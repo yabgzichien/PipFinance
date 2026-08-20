@@ -80,11 +80,17 @@ describe('allocatedTotal & leftover', () => {
 });
 
 describe('categoryStatus', () => {
-  it('classifies ok / warn / over', () => {
+  it('classifies ok / caution / warn / over', () => {
     expect(categoryStatus(10, 100)).toBe('ok');
+    expect(categoryStatus(60, 100)).toBe('caution');
     expect(categoryStatus(80, 100)).toBe('warn');
     expect(categoryStatus(120, 100)).toBe('over');
     expect(categoryStatus(10, 0)).toBe('over'); // any spend with 0 budget
+  });
+
+  it('sits exactly on the caution/warn boundary', () => {
+    expect(categoryStatus(50, 100)).toBe('caution');
+    expect(categoryStatus(49, 100)).toBe('ok');
   });
 });
 

@@ -34,27 +34,39 @@ function prevMonthKey(mk: string): string {
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
 // ── Design tints (from the approved mockup) ───────────────────────────────────
+// warn/caution are fixed hexes rather than colorTheme.amber: amber is a shared structural
+// token used for unrelated warnings elsewhere, and the caution (yellow) tier added alongside
+// it needs enough hue separation from it to read as a distinct step, not colorTheme.amber's
+// job to carry — see src/components/BudgetProgressList.tsx STATUS_COLOR, which this mirrors
+// so the two screens showing the same categoryStatus render it the same way.
+const CAUTION_COLOR = '#ca8a04';
+const WARN_COLOR = '#ea580c';
 const TINT = {
   redSoft: '#fce8e6',
   redTint: '#fff0ef',
   amberSoft: '#fdf3dc',
   amberTint: '#fffcf4',
+  yellowSoft: '#fbf0c7',
+  yellowTint: '#fffdf0',
   ncfUp: '#42e893',
   ncfDown: '#ff8a7a',
 } as const;
 
 function statusColor(st: CategoryBudgetStatus, theme: AccentTheme, colorTheme: StructuralColors): string {
   if (st === 'ok') return theme.accent;
-  if (st === 'warn') return colorTheme.amber;
+  if (st === 'caution') return CAUTION_COLOR;
+  if (st === 'warn') return WARN_COLOR;
   return colorTheme.red;
 }
 function statusBg(st: CategoryBudgetStatus, theme: AccentTheme): string {
   if (st === 'ok') return theme.accentTint;
+  if (st === 'caution') return TINT.yellowTint;
   if (st === 'warn') return TINT.amberTint;
   return TINT.redTint;
 }
 function statusBorder(st: CategoryBudgetStatus, theme: AccentTheme): string {
   if (st === 'ok') return theme.accentSoft;
+  if (st === 'caution') return TINT.yellowSoft;
   if (st === 'warn') return TINT.amberSoft;
   return TINT.redSoft;
 }

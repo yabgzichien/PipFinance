@@ -9,7 +9,7 @@ import { Card, CatBadge } from './ui';
 import { Icon } from './Icon';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
-export const STATUS_COLOR = { ok: '#1f8a5b', warn: '#d98a00', over: '#c5402f' } as const;
+export const STATUS_COLOR = { ok: '#1f8a5b', caution: '#ca8a04', warn: '#ea580c', over: '#c5402f' } as const;
 
 /**
  * The per-category budget-progress card: one row per budgeted category (spent /

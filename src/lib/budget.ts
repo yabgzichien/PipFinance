@@ -1,7 +1,7 @@
 // src/lib/budget.ts
 import type { Transaction } from './types';
 
-export type CategoryBudgetStatus = 'ok' | 'warn' | 'over';
+export type CategoryBudgetStatus = 'ok' | 'caution' | 'warn' | 'over';
 export type Allocations = Record<string, number>;
 
 /** 'YYYY-MM' from an ISO date/datetime, or null. */
@@ -72,6 +72,7 @@ export function categoryStatus(spent: number, allocated: number): CategoryBudget
   const ratio = spent / allocated;
   if (ratio > 1) return 'over';
   if (ratio >= 0.8) return 'warn';
+  if (ratio >= 0.5) return 'caution';
   return 'ok';
 }
 
