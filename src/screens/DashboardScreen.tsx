@@ -55,7 +55,7 @@ export function DashboardScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const now = useNow();
-  const { transactions, catById, allocations, hasBudget, coverage, accounts, accountValues, openShares, commitmentOccurrences } = useAppData();
+  const { transactions, catById, allocations, hasBudget, accounts, accountValues, openShares, commitmentOccurrences } = useAppData();
   const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
 
   const monthTxns = useMemo(() => {
@@ -194,7 +194,7 @@ export function DashboardScreen({
           <>
             {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
                 checks, before the money. */}
-            <StreakCard streak={streak} dots={dots} coverage={coverage.daysCovered} />
+            <StreakCard streak={streak} dots={dots} />
 
             {/* 2 — Money: a segmented Cash flow / Net worth card, same as before. The Cash flow
                 side's headline number is adaptive rather than fixed (see CashFlowView) so a
@@ -295,7 +295,7 @@ function HeaderIcon({ name, onPress }: { name: IconName; onPress: () => void }) 
 }
 
 /* ── Streak card ── */
-function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots: boolean[]; coverage: number; onPress?: () => void }) {
+function StreakCard({ streak, dots, onPress }: { streak: number; dots: boolean[]; onPress?: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   // Subtle flame flicker — driven entirely on the native thread (no per-frame JS).
@@ -347,9 +347,6 @@ function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots:
             </View>
           ))}
         </View>
-        <Caption color={colorTheme.ink2} style={styles.streakBest}>
-          Covered <Caption numeric color={colorTheme.ink2}>{coverage}/90 days</Caption>
-        </Caption>
       </View>
     </Card>
   );
@@ -648,11 +645,10 @@ const styles = StyleSheet.create({
   streakLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
   streakDivider: { width: 1, height: 38 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
+  dotsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
-  streakBest: { textAlign: 'right' },
 
   /* summary toggle */
   segTrack: { flexDirection: 'row', borderRadius: 999, padding: spacing.xs, marginBottom: spacing.base, borderWidth: 1 },
