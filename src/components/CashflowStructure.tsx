@@ -1,14 +1,12 @@
 // src/components/CashflowStructure.tsx
-// The two borrower-facing cards that answer "how do I earn?" and "how much of my month is already
-// spoken for?" — the questions an uneven earner has and a single average income figure hides.
+// The two cards that answer "how do I earn?" and "how much of my month is already spoken
+// for?" — the questions an uneven earner has and a single average income figure hides.
 //
-// Everything rendered here is computed on-device from the borrower's own ledger
-// (src/lib/incomeFloor.ts, src/lib/spendingProfile.ts). Nothing is self-declared, and nothing here
-// feeds the score or the passport: this is insight the borrower was previously never shown, even
-// though the lender console has displayed the same underlying signals all along.
+// Everything rendered here is computed on-device from the user's own ledger
+// (src/lib/incomeFloor.ts, src/lib/spendingProfile.ts). Nothing is self-declared.
 //
-// Copy register follows the app convention (UI/UX C5: one idea, verdict first, no jargon), and
-// deliberately never grades the borrower — uneven income is a shape, not a fault.
+// Copy register follows the app convention (one idea, verdict first, no jargon), and
+// deliberately never grades the user — uneven income is a shape, not a fault.
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { FadeIn, useEasedFrom } from './Motion';
@@ -28,7 +26,7 @@ const SWEEP_MS = 700;
 
 /**
  * The escapability ramp: dark for what cannot move, lightening toward what is genuinely the
- * borrower's to redirect. One hue family, so it reads as an ordered scale rather than three
+ * user's to redirect. One hue family, so it reads as an ordered scale rather than three
  * unrelated categories.
  *
  * The steps are separated by LIGHTNESS, which is what actually makes adjacent bar segments
@@ -37,7 +35,7 @@ const SWEEP_MS = 700;
  * ratio — visibly different in hue but not in weight, which is no help at a glance or to a
  * colour-blind reader. These three land at roughly 2.7:1 and 2.3:1 between neighbours.
  */
-/** Light green, the top of the app's existing band ramp: the borrower's freedom, not a vice. */
+/** Light green, the top of the app's existing band ramp: the user's freedom, not a vice. */
 const FLEXIBLE_COLOR = '#3ab07a';
 // `committed` tracks colorTheme.ink (heaviest, already spoken for) and is resolved inside each
 // component below since it needs the live hook. `essential` (deep green: compressible, never
@@ -69,7 +67,7 @@ function IncomeBar({ total, max, below, delay }: { total: number; max: number; b
  * Card A — the income that actually held up.
  *
  * The floor line, not the bars, is the hero: a percentage or an average means nothing on its own,
- * but a line the borrower cleared in 5 of 6 months is a number a lender can underwrite.
+ * but a line the user cleared in 5 of 6 months is a number they can actually plan against.
  */
 export function IncomeFloorCard({ floor, sourceCount }: { floor: IncomeFloor; sourceCount: number }) {
   const colorTheme = useThemeColors();
@@ -145,8 +143,8 @@ export function IncomeFloorCard({ floor, sourceCount }: { floor: IncomeFloor; so
 
       <Text style={[styles.body, { color: colorTheme.ink2 }]}>
         {floor.floor > floor.average
-          ? 'One weak month pulls your average below what you normally earn. The floor is the fairer number, and the one a lender can rely on.'
-          : 'Your income moves month to month. That is normal for the work you do, and a lender can still underwrite the floor.'}
+          ? 'One weak month pulls your average below what you normally earn. The floor is the fairer, more dependable number.'
+          : 'Your income moves month to month. That is normal for the work you do, and the floor is what you can plan around.'}
       </Text>
     </Card>
   );
@@ -290,12 +288,11 @@ export function ExpenseStructureCard({
 }
 
 /**
- * The monthly-recap variant: ONE month measured against the borrower's own normal.
+ * The monthly-recap variant: ONE month measured against the user's own normal.
  *
- * Deliberately not the same card as the credit screen's. The recap already reports this month's
- * income, spending and category breakdown; what it cannot say is whether the month was a good one
- * *for this person*, or how much of it was ever theirs to move. A RM2,400 month means nothing
- * until you know the floor is RM2,015.
+ * The recap already reports this month's income, spending and category breakdown; what it
+ * cannot say is whether the month was a good one *for this person*, or how much of it was
+ * ever theirs to move. A RM2,400 month means nothing until you know the floor is RM2,015.
  *
  * `structure` must be computed over this month's transactions only, using obligations detected
  * across the FULL history — a single month can never establish that something recurs.
@@ -321,8 +318,7 @@ export function MonthVsNormalCard({
   return (
     <Card style={styles.recapCard}>
       {/* Two InfoButtons, not one: this card covers both the income-floor comparison above and
-          the committed/essential/flexible split below, and each has its own glossary entry.
-          Same pattern as the score+band pair of (i) buttons under the credit gauge. */}
+          the committed/essential/flexible split below, and each has its own glossary entry. */}
       <View style={styles.head}>
         <Text style={[styles.kicker, { color: colorTheme.ink2 }]}>AGAINST YOUR NORMAL</Text>
         <View style={styles.headInfoGroup}>
@@ -362,7 +358,7 @@ export function MonthVsNormalCard({
             {flexible > 0 && <Segment amount={flexible} total={monthlyTotal} color={FLEXIBLE_COLOR} />}
           </View>
           {/* Compact legend: the recap is a glance, so the buckets carry a figure each and no
-              explanatory note. The credit screen is where the fuller reading lives. */}
+              explanatory note. */}
           <View style={styles.compactLegend}>
             {committed > 0 && <CompactLegendItem color={colorTheme.ink} label="Committed" amount={committed} />}
             {essentialVariable > 0 && <CompactLegendItem color={theme.accentInk} label="Essential" amount={essentialVariable} />}

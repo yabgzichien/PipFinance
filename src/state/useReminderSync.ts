@@ -85,8 +85,8 @@ export function useReminderSync(): void {
     };
 
     sync();
-    // Foreground signal, same as the lender poll: coming back to the app is the moment the
-    // ladder is most likely stale, since a day may have passed since it was last planned.
+    // Foreground signal: coming back to the app is the moment the ladder is most likely
+    // stale, since a day may have passed since it was last planned.
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') sync();
     });

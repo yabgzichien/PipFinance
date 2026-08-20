@@ -1,5 +1,5 @@
 // __tests__/commitments.test.ts
-import { clampToMonth, occurrencesFor, findCommitmentMatch, toArrearsRows } from '../src/lib/commitments';
+import { clampToMonth, occurrencesFor, findCommitmentMatch } from '../src/lib/commitments';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
 import type { Transaction } from '../src/lib/types';
 
@@ -93,25 +93,5 @@ describe('findCommitmentMatch', () => {
   it('skips a candidate already excluded (already linked elsewhere)', () => {
     const t = txn({ id: 'txn-1' });
     expect(findCommitmentMatch([t], c, '2026-06-05', new Set(['txn-1']))).toBeNull();
-  });
-});
-
-describe('toArrearsRows', () => {
-  function occ(over: Partial<CommitmentOccurrence>): CommitmentOccurrence {
-    return {
-      id: 'o1', commitmentId: 'c1', dueDate: '2026-06-05', month: '2026-06', amount: 89,
-      paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false,
-      unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z', ...over,
-    };
-  }
-
-  it('drops skipped occurrences', () => {
-    const rows = toArrearsRows([occ({ status: 'skipped' })]);
-    expect(rows).toEqual([]);
-  });
-
-  it('maps scheduled/paid/late rows to the Repayment shape', () => {
-    const rows = toArrearsRows([occ({ status: 'paid', paidOn: '2026-06-03' })]);
-    expect(rows).toEqual([{ id: 'o1', applicationId: 'c1', dueDate: '2026-06-05', paidOn: '2026-06-03', amount: 89, status: 'paid' }]);
   });
 });

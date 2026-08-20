@@ -15,13 +15,6 @@ import {
   type TestInput,
 } from './types';
 import {
-  IDENTITY_SYSTEM_PROMPT,
-  IDENTITY_USER_PROMPT,
-  IdentityParseError,
-  parseIdentityExtraction,
-  type IdentityExtraction,
-} from './ekycPrompt';
-import {
   BALANCE_SYSTEM_PROMPT,
   BALANCE_USER_PROMPT,
   DOC_SYSTEM_PROMPT,
@@ -208,47 +201,6 @@ export const GroqProvider: LLMProvider = {
       if (e instanceof ExtractionParseError) {
         throw new LLMError('bad_response', e.message);
       }
-      throw e;
-    }
-  },
-
-  async extractIdentity({ apiKey, model, parts }: DocExtractInput): Promise<IdentityExtraction> {
-    const img = parts.find((p) => p.kind === 'binary') as
-      | { kind: 'binary'; base64: string; mimeType: string }
-      | undefined;
-    if (!img) throw new LLMError('bad_response', 'No document image provided.');
-
-    const body = {
-      model: model || DEFAULT_MODEL,
-      messages: [
-        { role: 'system', content: IDENTITY_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: IDENTITY_USER_PROMPT },
-            { type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } },
-          ],
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0,
-    };
-
-    const res = await postChat(body, apiKey);
-    let json: any;
-    try {
-      json = await res.json();
-    } catch {
-      throw new LLMError('bad_response', 'Response was not JSON.');
-    }
-    const content: unknown = json?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') {
-      throw new LLMError('bad_response', 'Empty model response.');
-    }
-    try {
-      return parseIdentityExtraction(content);
-    } catch (e) {
-      if (e instanceof IdentityParseError) throw new LLMError('bad_response', e.message);
       throw e;
     }
   },

@@ -17,11 +17,16 @@ const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'utensils', 'car', 'signal', 
 const INCOME_ICONS: IconName[] = ['wallet', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
 const HUE_CHOICES = [12, 42, 70, 120, 162, 200, 248, 286, 330];
 
+/** Whether an icon value is a custom photo URI rather than a named icon. */
+function isCustomIcon(icon: string): boolean {
+  return icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('content:') || icon.startsWith('http') || icon.startsWith('/');
+}
+
 export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { categories, addCategory, deleteCategory } = useAppData();
+  const { categories, addCategory, deleteCategory, updateCategoryIcon } = useAppData();
 
   const [kind, setKind] = useState<TxnType>('expense');
   const [name, setName] = useState('');
@@ -29,10 +34,15 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   const [hue, setHue] = useState(162);
   const [busy, setBusy] = useState(false);
 
+  // Which existing category's picture is being edited, and the icon/photo chosen so far.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editIcon, setEditIcon] = useState<string>('cart');
+  const [editBusy, setEditBusy] = useState(false);
+
   const iconChoices = kind === 'income' ? INCOME_ICONS : EXPENSE_ICONS;
   const list = useMemo(() => categories.filter((c) => c.kind === kind), [categories, kind]);
 
-  const pickCustomIcon = async () => {
+  const pickCustomIcon = async (setter: (uri: string) => void) => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) return;
     const res = await ImagePicker.launchImageLibraryAsync({
@@ -43,13 +53,14 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
     if (!res.canceled && res.assets?.length) {
       const a = res.assets[0];
       const dataUri = a.base64 ? `data:${a.mimeType ?? 'image/jpeg'};base64,${a.base64}` : a.uri;
-      setIcon(dataUri);
+      setter(dataUri);
     }
   };
 
   // When switching kind, default the icon to one valid for that kind.
   useEffect(() => {
     setIcon(kind === 'income' ? 'wallet' : 'cart');
+    setEditingId(null);
   }, [kind]);
 
   const canAdd = name.trim().length > 0 && !busy;
@@ -63,6 +74,26 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
       setHue(162);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleEdit = (id: string, currentIcon: string) => {
+    if (editingId === id) {
+      setEditingId(null);
+      return;
+    }
+    setEditingId(id);
+    setEditIcon(currentIcon);
+  };
+
+  const saveEditedIcon = async () => {
+    if (!editingId || editBusy) return;
+    setEditBusy(true);
+    try {
+      await updateCategoryIcon(editingId, editIcon);
+      setEditingId(null);
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -92,17 +123,64 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
         <Eyebrow style={{ marginBottom: 10 }}>Your {kind} categories</Eyebrow>
         <Card style={{ overflow: 'hidden' }}>
           {list.map((c, i) => (
-            <View key={c.id} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
-              <CatBadge category={c} size={38} />
-              <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-                {c.label}
-              </Text>
-              {PROTECTED_CATEGORY_IDS.includes(c.id) ? (
-                <Text style={[styles.defaultTag, { color: colorTheme.ink2 }]}>locked</Text>
-              ) : (
-                <Pressable onPress={() => confirmDelete(c.id, c.label)} hitSlop={8} style={styles.delBtn}>
-                  <Icon name="trash" size={17} color="#b3261e" />
+            <View key={c.id}>
+              <View style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Change ${c.label}'s picture`}>
+                  <CatBadge category={c} size={38} />
                 </Pressable>
+                <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
+                  {c.label}
+                </Text>
+                {PROTECTED_CATEGORY_IDS.includes(c.id) && (
+                  <Text style={[styles.defaultTag, { color: colorTheme.ink2 }]}>locked</Text>
+                )}
+                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={8} style={styles.editBtn}>
+                  <Icon name="pencil" size={16} color={colorTheme.ink2} />
+                </Pressable>
+                {!PROTECTED_CATEGORY_IDS.includes(c.id) && (
+                  <Pressable onPress={() => confirmDelete(c.id, c.label)} hitSlop={8} style={styles.delBtn}>
+                    <Icon name="trash" size={17} color="#b3261e" />
+                  </Pressable>
+                )}
+              </View>
+
+              {editingId === c.id && (
+                <View style={[styles.editPanel, { backgroundColor: colorTheme.surface2, borderTopColor: colorTheme.line2 }]}>
+                  <View style={styles.choiceWrap}>
+                    {iconChoices.map((ic) => {
+                      const on = ic === editIcon;
+                      return (
+                        <Pressable key={ic} onPress={() => setEditIcon(ic)} style={[styles.iconChoice, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && { borderColor: theme.accent, backgroundColor: theme.accentTint }]}>
+                          <Icon name={ic} size={20} color={on ? theme.accent : colorTheme.ink2} stroke={1.9} />
+                        </Pressable>
+                      );
+                    })}
+                    <Pressable
+                      onPress={() => pickCustomIcon(setEditIcon)}
+                      style={[
+                        styles.iconChoice,
+                        { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
+                        isCustomIcon(editIcon) && { borderColor: theme.accent, backgroundColor: theme.accentTint },
+                        { minWidth: 68, flexDirection: 'row', gap: 4, paddingHorizontal: 6 },
+                      ]}
+                    >
+                      {isCustomIcon(editIcon) ? (
+                        <Image source={{ uri: editIcon }} style={{ width: 22, height: 22, borderRadius: 4 }} resizeMode="cover" />
+                      ) : (
+                        <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
+                      )}
+                      <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>Gallery</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.editActions}>
+                    <Pressable onPress={() => setEditingId(null)} style={styles.editActionBtn} disabled={editBusy}>
+                      <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>Cancel</Text>
+                    </Pressable>
+                    <Pressable onPress={saveEditedIcon} style={styles.editActionBtn} disabled={editBusy}>
+                      <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? 'Saving…' : 'Save'}</Text>
+                    </Pressable>
+                  </View>
+                </View>
               )}
             </View>
           ))}
@@ -135,15 +213,15 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                 );
               })}
               <Pressable
-                onPress={pickCustomIcon}
+                onPress={() => pickCustomIcon(setIcon)}
                 style={[
                   styles.iconChoice,
                   { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line },
-                  (icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('content:') || icon.startsWith('http') || icon.startsWith('/')) && { borderColor: theme.accent, backgroundColor: theme.accentTint },
+                  isCustomIcon(icon) && { borderColor: theme.accent, backgroundColor: theme.accentTint },
                   { minWidth: 68, flexDirection: 'row', gap: 4, paddingHorizontal: 6 }
                 ]}
               >
-                {(icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('content:') || icon.startsWith('http') || icon.startsWith('/')) ? (
+                {isCustomIcon(icon) ? (
                   <Image source={{ uri: icon }} style={{ width: 22, height: 22, borderRadius: 4 }} resizeMode="cover" />
                 ) : (
                   <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
@@ -194,6 +272,11 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },
   defaultTag: { fontFamily: uiFont(600), fontSize: 11.5 },
   delBtn: { padding: 6 },
+  editBtn: { padding: 6 },
+  editPanel: { padding: 15, paddingTop: 12, borderTopWidth: 1, gap: 12 },
+  editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 18 },
+  editActionBtn: { paddingVertical: 4, paddingHorizontal: 4 },
+  editActionText: { fontFamily: uiFont(700), fontSize: 13.5 },
   previewRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   input: {
     flex: 1,

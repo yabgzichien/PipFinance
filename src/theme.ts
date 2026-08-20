@@ -48,9 +48,9 @@ export const LIGHT_COLORS: StructuralColors = {
 } as const;
 
 /** Dark counterpart. `bg`/`ink` are anchored to the app's existing "dark card" tokens
- *  (`passportDark`/`shotInk` below) rather than invented from scratch — those were already
- *  a hand-picked dark-surface pair in this brand's hue. Every value here (and every accent
- *  preset's `dark` variant in accentPresets.ts) is checked by tools/contrastAudit/audit.js. */
+ *  (`shotInk` below) rather than invented from scratch — those were already a hand-picked
+ *  dark-surface pair in this brand's hue. Every value here (and every accent preset's `dark`
+ *  variant in accentPresets.ts) is checked by tools/contrastAudit/audit.js. */
 export const DARK_COLORS: StructuralColors = {
   bg: '#0a1810',
   surface: '#192419',
@@ -80,25 +80,7 @@ export const colors = {
   // fake-screenshot header
   shotHead: '#11231a',
   shotInk: '#eaf3ee',
-
-  deltaUp: '#42e893', // "+8 pts" up-arrow green on dark surfaces
-  passportDark: '#11231a',
 } as const;
-
-/**
- * Five score-band colors from the approved redesign  a warm→deep-green ramp.
- * Used by the credit gauge, the dashboard mini band-bar, and the lender band bar.
- */
-export const bandColors = {
-  Building: '#c0392b',
-  Fair: '#d98a00',
-  Good: '#3ab07a',
-  Strong: '#1f8a5b',
-  Excellent: '#145c3d',
-} as const;
-
-/** Ordered band list (low → high) for rendering the 5-segment band bar. */
-export const BAND_ORDER = ['Building', 'Fair', 'Good', 'Strong', 'Excellent'] as const;
 
 export const radius = {
   sm: 14,

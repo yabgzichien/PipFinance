@@ -1,7 +1,3 @@
-// MUST be first: polyfills crypto.getRandomValues for @noble/ed25519 on Hermes/React Native
-// (the browser and Node already provide it, so this is only needed on-device).
-import 'react-native-get-random-values';
-
 import { registerRootComponent } from 'expo';
 import { Platform } from 'react-native';
 

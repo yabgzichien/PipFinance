@@ -3,7 +3,6 @@
 // contributions): occurrence generation, month-end due-date clamping, and matching a tick
 // against an existing ledger row instead of creating a duplicate. No UI/DB imports.
 import { merchantKey } from './normalize';
-import type { Repayment } from '../db/loansRepo';
 import type { Transaction } from './types';
 
 export type CommitmentKind = 'expense' | 'investment';
@@ -126,24 +125,4 @@ export function findCommitmentMatch(
     return t;
   }
   return null;
-}
-
-/**
- * Adapt occurrences into the `Repayment` shape so `repaymentStanding.ts`'s pure arrears engine
- * (`overdueRowsFor`, `standingBucketFor`, `curedArrearsEvents`) can be reused unchanged instead
- * of re-implementing months-in-arrears logic for commitments. `'skipped'` rows are dropped: a
- * bill the user marked as not applying that month carries no ongoing arrears obligation and no
- * on-time/late record either way.
- */
-export function toArrearsRows(occurrences: CommitmentOccurrence[]): Repayment[] {
-  return occurrences
-    .filter((o): o is CommitmentOccurrence & { status: 'scheduled' | 'paid' | 'late' } => o.status !== 'skipped')
-    .map((o) => ({
-      id: o.id,
-      applicationId: o.commitmentId,
-      dueDate: o.dueDate,
-      paidOn: o.paidOn,
-      amount: o.amount,
-      status: o.status,
-    }));
 }

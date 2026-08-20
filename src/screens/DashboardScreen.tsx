@@ -8,9 +8,7 @@ import { FadeIn } from '../components/Motion';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { Pip } from '../components/Pip';
-import { ScoreBandBar } from '../components/ScoreBandBar';
 import { Amount, BtnLabel, Card, Eyebrow, PrimaryButton } from '../components/ui';
-import { TourAnchor } from '../components/TourAnchor';
 import { catColorsForHue } from '../lib/catColors';
 import { currentMonthKey, txnMonthKey } from '../lib/budget';
 import { greeting, longDate, monthName } from '../lib/dates';
@@ -19,15 +17,12 @@ import { netWorth } from '../lib/networth';
 import { computeStreak, compute7DayDots } from '../lib/streak';
 import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { AGING_DAYS, daysBetween } from '../lib/split';
-import { BORROWER_TOUR_STEPS, clampTourStep } from '../lib/tourSteps';
 import type { Category } from '../lib/types';
 import { useAppData } from '../state/store';
-import { useLenderSyncPoll } from '../state/useLenderSyncPoll';
-import { useCreditProfile } from '../state/useCreditProfile';
 import { useNow } from '../state/useNow';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { colors, numFont, platformShadow, shadowCard, shadowToggle, uiFont } from '../theme';
+import { numFont, shadowCard, shadowToggle, uiFont } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
@@ -45,9 +40,6 @@ export function DashboardScreen({
   onOpenBudget = () => {},
   onOpenRecap = () => {},
   onOpenNetWorth = () => {},
-  onOpenCredit = () => {},
-  onOpenPassport = () => {},
-  onOpenCoach = () => {},
   onOpenOwed = () => {},
   onOpenCommitments = () => {},
 }: {
@@ -57,9 +49,6 @@ export function DashboardScreen({
   onOpenBudget?: () => void;
   onOpenRecap?: () => void;
   onOpenNetWorth?: () => void;
-  onOpenCredit?: () => void;
-  onOpenPassport?: () => void;
-  onOpenCoach?: () => void;
   onOpenOwed?: () => void;
   onOpenCommitments?: () => void;
 }) {
@@ -67,17 +56,8 @@ export function DashboardScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const now = useNow();
-  const { transactions, catById, allocations, hasBudget, coverage, accounts, accountValues, openShares, commitmentOccurrences, tourActive, tourStepIndex, startTour } = useAppData();
+  const { transactions, catById, allocations, hasBudget, coverage, accounts, accountValues, openShares, commitmentOccurrences } = useAppData();
   const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
-  const { score, dataConfidence } = useCreditProfile();
-  const activeTourAnchor = tourActive ? BORROWER_TOUR_STEPS[clampTourStep(tourStepIndex, BORROWER_TOUR_STEPS.length)].anchorId ?? null : null;
-
-  // Keep in sync with every lender console while Home is open (approval-notify, 2026-07-19;
-  // kept live + broadened to reset-sync, 2026-07-20): auto-books a newly-approved referred
-  // application (bumping the unseen badge on the Loan tab) and clears any loan a lender's
-  // console reset has orphaned  both without the borrower needing to navigate away and back.
-  // Best-effort; an unreachable console degrades silently.
-  useLenderSyncPoll();
 
   const monthTxns = useMemo(() => {
     const cur = currentMonthKey();
@@ -163,15 +143,9 @@ export function DashboardScreen({
           </View>
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
-            <Pressable
-              style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}
-              onPress={() => void startTour({ fresh: true })}
-              accessibilityRole="button"
-              accessibilityLabel="Restart the guided tour"
-              hitSlop={8}
-            >
+            <View style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}>
               <CoinMascot size={40} float />
-            </Pressable>
+            </View>
           </View>
         </View>
 
@@ -180,9 +154,7 @@ export function DashboardScreen({
         ) : (
           <>
             {/* 1  Streak */}
-            <TourAnchor id="coverage-chip" activeId={activeTourAnchor}>
-              <StreakCard streak={streak} dots={dots} coverage={coverage.daysCovered} onPress={onOpenCoach} />
-            </TourAnchor>
+            <StreakCard streak={streak} dots={dots} coverage={coverage.daysCovered} />
 
             {/* 2  Net worth / Cash flow (toggle) */}
             <SummaryCard
@@ -267,22 +239,10 @@ export function DashboardScreen({
               </Pressable>
             )}
 
-            {/* 3  Compact credit card */}
-            <TourAnchor id="credit-hero-card" activeId={activeTourAnchor}>
-              <CreditCompactCard
-                score={score.score}
-                band={score.band}
-                confidence={dataConfidence.confidence}
-                onPress={onOpenCredit}
-              />
-            </TourAnchor>
-
             {/* Quick actions */}
             <QuickActions
-              onOpenCredit={onOpenCredit}
               onOpenBudget={onOpenBudget}
               onOpenNetWorth={onOpenNetWorth}
-              onOpenPassport={onOpenPassport}
             />
 
             {/* No capture CTA in the feed: it now lives as the raised "Add" button in the bottom
@@ -319,9 +279,6 @@ export function DashboardScreen({
                 </Pressable>
               )}
             </View>
-
-            {/* Ask Pip strip */}
-            <AskPipStrip onPress={onOpenCredit} />
           </>
         )}
 
@@ -628,70 +585,19 @@ function NetWorthView({
   );
 }
 
-/* ── Compact credit card ── */
-function CreditCompactCard({
-  score,
-  band,
-  confidence,
-  onPress,
-}: {
-  score: number;
-  band: string;
-  confidence: number;
-  onPress: () => void;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.96 : 1 }]}>
-      <Card style={styles.creditCard}>
-        <View style={styles.creditTop}>
-          <Text style={[styles.creditEyebrow, { color: colorTheme.ink2 }]}>Credit Score</Text>
-          <View style={[styles.confChip, { backgroundColor: theme.accentTint }]}>
-            <View style={[styles.confDot, { backgroundColor: theme.accent }]} />
-            <Text style={[styles.confText, { color: theme.onTint }]}>{Math.round(confidence * 100)}% data confidence</Text>
-          </View>
-        </View>
-        <View style={styles.creditMain}>
-          <View style={styles.creditScoreCol}>
-            <Text style={[styles.creditScore, { color: colorTheme.ink }]}>{score}</Text>
-            <View style={[styles.bandPill, { backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.bandPillText, { color: theme.onTint }]}>{band}</Text>
-            </View>
-          </View>
-          <View style={[styles.creditVDivider, { backgroundColor: colorTheme.line }]} />
-          <View style={{ flex: 1 }}>
-            <ScoreBandBar band={band as any} />
-            <View style={styles.viewProfile}>
-              <Text style={[styles.viewProfileText, { color: theme.accent }]}>View credit profile</Text>
-              <Icon name="chevronRight" size={14} color={theme.accent} />
-            </View>
-          </View>
-        </View>
-      </Card>
-    </Pressable>
-  );
-}
-
 /* ── Quick actions ── */
 function QuickActions({
-  onOpenCredit,
   onOpenBudget,
   onOpenNetWorth,
-  onOpenPassport,
 }: {
-  onOpenCredit: () => void;
   onOpenBudget: () => void;
   onOpenNetWorth: () => void;
-  onOpenPassport: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const items: { label: string; icon: IconName; onPress: () => void }[] = [
-    { label: 'Credit', icon: 'scale', onPress: onOpenCredit },
     { label: 'Budget', icon: 'wallet', onPress: onOpenBudget },
     { label: 'Net Worth', icon: 'trending', onPress: onOpenNetWorth },
-    { label: 'Passport', icon: 'scan', onPress: onOpenPassport },
   ];
   return (
     <Card style={styles.quickCard}>
@@ -704,29 +610,6 @@ function QuickActions({
         </Pressable>
       ))}
     </Card>
-  );
-}
-
-/* ── Ask Pip strip ── */
-function AskPipStrip({ onPress }: { onPress: () => void }) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  return (
-    <View style={styles.askWrap}>
-      <View style={[styles.askStrip, { backgroundColor: theme.accentSoft }]}>
-        <CoinMascot size={44} float />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.askTitle, { color: theme.onTint }]}>Lift your score with Pip's tips.</Text>
-          <Text style={[styles.askSub, { color: colorTheme.ink2 }]}>Personalised, from your real data.</Text>
-        </View>
-        <Pressable
-          onPress={onPress}
-          style={[styles.askBtn, { backgroundColor: theme.accentInk, ...platformShadow(theme.accent, 0.32, 16, { width: 0, height: 8 }, 3) }]}
-        >
-          <Text style={styles.askBtnText}>Ask Pip</Text>
-        </Pressable>
-      </View>
-    </View>
   );
 }
 
@@ -803,36 +686,12 @@ const styles = StyleSheet.create({
   spendTrack: { height: 4, borderRadius: 4, overflow: 'hidden' },
   spendPct: { fontFamily: numFont(500), fontSize: 11, width: 28, textAlign: 'right' },
 
-  /* compact credit */
-  creditCard: { marginHorizontal: 16, marginTop: 10, padding: 14, paddingHorizontal: 18 },
-  creditTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  creditEyebrow: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1, textTransform: 'uppercase' },
-  confChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingVertical: 3, paddingLeft: 7, paddingRight: 9 },
-  confDot: { width: 6, height: 6, borderRadius: 999 },
-  confText: { fontFamily: uiFont(600), fontSize: 11 },
-  creditMain: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  creditScoreCol: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-  creditScore: { fontFamily: numFont(700), fontSize: 46, lineHeight: 48 },
-  bandPill: { borderRadius: 20, paddingHorizontal: 11, paddingVertical: 3, marginBottom: 6 },
-  bandPillText: { fontFamily: uiFont(700), fontSize: 11.5 },
-  creditVDivider: { width: 1, height: 48 },
-  viewProfile: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
-  viewProfileText: { fontFamily: uiFont(600), fontSize: 11.5 },
-
   /* quick actions */
   quickCard: { marginHorizontal: 16, marginTop: 10, paddingVertical: 14, paddingHorizontal: 6, flexDirection: 'row', justifyContent: 'space-around' },
   quickItem: { flex: 1, alignItems: 'center', gap: 7 },
   quickIcon: { width: 50, height: 50, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   quickIconIdle: {},
   quickLabel: { fontSize: 11, textAlign: 'center' },
-
-  /* ask pip */
-  askWrap: { paddingHorizontal: 16, marginTop: 10 },
-  askStrip: { borderRadius: 22, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  askTitle: { fontFamily: uiFont(700), fontSize: 13, marginBottom: 2 },
-  askSub: { fontFamily: uiFont(500), fontSize: 11 },
-  askBtn: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8 },
-  askBtnText: { fontFamily: uiFont(700), fontSize: 12, color: colors.onAccent },
 
   /* generic cta */
   budgetCta: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 },

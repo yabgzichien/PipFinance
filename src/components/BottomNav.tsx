@@ -1,12 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccent } from '../state/accent';
 import { colors, platformShadow, uiFont } from '../theme';
 import { useThemeColors } from '../state/colorScheme';
 
-export type NavTab = 'home' | 'activity' | 'loan' | 'settings';
+export type NavTab = 'home' | 'activity' | 'networth' | 'settings';
 
 const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> = {
   home: (stroke, fill) => (
@@ -15,12 +15,11 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
   activity: (stroke) => (
     <Polyline points="22 12 18 12 15 21 9 3 6 12 2 12" fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   ),
-  loan: (stroke) => (
-    <>
-      <Circle cx={12} cy={12} r={9} fill="none" stroke={stroke} strokeWidth={1.8} />
-      <Line x1={12} y1={8} x2={12} y2={16} stroke={stroke} strokeWidth={1.8} strokeLinecap="round" />
-      <Line x1={8} y1={12} x2={16} y2={12} stroke={stroke} strokeWidth={1.8} strokeLinecap="round" />
-    </>
+  networth: (stroke) => (
+    <G fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 17l6-6 4 4 7-7" />
+      <Path d="M16.5 8H21v4.5" />
+    </G>
   ),
   settings: (stroke) => (
     <>
@@ -33,16 +32,15 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
 const TABS: { key: NavTab; label: string }[] = [
   { key: 'home', label: 'Home' },
   { key: 'activity', label: 'Activity' },
-  { key: 'loan', label: 'Loan' },
+  { key: 'networth', label: 'Net Worth' },
   { key: 'settings', label: 'Settings' },
 ];
 
-/** Persistent bottom tab bar for the borrower app. `badges` shows a count over a tab's icon —
- *  today, the number of lender offers waiting on the borrower's accept/decline.
+/** Persistent bottom tab bar for the tracker app. `badges` shows a count over a tab's icon.
  *
  *  `onAdd` mounts the raised centre button that opens the add-a-transaction flow. It lives here
  *  rather than on the Home feed because capture is the app's core loop and used to sit four cards
- *  down the dashboard scroll: on a phone the borrower had to scroll to reach the one action they
+ *  down the dashboard scroll: on a phone the user had to scroll to reach the one action they
  *  open the app to perform. In the tab bar it is on screen from every primary tab, always. */
 export function BottomNav({
   active,

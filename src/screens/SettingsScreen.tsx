@@ -7,8 +7,6 @@ import { clearMemory } from '../db/memoryRepo';
 import { getProvider, llmErrorMessage } from '../llm';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
-import { DEMO_PROFILES, type DemoProfileId } from '../data/demoProfile';
-import { verdictStyle } from '../lib/verdictStyle';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
 import { AGING_DAYS } from '../lib/split';
 import { ensurePermission } from '../notifications';
@@ -21,13 +19,12 @@ type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
 
 
-export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExport, onOpenAttacks = () => {}, onOpenCategories, onOpenCommitments, onResetToOnboarding }: { onBack: () => void; onMigrate?: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenAttacks?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onResetToOnboarding?: () => void }) {
+export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onResetToOnboarding }: { onBack: () => void; onMigrate?: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onResetToOnboarding?: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, loadDemoData, startTour, activeDemoProfile } = useAppData();
+  const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
-  const [resettingDemo, setResettingDemo] = useState(false);
 
   useEffect(() => {
     loadSettings().then(setSettings);
@@ -70,26 +67,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
     );
   };
 
-  // One-tap judge-demo reset (Demo Data Task 8): wipe whatever the last judge did, then reload
-  // the canonical seeded persona  so the next judge always starts from the same clean state.
-  const resetDemoConfirm = () => {
-    confirmAction(
-      'Reset demo?',
-      'This clears everything and reloads the seeded demo persona. Any scans or applications you made are discarded.',
-      'Reset demo',
-      async () => {
-        setResettingDemo(true);
-        try {
-          // loadDemoData wipes and rotates the passport key itself now, so the explicit
-          // resetAllData that used to precede it here would just be a second wipe.
-          await loadDemoData();
-        } finally {
-          setResettingDemo(false);
-        }
-      }
-    );
-  };
-
   if (!settings) {
     return (
       <View style={[styles.root, { backgroundColor: colorTheme.bg, justifyContent: 'center', alignItems: 'center' }]}>
@@ -104,22 +81,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
         <TopBar title="Settings" onBack={onBack} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
-        <Pressable
-          onPress={() =>
-            notify(
-              'Demo mode',
-              'Bureau/registry checks (CTOS, EPF, SOCSO), issuer signing, and eKYC identity verification are mocked for this demo. Score, confidence, and loan decisions are computed live by the real deterministic engines.'
-            )
-          }
-          style={({ pressed }) => [
-            styles.demoChip,
-            { borderColor: colorTheme.line, backgroundColor: colorTheme.surface2 },
-            { opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <Text style={[styles.demoChipText, { color: colorTheme.ink2 }]}>DEMO MODE</Text>
-        </Pressable>
-
         <Eyebrow style={{ marginBottom: 10 }}>Appearance</Eyebrow>
         <Card style={{ padding: 16 }}>
           <Text style={[styles.providerName, { color: colorTheme.ink }]}>Theme</Text>
@@ -303,60 +264,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
         )}
-
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Demo profiles</Eyebrow>
-        <DemoProfilePicker activeId={activeDemoProfile} onLoad={(id) => loadDemoData(id)} />
-
-        {/* The in-app Lender Console mirror was removed (2026-07-21): the real console is its
-            own web app, and shipping a second, always-slightly-behind copy of it inside the
-            BORROWER's settings blurred whose app this is. */}
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Demo tools</Eyebrow>
-        <Pressable
-          onPress={onOpenAttacks}
-          style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
-        >
-          <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-            <Icon name="alert" size={16} color={theme.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.providerName, { color: colorTheme.ink }]}>Attack Gallery</Text>
-            <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Run known fraud techniques against our own integrity rings and watch what they catch.</Text>
-          </View>
-          <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-        </Pressable>
-
-        <Pressable
-          onPress={() => void startTour({ fresh: true })}
-          style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-        >
-          <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-            <Icon name="sparkles" size={16} color={theme.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.providerName, { color: colorTheme.ink }]}>Restart judge tour</Text>
-            <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Replay the guided walkthrough from the start.</Text>
-          </View>
-          <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-        </Pressable>
-
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <View style={styles.providerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Reset demo</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>One tap: clear whatever you've mutated and reload the seeded judge persona.</Text>
-            </View>
-            <Pressable onPress={resetDemoConfirm} style={styles.resetBtn} disabled={resettingDemo}>
-              {resettingDemo ? (
-                <ActivityIndicator size="small" color={theme.accent} />
-              ) : (
-                <>
-                  <Icon name="sparkles" size={16} color={theme.accent} />
-                  <Text style={[styles.resetText, { color: theme.accent }]}>Reset demo</Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-        </Card>
 
         {/* Distinct "danger zone" treatment  this is the one irreversible action on this
             screen, so it shouldn't look like every other settings row. */}
@@ -620,86 +527,6 @@ function ProviderCard({
   );
 }
 
-// ── Demo Profile Picker ───────────────────────────────────────────────────────
-
-// Accent + icon come from the persona's own lender outcome (verdictStyle), so a persona reads
-// the same colour here as on the onboarding front door. These used to be two hardcoded maps and
-// they had drifted — Aina was plain green here while her outcome is a referral.
-
-function DemoProfilePicker({ activeId, onLoad }: { activeId: DemoProfileId | null; onLoad: (id: DemoProfileId) => void }) {
-  const colorTheme = useThemeColors();
-  const { resolvedScheme } = useColorSchemeMode();
-  const [loading, setLoading] = useState<DemoProfileId | null>(null);
-
-  const handleLoad = (id: DemoProfileId) => {
-    const meta = DEMO_PROFILES.find((p) => p.id === id)!;
-    confirmAction(
-      `Load ${meta.name}?`,
-      `This replaces whatever is currently loaded with ${meta.name}'s demo data. This can't be undone.`,
-      'Load',
-      async () => {
-        setLoading(id);
-        try {
-          await onLoad(id);
-        } finally {
-          setLoading(null);
-        }
-      }
-    );
-  };
-
-  // All three profiles render identically; the one currently loaded is tinted with
-  // its accent and shows an "In use" pill in place of the Load button.
-  return (
-    <View style={{ gap: 12 }}>
-      {DEMO_PROFILES.map((profile) => {
-        const verdict = verdictStyle(resolvedScheme)[profile.outcome.decision];
-        const accent = verdict.ink;
-        const active = activeId === profile.id;
-        const busy = loading === profile.id;
-        return (
-          <View
-            key={profile.id}
-            style={[
-              styles.profileCard,
-              { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
-              active && { borderColor: accent, backgroundColor: `${accent}0d` },
-            ]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: `${accent}18` }]}>
-              {busy ? <ActivityIndicator size="small" color={accent} /> : <Icon name={verdict.icon} size={16} color={accent} />}
-            </View>
-            <View style={{ flex: 1 }}>
-              <View style={styles.profileNameRow}>
-                <Text style={[styles.providerName, { color: accent }]}>{profile.name}</Text>
-                {active && (
-                  <View style={[styles.activePill, { backgroundColor: `${accent}1f` }]}>
-                    <Text style={[styles.activePillText, { color: accent }]}>In use</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>{profile.story}</Text>
-            </View>
-            {active ? (
-              <View style={styles.activeDot}>
-                <Icon name="check" size={15} color={accent} stroke={2.6} />
-              </View>
-            ) : (
-              <Pressable
-                onPress={() => handleLoad(profile.id)}
-                disabled={loading !== null}
-                style={({ pressed }) => [styles.loadBtn, { borderColor: `${accent}55` }, { opacity: pressed || (loading !== null && !busy) ? 0.6 : 1 }]}
-              >
-                <Text style={[styles.loadBtnText, { color: accent }]}>Load</Text>
-              </Pressable>
-            )}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
 function ReadonlyField({ label, children }: { label: string; children: React.ReactNode }) {
   const colorTheme = useThemeColors();
   return (
@@ -712,15 +539,6 @@ function ReadonlyField({ label, children }: { label: string; children: React.Rea
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  demoChip: {
-    alignSelf: 'flex-start',
-    borderRadius: 6,
-    borderWidth: 1,
-    paddingVertical: 4,
-    paddingHorizontal: 9,
-    marginBottom: 14,
-  },
-  demoChipText: { fontFamily: uiFont(700), fontSize: 11, letterSpacing: 0.5 },
   dangerCard: { borderColor: 'rgba(179,38,30,0.28)', backgroundColor: 'rgba(179,38,30,0.03)' },
   providerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   providerBadge: {
@@ -765,20 +583,4 @@ const styles = StyleSheet.create({
   /* accent color picker */
   swatchWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   swatch: { width: 38, height: 38, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-
-  /* demo profile picker */
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    borderWidth: 1,
-  },
-  profileNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  activePill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
-  activePillText: { fontFamily: uiFont(700), fontSize: 10, letterSpacing: 0.4, textTransform: 'uppercase' },
-  activeDot: { width: 30, height: 30, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  loadBtn: { borderRadius: 999, borderWidth: 1.5, paddingHorizontal: 16, paddingVertical: 7 },
-  loadBtnText: { fontFamily: uiFont(700), fontSize: 13 },
 });

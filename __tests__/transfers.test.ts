@@ -8,7 +8,6 @@
 import { monthlyIncomeStatement, spentByCategory } from '../src/lib/recap';
 import { detectObligations } from '../src/lib/obligations';
 import { computeSpendingProfile } from '../src/lib/spendingProfile';
-import { computeIncomeQuality } from '../src/lib/incomeQuality';
 import { computeSavingsHabit } from '../src/lib/savingsHabit';
 import { computeIncomeStatement, computeFinancialStatistics, buildReportPeriod } from '../src/lib/bookkeeping';
 import type { Account, BalanceEntry, Category, Transaction } from '../src/lib/types';
@@ -51,7 +50,6 @@ function snapshotAll(txns: Transaction[]) {
     spentByCategory: spentByCategory(txns, '2026-06'),
     detectObligations: detectObligations(txns),
     spendingProfile: computeSpendingProfile(txns),
-    incomeQuality: computeIncomeQuality(txns),
     savingsHabit: computeSavingsHabit(txns, 200, now),
     bookkeepingIncomeStatement: computeIncomeStatement(txns, mockCategories, period),
     bookkeepingStatistics: computeFinancialStatistics(txns, mockCategories, [] as Account[], [] as BalanceEntry[], period),

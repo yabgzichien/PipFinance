@@ -11,9 +11,8 @@ import { InfoButton } from './InfoButton';
 /**
  * The pay-yourself-first habit: a small fixed amount kept back the moment income lands.
  *
- * Motivation only, exactly like the recording streak. Nothing shown here reaches the credit score
- * or a loan decision, and the copy deliberately never implies it does, because a target the
- * borrower sets for themselves would be trivially gameable if it scored.
+ * Motivation only, exactly like the recording streak — a target the user sets for themselves,
+ * with no consequence for missing it.
  */
 export function SavingsHabitCard({
   habit,
@@ -120,7 +119,7 @@ export function SavingsHabitCard({
       )}
 
       <Text style={[styles.note, { color: colorTheme.ink3 }]}>
-        A habit tracker, not a credit signal. Your real surplus already counts towards your score.
+        A personal habit tracker only. Missing a month costs you nothing.
       </Text>
     </Card>
   );

@@ -109,7 +109,7 @@ export function ExportScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const themeColors = useThemeColors();
-  const { transactions, categories, accounts, balanceEntries, kyc, commitments, commitmentOccurrences } = useAppData();
+  const { transactions, categories, accounts, balanceEntries, commitments, commitmentOccurrences } = useAppData();
   const commitmentExtra = useMemo(
     () => ({ commitments, occurrences: commitmentOccurrences }),
     [commitments, commitmentOccurrences]
@@ -159,11 +159,7 @@ export function ExportScreen({
     return buildReportPeriod(periodType, selectedMonth, selectedYear, customStart, customEnd, now);
   }, [periodType, selectedMonth, selectedYear, customStart, customEnd, now]);
 
-  const verifiedName = useMemo(() => {
-    return kyc && kyc.status === 'verified' && kyc.fullName && kyc.fullName.trim()
-      ? kyc.fullName.trim()
-      : 'Pip User';
-  }, [kyc]);
+  const verifiedName = 'Pip User';
 
   const reportData = useMemo(() => {
     return buildFinancialReportBundle(

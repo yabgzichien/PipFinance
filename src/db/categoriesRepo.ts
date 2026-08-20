@@ -71,6 +71,14 @@ export async function addCategory(
   return { id, label: label.trim(), icon, hue, kind, isDefault: false };
 }
 
+/** Change a category's icon/picture in place  a named icon (see Icon.tsx) or a
+ *  data:/file:/content:/http(s): URI for a custom photo. Allowed on every category,
+ *  including the protected generics: the picture is cosmetic, not the delete-guard. */
+export async function updateCategoryIcon(id: string, icon: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE categories SET icon = ? WHERE id = ?', icon, id);
+}
+
 /**
  * The two generic categories that can never be deleted  they are the
  * reassignment targets when other categories are removed.

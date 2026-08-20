@@ -36,12 +36,6 @@
         }
       ],
       [
-        "expo-camera",
-        {
-          "cameraPermission": "Pip needs the camera to scan your IC or passport for identity verification."
-        }
-      ],
-      [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",

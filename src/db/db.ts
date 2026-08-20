@@ -1,6 +1,5 @@
 import * as SQLite from 'expo-sqlite';
 import { ALL_SEED_CATEGORIES, CATEGORY_ID_REMAP, INCOME_SEED_IDS } from '../data/categories';
-import { DEFAULT_PRODUCTS } from '../lib/loans';
 
 const DB_NAME = 'pip.db';
 
@@ -65,21 +64,6 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       allocations  TEXT NOT NULL,
       updated_at   TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS kyc (
-      id           INTEGER PRIMARY KEY CHECK (id = 1),
-      full_name    TEXT NOT NULL,
-      nric_masked  TEXT NOT NULL,
-      status       TEXT NOT NULL,
-      provider     TEXT NOT NULL,
-      verified_at  TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS occupation (
-      id               INTEGER PRIMARY KEY CHECK (id = 1),
-      occupation       TEXT NOT NULL,
-      sector           TEXT NOT NULL,
-      employment_type  TEXT NOT NULL,
-      tenure_months    INTEGER NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS app_meta (
       key    TEXT PRIMARY KEY NOT NULL,
       value  TEXT NOT NULL
@@ -110,32 +94,6 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       price_myr   REAL NOT NULL,
       change24    REAL,
       as_of       TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS loan_products (
-      id            TEXT PRIMARY KEY NOT NULL,
-      label         TEXT NOT NULL,
-      min_score     INTEGER NOT NULL,
-      min_amount    REAL NOT NULL,
-      max_amount    REAL NOT NULL,
-      tenor_months  INTEGER NOT NULL,
-      apr           REAL NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS loan_applications (
-      id                TEXT PRIMARY KEY NOT NULL,
-      product_id        TEXT NOT NULL,
-      requested_amount  REAL NOT NULL,
-      decision          TEXT NOT NULL,
-      score_at          INTEGER NOT NULL,
-      status            TEXT NOT NULL DEFAULT 'active',
-      created_at        TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS repayments (
-      id              TEXT PRIMARY KEY NOT NULL,
-      application_id  TEXT NOT NULL,
-      due_date        TEXT NOT NULL,
-      paid_on         TEXT,
-      amount          REAL NOT NULL,
-      status          TEXT NOT NULL DEFAULT 'scheduled'
     );
     CREATE TABLE IF NOT EXISTS people (
       id          TEXT PRIMARY KEY NOT NULL,
@@ -206,8 +164,6 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     CREATE INDEX IF NOT EXISTS idx_share_status ON split_shares (status);
     CREATE INDEX IF NOT EXISTS idx_payment_share ON split_payments (share_id);
     CREATE INDEX IF NOT EXISTS idx_balance_account ON balance_entries (account_id);
-    CREATE INDEX IF NOT EXISTS idx_loan_app_status ON loan_applications (status);
-    CREATE INDEX IF NOT EXISTS idx_repayment_application ON repayments (application_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_unique ON commitment_occurrences (commitment_id, due_date);
     CREATE INDEX IF NOT EXISTS idx_occ_month ON commitment_occurrences (month);
   `);
@@ -243,54 +199,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     // column already present
   }
 
-  // Migration: lender attribution on loan applications (accept-offer booking).
-  try {
-    await db.execAsync('ALTER TABLE loan_applications ADD COLUMN lender_label TEXT');
-  } catch {
-    // column already present
-  }
-
-  // Migration: link a booked loan to its Net-worth liability account (repayment pays it down).
-  try {
-    await db.execAsync('ALTER TABLE loan_applications ADD COLUMN liability_account_id TEXT');
-  } catch {
-    // column already present
-  }
-
-  // Migration: which registry lender this loan is with (Bidirectional Servicing Sync,
-  // 2026-07-18 design)  the id the console's /api/servicing expects, distinct from
-  // lender_label's display name. Null for a self-decided (non-lender-routed) application.
-  try {
-    await db.execAsync('ALTER TABLE loan_applications ADD COLUMN lender_id TEXT');
-  } catch {
-    // column already present
-  }
-
-  // Migration: default provenance (2026-07-18 design)  when this loan was marked defaulted
-  // and by which side, so a synced-in lender-reported default can be told apart from a
-  // locally-simulated one, and so the shared merge has an honest `at` to latch on.
-  for (const col of ['defaulted_at TEXT', 'defaulted_source TEXT']) {
-    try {
-      await db.execAsync(`ALTER TABLE loan_applications ADD COLUMN ${col}`);
-    } catch {
-      // column already present
-    }
-  }
-
-  // Migration: the declared purpose a loan was booked under (My Financing polish,
-  // 2026-07-19)  previously sent to the lender but never stored locally, so the borrower's
-  // own loan list couldn't show "why" a loan exists. Null for loans booked before this shipped.
-  for (const col of ['purpose_category TEXT', 'purpose_note TEXT']) {
-    try {
-      await db.execAsync(`ALTER TABLE loan_applications ADD COLUMN ${col}`);
-    } catch {
-      // column already present
-    }
-  }
-
   await migrateCategoryIds(db);
   await ensureSeedCategories(db);
-  await seedProducts(db);
   return db;
 }
 
@@ -375,28 +285,6 @@ async function seedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
 }
 
 /**
- * Idempotently insert the default loan product ladder (Task 1's DEFAULT_PRODUCTS)
- * via INSERT OR IGNORE keyed on `id`, mirroring `seedCategories`. Called once from
- * `init` (and again after `resetAllData` empties the table) so re-running on every
- * app start is safe and won't duplicate or clobber rows.
- */
-async function seedProducts(db: SQLite.SQLiteDatabase): Promise<void> {
-  for (const p of DEFAULT_PRODUCTS) {
-    await db.runAsync(
-      `INSERT OR IGNORE INTO loan_products (id, label, min_score, min_amount, max_amount, tenor_months, apr)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      p.id,
-      p.label,
-      p.minScore,
-      p.minAmount,
-      p.maxAmount,
-      p.tenorMonths,
-      p.apr
-    );
-  }
-}
-
-/**
  * Wipe every user table  transactions, learned merchants, the whole budget,
  * and all categories (custom + default)  then restore the default categories,
  * all in a single transaction. Used by the "Reset all data" action in Settings.
@@ -415,11 +303,6 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM accounts;
       DELETE FROM price_cache;
       DELETE FROM categories;
-      DELETE FROM repayments;
-      DELETE FROM loan_applications;
-      DELETE FROM loan_products;
-      DELETE FROM occupation;
-      DELETE FROM kyc;
       DELETE FROM split_payments;
       DELETE FROM split_shares;
       DELETE FROM splits;
@@ -428,7 +311,6 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM commitments;
     `);
     await seedCategories(db);
-    await seedProducts(db);
   });
 }
 

@@ -46,20 +46,8 @@ and force Expo Go mode:
 
 ```bash
 npm install
-node tools/issuerKey/generate.js               # first clone only — see note below
-node tools/demoPassport/generate.js
-node tools/demoPassport/generateApplicants.js
 npx expo start --go -c
 ```
-
-> **Issuer signing key:** `src/data/issuerKey.ts` is gitignored (rotated 2026-07-12 after
-> the previous key was found committed/public) — generate your own local one with the
-> command above before running the app, or the passport/loan demo screens won't verify.
-> After regenerating, copy the new `ISSUER_PUBLIC_KEY` into
-> `LenderConsole/lib/passport.ts`'s `ISSUER_PUBLIC_KEY_HEX`. Then paste the
-> `SAMPLE_CODE` line that `tools/demoPassport/generate.js` prints into
-> `LenderConsole/app/tokens.ts` (manual — see that file's own comment).
-> `generateApplicants.js` writes `LenderConsole/app/demoApplicants.ts` directly.
 
 Then:
 

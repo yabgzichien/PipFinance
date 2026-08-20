@@ -6,7 +6,6 @@ import { todayISO } from '../lib/duplicates';
 import { defaultLinkEffect } from '../lib/networth';
 import { suggestForMerchant } from '../lib/recommend';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction } from '../lib/types';
-import { emitTourSignal } from '../lib/tourSignals';
 import { useAppData, type NewLearned } from '../state/store';
 import { useThemeColors } from '../state/colorScheme';
 import { AttachScreen, type PickedImage } from './AttachScreen';
@@ -40,7 +39,7 @@ export function AddFlow({
   onClose: () => void;
   initialPhase?: Phase;
 }) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, tourActive } = useAppData();
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById } = useAppData();
   const colorTheme = useThemeColors();
 
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -65,7 +64,6 @@ export function AddFlow({
   };
 
   const onExtracted = async (items: ExtractedTxn[], accountId: string | null) => {
-    emitTourSignal('scan-extracted');
     setExtracted(items);
     setLinkId(accountId);
 
@@ -139,7 +137,6 @@ export function AddFlow({
     setResult(created);
     setNewLearned(learned);
     setPhase('saved');
-    emitTourSignal('scan-saved');
   };
 
   const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {
@@ -158,7 +155,6 @@ export function AddFlow({
         onManual={() => setPhase('manual')}
         onImport={() => setPhase('import')}
         onReceipt={() => setPhase('receipt')}
-        showSamples={tourActive}
       />
     );
   }
