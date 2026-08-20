@@ -5,7 +5,7 @@ import { fmt } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { colors, numFont, platformShadow, radius, shadowCard, uiFont } from '../theme';
+import { colors, numFont, platformShadow, radius, shadowCard, type, uiFont } from '../theme';
 import { Icon, type IconName } from './Icon';
 import { Pip, type PipExpr } from './Pip';
 
@@ -15,6 +15,48 @@ export function Eyebrow({ children, style }: { children: React.ReactNode; style?
   const colorTheme = useThemeColors();
   return <Text style={[styles.eyebrow, { color: colorTheme.ink2 }, style]}>{children}</Text>;
 }
+
+/* ── type scale primitives (docs/ui-design-plan.md §4) ──
+ * Five fixed sizes, two weights (500/700). `numeric` swaps the family from Hanken Grotesk
+ * to Space Grotesk (tabular figures) for the rare case a size/weight combo here is used on
+ * a number rather than a word — money amounts should still go through <Amount>, which
+ * already owns the "RM" prefix and currency formatting; this is for bare numeric labels
+ * (streak counts, day counts) that don't want that prefix. */
+type Weight = 500 | 700;
+interface TextPrimitiveProps {
+  children: React.ReactNode;
+  weight?: Weight;
+  numeric?: boolean;
+  color?: string;
+  style?: any;
+  numberOfLines?: number;
+}
+
+function textPrimitive(size: number, defaultWeight: Weight) {
+  return function TextPrimitive({ children, weight = defaultWeight, numeric, color, style, numberOfLines }: TextPrimitiveProps) {
+    const colorTheme = useThemeColors();
+    const family = numeric ? numFont(weight) : uiFont(weight);
+    return (
+      <Text
+        style={[{ fontFamily: family, fontSize: size, color: color ?? colorTheme.ink }, style]}
+        numberOfLines={numberOfLines}
+      >
+        {children}
+      </Text>
+    );
+  };
+}
+
+/** One per screen: the hero number or headline. 40px. */
+export const Display = textPrimitive(type.display, 700);
+/** Screen and card titles. 22px. */
+export const Title = textPrimitive(type.title, 700);
+/** Default body copy — the size most text on a screen should be. 16px. */
+export const Body = textPrimitive(type.body, 500);
+/** Eyebrows, meta, secondary rows. 13px. */
+export const Label = textPrimitive(type.label, 700);
+/** Timestamps, legal, genuinely rare. 11px. */
+export const Caption = textPrimitive(type.caption, 500);
 
 export function Amount({
   value,

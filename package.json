@@ -8,7 +8,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:type": "node tools/typeAudit/audit.js",
+    "audit:contrast": "node tools/contrastAudit/audit.js"
   },
   "jest": {
     "preset": "jest-expo",

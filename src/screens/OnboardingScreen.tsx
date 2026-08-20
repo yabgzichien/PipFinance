@@ -3,16 +3,20 @@
 //
 // This is a minimal placeholder (Stage 1 of the Play Store cleanup) — enough to reach the
 // tracker with no lending copy anywhere. A proper guided tour of the real features (receipt
-// scan, net worth, split bills, commitments) is separate follow-up work, not done here.
+// scan, net worth, split bills, commitments) is separate follow-up work, not done here
+// (docs/ui-design-plan.md §7). What did change here: the tagline and mechanism replace a
+// sentence that led with "Scan receipts" — the one claim a Malaysian competitor already owns
+// and the business plan says not to compete on (docs/ui-design-plan.md §7, business-plan.md §3).
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
+import { Body, BtnLabel, Title } from '../components/ui';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { colors, uiFont } from '../theme';
+import { colors, spacing } from '../theme';
 
 export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
@@ -35,19 +39,20 @@ export function OnboardingScreen() {
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <ScrollView
         contentContainerStyle={{
-          padding: 22,
-          paddingTop: insets.top + 40,
-          paddingBottom: insets.bottom + 28,
+          padding: spacing.lg,
+          paddingTop: insets.top + spacing.xl,
+          paddingBottom: insets.bottom + spacing.lg,
           flexGrow: 1,
           justifyContent: 'center',
         }}
       >
         <View style={styles.hero}>
           <Pip size={88} expr="happy" float />
-          <Text style={[styles.title, { color: colorTheme.ink }]}>Welcome to Pip</Text>
-          <Text style={[styles.subtitle, { color: colorTheme.ink2 }]}>
-            Scan receipts, track income and expenses, and see your net worth in one place.
-          </Text>
+          <Title style={{ marginTop: spacing.base }}>Know your money.</Title>
+          <Body color={colorTheme.ink2} style={styles.subtitle}>
+            Screenshot the app you already have open, Grab, Touch 'n Go, Maybank, whatever it
+            is, and Pip reads the numbers so you don't have to type them in.
+          </Body>
         </View>
 
         <Pressable
@@ -61,7 +66,7 @@ export function OnboardingScreen() {
           ) : (
             <>
               <Icon name="sparkles" size={16} color={colors.onAccent} />
-              <Text style={styles.primaryBtnText}>Get started</Text>
+              <BtnLabel>Get started</BtnLabel>
             </>
           )}
         </Pressable>
@@ -72,24 +77,20 @@ export function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  hero: { alignItems: 'center', marginBottom: 32 },
-  title: { fontFamily: uiFont(800), fontSize: 27, marginTop: 18 },
+  hero: { alignItems: 'center', marginBottom: spacing.xl },
   subtitle: {
-    fontFamily: uiFont(500),
-    fontSize: 14.5,
-    marginTop: 8,
+    marginTop: spacing.sm,
     textAlign: 'center',
     lineHeight: 20,
-    paddingHorizontal: 8,
+    paddingHorizontal: spacing.sm,
   },
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: spacing.sm,
     height: 52,
     borderRadius: 999,
   },
-  primaryBtnText: { fontFamily: uiFont(700), fontSize: 15.5, color: colors.onAccent },
   btnBusy: { opacity: 0.6 },
 });

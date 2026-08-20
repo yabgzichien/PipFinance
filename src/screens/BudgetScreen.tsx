@@ -1,6 +1,6 @@
 // src/screens/BudgetScreen.tsx
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BenchmarkCard } from '../components/BenchmarkCard';
 import { BenchmarkPicker } from '../components/BenchmarkPicker';
@@ -9,9 +9,10 @@ import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { Pip } from '../components/Pip';
 import { SavingsHabitCard } from '../components/SavingsHabitCard';
-import { Amount, BtnLabel, Card, CatBadge, Eyebrow, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
+import { Amount, Body, BtnLabel, Card, Caption, Eyebrow, Label, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
 import { getBenchmark } from '../lib/belanjawanku';
 import { benchmarkGaps } from '../lib/belanjawankuBudget';
+import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { computeSavingsHabit } from '../lib/savingsHabit';
 import { allocatedTotal, averageMonthlySpend, budgetHash, categoryStatus, currentMonthKey, leftover, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
@@ -22,7 +23,7 @@ import { buildBudgetPrompt, COACH_SYSTEM_PROMPT } from '../llm/budgetPrompt';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { uiFont } from '../theme';
+import { spacing } from '../theme';
 import { BudgetWizard } from './BudgetWizard';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
@@ -73,6 +74,10 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
     () => computeSavingsHabit(transactions, savingsTarget),
     [transactions, savingsTarget]
   );
+  // Moved here from Home (docs/ui-design-plan.md §3): a conservative income floor only means
+  // anything to someone setting up or reviewing a budget, and it almost never fired on Home for
+  // the launch persona (a salaried professional, not the irregular earner this is built for).
+  const incomeBaseline = useMemo(() => computeIncomeBaseline(transactions), [transactions]);
 
   const allocated = allocatedTotal(allocations);
   const left = leftover(expectedIncome, allocations);
@@ -118,12 +123,12 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
-      <View style={{ paddingTop: insets.top + 4 }}>
+      <View style={{ paddingTop: insets.top + spacing.xs }}>
         <TopBar title="Budget" onBack={onBack} />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: spacing.base, paddingBottom: insets.bottom + spacing.lg }} showsVerticalScrollIndicator={false}>
         {/* summary */}
-        <Card style={{ padding: 18 }}>
+        <Card style={{ padding: spacing.base }}>
           <View style={styles.rowBetween}>
             <View>
               <View style={styles.eyebrowRow}>
@@ -140,25 +145,44 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
               <Amount value={Math.abs(left)} size={22} weight={700} color={left < 0 ? STATUS_COLOR.over : theme.accent} />
             </View>
           </View>
-          <View style={{ marginTop: 14 }}>
+          <View style={{ marginTop: spacing.md }}>
             <ProgressTrack pct={expectedIncome > 0 ? (allocated / expectedIncome) * 100 : 0} />
-            <Text style={[styles.muted, { color: colorTheme.ink2 }]}>Allocated RM {fmt(allocated)} of RM {fmt(expectedIncome)}</Text>
+            <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Allocated RM {fmt(allocated)} of RM {fmt(expectedIncome)}</Caption>
           </View>
         </Card>
+
+        {/* Safe monthly income — for borrowers whose earnings actually swing, since a steady
+            salary needs no separate planning figure. Moved from Home (docs/ui-design-plan.md
+            §3): this is where someone setting up or reviewing a budget meets it. */}
+        {incomeBaseline.irregular && (
+          <Card style={styles.safeIncome}>
+            <Icon name="shield" size={17} color={theme.accent} />
+            <View style={{ flex: 1 }}>
+              <View style={styles.eyebrowRow}>
+                <Body weight={700}>Safe monthly income RM {fmt(incomeBaseline.baseline)}</Body>
+                <InfoButton entry="safe_income" />
+              </View>
+              <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+                Your months range RM {fmt(incomeBaseline.low)} to RM {fmt(incomeBaseline.high)}. Plan
+                against the floor, not the average.
+              </Label>
+            </View>
+          </Card>
+        )}
 
         {/* Ask Pip */}
         <Card style={[styles.adviceCard, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
           <View style={styles.adviceHead}>
             <Pip size={34} expr="idle" />
-            <Text style={[styles.adviceTitle, { color: theme.onTint }]}>Pip's budget tip</Text>
+            <Body weight={700} color={theme.onTint}>Pip's budget tip</Body>
           </View>
-          {advice ? <Text style={[styles.adviceText, { color: colorTheme.ink }]}>{advice}</Text> : <Text style={[styles.muted, { color: colorTheme.ink2 }]}>Tap for a quick take on your plan.</Text>}
-          {adviceErr ? <Text style={[styles.muted, { color: STATUS_COLOR.over }]}>{adviceErr}</Text> : null}
+          {advice ? <Body weight={500}>{advice}</Body> : <Caption color={colorTheme.ink2}>Tap for a quick take on your plan.</Caption>}
+          {adviceErr ? <Caption color={STATUS_COLOR.over}>{adviceErr}</Caption> : null}
           <Pressable onPress={askPip} style={[styles.askBtn, { backgroundColor: colorTheme.surface, borderColor: theme.accentSoft }]} disabled={adviceBusy}>
             {adviceBusy ? <ActivityIndicator size="small" color={theme.accent} /> : (
               <>
                 <Icon name="sparkles" size={15} color={theme.accent} />
-                <Text style={[styles.askText, { color: theme.accent }]}>{advice ? 'Refresh' : 'Ask Pip'}</Text>
+                <Label weight={700} color={theme.accent}>{advice ? 'Refresh' : 'Ask Pip'}</Label>
               </>
             )}
           </Pressable>
@@ -166,7 +190,7 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
 
         {/* per-category. Kept directly under the summary: "how is this month going" is the
             screen's core job, and the benchmark and habit cards below are the deeper read. */}
-        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>This month · {monthName()}</Eyebrow>
+        <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>This month · {monthName()}</Eyebrow>
         <BudgetProgressList allocations={allocations} spentByCat={spentByCat} catById={catById} />
 
         <BenchmarkCard
@@ -190,13 +214,13 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
         >
           <Icon name="trending" size={18} color={theme.accent} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.recapTitle, { color: colorTheme.ink }]}>Monthly recap</Text>
-            <Text style={[styles.recapSub, { color: colorTheme.ink2 }]}>See how each month stacked up against target.</Text>
+            <Body weight={700}>Monthly recap</Body>
+            <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>See how each month stacked up against target.</Label>
           </View>
           <Icon name="chevronRight" size={17} color={colorTheme.ink3} />
         </Pressable>
 
-        <View style={{ marginTop: 18 }}>
+        <View style={{ marginTop: spacing.lg }}>
           <PrimaryButton onPress={() => setEditing(true)} height={50}>
             <Icon name="pencil" size={17} color="#fff" />
             <BtnLabel>Edit budget</BtnLabel>
@@ -221,22 +245,10 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
 const styles = StyleSheet.create({
   root: { flex: 1 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  muted: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6 },
-  adviceCard: { padding: 16, marginTop: 14 },
-  adviceHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  adviceTitle: { fontFamily: uiFont(700), fontSize: 14.5 },
-  adviceText: { fontFamily: uiFont(500), fontSize: 14, lineHeight: 20 },
-  askBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 10, borderRadius: 999, borderWidth: 1 },
-  askText: { fontFamily: uiFont(700), fontSize: 13.5 },
-  catRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
-  divider: { borderTopWidth: 1 },
-  catLabel: { fontFamily: uiFont(600), fontSize: 14.5, flex: 1 },
-  catNums: { fontFamily: uiFont(600), fontSize: 12.5 },
-  barTrack: { height: 6, borderRadius: 999, overflow: 'hidden', marginTop: 7 },
-  remaining: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 4 },
-  unbudgetedIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  recapLink: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 18, padding: 16, borderRadius: 16, borderWidth: 1 },
-  recapTitle: { fontFamily: uiFont(700), fontSize: 15 },
-  recapSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 1 },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  safeIncome: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, padding: spacing.md, marginTop: spacing.md },
+  adviceCard: { padding: spacing.base, marginTop: spacing.md },
+  adviceHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  askBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, marginTop: spacing.md, paddingVertical: spacing.sm, borderRadius: 999, borderWidth: 1 },
+  recapLink: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.lg, padding: spacing.base, borderRadius: 16, borderWidth: 1 },
 });

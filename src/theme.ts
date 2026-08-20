@@ -89,6 +89,36 @@ export const radius = {
 } as const;
 
 /**
+ * The app-wide spacing scale (docs/ui-design-plan.md §4). Every padding/margin/gap in
+ * migrated files must be one of these six values (or 0) — enforced by
+ * tools/typeAudit/audit.js, not just convention. Keep this array in sync with
+ * ALLOWED_SPACING in that file; it can't import this module directly (plain Node, no TS
+ * transpile), the same constraint tools/contrastAudit/audit.js already works around.
+ */
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  base: 16,
+  lg: 24,
+  xl: 32,
+} as const;
+
+/**
+ * The app-wide type scale (docs/ui-design-plan.md §4): 5 sizes, 2 weights (500/700).
+ * Screens consume this through the Display/Title/Body/Label/Caption primitives in
+ * ui.tsx, not by declaring `fontSize` directly — tools/typeAudit/audit.js fails the
+ * build on a raw `fontSize:` outside ui.tsx.
+ */
+export const type = {
+  display: 40,
+  title: 22,
+  body: 16,
+  label: 13,
+  caption: 11,
+} as const;
+
+/**
  * Font family names exported by @expo-google-fonts. Loaded in App via useFonts;
  * until loaded RN falls back to the system font, so these are safe to reference.
  */

@@ -8,21 +8,20 @@ import { FadeIn } from '../components/Motion';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { Pip } from '../components/Pip';
-import { Amount, BtnLabel, Card, Eyebrow, PrimaryButton } from '../components/ui';
+import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
-import { currentMonthKey, txnMonthKey } from '../lib/budget';
-import { greeting, longDate, monthName } from '../lib/dates';
+import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
+import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
 import { fmt } from '../lib/format';
 import { netWorth } from '../lib/networth';
 import { computeStreak, compute7DayDots } from '../lib/streak';
-import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { AGING_DAYS, daysBetween } from '../lib/split';
 import type { Category } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useNow } from '../state/useNow';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { numFont, shadowCard, shadowToggle, uiFont } from '../theme';
+import { shadowCard, shadowToggle, spacing } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
@@ -70,6 +69,8 @@ export function DashboardScreen({
     [monthTxns]
   );
   const net = received - spent;
+  const hasAnyIncome = useMemo(() => transactions.some((t) => t.type === 'income'), [transactions]);
+  const budgetLeft = useMemo(() => allocatedTotal(allocations) - spent, [allocations, spent]);
 
   const spentByCat = useMemo(() => {
     const m: Record<string, number> = {};
@@ -89,7 +90,7 @@ export function DashboardScreen({
   }, [monthExpenses]);
 
   // A debt this old has stopped being a favour and started being a thing you have to chase, so
-  // the card switches from a neutral total to naming who is sitting on it.
+  // the "needs you" row switches from a neutral total to naming who is sitting on it.
   const owed = useMemo(() => {
     const today = dayKey(new Date());
     let oldestDays = 0;
@@ -124,9 +125,47 @@ export function DashboardScreen({
     };
   }, [commitmentOccurrences]);
 
+  // One slot, priority-ordered, so at most one thing is ever asking for attention at a time:
+  // an overdue commitment outranks an aged debt outranks a due-but-not-overdue commitment
+  // outranks an open (not yet aged) debt.
+  const needsYou = useMemo(() => {
+    if (commitmentsDue.overdue) {
+      return {
+        icon: 'clock' as IconName,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        sub: 'Something is overdue. Tap to catch up.',
+        onPress: onOpenCommitments,
+      };
+    }
+    if (owed.overdue) {
+      return {
+        icon: 'gift' as IconName,
+        title: `RM ${fmt(owed.total)} owed to you`,
+        sub: `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`,
+        onPress: onOpenOwed,
+      };
+    }
+    if (commitmentsDue.count > 0) {
+      return {
+        icon: 'clock' as IconName,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        sub: 'Due this month. Tap to tick off.',
+        onPress: onOpenCommitments,
+      };
+    }
+    if (owed.total > 0) {
+      return {
+        icon: 'gift' as IconName,
+        title: `RM ${fmt(owed.total)} owed to you`,
+        sub: `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`,
+        onPress: onOpenOwed,
+      };
+    }
+    return null;
+  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed]);
+
   const empty = transactions.length === 0;
   const streak = useMemo(() => computeStreak(transactions), [transactions]);
-  const incomeBaseline = useMemo(() => computeIncomeBaseline(transactions), [transactions]);
 
   // Last-7-day activity tracker for the streak card.
   const dots = useMemo(() => compute7DayDots(transactions), [transactions]);
@@ -134,12 +173,12 @@ export function DashboardScreen({
   return (
     <FadeIn style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       {/* Bottom padding clears the bottom nav's raised Add button, which overhangs the bar. */}
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 40 /* spacing-audit-ignore: tab-bar clearance, not rhythm */ }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.date, { color: colorTheme.ink2 }]}>{longDate(now)}</Text>
-            <Text style={[styles.greeting, { color: colorTheme.ink }]}>{greeting(now)}</Text>
+            <Caption color={colorTheme.ink2} style={{ marginBottom: spacing.xs }}>{longDate(now)}</Caption>
+            <Title>{greeting(now)}</Title>
           </View>
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
@@ -153,14 +192,20 @@ export function DashboardScreen({
           <EmptyState />
         ) : (
           <>
-            {/* 1  Streak */}
+            {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
+                checks, before the money. */}
             <StreakCard streak={streak} dots={dots} coverage={coverage.daysCovered} />
 
-            {/* 2  Net worth / Cash flow (toggle) */}
+            {/* 2 — Money: a segmented Cash flow / Net worth card, same as before. The Cash flow
+                side's headline number is adaptive rather than fixed (see CashFlowView) so a
+                first-run or pre-payday user is never greeted by a red negative. */}
             <SummaryCard
               net={net}
               received={received}
               spent={spent}
+              budgetLeft={budgetLeft}
+              hasAnyIncome={hasAnyIncome}
+              hasBudget={hasBudget}
               breakdown={breakdown}
               catById={catById}
               onSeeAll={onOpenBreakdown}
@@ -170,94 +215,32 @@ export function DashboardScreen({
               onOpenNetWorth={onOpenNetWorth}
             />
 
-            {/* Money friends still owe from split bills. Sits next to the balance sheet because
-                that is what it is: an asset, not spending that never happened. */}
-            {owed.total > 0 && (
+            {/* 3 — Needs you: at most one row. Today up to three independent cards could all
+                render at once (owed / commitments / safe income); this picks the single most
+                urgent thing instead of stacking all of them. */}
+            {needsYou && (
               <Pressable
-                onPress={onOpenOwed}
-                style={({ pressed }) => [styles.owedRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
+                onPress={needsYou.onPress}
+                style={({ pressed }) => [styles.needsRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
                 accessibilityRole="button"
               >
-                <Icon name="gift" size={17} color={theme.accent} />
+                <Icon name={needsYou.icon} size={17} color={theme.accent} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>RM {fmt(owed.total)} owed to you</Text>
-                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                    {owed.overdue
-                      ? `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`
-                      : `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`}
-                  </Text>
+                  <Label>{needsYou.title}</Label>
+                  <Caption color={colorTheme.ink2} style={{ marginTop: 4 }}>{needsYou.sub}</Caption>
                 </View>
                 <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
               </Pressable>
             )}
 
-            {/* Recurring bills and DCA investments still unpaid this month or overdue. */}
-            {commitmentsDue.count > 0 && (
-              <Pressable
-                onPress={onOpenCommitments}
-                style={({ pressed }) => [styles.owedRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
-                accessibilityRole="button"
-              >
-                <Icon name="clock" size={17} color={theme.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>
-                    {commitmentsDue.count} {commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM {fmt(commitmentsDue.total)}
-                  </Text>
-                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                    {commitmentsDue.overdue ? 'Something is overdue. Tap to catch up.' : 'Due this month. Tap to tick off.'}
-                  </Text>
-                </View>
-                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-              </Pressable>
-            )}
-
-            {/* Safe monthly income — only for borrowers whose earnings actually swing, since a
-                steady salary needs no separate planning figure. */}
-            {incomeBaseline.irregular && (
-              <Pressable
-                onPress={onOpenBudget}
-                style={({ pressed }) => [
-                  styles.safeIncome,
-                  { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2, opacity: pressed ? 0.9 : 1 },
-                ]}
-                accessibilityRole="button"
-              >
-                <Icon name="shield" size={17} color={theme.accent} />
-                <View style={{ flex: 1 }}>
-                  <View style={styles.safeIncomeTitleRow}>
-                    <Text style={[styles.safeIncomeTitle, { color: colorTheme.ink }]}>
-                      Safe monthly income RM {fmt(incomeBaseline.baseline)}
-                    </Text>
-                    <InfoButton entry="safe_income" />
-                  </View>
-                  <Text style={[styles.safeIncomeSub, { color: colorTheme.ink2 }]}>
-                    Your months range RM {fmt(incomeBaseline.low)} to RM {fmt(incomeBaseline.high)}. Plan
-                    against the floor, not the average.
-                  </Text>
-                </View>
-                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-              </Pressable>
-            )}
-
-            {/* Quick actions */}
-            <QuickActions
-              onOpenBudget={onOpenBudget}
-              onOpenNetWorth={onOpenNetWorth}
-            />
-
-            {/* No capture CTA in the feed: it now lives as the raised "Add" button in the bottom
-                nav, which is on screen from every tab. An inline copy meant the core action sat
-                four cards down the scroll AND was labelled "Scan a receipt" while opening a menu
-                of five different things. */}
-
-            {/* This month budget (kept) */}
-            <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+            {/* This month budget */}
+            <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
               {hasBudget ? (
                 <>
                   <View style={styles.sectionHead}>
                     <Eyebrow>This month · {monthName()}</Eyebrow>
                     <Pressable onPress={onOpenBudget} hitSlop={8}>
-                      <Text style={[styles.seeAll, { color: theme.accent }]}>Manage</Text>
+                      <Label weight={700} color={theme.accent}>Manage</Label>
                     </Pressable>
                   </View>
                   <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
@@ -271,8 +254,8 @@ export function DashboardScreen({
                       <Icon name="wallet" size={22} color={theme.accent} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.ctaTitle, { color: colorTheme.ink }]}>Set a monthly budget</Text>
-                      <Text style={[styles.ctaSub, { color: colorTheme.ink2 }]}>Plan income and allocate spend per category.</Text>
+                      <Body weight={700}>Set a monthly budget</Body>
+                      <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Plan income and allocate spend per category.</Label>
                     </View>
                     <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
                   </Card>
@@ -285,7 +268,7 @@ export function DashboardScreen({
         {/* Empty state: nothing to explore yet, so the one thing to do gets a full-width CTA on
             top of the bottom-nav button. */}
         {empty && (
-          <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+          <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
             <PrimaryButton onPress={onScan} height={54}>
               <Icon name="plus" size={21} color="#fff" stroke={2.4} />
               <BtnLabel>Add your first transaction</BtnLabel>
@@ -315,7 +298,7 @@ function HeaderIcon({ name, onPress }: { name: IconName; onPress: () => void }) 
 function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots: boolean[]; coverage: number; onPress?: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  // Subtle flame flicker  driven entirely on the native thread (no per-frame JS).
+  // Subtle flame flicker — driven entirely on the native thread (no per-frame JS).
   const flicker = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -347,8 +330,8 @@ function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots:
           </Animated.View>
         </View>
         <View>
-          <Text style={[styles.streakNum, { color: colorTheme.ink }]}>{streak}</Text>
-          <Text style={[styles.streakLabel, { color: colorTheme.ink2 }]}>day streak</Text>
+          <Title numeric>{streak}</Title>
+          <Caption color={colorTheme.ink2}>day streak</Caption>
         </View>
       </View>
       <View style={[styles.streakDivider, { backgroundColor: colorTheme.line }]} />
@@ -364,10 +347,9 @@ function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots:
             </View>
           ))}
         </View>
-        <Text style={styles.streakBest}>
-          <Text style={{ color: colorTheme.ink2 }}>Covered </Text>
-          <Text style={[styles.streakBestNum, { color: colorTheme.ink2 }]}>{coverage}/90 days</Text>
-        </Text>
+        <Caption color={colorTheme.ink2} style={styles.streakBest}>
+          Covered <Caption numeric color={colorTheme.ink2}>{coverage}/90 days</Caption>
+        </Caption>
       </View>
     </Card>
   );
@@ -386,6 +368,9 @@ function SummaryCard({
   net,
   received,
   spent,
+  budgetLeft,
+  hasAnyIncome,
+  hasBudget,
   breakdown,
   catById,
   onSeeAll,
@@ -397,6 +382,9 @@ function SummaryCard({
   net: number;
   received: number;
   spent: number;
+  budgetLeft: number;
+  hasAnyIncome: boolean;
+  hasBudget: boolean;
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
@@ -421,7 +409,7 @@ function SummaryCard({
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
             >
-              <Text style={[styles.segText, { color: colorTheme.ink2 }, on && [styles.segTextOn, { color: colorTheme.ink }]]}>{v === 'networth' ? 'Net worth' : 'Cash flow'}</Text>
+              <Label color={on ? colorTheme.ink : colorTheme.ink2}>{v === 'networth' ? 'Net worth' : 'Cash flow'}</Label>
             </Pressable>
           );
         })}
@@ -430,16 +418,41 @@ function SummaryCard({
       {view === 'networth' ? (
         <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} onSeeAll={onOpenNetWorth} />
       ) : (
-        <CashFlowView net={net} received={received} spent={spent} breakdown={breakdown} catById={catById} onSeeAll={onSeeAll} />
+        <CashFlowView
+          net={net}
+          received={received}
+          spent={spent}
+          budgetLeft={budgetLeft}
+          hasAnyIncome={hasAnyIncome}
+          hasBudget={hasBudget}
+          breakdown={breakdown}
+          catById={catById}
+          onSeeAll={onSeeAll}
+        />
       )}
     </Card>
   );
+}
+
+/** Which rung of the adaptive hero to show. No income on record yet: spending is a fact,
+ *  never a verdict, so it is the only rung that is never styled red. Income known but no
+ *  budget: net cash flow. A budget exists: what's left, which is what a user with a plan
+ *  actually wants to know. */
+type HeroRung = 'spent' | 'cashflow' | 'left';
+
+function heroRung(hasAnyIncome: boolean, hasBudget: boolean): HeroRung {
+  if (hasBudget) return 'left';
+  if (hasAnyIncome) return 'cashflow';
+  return 'spent';
 }
 
 function CashFlowView({
   net,
   received,
   spent,
+  budgetLeft,
+  hasAnyIncome,
+  hasBudget,
   breakdown,
   catById,
   onSeeAll,
@@ -447,31 +460,50 @@ function CashFlowView({
   net: number;
   received: number;
   spent: number;
+  budgetLeft: number;
+  hasAnyIncome: boolean;
+  hasBudget: boolean;
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const pos = net >= 0;
+  const rung = heroRung(hasAnyIncome, hasBudget);
+
+  const eyebrow = rung === 'spent' ? 'Spent this month' : rung === 'cashflow' ? `Net cash flow · ${monthName()}` : 'Left to spend';
+  const caption =
+    rung === 'spent'
+      ? 'No income logged yet'
+      : rung === 'cashflow'
+        ? 'Income − Expenses · this month'
+        : `${daysLeftInMonth()} days left in ${monthName()}`;
+  const heroValue = rung === 'spent' ? spent : rung === 'cashflow' ? net : budgetLeft;
+  // Spending is never styled as a failure — it's the only rung shown before Pip knows enough
+  // for a negative number to mean something actionable.
+  const heroNegative = rung !== 'spent' && heroValue < 0;
+  const heroColor = heroNegative ? colorTheme.red : colorTheme.ink;
+
   return (
     <>
       <View style={styles.cashTop}>
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
-            <Eyebrow>Net cash flow · {monthName()}</Eyebrow>
-            <InfoButton entry="net_cash_flow" />
+            <Eyebrow>{eyebrow}</Eyebrow>
+            <InfoButton entry={rung === 'cashflow' ? 'net_cash_flow' : rung === 'left' ? 'unallocated' : 'net_cash_flow'} />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 6 }}>
-            <Text style={[styles.cashSign, { color: pos ? theme.accent : colorTheme.red }]}>{pos ? '+' : '−'}</Text>
-            <Amount value={Math.abs(net)} size={30} weight={700} color={pos ? theme.accent : colorTheme.red} />
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
+            {heroNegative && <Display numeric color={colorTheme.red} >−</Display>}
+            <Display numeric color={heroColor}>{`RM ${fmt(Math.abs(heroValue))}`}</Display>
           </View>
-          <Text style={[styles.cashSub, { color: colorTheme.ink2 }]}>Income − Expenses · this month</Text>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{caption}</Caption>
         </View>
-        <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.incomeAmt, { color: theme.onTint }]}>RM {fmt(received)}</Text>
-          <Text style={[styles.incomeLabel, { color: colorTheme.ink2 }]}>income</Text>
-        </View>
+        {rung === 'cashflow' && (
+          <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
+            <Label numeric color={theme.onTint}>{`RM ${fmt(received)}`}</Label>
+            <Caption color={colorTheme.ink2}>income</Caption>
+          </View>
+        )}
       </View>
 
       {breakdown.length > 0 && (
@@ -483,7 +515,7 @@ function CashFlowView({
               <InfoButton entry="where_it_goes" />
             </View>
             <Pressable onPress={onSeeAll} hitSlop={8}>
-              <Text style={[styles.seeAll, { color: theme.accent }]}>See all →</Text>
+              <Label weight={700} color={theme.accent}>See all →</Label>
             </Pressable>
           </View>
           {breakdown.slice(0, 3).map((b) => {
@@ -497,14 +529,14 @@ function CashFlowView({
                 </View>
                 <View style={{ flex: 1 }}>
                   <View style={styles.spendLabelRow}>
-                    <Text style={[styles.spendLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
-                    <Text style={[styles.spendAmt, { color: colorTheme.ink }]}>RM {fmt(b.amt)}</Text>
+                    <Label weight={500} numberOfLines={1}>{cat.label}</Label>
+                    <Label numeric>{`RM ${fmt(b.amt)}`}</Label>
                   </View>
                   <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
                     <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: col.solid }} />
                   </View>
                 </View>
-                <Text style={[styles.spendPct, { color: colorTheme.ink2 }]}>{pct}%</Text>
+                <Caption numeric color={colorTheme.ink2} style={{ width: 28, textAlign: 'right' }}>{pct}%</Caption>
               </View>
             );
           })}
@@ -541,15 +573,15 @@ function NetWorthView({
             <Eyebrow>Net worth</Eyebrow>
             <InfoButton entry="net_worth" />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 6 }}>
-            {!pos && <Text style={[styles.cashSign, { color: colorTheme.red }]}>−</Text>}
-            <Amount value={Math.abs(net)} size={30} weight={700} color={pos ? colorTheme.ink : colorTheme.red} />
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
+            {!pos && <Display numeric color={colorTheme.red} >−</Display>}
+            <Display numeric color={pos ? colorTheme.ink : colorTheme.red}>{`RM ${fmt(Math.abs(net))}`}</Display>
           </View>
-          <Text style={[styles.cashSub, { color: colorTheme.ink2 }]}>Assets − Liabilities · today</Text>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Assets − Liabilities · today</Caption>
         </View>
         <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.incomeAmt, { color: theme.onTint }]}>RM {fmt(assets)}</Text>
-          <Text style={[styles.incomeLabel, { color: colorTheme.ink2 }]}>assets</Text>
+          <Label numeric color={theme.onTint}>{`RM ${fmt(assets)}`}</Label>
+          <Caption color={colorTheme.ink2}>assets</Caption>
         </View>
       </View>
 
@@ -559,7 +591,7 @@ function NetWorthView({
           <Eyebrow>Balance sheet</Eyebrow>
         </View>
         <Pressable onPress={onSeeAll} hitSlop={8}>
-          <Text style={[styles.seeAll, { color: theme.accent }]}>See all →</Text>
+          <Label weight={700} color={theme.accent}>See all →</Label>
         </Pressable>
       </View>
       {rows.map((r) => {
@@ -571,8 +603,8 @@ function NetWorthView({
             </View>
             <View style={{ flex: 1 }}>
               <View style={styles.spendLabelRow}>
-                <Text style={[styles.spendLabel, { color: colorTheme.ink }]} numberOfLines={1}>{r.label}</Text>
-                <Text style={[styles.spendAmt, { color: colorTheme.ink }]}>RM {fmt(r.amt)}</Text>
+                <Label weight={500} numberOfLines={1}>{r.label}</Label>
+                <Label numeric>{`RM ${fmt(r.amt)}`}</Label>
               </View>
               <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
                 <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: r.color }} />
@@ -585,120 +617,59 @@ function NetWorthView({
   );
 }
 
-/* ── Quick actions ── */
-function QuickActions({
-  onOpenBudget,
-  onOpenNetWorth,
-}: {
-  onOpenBudget: () => void;
-  onOpenNetWorth: () => void;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const items: { label: string; icon: IconName; onPress: () => void }[] = [
-    { label: 'Budget', icon: 'wallet', onPress: onOpenBudget },
-    { label: 'Net Worth', icon: 'trending', onPress: onOpenNetWorth },
-  ];
-  return (
-    <Card style={styles.quickCard}>
-      {items.map((it) => (
-        <Pressable key={it.label} onPress={it.onPress} style={styles.quickItem}>
-          <View style={[styles.quickIcon, styles.quickIconIdle, { backgroundColor: theme.accentTint }]}>
-            <Icon name={it.icon} size={21} color={theme.accent} />
-          </View>
-          <Text style={[styles.quickLabel, { color: colorTheme.ink2, fontFamily: uiFont(500) }]}>{it.label}</Text>
-        </Pressable>
-      ))}
-    </Card>
-  );
-}
-
 function EmptyState() {
   const colorTheme = useThemeColors();
   return (
-    <Card style={{ marginHorizontal: 16, marginTop: 8, padding: 26, alignItems: 'center' }}>
+    <Card style={{ marginHorizontal: spacing.base, marginTop: spacing.sm, padding: 24, alignItems: 'center' }}>
       <Pip size={88} expr="curious" float />
-      <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>No spending yet</Text>
-      <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-        Tap <Text style={{ fontFamily: uiFont(700) }}>Add</Text> to scan one receipt, or a whole statement at
-        once. I’ll read the lines and you file them.
-      </Text>
+      <Title style={{ marginTop: spacing.md }}>No spending yet</Title>
+      <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
+        Tap <Body weight={700}>Add</Body> to scan one receipt, or a whole statement at once. I’ll read the lines and you file them.
+      </Body>
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 },
-  date: { fontFamily: uiFont(500), fontSize: 11, marginBottom: 2 },
-  greeting: { fontFamily: uiFont(800), fontSize: 23 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.xs, paddingBottom: spacing.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerIcon: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
   pipBubble: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
 
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  seeAll: { fontFamily: uiFont(600), fontSize: 12.5 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
-  safeIncome: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 10, padding: 13, borderRadius: 16, borderWidth: 1 },
-  safeIncomeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  safeIncomeTitle: { fontFamily: uiFont(700), fontSize: 14 },
-  safeIncomeSub: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 2 },
-  /* owed to you */
-  owedRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 10, padding: 13, borderRadius: 16, borderWidth: 1 },
-  owedTitle: { fontFamily: uiFont(700), fontSize: 14 },
-  owedSub: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  /* needs-you: the single consolidated attention row */
+  needsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
+
   /* streak */
-  streakCard:{ marginHorizontal: 16, marginTop: 2, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  streakLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  streakCard: { marginHorizontal: spacing.base, marginTop: spacing.xs, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  streakLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
-  streakNum: { fontFamily: numFont(700), fontSize: 24, lineHeight: 26 },
-  streakLabel: { fontFamily: uiFont(500), fontSize: 11 },
   streakDivider: { width: 1, height: 38 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  dotsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm },
   dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
-  streakBest: { fontFamily: uiFont(500), fontSize: 11, textAlign: 'right' },
-  streakBestNum: { fontFamily: numFont(600) },
+  streakBest: { textAlign: 'right' },
 
   /* summary toggle */
-  segTrack: { flexDirection: 'row', borderRadius: 999, padding: 3, marginBottom: 16, borderWidth: 1 },
-  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 999 },
+  segTrack: { flexDirection: 'row', borderRadius: 999, padding: spacing.xs, marginBottom: spacing.base, borderWidth: 1 },
+  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm, borderRadius: 999 },
   segBtnOn: { ...shadowToggle },
-  segText: { fontFamily: uiFont(600), fontSize: 13 },
-  segTextOn: {},
 
   /* cash flow */
-  cashCard: { marginHorizontal: 16, marginTop: 10, padding: 16 },
-  cashTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  cashSign: { fontFamily: numFont(700), fontSize: 24, marginRight: 1 },
-  cashSub: { fontFamily: uiFont(500), fontSize: 11, marginTop: 4 },
-  incomeBadge: { borderRadius: 14, paddingHorizontal: 11, paddingVertical: 7, alignItems: 'center' },
-  incomeAmt: { fontFamily: numFont(700), fontSize: 13 },
-  incomeLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
-  cashDivider: { height: 1, marginVertical: 11 },
-  spendRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  cashCard: { marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.base },
+  cashTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  incomeBadge: { borderRadius: 14, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
+  cashDivider: { height: 1, marginVertical: spacing.md },
+  spendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   spendIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  spendLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
-  spendLabel: { fontFamily: uiFont(500), fontSize: 12.5, flex: 1, marginRight: 8 },
-  spendAmt: { fontFamily: numFont(600), fontSize: 12.5 },
+  spendLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: spacing.xs },
   spendTrack: { height: 4, borderRadius: 4, overflow: 'hidden' },
-  spendPct: { fontFamily: numFont(500), fontSize: 11, width: 28, textAlign: 'right' },
-
-  /* quick actions */
-  quickCard: { marginHorizontal: 16, marginTop: 10, paddingVertical: 14, paddingHorizontal: 6, flexDirection: 'row', justifyContent: 'space-around' },
-  quickItem: { flex: 1, alignItems: 'center', gap: 7 },
-  quickIcon: { width: 50, height: 50, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  quickIconIdle: {},
-  quickLabel: { fontSize: 11, textAlign: 'center' },
 
   /* generic cta */
-  budgetCta: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 },
+  budgetCta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.base },
   ctaIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  ctaTitle: { fontFamily: uiFont(700), fontSize: 15 },
-  ctaSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 1 },
-
-  emptyTitle: { fontFamily: uiFont(700), fontSize: 19, marginTop: 14 },
-  emptySub: { fontFamily: uiFont(500), fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 6 },
 });
