@@ -1,11 +1,13 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Image, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { catColorsForHue } from '../lib/catColors';
 import { fmt } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { colors, numFont, platformShadow, radius, shadowCard, type, uiFont } from '../theme';
+import { duration as motionDuration, easing as motionEasing } from '../theme/motion';
 import { Icon, type IconName } from './Icon';
 import { Pip, type PipExpr } from './Pip';
 
@@ -30,16 +32,22 @@ interface TextPrimitiveProps {
   color?: string;
   style?: any;
   numberOfLines?: number;
+  /** Shrink the font (native only  react-native-web doesn't implement this) rather than wrap
+   *  or overflow when the content is longer than usual, e.g. a hero amount that got very large. */
+  adjustsFontSizeToFit?: boolean;
+  minimumFontScale?: number;
 }
 
 function textPrimitive(size: number, defaultWeight: Weight) {
-  return function TextPrimitive({ children, weight = defaultWeight, numeric, color, style, numberOfLines }: TextPrimitiveProps) {
+  return function TextPrimitive({ children, weight = defaultWeight, numeric, color, style, numberOfLines, adjustsFontSizeToFit, minimumFontScale }: TextPrimitiveProps) {
     const colorTheme = useThemeColors();
     const family = numeric ? numFont(weight) : uiFont(weight);
     return (
       <Text
         style={[{ fontFamily: family, fontSize: size, color: color ?? colorTheme.ink }, style]}
         numberOfLines={numberOfLines}
+        adjustsFontSizeToFit={adjustsFontSizeToFit}
+        minimumFontScale={minimumFontScale}
       >
         {children}
       </Text>
@@ -85,10 +93,18 @@ export function Amount({
 
 /* ── surfaces ── */
 
-export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
+export function Card({
+  children,
+  style,
+  onLayout,
+}: {
+  children: React.ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
   const colorTheme = useThemeColors();
   return (
-    <View style={[styles.card, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, style]}>
+    <View onLayout={onLayout} style={[styles.card, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, style]}>
       {children}
     </View>
   );
@@ -202,7 +218,10 @@ export function B({ children }: { children: React.ReactNode }) {
 
 export function PipSays({
   expr = 'idle',
-  size = 52,
+  // 52 -> 60 (docs/ui-engagement-plan.md Step 3): the fine detail in the newer expressions
+  // (think's single brow, sheepish's wince) reads as a hairline below this. Kept as one shared
+  // default rather than sized per screen, so every PipSays call site stays visually consistent.
+  size = 60,
   children,
 }: {
   expr?: PipExpr;
@@ -310,12 +329,45 @@ export function TopBar({
   );
 }
 
+/**
+ * The fill glides to a new `pct` instead of cutting to it, so a wizard step advancing (or a
+ * budget allocation changing) is something the eye can follow. Mounts already at `pct` rather
+ * than sweeping up from 0: on a screen that just opened, the bar is data, not an entrance.
+ * Reduced motion snaps, same contract as everything else in docs/ui-engagement-plan.md Step 1.
+ */
 export function ProgressTrack({ pct, height = 7 }: { pct: number; height?: number }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const reducedMotion = useReducedMotion();
+  const target = Math.max(0, Math.min(100, pct));
+  const fill = useRef(new Animated.Value(target)).current;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      fill.setValue(target);
+      return;
+    }
+    // Width is a percentage string, which the native driver can't interpolate.
+    const a = Animated.timing(fill, {
+      toValue: target,
+      duration: motionDuration.enter,
+      easing: motionEasing.standard,
+      useNativeDriver: false,
+    });
+    a.start();
+    return () => a.stop();
+  }, [target, reducedMotion, fill]);
+
   return (
     <View style={[styles.track, { height, backgroundColor: colorTheme.line }]}>
-      <View style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: '100%', borderRadius: 999, backgroundColor: theme.accent }} />
+      <Animated.View
+        style={{
+          width: fill.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+          height: '100%',
+          borderRadius: 999,
+          backgroundColor: theme.accent,
+        }}
+      />
     </View>
   );
 }

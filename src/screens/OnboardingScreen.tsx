@@ -1,96 +1,90 @@
 // src/screens/OnboardingScreen.tsx
-// The app's front door: a one-tap welcome screen before the tracker's empty state.
-//
-// This is a minimal placeholder (Stage 1 of the Play Store cleanup) — enough to reach the
-// tracker with no lending copy anywhere. A proper guided tour of the real features (receipt
-// scan, net worth, split bills, commitments) is separate follow-up work, not done here
-// (docs/ui-design-plan.md §7). What did change here: the tagline and mechanism replace a
-// sentence that led with "Scan receipts" — the one claim a Malaysian competitor already owns
-// and the business plan says not to compete on (docs/ui-design-plan.md §7, business-plan.md §3).
+// The app's front door: a 5-step setup wizard (Pip intro, budget, recurring payment,
+// notifications, widget) rather than a single "Get started" screen. Every step after the
+// intro can be skipped  there is deliberately no skip-all shortcut, so a user in a hurry
+// skips step by step, which stays honest about what didn't get set up rather than silently
+// marking everything done. See docs/superpowers/specs/2026-08-21-onboarding-setup-wizard-design.md.
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Icon } from '../components/Icon';
-import { Pip } from '../components/Pip';
-import { Body, BtnLabel, Title } from '../components/ui';
-import { useAccent } from '../state/accent';
+import { FadeIn } from '../components/Motion';
+import { ProgressTrack, TopBar } from '../components/ui';
+import * as haptics from '../lib/haptics';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { colors, spacing } from '../theme';
+import { spacing } from '../theme';
+import { BudgetStep } from './onboarding/BudgetStep';
+import { NotificationsStep } from './onboarding/NotificationsStep';
+import { PipIntroStep } from './onboarding/PipIntroStep';
+import { RecurringPaymentStep } from './onboarding/RecurringPaymentStep';
+import { WidgetStep } from './onboarding/WidgetStep';
+
+/** Widget setup only applies where the app actually ships a widget target. */
+const HAS_WIDGET_STEP = Platform.OS === 'android';
+const TOTAL_STEPS = HAS_WIDGET_STEP ? 5 : 4;
+
+const STEP_TITLES = ['', 'Budget', 'Recurring payment', 'Notifications', 'Widget'];
 
 export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
-  const theme = useAccent();
   const colorTheme = useThemeColors();
   const { completeOnboarding } = useAppData();
-  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState(0);
+  // Which way the wizard last moved. Forward, the incoming step rises into place; back, it
+  // settles down from above, so the direction of travel is legible without a slide transition.
+  const [back, setBack] = useState(false);
+  const [finishing, setFinishing] = useState(false);
 
-  async function getStarted() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await completeOnboarding();
-    } finally {
-      setBusy(false);
+  const finish = () => {
+    if (finishing) return;
+    setFinishing(true);
+    haptics.payoff();
+    void completeOnboarding();
+  };
+
+  const advance = () => {
+    if (step >= 3 && (!HAS_WIDGET_STEP || step === 4)) {
+      finish();
+      return;
     }
-  }
+    setBack(false);
+    setStep((s) => s + 1);
+  };
+
+  const goBack = () => {
+    haptics.tap();
+    setBack(true);
+    setStep((s) => s - 1);
+  };
+
+  const stepIndexForProgress = step >= 4 ? 4 : step;
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: spacing.lg,
-          paddingTop: insets.top + spacing.xl,
-          paddingBottom: insets.bottom + spacing.lg,
-          flexGrow: 1,
-          justifyContent: 'center',
-        }}
-      >
-        <View style={styles.hero}>
-          <Pip size={88} expr="happy" float />
-          <Title style={{ marginTop: spacing.base }}>Know your money.</Title>
-          <Body color={colorTheme.ink2} style={styles.subtitle}>
-            Screenshot the app you already have open, Grab, Touch 'n Go, Maybank, whatever it
-            is, and Pip reads the numbers so you don't have to type them in.
-          </Body>
+      {step > 0 && (
+        <View style={{ paddingTop: insets.top + 4 }}>
+          <TopBar title={STEP_TITLES[step]} onBack={goBack} />
+          <View style={{ paddingHorizontal: 18, paddingTop: 2 }}>
+            <ProgressTrack pct={((stepIndexForProgress + 1) / TOTAL_STEPS) * 100} height={5} />
+          </View>
         </View>
+      )}
 
-        <Pressable
-          style={[styles.primaryBtn, { backgroundColor: theme.accentInk }, busy && styles.btnBusy]}
-          onPress={() => void getStarted()}
-          disabled={busy}
-          accessibilityRole="button"
-        >
-          {busy ? (
-            <ActivityIndicator size="small" color={colors.onAccent} />
-          ) : (
-            <>
-              <Icon name="sparkles" size={16} color={colors.onAccent} />
-              <BtnLabel>Get started</BtnLabel>
-            </>
-          )}
-        </Pressable>
-      </ScrollView>
+      {/* Keyed on `step` so each step remounts and replays its entrance; the steps hold no
+          state worth preserving across a move, and the back button re-enters an earlier one
+          fresh rather than showing a half-filled form the user already skipped past. */}
+      <FadeIn key={step} style={styles.fill} offset={back ? -14 : 16}>
+        {step === 0 && <PipIntroStep onNext={advance} />}
+        {step === 1 && <BudgetStep onNext={advance} onSkip={advance} />}
+        {step === 2 && <RecurringPaymentStep onNext={advance} onSkip={advance} />}
+        {step === 3 && <NotificationsStep onNext={advance} onSkip={advance} />}
+        {step === 4 && HAS_WIDGET_STEP && <WidgetStep onFinish={finish} />}
+      </FadeIn>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  hero: { alignItems: 'center', marginBottom: spacing.xl },
-  subtitle: {
-    marginTop: spacing.sm,
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: spacing.sm,
-  },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    height: 52,
-    borderRadius: 999,
-  },
-  btnBusy: { opacity: 0.6 },
+  fill: { flex: 1, paddingTop: spacing.sm },
 });
