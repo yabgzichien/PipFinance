@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { todayISO } from '../lib/duplicates';
 import { classesFor } from '../lib/networth';
@@ -61,7 +61,10 @@ export function AddAccountModal({
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.center, { pointerEvents: 'box-none' }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.center, { pointerEvents: 'box-none' }]}
+      >
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom }]}>
           <View style={styles.head}>
             <Text style={[styles.title, { color: colorTheme.ink }]}>New account</Text>
@@ -117,7 +120,7 @@ export function AddAccountModal({
             </PrimaryButton>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

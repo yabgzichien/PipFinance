@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image as RNImage, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
@@ -150,7 +150,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
           <Text style={[styles.title, { color: colorTheme.ink }]} numberOfLines={1}>
@@ -310,7 +313,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             <Text style={styles.deleteText}>Delete transaction</Text>
           </Pressable>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       <AddCategoryModal
         visible={adding}

@@ -1,6 +1,6 @@
 // src/screens/CommitmentsScreen.tsx
 import React, { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { Icon } from '../components/Icon';
@@ -476,7 +476,10 @@ function CommitmentEditorModal({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
@@ -594,7 +597,7 @@ function CommitmentEditorModal({
             </PrimaryButton>
           </View>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

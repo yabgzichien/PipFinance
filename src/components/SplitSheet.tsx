@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fmt } from '../lib/format';
 import { computeSplit, validateSplit, type Participant } from '../lib/split';
@@ -8,6 +8,7 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { colors, numFont, radius, shadowToggle, uiFont } from '../theme';
+import { AddPersonModal } from './AddPersonModal';
 import { Icon } from './Icon';
 import { BtnLabel, PrimaryButton } from './ui';
 
@@ -55,7 +56,7 @@ export function SplitSheet({
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [exacts, setExacts] = useState<Record<string, string>>({});
   const [selfWeight, setSelfWeight] = useState(1);
-  const [newName, setNewName] = useState('');
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Re-seed whenever the sheet opens, so re-opening an existing split shows what is already
@@ -77,7 +78,6 @@ export function SplitSheet({
       setSelfWeight(1);
       setIncludeSelf(true);
     }
-    setNewName('');
   }, [visible, initial]);
 
   const participants: Participant[] = useMemo(
@@ -106,17 +106,9 @@ export function SplitSheet({
   const toggle = (id: string) =>
     setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const addNew = async () => {
-    const name = newName.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    try {
-      const person = await addPerson(name);
-      setPicked((prev) => (prev.includes(person.id) ? prev : [...prev, person.id]));
-      setNewName('');
-    } finally {
-      setBusy(false);
-    }
+  const addNew = async (name: string) => {
+    const person = await addPerson(name);
+    setPicked((prev) => (prev.includes(person.id) ? prev : [...prev, person.id]));
   };
 
   const bump = (id: string, by: number) =>
@@ -135,7 +127,10 @@ export function SplitSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
           <View style={{ flex: 1 }}>
@@ -171,35 +166,16 @@ export function SplitSheet({
           <Text style={[styles.hint, { color: colorTheme.ink3 }]}>{METHODS.find((m) => m.key === method)?.hint}</Text>
 
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Who else was there</Text>
-          {people.length > 0 && (
-            <View style={styles.chipWrap}>
-              {unpicked.map((p) => (
-                <Pressable key={p.id} onPress={() => toggle(p.id)} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-                  <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
-                  <Text style={[styles.chipText, { color: theme.onTint }]}>{p.name}</Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          <View style={styles.addRow}>
-            <TextInput
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="Add a name"
-              placeholderTextColor={colorTheme.ink3}
-              style={[styles.nameInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-              autoCapitalize="words"
-              returnKeyType="done"
-              onSubmitEditing={addNew}
-            />
-            <Pressable
-              onPress={addNew}
-              style={[styles.addBtn, { backgroundColor: theme.accent }, !newName.trim() && styles.addBtnOff, !newName.trim() && { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
-              disabled={!newName.trim() || busy}
-              accessibilityLabel="Add this person"
-            >
-              <Icon name="plus" size={18} color={newName.trim() ? colors.onAccent : colorTheme.ink3} stroke={2.4} />
+          <View style={styles.chipWrap}>
+            {unpicked.map((p) => (
+              <Pressable key={p.id} onPress={() => toggle(p.id)} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+                <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
+                <Text style={[styles.chipText, { color: theme.onTint }]}>{p.name}</Text>
+              </Pressable>
+            ))}
+            <Pressable onPress={() => setAddPersonOpen(true)} style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
+              <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>Add a name</Text>
             </Pressable>
           </View>
 
@@ -305,7 +281,9 @@ export function SplitSheet({
             </Pressable>
           )}
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
+
+      <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
     </Modal>
   );
 }
@@ -350,24 +328,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipText: { fontFamily: uiFont(600), fontSize: 13 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  nameInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontFamily: uiFont(600),
-    fontSize: 14.5,
-  },
-  addBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addBtnOff: { borderWidth: 1 },
+  addChip: { borderStyle: 'dashed' },
   empty: { fontFamily: uiFont(500), fontSize: 13, marginTop: 14, textAlign: 'center' },
   list: { marginTop: 14, gap: 8 },
   personRow: {

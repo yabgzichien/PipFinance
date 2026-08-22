@@ -1,6 +1,6 @@
 // src/screens/ImportReviewScreen.tsx
 import React, { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
@@ -231,7 +231,10 @@ function RowEditModal({
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]} numberOfLines={1}>{row.item.merchant || currentCatLabel}</Text>
@@ -288,7 +291,7 @@ function RowEditModal({
             </PrimaryButton>
           </View>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       <AddCategoryModal
         visible={adding}

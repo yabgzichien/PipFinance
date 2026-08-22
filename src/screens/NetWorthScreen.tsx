@@ -1,6 +1,6 @@
 // src/screens/NetWorthScreen.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -61,7 +61,7 @@ function lastMonths(n: number): string[] {
   return out;
 }
 
-export function NetWorthScreen({ onBack }: { onBack: () => void }) {
+export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -133,7 +133,7 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
           hasHoldings ? <RefreshControl refreshing={refreshing} onRefresh={doRefresh} tintColor={theme.accent} /> : undefined
         }
       >
-        <HeroCard nw={nw} series={series} months={monthShorts} delta={delta} prevMonth={prevMonth} mode={profitMode} setMode={setProfitMode} />
+        <HeroCard nw={nw} series={series} months={monthShorts} delta={delta} prevMonth={prevMonth} mode={profitMode} setMode={setProfitMode} onOpenHistory={onOpenHistory} />
         <ScanRow onScan={() => setScanning(true)} onAdd={() => { setPresetCoin(null); setAdding(true); }} />
 
         {empty && (
@@ -203,6 +203,7 @@ function HeroCard({
   prevMonth,
   mode,
   setMode,
+  onOpenHistory,
 }: {
   nw: { net: number; assets: number; liabilities: number };
   series: number[];
@@ -211,6 +212,7 @@ function HeroCard({
   prevMonth: string;
   mode: ValueMode;
   setMode: (m: ValueMode) => void;
+  onOpenHistory: () => void;
 }) {
   const theme = useAccent();
   const deltaUp = (delta ?? 0) >= 0;
@@ -223,7 +225,7 @@ function HeroCard({
     : `RM ${fmt(Math.abs(delta ?? 0))}`;
 
   return (
-    <View style={styles.hero}>
+    <Pressable onPress={onOpenHistory} style={styles.hero} accessibilityRole="button" accessibilityLabel="View net worth history">
       {/* gradient fill */}
       <Svg style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
         <Defs>
@@ -294,7 +296,7 @@ function HeroCard({
           </View>
         </>
       )}
-    </View>
+    </Pressable>
   );
 }
 
@@ -693,7 +695,10 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.backdrop} onPress={close} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>New account</Text>
@@ -830,7 +835,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
             </PrimaryButton>
           </View>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       <TickerSearchModal
         visible={searchOpen}
@@ -1018,7 +1023,10 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]} numberOfLines={1}>{account.name}</Text>
@@ -1162,7 +1170,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
             <Text style={styles.deleteText}>Delete account</Text>
           </Pressable>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
