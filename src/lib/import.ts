@@ -51,19 +51,18 @@ export function docxXmlToText(xml: string): string {
  * (case-insensitive) against the hint string.
  */
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  // expense  keyed on the COICOP-aligned defaults in src/data/categories.ts
-  housing:        ['housing', 'rent', 'rental', 'sewa', 'utility', 'utilities', 'electricity', 'water', 'gas', 'lpg', 'maintenance', 'quit rent', 'assessment', 'tnb', 'syabas', 'air selangor', 'indah water'],
-  food:           ['groceries', 'grocery', 'supermarket', 'hypermarket', 'market', 'pasar', 'aeon', 'tesco', 'mydin', 'jaya', 'lotus', 'cold storage', 'speedmart', 'provisions'],
-  dining:         ['dining', 'restaurant', 'food', 'meal', 'lunch', 'dinner', 'breakfast', 'mamak', 'hawker', 'bistro', 'eatery', 'pizza', 'burger', 'mcd', 'kfc', 'domino', 'subway', 'foodpanda', 'coffee', 'café', 'cafe', 'teh', 'kopitiam', 'starbucks', 'zus', 'oldtown', 'boba', 'bubble tea', 'milk tea'],
-  transport:      ['transport', 'fuel', 'petrol', 'diesel', 'petronas', 'shell', 'caltex', 'bhp', 'grab', 'uber', 'lyft', 'taxi', 'bus', 'train', 'lrt', 'mrt', 'ktm', 'toll', 'parking', 'transit', 'ride', 'commute', 'touch n go'],
-  communications: ['communication', 'internet', 'broadband', 'phone', 'mobile', 'telco', 'prepaid', 'postpaid', 'unifi', 'maxis', 'celcom', 'digi', 'umobile', 'yes', 'astro', 'postage'],
-  healthcare:     ['health', 'medical', 'hospital', 'clinic', 'klinik', 'pharmacy', 'doctor', 'dentist', 'medicine', 'guardian', 'watson', 'lab', 'optical'],
-  education:      ['education', 'school', 'sekolah', 'tuition', 'tadika', 'nursery', 'childcare', 'college', 'university', 'course', 'exam', 'textbook', 'stationery', 'yuran'],
-  household:      ['household', 'shopping', 'shop', 'retail', 'store', 'fashion', 'clothing', 'apparel', 'furniture', 'appliance', 'toiletries', 'personal care', 'salon', 'barber', 'laundry', 'lazada', 'shopee', 'amazon', 'zalora', 'ikea', 'h&m', 'uniqlo'],
-  recreation:     ['recreation', 'entertainment', 'movie', 'cinema', 'game', 'gaming', 'sport', 'gym', 'fitness', 'concert', 'event', 'hobby', 'travel', 'holiday', 'netflix', 'spotify', 'subscription'],
+  // expense  keyed on the 7-category defaults in src/data/categories.ts (2026-08-21 retune).
+  // Buckets that absorbed more than one old category (food, other) carry the union of the
+  // old keyword lists; buckets that narrowed (travelling from transport, rental from housing,
+  // car-instalment from debt-service) kept the old list as-is rather than trying to guess
+  // which merchant belongs to the narrower new meaning.
+  food:           ['groceries', 'grocery', 'supermarket', 'hypermarket', 'market', 'pasar', 'aeon', 'tesco', 'mydin', 'jaya', 'lotus', 'cold storage', 'speedmart', 'provisions', 'dining', 'restaurant', 'food', 'meal', 'lunch', 'dinner', 'breakfast', 'mamak', 'hawker', 'bistro', 'eatery', 'pizza', 'burger', 'mcd', 'kfc', 'domino', 'subway', 'foodpanda', 'coffee', 'café', 'cafe', 'teh', 'kopitiam', 'starbucks', 'zus', 'oldtown', 'boba', 'bubble tea', 'milk tea'],
+  entertainment:  ['recreation', 'entertainment', 'movie', 'cinema', 'game', 'gaming', 'sport', 'gym', 'fitness', 'concert', 'event', 'hobby', 'netflix', 'spotify', 'subscription'],
+  travelling:     ['transport', 'fuel', 'petrol', 'diesel', 'petronas', 'shell', 'caltex', 'bhp', 'grab', 'uber', 'lyft', 'taxi', 'bus', 'train', 'lrt', 'mrt', 'ktm', 'toll', 'parking', 'transit', 'ride', 'commute', 'touch n go', 'travel', 'holiday', 'flight', 'airasia', 'airline', 'hotel', 'agoda'],
   insurance:      ['insurance', 'takaful', 'premium', 'policy', 'bank charge', 'service charge', 'admin fee', 'late fee', 'stamp duty', 'zakat', 'donation', 'derma'],
-  'debt-service': ['loan repayment', 'debt repayment', 'repayment', 'installment', 'instalment', 'ansuran', 'financing', 'hire purchase', 'mortgage', 'credit card payment', 'ptptn'],
-  other:          ['other', 'miscellaneous', 'misc', 'unknown'],
+  rental:         ['housing', 'rent', 'rental', 'sewa', 'utility', 'utilities', 'electricity', 'water', 'gas', 'lpg', 'maintenance', 'quit rent', 'assessment', 'tnb', 'syabas', 'air selangor', 'indah water'],
+  'car-instalment': ['loan repayment', 'debt repayment', 'repayment', 'installment', 'instalment', 'ansuran', 'financing', 'hire purchase', 'mortgage', 'credit card payment', 'ptptn'],
+  other:          ['other', 'miscellaneous', 'misc', 'unknown', 'communication', 'internet', 'broadband', 'phone', 'mobile', 'telco', 'prepaid', 'postpaid', 'unifi', 'maxis', 'celcom', 'digi', 'umobile', 'yes', 'astro', 'postage', 'health', 'medical', 'hospital', 'clinic', 'klinik', 'pharmacy', 'doctor', 'dentist', 'medicine', 'guardian', 'watson', 'lab', 'optical', 'education', 'school', 'sekolah', 'tuition', 'tadika', 'nursery', 'childcare', 'college', 'university', 'course', 'exam', 'textbook', 'stationery', 'yuran', 'household', 'shopping', 'shop', 'retail', 'store', 'fashion', 'clothing', 'apparel', 'furniture', 'appliance', 'toiletries', 'personal care', 'salon', 'barber', 'laundry', 'lazada', 'shopee', 'amazon', 'zalora', 'ikea', 'h&m', 'uniqlo'],
   // income  split by source, the way a P&L is
   'employment-income': ['salary', 'wage', 'payroll', 'gaji', 'employment', 'remuneration', 'bonus', 'overtime', 'ot claim'],
   'business-income':   ['business', 'trade', 'sales', 'takings', 'revenue', 'turnover', 'jualan', 'niaga', 'shopee payout', 'lazada payout', 'customer payment'],

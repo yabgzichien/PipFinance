@@ -41,22 +41,41 @@ Everything stays **on your device** (local SQLite). No account, no cloud.
 
 ## Run it
 
-This project targets **Expo SDK 54** (matches Expo Go 54). Start with the cache cleared
-and force Expo Go mode:
+This project targets **Expo SDK 54**. Which client you run depends on what you're touching:
+
+- **Expo Go**: fine for everything except the camera scanner. Fast, no native build.
+- **A dev-client build**: required to test the bank/e-wallet or receipt camera capture.
+  `react-native-document-scanner-plugin` (the live bounding-box scanner) is a native module
+  Expo Go doesn't have compiled in; the rest of the app degrades gracefully to the plain camera
+  picker when that module isn't available, but only a dev-client build actually exercises the
+  scanner itself.
+
+### Expo Go (default)
 
 ```bash
 npm install
 npx expo start --go -c
 ```
 
-Then:
-
 - **Phone:** scan the QR code in the terminal with the **Expo Go** app.
 - **Android emulator:** press `a` · **iOS simulator (macOS):** press `i`.
 
 > `--go` forces Expo Go (in case a stray `android/` prebuild folder makes the CLI
 > default to a dev build); `-c` clears the Metro cache. Plain `npx expo start` also
-> works once any `android/` folder is removed.
+> works once any `android/`/`ios/` folder is removed.
+
+### Dev-client build (to test the camera scanner)
+
+```bash
+npm install
+npx expo prebuild        # generates android/ and ios/ (gitignored, regenerate anytime)
+npx expo run:android     # or: npx expo run:ios (macOS only)
+```
+
+Or build one in the cloud instead of locally: `eas build --profile development`, install the
+result on a device, then `npx expo start --dev-client`. Either way, once a dev-client build is
+installed, `npx expo start --dev-client -c` is the day-to-day command: same fast-refresh loop
+as Expo Go, just pointed at the build that has the native module.
 
 ### First run
 

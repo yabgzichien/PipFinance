@@ -21,6 +21,7 @@ import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { Pip } from './src/components/Pip';
 import { AddFlow } from './src/screens/AddFlow';
 import { AllTransactionsScreen } from './src/screens/AllTransactionsScreen';
+import { CategoryDetailScreen } from './src/screens/CategoryDetailScreen';
 import { BreakdownScreen } from './src/screens/BreakdownScreen';
 import { CategoriesScreen } from './src/screens/CategoriesScreen';
 import { BudgetScreen } from './src/screens/BudgetScreen';
@@ -41,12 +42,12 @@ import { AlertHostProvider } from './src/state/alertHost';
 import { ColorSchemeProvider, useColorSchemeMode, useThemeColors } from './src/state/colorScheme';
 import { GlossaryProvider } from './src/state/glossary';
 import { AppDataProvider, useAppData } from './src/state/store';
+import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
 import { syncStreakWidget } from './src/widget/syncStreakWidget';
+import { backTargetFor, type Screen } from './src/lib/screenNav';
 import { platformShadow, uiFont } from './src/theme';
-
-type Screen = 'home' | 'add' | 'settings' | 'categories' | 'transactions' | 'breakdown' | 'budget' | 'recap' | 'networth' | 'calendar' | 'advancedImport' | 'owed' | 'export' | 'commitments';
 
 /**
  * Web-only: a global :focus-visible outline so keyboard users get a visible focus indicator
@@ -189,8 +190,11 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   // Owed is reachable from both Home and Activity, so back has to return where it came from.
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
   const [txnFilter, setTxnFilter] = useState<string | null>(null);
-  const [addInitial, setAddInitial] = useState<'attach' | 'import'>('attach');
+  const [categoryDetailId, setCategoryDetailId] = useState<string | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
+  // Calendar is reachable from both Recap and the Home streak card, so back has to return
+  // where it came from  same pattern as owedOrigin above.
+  const [calendarOrigin, setCalendarOrigin] = useState<Screen>('recap');
   const [exportMonth, setExportMonth] = useState<string | undefined>(undefined);
   const [exportOrigin, setExportOrigin] = useState<Screen>('settings');
   const openExport = (from: Screen, month?: string) => {
@@ -199,12 +203,32 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     setScreen('export');
   };
 
+  // The single "go back" action for every screen — used by each screen's own back button below
+  // and by the hardware/gesture back handler, so the two can never disagree about where back
+  // goes. Returns whether it actually navigated (false only on Home, which has nowhere back to
+  // go and falls through to the exit-confirm gate instead).
+  const goBack = (): boolean => {
+    const target = backTargetFor(screen, { owedOrigin, calendarOrigin, exportOrigin });
+    if (!target) return false;
+    if (screen === 'transactions') setTxnFilter(null);
+    setScreen(target);
+    return true;
+  };
+
+  const confirmExit = useExitConfirm();
+  useBackHandler(() => {
+    // OnboardingScreen owns hardware back for as long as it's mounted (including its own
+    // exit-confirm on the intro step); this only runs once it has already deferred to exit.
+    if (!onboardingComplete) return false;
+    if (goBack()) return true;
+    return confirmExit();
+  });
+
   // Deep linking and Android widget tap handler
   useEffect(() => {
     const handleUrl = (url: string | null) => {
       if (!url) return;
       if (url.startsWith('pip://add') || url.endsWith('/add')) {
-        setAddInitial('attach');
         setScreen('add');
       } else if (url.startsWith('pip://dashboard') || url.endsWith('/home')) {
         setScreen('home');
@@ -250,11 +274,15 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     );
   }
 
-  // One-time setup before the main app.
+  // One-time setup before the main app. AppAlertModal has to be mounted here too, not just in
+  // the post-onboarding tree below  the wizard's category delete confirmation (confirmAction)
+  // dispatches into AlertHostProvider regardless of onboarding state, and without a mounted
+  // AppAlertModal to render it, that dispatch has nowhere to show up.
   if (!onboardingComplete) {
     return (
       <View style={[styles.fill, { backgroundColor: theme.bg }]}>
         <OnboardingScreen />
+        <AppAlertModal />
       </View>
     );
   }
@@ -264,16 +292,17 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       <View style={styles.fill}>
       {screen === 'home' && (
         <DashboardScreen
-          onScan={() => {
-            setAddInitial('attach');
-            setScreen('add');
-          }}
+          onScan={() => setScreen('add')}
           onOpenAll={() => {
             setTxnFilter(null);
             setScreen('transactions');
           }}
           onOpenBreakdown={() => setScreen('breakdown')}
           onOpenBudget={() => setScreen('budget')}
+          onOpenCategory={(id) => {
+            setCategoryDetailId(id);
+            setScreen('categoryDetail');
+          }}
           onOpenRecap={() => setScreen('recap')}
           onOpenNetWorth={() => setScreen('networth')}
           onOpenOwed={() => {
@@ -281,21 +310,21 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setScreen('owed');
           }}
           onOpenCommitments={() => setScreen('commitments')}
+          onOpenCalendar={() => {
+            setCalendarOrigin('home');
+            setCalendarMonth(undefined);
+            setScreen('calendar');
+          }}
         />
       )}
       {screen === 'add' && (
         <AddFlow
-          initialPhase={addInitial}
-          onClose={() => setScreen('home')}
+          onClose={goBack}
         />
       )}
       {screen === 'settings' && (
         <SettingsScreen
-          onBack={() => setScreen('home')}
-          onMigrate={() => {
-            setAddInitial('import');
-            setScreen('add');
-          }}
+          onBack={goBack}
           onAdvancedImport={() => setScreen('advancedImport')}
           onOpenExport={() => openExport('settings')}
           onOpenCategories={() => setScreen('categories')}
@@ -303,14 +332,14 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onResetToOnboarding={() => setScreen('home')}
         />
       )}
-      {screen === 'advancedImport' && <AdvancedImportScreen onClose={() => setScreen('settings')} />}
+      {screen === 'advancedImport' && <AdvancedImportScreen onClose={goBack} />}
       {screen === 'export' && (
         <ExportScreen
           initialMonth={exportMonth}
-          onBack={() => setScreen(exportOrigin)}
+          onBack={goBack}
         />
       )}
-      {screen === 'categories' && <CategoriesScreen onBack={() => setScreen('home')} />}
+      {screen === 'categories' && <CategoriesScreen onBack={goBack} />}
       {screen === 'transactions' && (
         <AllTransactionsScreen
           filterCategoryId={txnFilter}
@@ -319,19 +348,20 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setOwedOrigin('transactions');
             setScreen('owed');
           }}
-          onBack={() => {
-            setTxnFilter(null);
-            setScreen('home');
-          }}
+          onBack={goBack}
         />
       )}
-      {screen === 'owed' && <OwedScreen onBack={() => setScreen(owedOrigin)} />}
-      {screen === 'commitments' && <CommitmentsScreen onBack={() => setScreen('home')} />}
-      {screen === 'budget' && <BudgetScreen onBack={() => setScreen('home')} onOpenRecap={() => setScreen('recap')} />}
+      {screen === 'owed' && <OwedScreen onBack={goBack} />}
+      {screen === 'commitments' && <CommitmentsScreen onBack={goBack} />}
+      {screen === 'budget' && <BudgetScreen onBack={goBack} onOpenRecap={() => setScreen('recap')} />}
+      {screen === 'categoryDetail' && categoryDetailId && (
+        <CategoryDetailScreen categoryId={categoryDetailId} onBack={goBack} />
+      )}
       {screen === 'recap' && (
         <RecapScreen
-          onBack={() => setScreen('home')}
+          onBack={goBack}
           onOpenCalendar={(month) => {
+            setCalendarOrigin('recap');
             setCalendarMonth(month);
             setScreen('calendar');
           }}
@@ -340,18 +370,15 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       )}
       {screen === 'calendar' && (
         <CalendarScreen
-          onBack={() => setScreen('recap')}
+          onBack={goBack}
           initialMonth={calendarMonth}
-          onAdd={() => {
-            setAddInitial('attach');
-            setScreen('add');
-          }}
+          onAdd={() => setScreen('add')}
         />
       )}
-      {screen === 'networth' && <NetWorthScreen onBack={() => setScreen('home')} />}
+      {screen === 'networth' && <NetWorthScreen onBack={goBack} />}
       {screen === 'breakdown' && (
         <BreakdownScreen
-          onBack={() => setScreen('home')}
+          onBack={goBack}
           onOpenCategory={(id) => {
             setTxnFilter(id);
             setScreen('transactions');
@@ -363,10 +390,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         <BottomNav
           active={navTab}
           onNavigate={goTab}
-          onAdd={() => {
-            setAddInitial('attach');
-            setScreen('add');
-          }}
+          onAdd={() => setScreen('add')}
         />
       )}
       <GlossaryModal />

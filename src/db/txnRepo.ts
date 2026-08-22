@@ -13,6 +13,7 @@ interface TxnRow {
   created_at: string;
   source: string;
   remark: string | null;
+  receipt_uri: string | null;
 }
 
 function toTxn(r: TxnRow): Transaction {
@@ -28,6 +29,7 @@ function toTxn(r: TxnRow): Transaction {
     createdAt: r.created_at,
     source: (r.source as TxnSource) ?? 'manual',
     remark: r.remark,
+    receiptUri: r.receipt_uri,
   };
 }
 
@@ -40,6 +42,7 @@ export interface NewTxn {
   categoryId: string | null;
   source?: TxnSource;
   remark?: string | null;
+  receiptUri?: string | null;
 }
 
 export async function listTransactions(limit?: number): Promise<Transaction[]> {
@@ -66,10 +69,11 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
       const id = genId();
       const createdAt = new Date().toISOString();
       const remark = cleanRemark(it.remark);
+      const receiptUri = it.receiptUri ?? null;
       await db.runAsync(
         `INSERT INTO transactions
-           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark)
-         VALUES (?, ?, ?, ?, 'MYR', ?, ?, ?, ?, ?, ?)`,
+           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri)
+         VALUES (?, ?, ?, ?, 'MYR', ?, ?, ?, ?, ?, ?, ?)`,
         id,
         it.merchantRaw,
         it.merchantKey,
@@ -79,7 +83,8 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
         it.categoryId,
         createdAt,
         it.source ?? 'manual',
-        remark
+        remark,
+        receiptUri
       );
       created.push({
         id,
@@ -93,6 +98,7 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
         createdAt,
         source: it.source ?? 'manual',
         remark,
+        receiptUri,
       });
     }
   });

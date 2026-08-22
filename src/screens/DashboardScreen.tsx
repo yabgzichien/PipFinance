@@ -1,29 +1,37 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { BudgetProgressList } from '../components/BudgetProgressList';
-import { CoinMascot } from '../components/CoinMascot';
+import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
+import { BudgetProgressList, STATUS_COLOR } from '../components/BudgetProgressList';
 import { FadeIn } from '../components/Motion';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
+import { PieChart } from '../components/PieChart';
 import { Pip } from '../components/Pip';
 import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
 import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
 import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
-import { fmt } from '../lib/format';
-import { netWorth } from '../lib/networth';
-import { computeStreak, compute7DayDots } from '../lib/streak';
+import { fmt, fmtCompact } from '../lib/format';
+import { netWorth, netWorthSeries } from '../lib/networth';
+import { lastActiveDay } from '../lib/streak';
 import { AGING_DAYS, daysBetween } from '../lib/split';
+import * as haptics from '../lib/haptics';
 import type { Category } from '../lib/types';
-import { useAppData } from '../state/store';
+import { useAppData, type HeroPanel } from '../state/store';
 import { useNow } from '../state/useNow';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { shadowCard, shadowToggle, spacing } from '../theme';
+import { shadowCard, spacing } from '../theme';
+import { duration as motionDuration } from '../theme/motion';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+
+/** Days of inactivity before the header mascot goes `sleepy` (docs/ui-engagement-plan.md
+ *  Step 3). Matches the streak's own grace window (1 day) plus a few more so this fires only
+ *  once a lapse is real, not on the day a streak would still forgive. */
+const SLEEPY_LAPSED_DAYS = 4;
 
 const dayKey = (d: Date) => {
   const y = d.getFullYear();
@@ -32,31 +40,70 @@ const dayKey = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+function lastMonths(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
 export function DashboardScreen({
   onScan,
   onOpenAll,
   onOpenBreakdown,
   onOpenBudget = () => {},
+  onOpenCategory = () => {},
   onOpenRecap = () => {},
   onOpenNetWorth = () => {},
   onOpenOwed = () => {},
   onOpenCommitments = () => {},
+  onOpenCalendar = () => {},
 }: {
   onScan: () => void;
   onOpenAll: () => void;
   onOpenBreakdown: () => void;
   onOpenBudget?: () => void;
+  /** Tapping a category row on the budget card (not "Manage"). */
+  onOpenCategory?: (id: string) => void;
   onOpenRecap?: () => void;
   onOpenNetWorth?: () => void;
   onOpenOwed?: () => void;
   onOpenCommitments?: () => void;
+  /** Opens the activity calendar (CalendarScreen), defaulted to the current month, so the
+   *  streak card's tap target has somewhere real to go. */
+  onOpenCalendar?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const now = useNow();
-  const { transactions, catById, allocations, hasBudget, accounts, accountValues, openShares, commitmentOccurrences } = useAppData();
+  const {
+    transactions,
+    catById,
+    allocations,
+    hasBudget,
+    accounts,
+    accountValues,
+    balanceEntries,
+    openShares,
+    commitmentOccurrences,
+    streak,
+    streakWeek,
+    streakTodayIndex,
+    streakFreezeAvailable,
+    streakGraduated,
+    streakStartLabel,
+    streakPaused,
+    streakCelebrationToken,
+  } = useAppData();
   const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
+  const netWorthTrend = useMemo(
+    () => netWorthSeries(accounts, balanceEntries, lastMonths(6)).map((p) => p.net),
+    [accounts, balanceEntries]
+  );
 
   const monthTxns = useMemo(() => {
     const cur = currentMonthKey();
@@ -165,10 +212,30 @@ export function DashboardScreen({
   }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed]);
 
   const empty = transactions.length === 0;
-  const streak = useMemo(() => computeStreak(transactions), [transactions]);
 
-  // Last-7-day activity tracker for the streak card.
-  const dots = useMemo(() => compute7DayDots(transactions), [transactions]);
+  // A returning user who has gone quiet, not a first-run empty state  the header mascot goes
+  // sleepy rather than judging the gap (docs/ui-engagement-plan.md §1: reward looking, never
+  // the state of the finances; a lapse in *logging* is fair game, a lapse in *spending* is not).
+  const sleepy = useMemo(() => {
+    if (empty) return false;
+    const last = lastActiveDay(transactions, now);
+    if (last === null) return false;
+    const today = Math.floor(now.getTime() / 86_400_000);
+    return today - last >= SLEEPY_LAPSED_DAYS;
+  }, [empty, transactions, now]);
+
+  // A save just extended the streak (docs/ui-engagement-plan.md Step 4/§2.1): a one-shot fire
+  // burst over the streak card, plus the haptic payoff. Compares against the token's *last seen*
+  // value rather than treating it as a boolean, so a second continuation while the burst from the
+  // first is still playing is still noticed (the effect just restarts the timer).
+  const [celebrating, setCelebrating] = useState(false);
+  const seenCelebrationToken = useRef(streakCelebrationToken);
+  useEffect(() => {
+    if (streakCelebrationToken === seenCelebrationToken.current) return;
+    seenCelebrationToken.current = streakCelebrationToken;
+    setCelebrating(true);
+    haptics.payoff();
+  }, [streakCelebrationToken]);
 
   return (
     <FadeIn style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -183,7 +250,7 @@ export function DashboardScreen({
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
             <View style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}>
-              <CoinMascot size={40} float />
+              {sleepy ? <Pip size={36} expr="sleepy" /> : <Pip size={40} expr="idle" float />}
             </View>
           </View>
         </View>
@@ -193,8 +260,20 @@ export function DashboardScreen({
         ) : (
           <>
             {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
-                checks, before the money. */}
-            <StreakCard streak={streak} dots={dots} />
+                checks, before the money. Tapping it opens the full activity calendar. */}
+            <View style={styles.streakWrap}>
+              <StreakCard
+                streak={streak}
+                week={streakWeek}
+                todayIndex={streakTodayIndex}
+                freezeAvailable={streakFreezeAvailable}
+                graduated={streakGraduated}
+                startLabel={streakStartLabel}
+                paused={streakPaused}
+                onPress={onOpenCalendar}
+              />
+              {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
+            </View>
 
             {/* 2 — Money: a segmented Cash flow / Net worth card, same as before. The Cash flow
                 side's headline number is adaptive rather than fixed (see CashFlowView) so a
@@ -212,6 +291,7 @@ export function DashboardScreen({
               netWorthValue={nw.net}
               assets={nw.assets}
               liabilities={nw.liabilities}
+              netWorthTrend={netWorthTrend}
               onOpenNetWorth={onOpenNetWorth}
             />
 
@@ -243,9 +323,12 @@ export function DashboardScreen({
                       <Label weight={700} color={theme.accent}>Manage</Label>
                     </Pressable>
                   </View>
-                  <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
-                    <BudgetProgressList allocations={allocations} spentByCat={spentByCat} catById={catById} />
-                  </Pressable>
+                  <BudgetProgressList
+                    allocations={allocations}
+                    spentByCat={spentByCat}
+                    catById={catById}
+                    onPressCategory={onOpenCategory}
+                  />
                 </>
               ) : (
                 <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
@@ -294,51 +377,158 @@ function HeaderIcon({ name, onPress }: { name: IconName; onPress: () => void }) 
   );
 }
 
-/* ── Streak card ── */
-function StreakCard({ streak, dots, onPress }: { streak: number; dots: boolean[]; onPress?: () => void }) {
+/* ── Streak card (docs/ui-engagement-plan.md Step 4) ──
+   Monday-first 7-dot strip: which days this week already have a logged transaction. The flame +
+   streak number are the accomplishment signal; the dots are the weekly, always-winnable loop
+   underneath it (§2.6 of that document) closing and resetting each Monday, same as the freeze
+   and graduation logic that governs the number itself. Tapping the card opens the full activity
+   calendar (CalendarScreen) so "which days did I actually log" has a real answer, not just a
+   week's worth of dots. */
+function StreakCard({
+  streak,
+  week,
+  todayIndex,
+  freezeAvailable,
+  graduated,
+  startLabel,
+  paused,
+  onPress,
+}: {
+  streak: number;
+  week: boolean[];
+  todayIndex: number;
+  freezeAvailable: boolean;
+  graduated: boolean;
+  startLabel: string | null;
+  paused: boolean;
+  onPress?: () => void;
+}) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  // Subtle flame flicker — driven entirely on the native thread (no per-frame JS).
-  const flicker = useRef(new Animated.Value(0)).current;
+  // Flame flicker — three layers (outer body, mid tongue, hot core) animate on independent
+  // loops so the flame reads as an organic flicker rather than one rigid shape bobbing up and
+  // down. All native-driver transforms (rotate/scale/translate), no per-frame JS.
+  const flickerOuter = useRef(new Animated.Value(0)).current;
+  const flickerMid = useRef(new Animated.Value(0)).current;
+  const flickerCore = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
-    const loop = Animated.loop(
+    if (reducedMotion) {
+      flickerOuter.setValue(0);
+      flickerMid.setValue(0);
+      flickerCore.setValue(0);
+      return;
+    }
+    const loopOuter = Animated.loop(
       Animated.sequence([
-        Animated.timing(flicker, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(flicker, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerOuter, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerOuter, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
       ])
     );
-    loop.start();
-    return () => loop.stop();
-  }, [flicker]);
-  const flameStyle = {
-    opacity: flicker.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }),
+    const loopMid = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flickerMid, { toValue: 1, duration: 820, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerMid, { toValue: 0, duration: 940, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    const loopCore = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flickerCore, { toValue: 1, duration: 560, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerCore, { toValue: 0, duration: 640, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    loopOuter.start();
+    loopMid.start();
+    loopCore.start();
+    return () => {
+      loopOuter.stop();
+      loopMid.stop();
+      loopCore.stop();
+    };
+  }, [flickerOuter, flickerMid, flickerCore, reducedMotion]);
+  const outerFlameStyle = {
+    opacity: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
     transform: [
-      { translateY: flicker.interpolate({ inputRange: [0, 1], outputRange: [0, -1.2] }) },
-      { scaleX: flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] }) },
-      { scaleY: flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) },
+      { translateY: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) },
+      { translateX: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] }) },
+      { rotate: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: ['-1.5deg', '1.5deg'] }) },
+      { scaleY: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] }) },
     ],
   };
+  const midFlameStyle = {
+    transform: [
+      { translateY: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [0, -1.6] }) },
+      { translateX: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [0, -0.6] }) },
+      { rotate: flickerMid.interpolate({ inputRange: [0, 1], outputRange: ['2deg', '-2deg'] }) },
+      { scaleX: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [1, 0.94] }) },
+      { scaleY: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
+    ],
+  };
+  const coreFlameStyle = {
+    transform: [
+      { translateY: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [0, -2] }) },
+      { translateX: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [0, 0.7] }) },
+      { scale: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) },
+    ],
+  };
+
   const card = (
     <Card style={styles.streakCard}>
+      {freezeAvailable && (
+        <View style={[styles.streakShield, { backgroundColor: colorTheme.surface }]} accessibilityLabel="A streak freeze is banked for this month">
+          <Icon name="shield" size={11} color={theme.accent} />
+        </View>
+      )}
       <View style={styles.streakLeft}>
         <View style={styles.flameTile}>
-          <Animated.View style={flameStyle}>
-            <Svg width={18} height={21} viewBox="0 0 18 22" fill="none">
-              <Path d="M9 1C9 1 14.5 6.5 14.5 11.5C14.5 15 12 17.5 9 17.5C6 17.5 3.5 15 3.5 11.5C3.5 8.5 5.5 6.5 5.5 6.5C5.5 6.5 6 9.5 9 9.5C9 9.5 7.5 7.5 9 4C9.5 5.5 11.5 7.5 11.5 9.5C13 8 12.5 5.5 11 3.5C14 5.5 15.5 8.5 15.5 11.5C15.5 16.5 12.5 20.5 9 21.5C5.5 20.5 2.5 16.5 2.5 11.5C2.5 5.5 9 1 9 1Z" fill={colorTheme.amber} />
-              <Path d="M9 13.5C9 13.5 11 12 11 10.5C10.5 11.5 9 11.5 9 11.5C9 11.5 9.5 10 9 9C8.5 10 7 11.5 7 12.5C7 13.6 7.9 14.5 9 14.5C8.7 14 9 13.5 9 13.5Z" fill="#FAC438" />
-            </Svg>
-          </Animated.View>
+          <View style={{ width: 26, height: 32 }}>
+            <Animated.View style={[StyleSheet.absoluteFill, outerFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
+                <Path d="M9 1C9 1 14.5 6.5 14.5 11.5C14.5 15 12 17.5 9 17.5C6 17.5 3.5 15 3.5 11.5C3.5 8.5 5.5 6.5 5.5 6.5C5.5 6.5 6 9.5 9 9.5C9 9.5 7.5 7.5 9 4C9.5 5.5 11.5 7.5 11.5 9.5C13 8 12.5 5.5 11 3.5C14 5.5 15.5 8.5 15.5 11.5C15.5 16.5 12.5 20.5 9 21.5C5.5 20.5 2.5 16.5 2.5 11.5C2.5 5.5 9 1 9 1Z" fill={colorTheme.amber} />
+              </Svg>
+            </Animated.View>
+            <Animated.View style={[StyleSheet.absoluteFill, midFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
+                <Ellipse cx={9} cy={13.5} rx={3.2} ry={5.2} fill="#f2901e" />
+              </Svg>
+            </Animated.View>
+            <Animated.View style={[StyleSheet.absoluteFill, coreFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
+                <Ellipse cx={9} cy={15} rx={1.8} ry={3.2} fill="#fac438" />
+                <Ellipse cx={9} cy={16.5} rx={0.9} ry={1.6} fill="#fff2c4" />
+              </Svg>
+            </Animated.View>
+          </View>
         </View>
         <View>
-          <Title numeric>{streak}</Title>
-          <Caption color={colorTheme.ink2}>day streak</Caption>
+          {graduated && startLabel ? (
+            <>
+              <Label weight={700}>{startLabel}</Label>
+              <Caption color={colorTheme.ink2}>{paused ? 'Paused' : `${streak}-day run`}</Caption>
+            </>
+          ) : (
+            <>
+              <Title numeric>{streak}</Title>
+              <Caption color={colorTheme.ink2}>{paused ? 'Paused' : 'day streak'}</Caption>
+            </>
+          )}
         </View>
       </View>
       <View style={[styles.streakDivider, { backgroundColor: colorTheme.line }]} />
       <View style={{ flex: 1 }}>
         <View style={styles.dotsRow}>
-          {dots.map((done, i) => (
-            <View key={i} style={[styles.dot, done ? [styles.dotDone, { backgroundColor: theme.accent }] : [styles.dotTodo, { borderColor: colorTheme.ink3 }]]}>
+          {week.map((done, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                done
+                  ? [styles.dotDone, { backgroundColor: theme.accent }]
+                  : i === todayIndex
+                    ? [styles.dotToday, { backgroundColor: theme.accentSoft }]
+                    : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
+              ]}
+            >
               {done && (
                 <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
                   <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
@@ -352,15 +542,132 @@ function StreakCard({ streak, dots, onPress }: { streak: number; dots: boolean[]
   );
   if (!onPress) return card;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open the coach's coverage lever">
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open your activity calendar">
       {card}
     </Pressable>
   );
 }
 
-/* ── Summary card: toggles between Net worth (default) and Cash flow ── */
-type SummaryView = 'networth' | 'cashflow';
+const EMBER_COUNT = 5;
 
+/**
+ * One-shot fire burst over the streak card the moment a save extends the streak
+ * (docs/ui-engagement-plan.md §2.1: the animation is the app visibly *noticing* the moment,
+ * which is the largest documented lever in the research this app's engagement plan is built on).
+ * Pip pops to `happy` and a handful of embers rise past the flame and fade. No sound (not
+ * available yet  see haptics.payoff() at the call site for the felt half of the reward
+ * instead); this is the hook a real streak-continue chime would attach to once one exists.
+ *
+ * Mount-driven and self-contained: renders `null` immediately under reduced motion (a one-shot
+ * burst still respects that setting even though it isn't a loop), and calls `onDone` either way
+ * so the parent can unmount it after `motionDuration.celebrate` plus enough tail for the last
+ * ember to finish.
+ */
+function StreakCelebration({ onDone }: { onDone: () => void }) {
+  const colorTheme = useThemeColors();
+  const reducedMotion = useReducedMotion();
+  const pop = useRef(new Animated.Value(0)).current;
+  const embers = useRef(Array.from({ length: EMBER_COUNT }, () => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      onDone();
+      return;
+    }
+    Animated.spring(pop, { toValue: 1, friction: 5, tension: 140, useNativeDriver: true }).start();
+    const emberAnims = embers.map((e, i) =>
+      Animated.timing(e, {
+        toValue: 1,
+        duration: motionDuration.celebrate + i * 70,
+        delay: 90 + i * 45,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      })
+    );
+    Animated.parallel(emberAnims).start();
+    const tailMs = motionDuration.celebrate + EMBER_COUNT * 70 + 250;
+    const timer = setTimeout(onDone, tailMs);
+    return () => clearTimeout(timer);
+    // Intentionally mount-only: this component is remounted (via the `celebrating` boolean at
+    // the call site) for every new burst rather than re-triggered by a prop change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (reducedMotion) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.celebrationWrap}>
+      {embers.map((e, i) => {
+        const spread = (i - (EMBER_COUNT - 1) / 2) * 9;
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.ember,
+              { backgroundColor: i % 2 === 0 ? colorTheme.amber : '#FAC438' },
+              {
+                opacity: e.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 1, 0] }),
+                transform: [
+                  { translateY: e.interpolate({ inputRange: [0, 1], outputRange: [0, -46 - i * 5] }) },
+                  { translateX: e.interpolate({ inputRange: [0, 1], outputRange: [0, spread] }) },
+                  { scale: e.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0.15] }) },
+                ],
+              },
+            ]}
+          />
+        );
+      })}
+      <Animated.View
+        style={{
+          opacity: pop,
+          transform: [
+            { scale: pop },
+            { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [8, -10] }) },
+          ],
+        }}
+      >
+        <Pip size={44} expr="happy" />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * React Native Web's `pagingEnabled` sets `scroll-snap-type: x mandatory` on the scroller and
+ * `scroll-snap-align: start` on a wrapper it auto-generates around each direct child, but never
+ * `scroll-snap-stop`  so the browser is free to skip snap points under a fast swipe, and a
+ * normal trackpad flick sails from the first panel straight to the last, skipping the ones in
+ * between. `always` forces a stop at every panel regardless of swipe speed.
+ *
+ * That auto-generated wrapper isn't reachable through props (RNW creates it internally, one
+ * level above whatever we render), so this reaches it imperatively through the DOM once our own
+ * node mounts. Native has no such property and no such wrapper, so this is a no-op there.
+ */
+function pinWebScrollSnapStop(node: unknown) {
+  if (Platform.OS !== 'web' || !node) return;
+  const el = node as HTMLElement;
+  const wrapper = el.parentElement;
+  if (wrapper) wrapper.style.setProperty('scroll-snap-stop', 'always');
+}
+
+/** Which panels the hero carousel offers. `left` (budget remaining) only appears once a
+ *  budget exists — swiping to it before that would show a number with no meaning yet. */
+function heroPanels(hasBudget: boolean): HeroPanel[] {
+  return hasBudget ? ['cashflow', 'spent', 'left', 'networth'] : ['cashflow', 'spent', 'networth'];
+}
+
+/** Adaptive default panel when the user hasn't pinned one. No income on record yet:
+ *  spending is a fact, never a verdict, so lead with that. Income known but no budget:
+ *  net cash flow. A budget exists: what's left, which is what a user with a plan actually
+ *  wants to know first. */
+function adaptivePanel(hasAnyIncome: boolean, hasBudget: boolean): HeroPanel {
+  if (hasBudget) return 'left';
+  if (hasAnyIncome) return 'cashflow';
+  return 'spent';
+}
+
+/* ── Summary card: a swipeable hero carousel (Net cash flow / Total spent / Left to spend /
+   Net worth). ── */
 function SummaryCard({
   net,
   received,
@@ -374,6 +681,7 @@ function SummaryCard({
   netWorthValue,
   assets,
   liabilities,
+  netWorthTrend,
   onOpenNetWorth,
 }: {
   net: number;
@@ -388,98 +696,150 @@ function SummaryCard({
   netWorthValue: number;
   assets: number;
   liabilities: number;
+  netWorthTrend: number[];
   onOpenNetWorth: () => void;
 }) {
-  const [view, setView] = useState<SummaryView>('cashflow');
+  const theme = useAccent();
   const colorTheme = useThemeColors();
+  const panels = useMemo(() => heroPanels(hasBudget), [hasBudget]);
+  const defaultPanel = useMemo(
+    () => adaptivePanel(hasAnyIncome, hasBudget),
+    [hasAnyIncome, hasBudget]
+  );
+
+  const [cardWidth, setCardWidth] = useState(0);
+  const [index, setIndex] = useState(Math.max(0, panels.indexOf(defaultPanel)));
+  const scrollRef = useRef<ScrollView>(null);
+  const measureRef = useRef<View>(null);
+  const didInitialScroll = useRef(false);
+
+  // `onLayout` alone (React Native Web's ResizeObserver-based implementation) can miss the
+  // first paint if the surface isn't yet compositing, so also measure directly on mount.
+  useEffect(() => {
+    measureRef.current?.measure((_x, _y, width) => {
+      if (width > 0) setCardWidth(width);
+    });
+  }, []);
+
+  // Jump to the default panel once the card has measured and on every default change
+  // (e.g. a budget just got created and `left` became available).
+  useEffect(() => {
+    if (!cardWidth) return;
+    const target = Math.max(0, panels.indexOf(defaultPanel));
+    scrollRef.current?.scrollTo({ x: target * cardWidth, animated: didInitialScroll.current });
+    setIndex(target);
+    didInitialScroll.current = true;
+  }, [cardWidth, defaultPanel, panels]);
+
+  const currentPanel = panels[index] ?? panels[0];
+
   return (
     <Card style={styles.cashCard}>
-      {/* segmented toggle */}
-      <View style={[styles.segTrack, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-        {(['cashflow', 'networth'] as SummaryView[]).map((v) => {
-          const on = view === v;
-          return (
-            <Pressable
-              key={v}
-              onPress={() => setView(v)}
-              style={[styles.segBtn, on && [styles.segBtnOn, { backgroundColor: colorTheme.surface }]]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-            >
-              <Label color={on ? colorTheme.ink : colorTheme.ink2}>{v === 'networth' ? 'Net worth' : 'Cash flow'}</Label>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {view === 'networth' ? (
-        <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} onSeeAll={onOpenNetWorth} />
-      ) : (
-        <CashFlowView
-          net={net}
-          received={received}
-          spent={spent}
-          budgetLeft={budgetLeft}
-          hasAnyIncome={hasAnyIncome}
-          hasBudget={hasBudget}
-          breakdown={breakdown}
-          catById={catById}
-          onSeeAll={onSeeAll}
-        />
+      <View ref={measureRef} onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}>
+      {cardWidth > 0 && (
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) => {
+            const i = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+            setIndex(Math.min(panels.length - 1, Math.max(0, i)));
+          }}
+        >
+          {panels.map((panel) => (
+            <View key={panel} ref={pinWebScrollSnapStop} style={{ width: cardWidth }}>
+              {panel === 'networth' ? (
+                <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} trend={netWorthTrend} onSeeAll={onOpenNetWorth} />
+              ) : (
+                <CashFlowView
+                  panel={panel}
+                  net={net}
+                  received={received}
+                  spent={spent}
+                  budgetLeft={budgetLeft}
+                  breakdown={breakdown}
+                  catById={catById}
+                  onSeeAll={onSeeAll}
+                />
+              )}
+            </View>
+          ))}
+        </ScrollView>
       )}
+
+      {panels.length > 1 && (
+        <View style={styles.heroDotsRow}>
+          {panels.map((panel, i) => (
+            <View
+              key={panel}
+              style={[styles.heroDot, { backgroundColor: i === index ? theme.accent : colorTheme.line2 }]}
+            />
+          ))}
+        </View>
+      )}
+      </View>
     </Card>
   );
 }
 
-/** Which rung of the adaptive hero to show. No income on record yet: spending is a fact,
- *  never a verdict, so it is the only rung that is never styled red. Income known but no
- *  budget: net cash flow. A budget exists: what's left, which is what a user with a plan
- *  actually wants to know. */
-type HeroRung = 'spent' | 'cashflow' | 'left';
-
-function heroRung(hasAnyIncome: boolean, hasBudget: boolean): HeroRung {
-  if (hasBudget) return 'left';
-  if (hasAnyIncome) return 'cashflow';
-  return 'spent';
-}
-
 function CashFlowView({
+  panel,
   net,
   received,
   spent,
   budgetLeft,
-  hasAnyIncome,
-  hasBudget,
   breakdown,
   catById,
   onSeeAll,
 }: {
+  panel: Exclude<HeroPanel, 'networth'>;
   net: number;
   received: number;
   spent: number;
   budgetLeft: number;
-  hasAnyIncome: boolean;
-  hasBudget: boolean;
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const rung = heroRung(hasAnyIncome, hasBudget);
 
-  const eyebrow = rung === 'spent' ? 'Spent this month' : rung === 'cashflow' ? `Net cash flow · ${monthName()}` : 'Left to spend';
+  const pieData = useMemo(
+    () => breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid })),
+    [breakdown, catById]
+  );
+  const topCat = breakdown.length > 0 ? (catById[breakdown[0].catId] ?? fallback) : null;
+  const topPct = topCat && spent > 0 ? Math.round((breakdown[0].amt / spent) * 100) : 0;
+
+  const eyebrow = panel === 'spent' ? 'Spent this month' : panel === 'cashflow' ? `Net cash flow · ${monthName()}` : 'Left to spend';
   const caption =
-    rung === 'spent'
-      ? 'No income logged yet'
-      : rung === 'cashflow'
+    panel === 'spent'
+      ? 'Total expenses this month'
+      : panel === 'cashflow'
         ? 'Income − Expenses · this month'
         : `${daysLeftInMonth()} days left in ${monthName()}`;
-  const heroValue = rung === 'spent' ? spent : rung === 'cashflow' ? net : budgetLeft;
-  // Spending is never styled as a failure — it's the only rung shown before Pip knows enough
-  // for a negative number to mean something actionable.
-  const heroNegative = rung !== 'spent' && heroValue < 0;
-  const heroColor = heroNegative ? colorTheme.red : colorTheme.ink;
+  const heroValue = panel === 'spent' ? spent : panel === 'cashflow' ? net : budgetLeft;
+  const heroNegative = heroValue < 0;
+  const heroAmount = `RM ${fmtCompact(Math.abs(heroValue))}`;
+
+  // Cash flow and spent both get a signed, colored treatment so either reads at a glance
+  // without reading the caption underneath: cash flow uses accounting parentheses, spent a
+  // leading sign, since it's the more literal "money in vs money out" figure. Left to spend
+  // keeps its plainer look (red only once over budget) — otherwise it'd read identically to
+  // one of the other two rather than standing apart from both.
+  let heroColor = colorTheme.ink;
+  let heroText = heroAmount;
+  if (panel === 'cashflow') {
+    heroColor = heroNegative ? colorTheme.red : STATUS_COLOR.ok;
+    heroText = heroNegative ? `(${heroAmount})` : heroAmount;
+  } else if (panel === 'spent') {
+    heroColor = heroNegative ? colorTheme.red : STATUS_COLOR.ok;
+    heroText = `${heroNegative ? '−' : '+'}${heroAmount}`;
+  } else if (heroNegative) {
+    heroColor = colorTheme.red;
+    heroText = `−${heroAmount}`;
+  }
 
   return (
     <>
@@ -487,15 +847,14 @@ function CashFlowView({
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
             <Eyebrow>{eyebrow}</Eyebrow>
-            <InfoButton entry={rung === 'cashflow' ? 'net_cash_flow' : rung === 'left' ? 'unallocated' : 'net_cash_flow'} />
+            <InfoButton entry={panel === 'cashflow' ? 'net_cash_flow' : panel === 'left' ? 'unallocated' : 'net_cash_flow'} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
-            {heroNegative && <Display numeric color={colorTheme.red} >−</Display>}
-            <Display numeric color={heroColor}>{`RM ${fmt(Math.abs(heroValue))}`}</Display>
+            <Display numeric color={heroColor} adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.55}>{heroText}</Display>
           </View>
           <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{caption}</Caption>
         </View>
-        {rung === 'cashflow' && (
+        {panel === 'cashflow' && (
           <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
             <Label numeric color={theme.onTint}>{`RM ${fmt(received)}`}</Label>
             <Caption color={colorTheme.ink2}>income</Caption>
@@ -503,40 +862,17 @@ function CashFlowView({
         )}
       </View>
 
-      {breakdown.length > 0 && (
+      {breakdown.length > 0 && topCat && (
         <>
           <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
-          <View style={styles.sectionHead}>
-            <View style={styles.eyebrowRow}>
-              <Eyebrow>Where it goes</Eyebrow>
-              <InfoButton entry="where_it_goes" />
+          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+            <PieChart data={pieData} size={56} thickness={11} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Label weight={500} numberOfLines={1}>{`${topCat.label} · ${topPct}%`}</Label>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>Biggest this month</Caption>
             </View>
-            <Pressable onPress={onSeeAll} hitSlop={8}>
-              <Label weight={700} color={theme.accent}>See all →</Label>
-            </Pressable>
-          </View>
-          {breakdown.slice(0, 3).map((b) => {
-            const cat = catById[b.catId] ?? fallback;
-            const col = catColorsForHue(cat.hue);
-            const pct = spent > 0 ? Math.round((b.amt / spent) * 100) : 0;
-            return (
-              <View key={b.catId} style={styles.spendRow}>
-                <View style={[styles.spendIcon, { backgroundColor: col.bg }]}>
-                  <Icon name={cat.icon as IconName} size={16} color={col.fg} stroke={1.9} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.spendLabelRow}>
-                    <Label weight={500} numberOfLines={1}>{cat.label}</Label>
-                    <Label numeric>{`RM ${fmt(b.amt)}`}</Label>
-                  </View>
-                  <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
-                    <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: col.solid }} />
-                  </View>
-                </View>
-                <Caption numeric color={colorTheme.ink2} style={{ width: 28, textAlign: 'right' }}>{pct}%</Caption>
-              </View>
-            );
-          })}
+            <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+          </Pressable>
         </>
       )}
     </>
@@ -547,21 +883,22 @@ function NetWorthView({
   net,
   assets,
   liabilities,
+  trend,
   onSeeAll,
 }: {
   net: number;
   assets: number;
   liabilities: number;
+  trend: number[];
   onSeeAll: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const pos = net >= 0;
-  const maxV = Math.max(assets, liabilities, 1);
-  const rows: { label: string; amt: number; icon: IconName; color: string }[] = [
-    { label: 'Assets', amt: assets, icon: 'trending', color: theme.accent },
-    { label: 'Liabilities', amt: liabilities, icon: 'scale', color: colorTheme.red },
-  ];
+  const delta = trend.length >= 2 ? net - trend[trend.length - 2] : null;
+  const deltaUp = (delta ?? 0) >= 0;
+  const trendColor = delta === null ? colorTheme.ink3 : deltaUp ? theme.accent : colorTheme.red;
+
   return (
     <>
       <View style={styles.cashTop}>
@@ -571,8 +908,16 @@ function NetWorthView({
             <InfoButton entry="net_worth" />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
-            {!pos && <Display numeric color={colorTheme.red} >−</Display>}
-            <Display numeric color={pos ? colorTheme.ink : colorTheme.red}>{`RM ${fmt(Math.abs(net))}`}</Display>
+            <Display
+              numeric
+              color={pos ? colorTheme.ink : colorTheme.red}
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              minimumFontScale={0.55}
+              style={styles.netWorthAmount}
+            >
+              {`${pos ? '' : '−'}RM ${fmtCompact(Math.abs(net))}`}
+            </Display>
           </View>
           <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Assets − Liabilities · today</Caption>
         </View>
@@ -582,35 +927,42 @@ function NetWorthView({
         </View>
       </View>
 
-      <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
-      <View style={styles.sectionHead}>
-        <View style={styles.eyebrowRow}>
-          <Eyebrow>Balance sheet</Eyebrow>
-        </View>
-        <Pressable onPress={onSeeAll} hitSlop={8}>
-          <Label weight={700} color={theme.accent}>See all →</Label>
-        </Pressable>
-      </View>
-      {rows.map((r) => {
-        const pct = Math.round((r.amt / maxV) * 100);
-        return (
-          <View key={r.label} style={styles.spendRow}>
-            <View style={[styles.spendIcon, { backgroundColor: r.color + '1f' }]}>
-              <Icon name={r.icon} size={16} color={r.color} stroke={1.9} />
+      {trend.length >= 2 && (
+        <>
+          <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
+          {/* A sparkline in the same slot the other panels use for their pie chart, so all
+              three panels read as one visual family: chart thumbnail + one-line takeaway. */}
+          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+            <NetWorthSparkline values={trend} color={trendColor} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Label weight={500} numberOfLines={1}>
+                {delta === null ? '6-month trend' : `${deltaUp ? '+' : '−'}RM ${fmt(Math.abs(delta))} vs last month`}
+              </Label>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>6-month trend</Caption>
             </View>
-            <View style={{ flex: 1 }}>
-              <View style={styles.spendLabelRow}>
-                <Label weight={500} numberOfLines={1}>{r.label}</Label>
-                <Label numeric>{`RM ${fmt(r.amt)}`}</Label>
-              </View>
-              <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
-                <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: r.color }} />
-              </View>
-            </View>
-          </View>
-        );
-      })}
+            <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+          </Pressable>
+        </>
+      )}
     </>
+  );
+}
+
+function NetWorthSparkline({ values, color }: { values: number[]; color: string }) {
+  const W = 56;
+  const H = 56;
+  const pd = 6;
+  const mn = Math.min(...values);
+  const mx = Math.max(...values);
+  const rng = mx - mn || 1;
+  const pts = values.map((v, i) => [pd + (i / (values.length - 1)) * (W - pd * 2), pd + (1 - (v - mn) / rng) * (H - pd * 2)]);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
+  return (
+    <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Path d={line} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx={last[0]} cy={last[1]} r={3} fill={color} />
+    </Svg>
   );
 }
 
@@ -618,7 +970,7 @@ function EmptyState() {
   const colorTheme = useThemeColors();
   return (
     <Card style={{ marginHorizontal: spacing.base, marginTop: spacing.sm, padding: 24, alignItems: 'center' }}>
-      <Pip size={88} expr="curious" float />
+      <Pip size={88} nerdy float propellerHat />
       <Title style={{ marginTop: spacing.md }}>No spending yet</Title>
       <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
         Tap <Body weight={700}>Add</Body> to scan one receipt, or a whole statement at once. I’ll read the lines and you file them.
@@ -645,25 +997,48 @@ const styles = StyleSheet.create({
   streakLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
   streakDivider: { width: 1, height: 38 },
+  streakShield: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+    ...shadowCard,
+  },
   dotsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
+  dotToday: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
 
-  /* summary toggle */
-  segTrack: { flexDirection: 'row', borderRadius: 999, padding: spacing.xs, marginBottom: spacing.base, borderWidth: 1 },
-  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.sm, borderRadius: 999 },
-  segBtnOn: { ...shadowToggle },
+  /* streak celebration burst */
+  streakWrap: { position: 'relative' },
+  celebrationWrap: {
+    position: 'absolute',
+    top: -18,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    zIndex: 2,
+  },
+  ember: { position: 'absolute', bottom: 20, width: 7, height: 7, borderRadius: 4 },
+
+  /* summary hero carousel */
+  heroDotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
+  heroDot: { width: 6, height: 6, borderRadius: 3 },
 
   /* cash flow */
   cashCard: { marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.base },
   cashTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   incomeBadge: { borderRadius: 14, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
   cashDivider: { height: 1, marginVertical: spacing.md },
-  spendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
-  spendIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  spendLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: spacing.xs },
-  spendTrack: { height: 4, borderRadius: 4, overflow: 'hidden' },
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  netWorthAmount: { textDecorationLine: 'underline' },
 
   /* generic cta */
   budgetCta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.base },

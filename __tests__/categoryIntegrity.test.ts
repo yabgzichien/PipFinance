@@ -27,8 +27,8 @@ const byId = new Map(ALL_SEED_CATEGORIES.map((c) => [c.id, c]));
 const asCategories: Category[] = ALL_SEED_CATEGORIES.map((c) => ({ ...c, isDefault: true }));
 
 describe('default category set', () => {
-  it('has 12 expense + 6 income categories with unique ids and no blank fields', () => {
-    expect(EXPENSE_CATEGORIES).toHaveLength(12);
+  it('has 7 expense + 6 income categories with unique ids and no blank fields', () => {
+    expect(EXPENSE_CATEGORIES).toHaveLength(7);
     expect(INCOME_CATEGORIES).toHaveLength(6);
     expect(new Set(ALL_SEED_CATEGORIES.map((c) => c.id)).size).toBe(ALL_SEED_CATEGORIES.length);
     for (const c of ALL_SEED_CATEGORIES) {
@@ -70,6 +70,20 @@ describe('CATEGORY_ID_REMAP (retired ids)', () => {
       'income', 'allowance', 'bonus', 'borrowers-return', 'dividend', 'interest',
     ];
     for (const id of retired) expect(CATEGORY_ID_REMAP[id]).toBeDefined();
+  });
+
+  it('covers every expense id the 2026-08-07..2026-08-21 default set used, direct to a live id', () => {
+    // The 12-category set that existed just before the 2026-08-21 retune. `food`, `insurance`
+    // and `other` survived it (same id, different label/members) so need no remap entry; every
+    // other id here must point straight at one of the 7 current categories, not at another one
+    // of these now-retired ids  see the "no chained remaps" note on CATEGORY_ID_REMAP itself.
+    const retiredByThisRetune = [
+      'housing', 'dining', 'transport', 'communications', 'healthcare', 'education', 'household', 'recreation', 'debt-service',
+    ];
+    for (const id of retiredByThisRetune) {
+      expect(CATEGORY_ID_REMAP[id]).toBeDefined();
+      expect(byId.has(CATEGORY_ID_REMAP[id])).toBe(true);
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-import { DEFAULT_SAVINGS_TARGET, computeSavingsHabit, savingsStepUp } from '../src/lib/savingsHabit';
+import { DEFAULT_SAVINGS_TARGET, computeSavingsHabit } from '../src/lib/savingsHabit';
 import type { Transaction } from '../src/lib/types';
 
 const NOW = new Date('2026-08-15T00:00:00Z');
@@ -107,31 +107,5 @@ describe('computeSavingsHabit', () => {
 
   it('starts borrowers at a target small enough to survive a bad month', () => {
     expect(DEFAULT_SAVINGS_TARGET).toBe(50);
-  });
-});
-
-describe('savingsStepUp', () => {
-  const habitWithRun = (monthsKept: number, target = 50) =>
-    computeSavingsHabit(history(Array(Math.max(monthsKept, 1)).fill(monthsKept > 0 ? 500 : 0)), target, NOW);
-
-  it('suggests the guide figure once a run is established', () => {
-    expect(savingsStepUp(habitWithRun(3), 150)).toBe(150);
-    expect(savingsStepUp(habitWithRun(5), 150)).toBe(150);
-  });
-
-  it('stays quiet until the borrower has actually held the smaller amount', () => {
-    expect(savingsStepUp(habitWithRun(1), 150)).toBeNull();
-    expect(savingsStepUp(habitWithRun(2), 150)).toBeNull();
-    expect(savingsStepUp(habitWithRun(0), 150)).toBeNull();
-  });
-
-  it('never suggests a target the borrower already meets or exceeds', () => {
-    expect(savingsStepUp(habitWithRun(6, 150), 150)).toBeNull();
-    expect(savingsStepUp(habitWithRun(6, 300), 150)).toBeNull();
-  });
-
-  it('stays quiet when the guide has no savings figure for this household', () => {
-    expect(savingsStepUp(habitWithRun(6), undefined)).toBeNull();
-    expect(savingsStepUp(habitWithRun(6), 0)).toBeNull();
   });
 });

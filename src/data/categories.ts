@@ -3,44 +3,21 @@ import type { Category } from '../lib/types';
 type SeedCategory = Omit<Category, 'isDefault'>;
 
 /**
- * Default EXPENSE categories (bookkeeping retune, 2026-08-07).
+ * Default EXPENSE categories (onboarding-wizard retune, 2026-08-21).
  *
- * One category per COICOP 2018 division  the UN Statistics Division classification
- * of household expenditure by *purpose*, which is also what DOSM's Household
- * Expenditure Survey is coded on. Labels stay plain-language for the borrower; the
- * COICOP division is recorded here so the essentials split and the lender-facing
- * spending profile stay comparable against published Malaysian household benchmarks.
- *
- * The one non-COICOP line is `debt-service`. Loan repayment is not consumption  in
- * bookkeeping terms it is a finance cost plus a principal movement  and it is kept
- * separate so debt service is readable straight off the ledger instead of hiding
- * inside a payment-method bucket the way the old `bills` category did.
+ * Shrunk from the prior 12-category COICOP-aligned set to 7 plain-language buckets,
+ * so a first-time user in the setup wizard picks from a short list instead of a
+ * bookkeeping taxonomy. This intentionally drops COICOP division alignment: nothing
+ * in the app compares these buckets against an external taxonomy any more.
  */
 export const EXPENSE_CATEGORIES: SeedCategory[] = [
-  // COICOP 04  housing, water, electricity, gas and other fuels
-  { id: 'housing', label: 'Housing & Utilities', icon: 'home', hue: 200, kind: 'expense' },
-  // COICOP 01  food and non-alcoholic beverages
-  { id: 'food', label: 'Food & Groceries', icon: 'cart', hue: 162, kind: 'expense' },
-  // COICOP 11  restaurants and hotels
-  { id: 'dining', label: 'Dining & Beverages', icon: 'utensils', hue: 25, kind: 'expense' },
-  // COICOP 07  transport (includes fuel for personal vehicles)
-  { id: 'transport', label: 'Transport & Fuel', icon: 'car', hue: 248, kind: 'expense' },
-  // COICOP 08  communication
-  { id: 'communications', label: 'Communications', icon: 'signal', hue: 190, kind: 'expense' },
-  // COICOP 06  health
-  { id: 'healthcare', label: 'Healthcare', icon: 'heart', hue: 12, kind: 'expense' },
-  // COICOP 10  education
-  { id: 'education', label: 'Education', icon: 'book', hue: 265, kind: 'expense' },
-  // COICOP 03 + 05 + 13  clothing, furnishings, personal care
-  { id: 'household', label: 'Household & Personal', icon: 'bag', hue: 330, kind: 'expense' },
-  // COICOP 09  recreation and culture
-  { id: 'recreation', label: 'Recreation & Culture', icon: 'play', hue: 305, kind: 'expense' },
-  // COICOP 12.5 + bank charges, takaful, zakat
-  { id: 'insurance', label: 'Insurance & Fees', icon: 'shield', hue: 286, kind: 'expense' },
-  // Not COICOP: finance costs and principal repayment (drives DSR, not consumption)
-  { id: 'debt-service', label: 'Loan Repayment', icon: 'receipt', hue: 355, kind: 'expense' },
-  // COICOP 12 residual
-  { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense' },
+  { id: 'food', label: 'Food', icon: 'cart', hue: 162, kind: 'expense' },
+  { id: 'entertainment', label: 'Entertainment', icon: 'play', hue: 305, kind: 'expense' },
+  { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense' },
+  { id: 'travelling', label: 'Travelling', icon: 'fuel', hue: 248, kind: 'expense' },
+  { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense' },
+  { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense' },
+  { id: 'car-instalment', label: 'Car Instalment', icon: 'car', hue: 355, kind: 'expense' },
 ];
 
 /**
@@ -73,23 +50,41 @@ export const INCOME_SEED_IDS = INCOME_CATEGORIES.map((c) => c.id);
  * db.ts so existing ledgers, learned merchant memory and budget allocations follow
  * the retune instead of dangling at ids that no longer exist.
  *
- * Two of these are lossy on purpose and cannot be undone by a later migration:
- *  - `bills` fanned out into housing / communications / insurance / debt-service.
- *    There is no way to tell a TNB bill from a phone bill from a loan installment
- *    after the fact, so every old `bills` row lands on `housing` (the largest of
- *    the four in DOSM HES) and the borrower re-files the rest by hand.
+ * Every value here points directly at a category id that exists in the CURRENT
+ * `ALL_SEED_CATEGORIES` (never at another key of this same table): `migrateCategoryIds`
+ * runs each pair as one independent UPDATE, so a value that itself needed remapping
+ * (e.g. the pre-2026-08-07 `fuel: 'transport'`) would leave rows stranded once
+ * `transport` stopped being a default id, depending on iteration order. Every retune
+ * flattens the table back to single-hop pairs instead of chaining through the ids
+ * an earlier retune produced.
+ *
+ * Some of these are lossy on purpose and cannot be undone by a later migration:
+ *  - `bills` (and now `housing`) land on `rental`, `dining` lands on `food`, and
+ *    `communications`/`healthcare`/`education`/`household` all land on `other`  the
+ *    2026-08-21 retune collapses 12 COICOP-aligned categories into 7 plain-language
+ *    ones, so several distinct old categories now share one bucket.
  *  - `borrowers-return` was never income in bookkeeping terms  it is recovery of
  *    a receivable  so it lands on `other-income` rather than an earnings line.
  */
 export const CATEGORY_ID_REMAP: Record<string, string> = {
-  // expense
-  fuel: 'transport',
+  // expense (pre-2026-08-07 ids, pointed directly at their 2026-08-21 destination)
+  fuel: 'travelling',
   groceries: 'food',
-  coffee: 'dining',
-  shopping: 'household',
-  health: 'healthcare',
-  fun: 'recreation',
-  bills: 'housing',
+  coffee: 'food',
+  shopping: 'other',
+  health: 'other',
+  fun: 'entertainment',
+  bills: 'rental',
+  // expense (2026-08-07..2026-08-21 ids, retired by the 2026-08-21 retune)
+  housing: 'rental',
+  dining: 'food',
+  transport: 'travelling',
+  communications: 'other',
+  healthcare: 'other',
+  education: 'other',
+  household: 'other',
+  recreation: 'entertainment',
+  'debt-service': 'car-instalment',
   // income
   income: 'employment-income',
   bonus: 'employment-income',

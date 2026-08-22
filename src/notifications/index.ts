@@ -10,12 +10,12 @@
 
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import type { ReminderPlanEntry } from '../lib/reminders';
+import type { ReminderKind, ReminderPlanEntry } from '../lib/reminders';
 
 /** Marks a scheduled notification as ours, so a re-sync never cancels anything else. */
 const PIP_REMINDER = 'pipReminder';
 
-export type ReminderKind = 'log' | 'owed' | 'commitment';
+export type { ReminderKind };
 
 export interface ReminderPlan {
   log: ReminderPlanEntry[];

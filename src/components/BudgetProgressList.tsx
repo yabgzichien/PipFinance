@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { categoryStatus } from '../lib/budget';
 import { fmt } from '../lib/format';
 import type { Category } from '../lib/types';
@@ -21,13 +21,21 @@ export function BudgetProgressList({
   allocations,
   spentByCat,
   catById,
+  onPressCategory,
 }: {
   allocations: Record<string, number>;
   spentByCat: Record<string, number>;
   catById: Record<string, Category>;
+  /** Tapping a category row drills into its transactions instead of opening the Budget screen. */
+  onPressCategory?: (id: string) => void;
 }) {
   const colorTheme = useThemeColors();
-  const budgetedIds = useMemo(() => Object.keys(allocations), [allocations]);
+  // Highest spender first, so the category actually pulling the budget off track is the one
+  // you see without scrolling, rather than whatever order allocations happened to be set in.
+  const budgetedIds = useMemo(
+    () => Object.keys(allocations).sort((a, b) => (spentByCat[b] ?? 0) - (spentByCat[a] ?? 0)),
+    [allocations, spentByCat]
+  );
   const unbudgetedSpent = useMemo(
     () => Object.entries(spentByCat).filter(([id]) => !budgetedIds.includes(id)).reduce((s, [, v]) => s + v, 0),
     [spentByCat, budgetedIds]
@@ -42,7 +50,15 @@ export function BudgetProgressList({
         const st = categoryStatus(spent, alloc);
         const remaining = alloc - spent;
         return (
-          <View key={id} style={[styles.catRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+          <Pressable
+            key={id}
+            onPress={onPressCategory ? () => onPressCategory(id) : undefined}
+            style={({ pressed }) => [
+              styles.catRow,
+              i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }],
+              onPressCategory && pressed && { backgroundColor: colorTheme.surface2 },
+            ]}
+          >
             <CatBadge category={cat} size={36} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={styles.rowBetween}>
@@ -56,7 +72,7 @@ export function BudgetProgressList({
                 {remaining < 0 ? `RM ${fmt(-remaining)} over` : `RM ${fmt(remaining)} left`}
               </Text>
             </View>
-          </View>
+          </Pressable>
         );
       })}
       {unbudgetedSpent > 0 && (

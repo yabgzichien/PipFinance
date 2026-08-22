@@ -77,6 +77,51 @@ export function computeAdherence(allocations: Allocations, spentByCat: Record<st
   return { withinCount, totalBudgeted: budgetedIds.length, overspends };
 }
 
+/** The 'YYYY-MM' immediately before the given one. */
+export function prevMonthKey(mk: string): string {
+  const [y, m] = mk.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export interface CategoryComparison {
+  catId: string;
+  current: number;
+  previous: number;
+  /** current − previous. Positive is "spent more", negative is "spent less" — neither is a
+   *  verdict (docs/ui-engagement-plan.md §1 and Step 5: both directions read neutrally). */
+  deltaAbs: number;
+}
+
+/**
+ * Per-category spend for `month` next to the month before it — the winnable, shame-free
+ * comparison from Step 5 (§2.6): a user versus their own last month, never another user.
+ * Biggest current spend first. A category with spend in only one of the two months still
+ * appears, with a zero on the other side.
+ */
+export function categoryComparisons(txns: Transaction[], month: string): CategoryComparison[] {
+  const current = spentByCategory(txns, month);
+  const previous = spentByCategory(txns, prevMonthKey(month));
+  const catIds = new Set([...Object.keys(current), ...Object.keys(previous)]);
+  return [...catIds]
+    .map((catId) => {
+      const cur = current[catId] ?? 0;
+      const prev = previous[catId] ?? 0;
+      return { catId, current: cur, previous: prev, deltaAbs: cur - prev };
+    })
+    .sort((a, b) => b.current - a.current);
+}
+
+/**
+ * Whether there is enough real history to show a month-over-month comparison: the previous
+ * month needs actual recorded spend, not just an empty bucket (Step 5: "renders only with at
+ * least two full months of data, otherwise the comparison is noise").
+ */
+export function hasComparisonData(txns: Transaction[], month: string): boolean {
+  const previous = spentByCategory(txns, prevMonthKey(month));
+  return Object.values(previous).some((v) => v > 0);
+}
+
 /**
  * Months the recap can show: every month that has transactions or a budget
  * snapshot, plus the current month, deduped and sorted newest first.

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet } from 'react-native';
 import Svg, { Circle, Ellipse, Line, Path, Rect, G } from 'react-native-svg';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -15,6 +15,32 @@ const LEAF_LEFT = '#1c7a4e';
 const LEAF_RIGHT = '#2aab68';
 const LEAF_STEM = '#185e3e';
 const BLUSH = '#F07828';
+
+/** Straw-hat palette (`hat`). Paler and far less saturated than the coin it sits on — a true
+ *  straw yellow would sink into the gold — and the red band does most of the separating. */
+const STRAW = '#F0DCA4';
+const STRAW_LINE = '#B08A3E';
+const HAT_BAND = '#D6453F';
+
+/** Propeller-hat palette (`propellerHat`) — a color-blocked party cap matched to the reference
+ *  toy: yellow/red crown halves with a blue seam and brim trim, and a green brim. */
+const CAP_YELLOW = '#F5C542';
+const CAP_RED = '#E8453C';
+const CAP_TRIM = '#3F6FD1';
+const CAP_BRIM = '#2E9E5B';
+const CAP_BRIM_LINE = '#1F7A44';
+
+/** Cool-pose palette (`glasses`). The gloves are off-white with a warm brown outline rather than
+ *  flat white: unoutlined pale hands disappear against a light page, and a neutral grey outline
+ *  would pull them out of the coin's family. Teeth are near-white for the same reason. */
+const SHADE_FRAME = '#232323';
+const SHADE_LENS = '#2E2E33';
+const HAND_FILL = '#FFF6E4';
+const HAND_LINE = '#8A5A16';
+const TEETH = '#FFFDF5';
+
+/** Nerd-pose palette (`nerdy`). */
+const PIMPLE = '#E8703A';
 
 /** Idea-bulb palette. Warmer and lighter than the coin so the bulb still reads as a separate
  *  lit object floating above Pip rather than a third piece of his body. */
@@ -94,7 +120,6 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle) as unknown as Re
   fill?: string;
   opacity?: AnimNum;
 }>;
-
 /** Multiply each RGB channel of a #rrggbb hex by `factor` (brightness shade). */
 function shade(hex: string, factor: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
@@ -161,6 +186,200 @@ function BlinkCover({ expr, fill, blink }: { expr: PipExpr; fill: string; blink:
         const ry = blink.interpolate({ inputRange: [0, 1], outputRange: [0, e.r + 1] });
         return <AnimatedEllipse key={i} cx={e.cx} cy={e.cy} rx={e.r + 1.2} ry={ry} fill={fill} />;
       })}
+    </G>
+  );
+}
+
+/** Oversized shades, drawn wide enough to run most of the way across the face — the reference
+ *  pose reads as smug because the glasses dominate, so a dainty pair would miss it. Bridge and
+ *  temples go down first so the lenses cover the joins. */
+function Sunglasses() {
+  return (
+    <G>
+      <Path d="M47 51.5 Q50 48.6 53 51.5" stroke={SHADE_FRAME} strokeWidth={2.6} fill="none" strokeLinecap="round" />
+      <Path d="M29 50.5 L24.5 47.8" stroke={SHADE_FRAME} strokeWidth={2.6} fill="none" strokeLinecap="round" />
+      <Path d="M71 50.5 L75.5 47.8" stroke={SHADE_FRAME} strokeWidth={2.6} fill="none" strokeLinecap="round" />
+      <Rect x={29} y={47} width={18} height={12.5} rx={5.6} fill={SHADE_LENS} stroke={SHADE_FRAME} strokeWidth={1.7} />
+      <Rect x={53} y={47} width={18} height={12.5} rx={5.6} fill={SHADE_LENS} stroke={SHADE_FRAME} strokeWidth={1.7} />
+      <Ellipse cx={34.5} cy={50.5} rx={3} ry={1.7} fill="#fff" opacity={0.32} rotation={-20} originX={34.5} originY={50.5} />
+      <Ellipse cx={58.5} cy={50.5} rx={3} ry={1.7} fill="#fff" opacity={0.32} rotation={-20} originX={58.5} originY={50.5} />
+    </G>
+  );
+}
+
+/** Two thick bars above the shades, inner ends dropped ~2 units. That tilt is the whole trick:
+ *  level brows read blank behind sunglasses, inner-high reads worried, inner-low reads smug. */
+function Brows({ INK }: { INK: string }) {
+  return (
+    <G stroke={INK} strokeWidth={4.2} strokeLinecap="round">
+      <Line x1={32.5} y1={39.5} x2={45.5} y2={41.5} />
+      <Line x1={67.5} y1={39.5} x2={54.5} y2={41.5} />
+    </G>
+  );
+}
+
+/** The reference pose's grin: a wide block of teeth rather than a drawn line. Vertical splits
+ *  stop short of the bowl's edge so no tooth pokes through the outline, and the low arc is the
+ *  lower row. Sized to sit clear of the blush above and the bevel edge below. */
+function Grin({ INK }: { INK: string }) {
+  return (
+    <G>
+      <Path
+        d="M36 64 H64 Q62.5 79 50 79 Q37.5 79 36 64 Z"
+        fill={TEETH}
+        stroke={INK}
+        strokeWidth={2.2}
+        strokeLinejoin="round"
+      />
+      <G stroke={INK} strokeLinecap="round" fill="none">
+        <G strokeWidth={1.3}>
+          <Line x1={43} y1={64} x2={43} y2={74} />
+          <Line x1={50} y1={64} x2={50} y2={76} />
+          <Line x1={57} y1={64} x2={57} y2={74} />
+        </G>
+        <Path d="M39.5 72.6 Q50 78 60.5 72.6" strokeWidth={1.8} />
+      </G>
+    </G>
+  );
+}
+
+/** Enlarged eyes for the `nerdy` pose — bigger than the plain-face `EYES.idle` pair so the face
+ *  still reads at a glance now that nothing else (glasses, brows) fills the upper face. */
+function NerdEyes({ INK }: { INK: string }) {
+  return (
+    <G>
+      <Circle cx={39} cy={55} r={6.2} fill={INK} />
+      <Circle cx={41.3} cy={52.6} r={1.8} fill="#fff" />
+      <Circle cx={61} cy={55} r={6.2} fill={INK} />
+      <Circle cx={63.3} cy={52.6} r={1.8} fill="#fff" />
+    </G>
+  );
+}
+
+/** A lollipop held up beside the face for the `nerdy` pose — a small fist (the cool pose's hand
+ *  palette, so the two "held prop" ideas share a family) gripping a pale stick that runs up
+ *  outside the right lens to a rainbow bullseye candy tucked beside the sprout. Five concentric
+ *  bands rather than a gradient fill — react-native-svg gradients need a <Defs> registry, and
+ *  flat concentric circles already match how every other fill in this file is drawn. Drawn after
+ *  the glasses so the fist overlaps the coin's rim rather than butting into it, same as `Hands`. */
+function Lollipop() {
+  return (
+    <G>
+      <Line x1={83} y1={72} x2={75} y2={37} stroke={HAND_FILL} strokeWidth={2.6} strokeLinecap="round" />
+      <Circle cx={75} cy={27} r={13} fill="#E8453C" stroke="#4A3220" strokeWidth={1.6} />
+      <Circle cx={75} cy={27} r={10.4} fill="#F2954A" />
+      <Circle cx={75} cy={27} r={7.8} fill="#F5D93A" />
+      <Circle cx={75} cy={27} r={5.2} fill="#4FAF6D" />
+      <Circle cx={75} cy={27} r={2.6} fill="#4A90D9" />
+      <Ellipse cx={69.5} cy={21} rx={3.4} ry={2.1} fill="#fff" opacity={0.5} rotation={-25} originX={69.5} originY={21} />
+      <Rect x={77} y={67.5} width={12} height={11} rx={5.2} fill={HAND_FILL} stroke={HAND_LINE} strokeWidth={2} />
+    </G>
+  );
+}
+
+/**
+ * One floating thumbs-up glove — a fist with the thumb rising off its outer edge, and no arm
+ * behind it, which is what the reference shows. `flip` mirrors the thumb so both hands angle up
+ * and away from the coin.
+ *
+ * The thumb is two stacked round-capped strokes (outline width, then fill width) rather than a
+ * traced outline: a capsule is exactly what a round cap gives for free. The fist then covers the
+ * thumb's lower cap, and its own outline crossing there reads as the thumb crease.
+ */
+function Hand({ cx, cy, flip }: { cx: number; cy: number; flip?: boolean }) {
+  const s = flip ? -1 : 1;
+  const [tx0, ty0] = [cx + s * 2.6, cy - 3];
+  const [tx1, ty1] = [cx + s * 6.4, cy - 12.6];
+  const left = cx - 7;
+  return (
+    <G>
+      <Line x1={tx0} y1={ty0} x2={tx1} y2={ty1} stroke={HAND_LINE} strokeWidth={8.8} strokeLinecap="round" />
+      <Line x1={tx0} y1={ty0} x2={tx1} y2={ty1} stroke={HAND_FILL} strokeWidth={6.2} strokeLinecap="round" />
+      <Rect x={left} y={cy - 6.5} width={14} height={13.5} rx={5.8} fill={HAND_FILL} stroke={HAND_LINE} strokeWidth={2.1} />
+      {/* Curled-finger ridges. */}
+      <G stroke={HAND_LINE} strokeWidth={1.3} strokeLinecap="round" opacity={0.75}>
+        <Line x1={left + 3.6} y1={cy - 1.4} x2={left + 10.4} y2={cy - 1.4} />
+        <Line x1={left + 3.6} y1={cy + 2.6} x2={left + 10.4} y2={cy + 2.6} />
+      </G>
+    </G>
+  );
+}
+
+/**
+ * A straw sun hat with a red band.
+ *
+ * The crown is 38 wide against a 66-wide head — a crown much narrower than that stops reading as
+ * something the head could fit inside and turns into a cake perched on top. It's also deliberately
+ * shallow (12 tall), both because that's the boater/sugegasa shape and because the leaves start at
+ * y≈19: a taller crown would eat the sprout, which is Pip's most recognisable feature. The stub of
+ * stem left showing between crown and leaves is what sells the hat as worn rather than pasted on.
+ *
+ * The brim's centre line sits at y=30, well inside the head's top (y=23), for the same reason — a
+ * brim resting at the very top of the skull hovers. Brim first, then crown, or the crown's base
+ * shows through. The band then sits inside the crown's deliberately straight-sided lower half,
+ * which is the only reason a plain rect can hug it without poking out of the curve.
+ */
+function StrawHat() {
+  return (
+    <G>
+      {/* Crown and band go down FIRST so the brim can occlude their base. That order is the whole
+          illusion: on a wide-brim hat seen head-on you see the brim's near edge in front of the
+          crown, and the crown emerges from behind it. Drawn the other way round the crown sits on
+          top as a complete box and the hat reads as a cake on a plate.
+          Everything below y≈28.5 here is therefore hidden, including the straight sides — those
+          exist only so a plain <Rect> band can hug the crown without poking out of a curve. */}
+      {/* The base flares out to x 25/75, wider than the dome above it, because the skull keeps
+          widening as it drops: a straight-sided crown lets a sliver of gold show between its side
+          and the brim's top edge. All of the flare below y≈32 is hidden by the brim. */}
+      <Path
+        d="M25 38 L29 27 C29.5 21 37 17.5 50 17.5 C63 17.5 70.5 21 71 27 L75 38 Z"
+        fill={STRAW}
+        stroke={STRAW_LINE}
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      {/* A trapezoid, not a rect, so it follows that flare instead of leaving bare corners where
+          the crown has already widened past it. Inset 0.9 to clear the crown's own stroke. */}
+      <Path d="M29.9 27 L70.1 27 L73.74 37 L26.26 37 Z" fill={HAT_BAND} />
+      {/* Cast shadow, drawn just before the brim so only a crescent of it escapes below the brim's
+          edge. This is what stops the hat reading as a disc hovering in front of Pip's face. */}
+      <Ellipse cx={50} cy={40.5} rx={34} ry={7} fill="rgba(120,80,20,0.2)" />
+      {/* ry is only 6.5 against rx 36: seen head-on a brim is a shallow band, and a deeper ellipse
+          turns into a saucer that swallows the crown. */}
+      <Ellipse cx={50} cy={38} rx={36} ry={6.5} fill={STRAW} stroke={STRAW_LINE} strokeWidth={1.8} />
+      {/* One woven ring: the cheapest cue that the brim is straw rather than felt. */}
+      <Ellipse cx={50} cy={38} rx={29} ry={4.8} fill="none" stroke={STRAW_LINE} strokeWidth={1.1} opacity={0.45} />
+    </G>
+  );
+}
+
+/**
+ * A color-blocked propeller cap (`propellerHat`), sharing `StrawHat`'s crown/brim silhouette so
+ * it sits in the same spot on Pip's head, but with a yellow/red split crown, blue edge slivers
+ * (echoing the reference toy's side panels peeking past the front), and a green brim.
+ */
+function PropellerCap() {
+  return (
+    <G>
+      <Path d="M25 38 L29 27 C29.5 21 37 17.5 50 17.5 L50 38 Z" fill={CAP_YELLOW} />
+      <Path d="M75 38 L71 27 C70.5 21 63 17.5 50 17.5 L50 38 Z" fill={CAP_RED} />
+      <Path d="M25 38 L29 27 C29.5 21 33 18.5 36 18.3 L32 38 Z" fill={CAP_TRIM} />
+      <Path d="M75 38 L71 27 C70.5 21 67 18.5 64 18.3 L68 38 Z" fill={CAP_TRIM} />
+      <Line x1={50} y1={17.5} x2={50} y2={38} stroke={CAP_TRIM} strokeWidth={1.2} opacity={0.5} />
+      <Ellipse cx={50} cy={40.5} rx={34} ry={7} fill="rgba(20,50,30,0.18)" />
+      <Ellipse cx={50} cy={38} rx={36} ry={6.5} fill={CAP_BRIM} stroke={CAP_BRIM_LINE} strokeWidth={1.8} />
+      <Ellipse cx={50} cy={38} rx={29} ry={4.8} fill="none" stroke={CAP_BRIM_LINE} strokeWidth={1.1} opacity={0.45} />
+    </G>
+  );
+}
+
+/** Both hands, deliberately not level: the reference holds one up by the face and one low and
+ *  out. Mirrored heights would read as a jumping-jack rather than a pose. */
+function Hands() {
+  return (
+    <G>
+      <Hand cx={14} cy={56} flip />
+      <Hand cx={84} cy={71} />
     </G>
   );
 }
@@ -284,6 +503,20 @@ function IdeaBulb({ size }: { size: number }) {
   );
 }
 
+const HatContext = createContext(false);
+
+/**
+ * Puts the straw hat on every <Pip> rendered inside, including the ones nested in <PipSays> on
+ * child screens. Scoped this way because the add-a-transaction flow spans eight screens and
+ * <PipSays> is shared with screens outside it (Commitments, Owed, the balance scan) — threading a
+ * prop would mean touching ~30 call sites and would still put the hat on the wrong ones.
+ *
+ * An explicit `hat` on a Pip still wins, so a call site inside the flow can opt out.
+ */
+export function PipWearsHat({ children }: { children: React.ReactNode }) {
+  return <HatContext.Provider value={true}>{children}</HatContext.Provider>;
+}
+
 export function Pip({
   size = 96,
   expr = 'idle',
@@ -291,6 +524,10 @@ export function Pip({
   float = false,
   celebrate = false,
   idea = false,
+  glasses = false,
+  nerdy = false,
+  hat,
+  propellerHat = false,
 }: {
   size?: number;
   expr?: PipExpr;
@@ -304,6 +541,20 @@ export function Pip({
    *  `size` to the rendered height, so a caller that swaps it on and off mid-screen should
    *  reserve the taller box (see NotificationsStep) rather than let the layout jump. */
   idea?: boolean;
+  /** The "cool" pose (the widget step's hero): shades, brows, a toothy grin, and a floating
+   *  thumbs-up either side. It replaces the whole face, so `expr` is ignored while it's on.
+   *  Stays inside the same 100x100 box — the hands fill margin the coin never used — so turning
+   *  it on doesn't change the rendered size. */
+  glasses?: boolean;
+  /** The "nerd" pose (the empty-state hero): big eyes, a simple smile, cheek freckles, and a
+   *  held rainbow lollipop. Also replaces the whole face, so `expr` is ignored while it's on. */
+  nerdy?: boolean;
+  /** Straw hat. Leave undefined to inherit from <PipWearsHat> (which is how the whole
+   *  add-a-transaction flow gets it); pass `false` to opt a single Pip out inside that flow. */
+  hat?: boolean;
+  /** A color-blocked party cap. Takes over the head slot from `hat`/`PipWearsHat` entirely while
+   *  on — a coin only wears one hat at a time. */
+  propellerHat?: boolean;
 }) {
   // The body is the coin, not the accent: Pip is one fixed character everywhere rather than a
   // shape that recolours per preset. `fill` is the bevel (COIN_FACE), because that disc is what
@@ -317,6 +568,10 @@ export function Pip({
   const blink = useRef(new Animated.Value(0)).current;
   const burst = useRef(new Animated.Value(0)).current;
   const reducedMotion = useReducedMotion();
+  // Read unconditionally — `hat ?? useContext(...)` would short-circuit the hook away whenever the
+  // prop is passed, changing hook order between renders.
+  const hatFromFlow = useContext(HatContext);
+  const wearsHat = hat ?? hatFromFlow;
 
   useEffect(() => {
     if (!float || reducedMotion) {
@@ -346,7 +601,7 @@ export function Pip({
   // Micro-idle: a blink every 4-7s, randomised so two Pips on screen never sync up. The single
   // cheapest cue that reads as "alive" (docs/ui-engagement-plan.md §2.1).
   useEffect(() => {
-    if (reducedMotion || !BLINKABLE.includes(expr)) {
+    if (reducedMotion || glasses || nerdy || !BLINKABLE.includes(expr)) {
       blink.setValue(0);
       return;
     }
@@ -369,7 +624,7 @@ export function Pip({
       clearTimeout(timeout);
       blink.setValue(0);
     };
-  }, [expr, reducedMotion, blink]);
+  }, [expr, reducedMotion, glasses, nerdy, blink]);
 
   useEffect(() => {
     if (!celebrate || reducedMotion) {
@@ -408,23 +663,53 @@ export function Pip({
         <Ellipse cx={32} cy={60.3} rx={5.3} ry={3.4} fill={BLUSH} opacity={0.3} />
         <Ellipse cx={68} cy={60.3} rx={5.3} ry={3.4} fill={BLUSH} opacity={0.3} />
 
-        {expr === 'sheepish' && <Ellipse cx={70} cy={40} rx={2.1} ry={3} fill="rgba(140,195,255,0.85)" />}
+        {/* After the body so the brim sits over the head, but before the face, which it never
+            reaches — the sprout above it is drawn earlier and stays clear of the crown.
+            `propellerHat` takes the head slot outright — a coin only wears one hat. */}
+        {propellerHat ? <PropellerCap /> : wearsHat && <StrawHat />}
 
-        <Eyes expr={expr} INK={INK} />
-        <BlinkCover expr={expr} fill={fill} blink={blink} />
-        <Mouth expr={expr} INK={INK} />
-
-        {expr === 'sleepy' && (
-          <Path
-            d="M74 20 L82 20 L74 27 L82 27"
-            stroke={INK}
-            strokeWidth={1.6}
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            opacity={0.7}
-          />
+        {/* The cool and nerdy poses each own the whole face, so `expr` and everything keyed off it
+            (the sheepish sweat drop, the sleepy Zs, blinking) sits inside the plain branch rather
+            than leaking a second mood on top of either pair of glasses. */}
+        {glasses ? (
+          <>
+            <Brows INK={INK} />
+            <Sunglasses />
+            <Grin INK={INK} />
+          </>
+        ) : nerdy ? (
+          <>
+            <NerdEyes INK={INK} />
+            <Path d="M41 65 Q50 73 59 65" fill="none" stroke={INK} strokeWidth={3.2} strokeLinecap="round" />
+            {/* Cheek freckles, drawn over the ambient blush so they read as raised spots rather
+                than smudges. */}
+            <Circle cx={30.5} cy={68} r={1.3} fill={PIMPLE} opacity={0.85} />
+            <Circle cx={69.5} cy={68} r={1.3} fill={PIMPLE} opacity={0.85} />
+          </>
+        ) : (
+          <>
+            {expr === 'sheepish' && <Ellipse cx={70} cy={40} rx={2.1} ry={3} fill="rgba(140,195,255,0.85)" />}
+            <Eyes expr={expr} INK={INK} />
+            <BlinkCover expr={expr} fill={fill} blink={blink} />
+            <Mouth expr={expr} INK={INK} />
+            {expr === 'sleepy' && (
+              <Path
+                d="M74 20 L82 20 L74 27 L82 27"
+                stroke={INK}
+                strokeWidth={1.6}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={0.7}
+              />
+            )}
+          </>
         )}
+
+        {/* After the body, so each fist overlaps the rim it sits against instead of butting into
+            it. Before the sparkles, which should read over everything. */}
+        {glasses && <Hands />}
+        {nerdy && <Lollipop />}
 
         {SPARKLES.map((s, i) => {
           const cx = burst.interpolate({ inputRange: [0, 1], outputRange: [s.x0, s.x1] });

@@ -8,6 +8,7 @@ import {
   leftover,
   categoryStatus,
   budgetHash,
+  positiveAllocations,
 } from '../src/lib/budget';
 import type { Transaction } from '../src/lib/types';
 
@@ -76,6 +77,15 @@ describe('allocatedTotal & leftover', () => {
     expect(allocatedTotal(a)).toBe(450);
     expect(leftover(1000, a)).toBe(550);
     expect(leftover(400, a)).toBe(-50);
+  });
+});
+
+describe('positiveAllocations', () => {
+  it('drops categories allocated RM 0 or less', () => {
+    expect(positiveAllocations({ dining: 300, fuel: 0, other: -5 })).toEqual({ dining: 300 });
+  });
+  it('keeps everything when all allocations are positive', () => {
+    expect(positiveAllocations({ dining: 300, fuel: 150 })).toEqual({ dining: 300, fuel: 150 });
   });
 });
 

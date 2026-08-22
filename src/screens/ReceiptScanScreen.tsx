@@ -4,15 +4,17 @@
 // and ride on each person's own items; the amount the card was charged is the figure everything
 // reconciles to, because that is what left the account.
 import * as ImagePicker from 'expo-image-picker';
-import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { scanDocument } from '../lib/documentScanner';
 import { fmt } from '../lib/format';
 import { llmErrorMessage } from '../llm';
 import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
+import { saveReceiptImage } from '../lib/receiptStorage';
 import { scanReceiptImage } from '../lib/scanReceipt';
 import { computeItemized, SELF, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
@@ -20,6 +22,7 @@ import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { colors, numFont, radius, uiFont } from '../theme';
+import type { PickedImage } from './AttachScreen';
 
 export interface ReceiptSplitResult {
   merchant: string | null;
@@ -28,15 +31,22 @@ export interface ReceiptSplitResult {
   /** null when nobody was added — the receipt was the user's alone, so the whole charge is
    *  their own expense and there is no share for anyone to owe back. */
   draft: SplitDraft | null;
+  /** The saved receipt photo's permanent URI, or null if the user left "keep this photo" off. */
+  photoUri: string | null;
 }
 
 type Phase = 'capture' | 'reading' | 'assign';
 
 export function ReceiptScanScreen({
+  initialImage,
   onBack,
   onDone,
   onManualInstead,
 }: {
+  /** The image the add hub already captured, handed over once the user confirmed on
+   *  ScanKindScreen that it was a receipt. When set, this screen skips straight to reading it;
+   *  its own capture screen stays reachable as the retry surface if that read fails. */
+  initialImage?: PickedImage;
   onBack: () => void;
   onDone: (result: ReceiptSplitResult) => void;
   /** Escape hatch: split a typed total instead of a photographed receipt. */
@@ -47,8 +57,10 @@ export function ReceiptScanScreen({
   const colorTheme = useThemeColors();
   const { people, addPerson } = useAppData();
 
-  const [phase, setPhase] = useState<Phase>('capture');
+  const [phase, setPhase] = useState<Phase>(initialImage ? 'reading' : 'capture');
   const [error, setError] = useState('');
+  const [pickedImage, setPickedImage] = useState<PickedImage | null>(initialImage ?? null);
+  const [keepPhoto, setKeepPhoto] = useState(false);
   const [receipt, setReceipt] = useState<ScannedReceipt | null>(null);
   const [lines, setLines] = useState<ReceiptLine[]>([]);
   const [surcharges, setSurcharges] = useState<Surcharges>({ serviceChargePct: 0, taxPct: 0 });
@@ -81,11 +93,12 @@ export function ReceiptScanScreen({
   const splitting = picked.length > 0;
   const canSave = charged > 0 && (!splitting || !negative);
 
-  const read = async (base64: string, mime: string) => {
+  const read = async (image: PickedImage) => {
+    setPickedImage(image);
     setPhase('reading');
     setError('');
     try {
-      const scanned = await scanReceiptImage(base64, mime);
+      const scanned = await scanReceiptImage(image.base64, image.mime);
       setReceipt(scanned);
       setLines(
         scanned.items.map((it, i) => ({
@@ -105,6 +118,13 @@ export function ReceiptScanScreen({
     }
   };
 
+  // Mount-once: the add hub already has the image, so reading starts without a second capture.
+  // A failed read falls through to 'capture' above, which is why that screen survives.
+  useEffect(() => {
+    if (initialImage) read(initialImage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleResult = (res: ImagePicker.ImagePickerResult) => {
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
@@ -112,13 +132,23 @@ export function ReceiptScanScreen({
       notify('Hmm', "That photo couldn't be read. Try another one.");
       return;
     }
-    read(a.base64, a.mimeType ?? 'image/jpeg');
+    read({ uri: a.uri, base64: a.base64, mime: a.mimeType ?? 'image/jpeg' });
   };
 
   const takePhoto = async () => {
     if (busy) return;
     setBusy(true);
     try {
+      // Same native-vs-web branch as AttachScreen's takePhoto: a live bounding box on native
+      // builds, the plain camera picker on web or when the native scanner isn't registered.
+      if (Platform.OS !== 'web') {
+        const outcome = await scanDocument();
+        if (outcome.status === 'picked') {
+          read(outcome.image);
+          return;
+        }
+        if (outcome.status === 'cancelled') return;
+      }
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
         notify('Permission needed', 'Allow camera access to photograph the receipt.');
@@ -186,9 +216,18 @@ export function ReceiptScanScreen({
 
   const save = () => {
     if (!canSave) return;
+    let photoUri: string | null = null;
+    if (keepPhoto && pickedImage) {
+      try {
+        photoUri = saveReceiptImage(pickedImage.uri, pickedImage.mime);
+      } catch {
+        // Best-effort: a failed copy just means no saved photo, not a failed receipt.
+      }
+    }
     onDone({
       merchant: receipt?.merchant ?? null,
       charged,
+      photoUri,
       draft: splitting
         ? {
             gross: charged,
@@ -250,7 +289,12 @@ export function ReceiptScanScreen({
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={receipt?.merchant ?? 'Assign the items'} onBack={() => setPhase('capture')} />
+        {/* Back means "this wasn't a receipt after all" when the hub supplied the image, so it
+            returns to the kind question rather than to a capture screen the user never used. */}
+        <TopBar
+          title={receipt?.merchant ?? 'Assign the items'}
+          onBack={() => (initialImage ? onBack() : setPhase('capture'))}
+        />
       </View>
 
       <ScrollView
@@ -270,6 +314,35 @@ export function ReceiptScanScreen({
             )}
           </BubbleText>
         </PipSays>
+
+        {/* Hidden on web rather than disabled: expo-file-system's persistent storage has no web
+            support, so a toggle that silently keeps nothing is worse than one not offered. */}
+        {Platform.OS !== 'web' && (
+          <Card style={[styles.keepRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>Keep this receipt photo</Text>
+              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>View it later from the transaction</Text>
+            </View>
+            <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              {[false, true].map((v) => {
+                const on = keepPhoto === v;
+                return (
+                  <Pressable
+                    key={String(v)}
+                    onPress={() => setKeepPhoto(v)}
+                    style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: on }}
+                  >
+                    <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+                      {v ? 'On' : 'Off'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Card>
+        )}
 
         <Text style={[styles.label, { color: colorTheme.ink2 }]}>Who was at the table (optional)</Text>
         {unpicked.length > 0 && (
@@ -561,6 +634,14 @@ const styles = StyleSheet.create({
   sourceIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   sourceTitle: { fontFamily: uiFont(700), fontSize: 15 },
   sourceSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 2 },
+
+  keepRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginTop: 16, borderWidth: 1 },
+  keepTitle: { fontFamily: uiFont(700), fontSize: 14 },
+  keepSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
+  modeToggle: { flexDirection: 'row', borderRadius: 999, padding: 3, borderWidth: 1 },
+  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999 },
+  modeText: { fontFamily: uiFont(700), fontSize: 13 },
+  modeTextOn: { color: '#fff' },
 
   label: { fontFamily: uiFont(600), fontSize: 12.5, marginTop: 18, marginBottom: 9 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },

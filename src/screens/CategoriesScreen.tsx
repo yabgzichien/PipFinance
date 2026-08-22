@@ -4,21 +4,21 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { BtnLabel, Card, CatBadge, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
-import { PROTECTED_CATEGORY_IDS } from '../db/categoriesRepo';
+import { NoFallbackCategoryError } from '../db/categoriesRepo';
 import { catColorsForHue } from '../lib/catColors';
-import { confirmAction } from '../lib/platformAlert';
+import { confirmAction, notify } from '../lib/platformAlert';
 import type { TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { radius, shadowToggle, uiFont } from '../theme';
 
-const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'utensils', 'car', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
-const INCOME_ICONS: IconName[] = ['wallet', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
+export const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'utensils', 'car', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
+export const INCOME_ICONS: IconName[] = ['wallet', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
 const HUE_CHOICES = [12, 42, 70, 120, 162, 200, 248, 286, 330];
 
 /** Whether an icon value is a custom photo URI rather than a named icon. */
-function isCustomIcon(icon: string): boolean {
+export function isCustomIcon(icon: string): boolean {
   return icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('content:') || icon.startsWith('http') || icon.startsWith('/');
 }
 
@@ -98,7 +98,17 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   };
 
   const confirmDelete = (id: string, label: string) => {
-    confirmAction('Delete category?', `Remove “${label}”? Transactions move to a default and its learning is cleared.`, 'Delete', () => deleteCategory(id));
+    confirmAction('Delete category?', `Remove “${label}”? Transactions move to another category and its learning is cleared.`, 'Delete', async () => {
+      try {
+        await deleteCategory(id);
+      } catch (e) {
+        if (e instanceof NoFallbackCategoryError) {
+          notify('Add another category first', `“${label}” is your only ${e.kind} category, so there's nowhere to move its transactions. Add another ${e.kind} category, then delete this one.`);
+          return;
+        }
+        throw e;
+      }
+    });
   };
 
   return (
@@ -131,17 +141,12 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                 <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                   {c.label}
                 </Text>
-                {PROTECTED_CATEGORY_IDS.includes(c.id) && (
-                  <Text style={[styles.defaultTag, { color: colorTheme.ink2 }]}>locked</Text>
-                )}
                 <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={8} style={styles.editBtn}>
                   <Icon name="pencil" size={16} color={colorTheme.ink2} />
                 </Pressable>
-                {!PROTECTED_CATEGORY_IDS.includes(c.id) && (
-                  <Pressable onPress={() => confirmDelete(c.id, c.label)} hitSlop={8} style={styles.delBtn}>
-                    <Icon name="trash" size={17} color="#b3261e" />
-                  </Pressable>
-                )}
+                <Pressable onPress={() => confirmDelete(c.id, c.label)} hitSlop={8} style={styles.delBtn}>
+                  <Icon name="trash" size={17} color="#b3261e" />
+                </Pressable>
               </View>
 
               {editingId === c.id && (
@@ -270,7 +275,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
   divider: { borderTopWidth: 1 },
   rowLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },
-  defaultTag: { fontFamily: uiFont(600), fontSize: 11.5 },
   delBtn: { padding: 6 },
   editBtn: { padding: 6 },
   editPanel: { padding: 15, paddingTop: 12, borderTopWidth: 1, gap: 12 },

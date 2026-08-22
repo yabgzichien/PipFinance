@@ -1,5 +1,5 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { addCategory as dbAddCategory, deleteCategory as dbDeleteCategory, updateCategoryIcon as dbUpdateCategoryIcon, listCategories } from '../db/categoriesRepo';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { addCategory as dbAddCategory, deleteCategory as dbDeleteCategory, updateCategoryIcon as dbUpdateCategoryIcon, updateCategoryLabel as dbUpdateCategoryLabel, listCategories } from '../db/categoriesRepo';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import { getMemoryMap, upsertMemory } from '../db/memoryRepo';
 import {
@@ -51,13 +51,26 @@ import {
 } from '../db/splitRepo';
 import { openReceivableTotal, outstanding, type OpenShare } from '../lib/split';
 import { refreshPrices as fetchPrices } from '../prices';
-import { budgetHash, currentMonthKey, monthKey } from '../lib/budget';
+import { budgetHash, currentMonthKey, monthKey, positiveAllocations } from '../lib/budget';
 import { computeCoverage, type Coverage } from '../lib/coverage';
 import { getMeta, setMeta } from '../db/metaRepo';
-import { DEFAULT_GUIDE_CITY, DEFAULT_HOUSEHOLD_PROFILE } from '../lib/belanjawanku';
 import { DEFAULT_SAVINGS_TARGET } from '../lib/savingsHabit';
 import { isReminderCadence, type ReminderCadence } from '../lib/reminders';
-import { GUIDE_CITIES, HOUSEHOLD_PROFILES, type GuideCityId, type HouseholdProfileId } from '../data/belanjawanku';
+import { setHapticsEnabled } from '../lib/haptics';
+import { setSoundEnabled as applySoundEnabled } from '../lib/sound';
+import { isMotionSetting, type MotionSetting } from '../theme/motion';
+import {
+  computeStreakPaused,
+  computeStreakWithFreeze,
+  computeWeekRing,
+  ensureMonthlyFreeze,
+  isStreakGraduated,
+  lastActiveDay,
+  streakStartDay,
+  NO_STREAK_FREEZE,
+  type StreakFreezeState,
+} from '../lib/streak';
+import { monthLabel } from '../lib/dates';
 import { syncStreakWidget } from '../widget/syncStreakWidget';
 import {
   addCommitment as dbAddCommitment,
@@ -79,11 +92,8 @@ import { matchSourceCategory } from '../lib/import';
 import type { ParsedCommitment } from '../lib/advancedImport';
 
 const ONBOARDING_KEY = 'onboarding_complete';
-// Which Belanjawanku household category and city the borrower's budget is benchmarked against,
-// and the monthly amount they committed to keeping back. Preferences, not ledger data, so they
-// live in app_meta rather than earning a table of their own.
-const HOUSEHOLD_PROFILE_KEY = 'belanjawanku_household';
-const GUIDE_CITY_KEY = 'belanjawanku_city';
+// The monthly amount the borrower committed to keeping back. A preference, not ledger data, so
+// it lives in app_meta rather than earning a table of its own.
 const SAVINGS_TARGET_KEY = 'savings_target';
 // Local reminder preferences. Both default to off so the OS permission prompt only ever
 // appears because the user reached for it in Settings. Deliberately survive `resetAllData`,
@@ -93,6 +103,27 @@ const SAVINGS_TARGET_KEY = 'savings_target';
 const REMINDER_CADENCE_KEY = 'reminder_cadence';
 const OWED_REMINDER_KEY = 'owed_reminder_on';
 const COMMITMENT_REMINDER_KEY = 'commitment_reminder_on';
+// docs/ui-engagement-plan.md Step 7: overrides the behaviour-inferred log-reminder fire hour.
+// Empty string means "no override, follow the inferred/fallback hour" (autonomy stays the
+// default; a user who never opens this row keeps the app deciding for them).
+const REMINDER_HOUR_OVERRIDE_KEY = 'reminder_hour_override';
+// docs/ui-engagement-plan.md Step 1: Full/Reduced/Off for loops and haptics app-wide. Defaults
+// to 'full' — the OS-level AccessibilityInfo reduce-motion signal (src/state/useReducedMotion.ts)
+// already covers the user who never opens this Settings row.
+const MOTION_SETTING_KEY = 'motion_setting';
+// The save-confirmation chime (src/lib/sound.ts). Its own key rather than a tier of
+// MOTION_SETTING_KEY: sound carries into a room the way animation and haptics don't, so
+// muting it is a separate decision from turning motion down. Defaults to on, so an absent
+// row reads as on and only an explicit 'false' mutes.
+const SOUND_ENABLED_KEY = 'sound_enabled';
+// docs/ui-engagement-plan.md Step 4: the streak's earned-not-purchased freeze and the
+// user-controlled pause. Both survive resetAllData/resetToOnboarding the same way the reminder
+// preferences do (see the comment above REMINDER_CADENCE_KEY) — they're how this phone's owner
+// wants the habit lever to behave, not persona data a demo reset should touch.
+const STREAK_FREEZE_MONTH_KEY = 'streak_freeze_month';
+const STREAK_FREEZE_AVAILABLE_KEY = 'streak_freeze_available';
+const STREAK_FREEZE_SPENT_FOR_KEY = 'streak_freeze_spent_for';
+const STREAK_PAUSED_SINCE_KEY = 'streak_paused_since';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
@@ -153,6 +184,8 @@ async function reconcileReceivable(shareRows: SplitShare[], accts: Account[]): P
   return true;
 }
 
+export type HeroPanel = 'cashflow' | 'spent' | 'left' | 'networth';
+
 interface AppData {
   ready: boolean;
   categories: Category[];
@@ -180,13 +213,17 @@ interface AppData {
   /** Change a category's icon/picture  a named icon or a custom photo URI. Allowed on every
    *  category, including the protected generics. */
   updateCategoryIcon: (id: string, icon: string) => Promise<void>;
+  /** Rename a category. Allowed on every category, including the protected generics. */
+  updateCategoryLabel: (id: string, label: string) => Promise<void>;
   commitCategorized: (
     items: ExtractedTxn[],
     assignments: (string | null)[],
     source?: TxnSource,
     /** Parallel to `items`: a split to attach to that row, or null. A split row saves at its
      *  `ownShare`, not the extracted amount, and the gross is kept on the split record. */
-    splitDrafts?: (SplitDraft | null)[]
+    splitDrafts?: (SplitDraft | null)[],
+    /** Parallel to `items`: the saved receipt photo's URI for that row, or null. */
+    receiptUris?: (string | null)[]
   ) => Promise<{ created: Transaction[]; newLearned: NewLearned[] }>;
   /** People you split bills with, remembered locally so totals can roll up per person. */
   people: Person[];
@@ -226,16 +263,16 @@ interface AppData {
   resetAllData: () => Promise<void>;
   /** Wipe all data AND reset onboarding so the setup wizard re-appears. */
   resetToOnboarding: () => Promise<void>;
-  /** Which Belanjawanku household category and city the budget is benchmarked against. */
-  householdProfile: HouseholdProfileId;
-  guideCity: GuideCityId;
-  setBenchmarkProfile: (profile: HouseholdProfileId, city: GuideCityId) => Promise<void>;
   /** Monthly pay-yourself-first commitment. Motivation only. */
   savingsTarget: number;
   setSavingsTarget: (amount: number) => Promise<void>;
   /** How often to nudge about logging spending. `'off'` disables the reminder entirely. */
   reminderCadence: ReminderCadence;
   setReminderCadence: (cadence: ReminderCadence) => Promise<void>;
+  /** User override for the log reminder's fire hour, `null` meaning "let Pip infer it from
+   *  when I actually log" (docs/ui-engagement-plan.md Step 7, item 1). */
+  reminderHourOverride: number | null;
+  setReminderHourOverride: (hour: number | null) => Promise<void>;
   /** Whether to chase debts that have aged past `AGING_DAYS`, weekly. */
   owedReminderEnabled: boolean;
   setOwedReminderEnabled: (on: boolean) => Promise<void>;
@@ -243,7 +280,47 @@ interface AppData {
    *  once-off nudge for anything overdue. */
   commitmentReminderEnabled: boolean;
   setCommitmentReminderEnabled: (on: boolean) => Promise<void>;
-  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null) => Promise<void>;
+  /** Full/Reduced/Off for loops and haptics app-wide (docs/ui-engagement-plan.md Step 1).
+   *  Read by `useReducedMotion` alongside the OS accessibility signal, and mirrored into
+   *  `src/lib/haptics.ts` so haptics respect it without every call site threading it through. */
+  motionSetting: MotionSetting;
+  setMotionSetting: (setting: MotionSetting) => Promise<void>;
+  /** Whether the save-confirmation chime plays. Mirrored into `src/lib/sound.ts` so call
+   *  sites never thread it through. Independent of `motionSetting` on purpose — see the
+   *  comment above SOUND_ENABLED_KEY. */
+  soundEnabled: boolean;
+  setSoundEnabled: (on: boolean) => Promise<void>;
+
+  // --- Streak (docs/ui-engagement-plan.md Step 4) ---------------------------------------
+  /** The displayed streak: pause-frozen when paused, freeze-bridged otherwise. What every
+   *  screen should render — nothing downstream needs the raw `computeStreak`. */
+  streak: number;
+  /** Monday-first, this-week-only activity ring for the Home card (replaces the old rolling
+   *  7-day dots there; the Android widget keeps its own rolling window, see StreakWidget.tsx). */
+  streakWeek: boolean[];
+  /** Index of today within `streakWeek` (0=Mon..6=Sun). */
+  streakTodayIndex: number;
+  /** Whether an unspent monthly freeze is currently banked  shown as a small shield. */
+  streakFreezeAvailable: boolean;
+  /** True once the run has held for `STREAK_GRADUATION_DAYS`: the UI should back off the daily
+   *  count in favour of `streakStartLabel`. */
+  streakGraduated: boolean;
+  /** "Logging since <Month Year>", or null if there's no active run to date from. Only
+   *  meaningful once `streakGraduated` is true. */
+  streakStartLabel: string | null;
+  /** Whether the user has paused the streak (Settings). While paused, `streak` is frozen and
+   *  the reminder ladder should not chase logging (wired in a later step). */
+  streakPaused: boolean;
+  pauseStreak: () => Promise<void>;
+  resumeStreak: () => Promise<void>;
+  /** Increments once each time a save extends the streak to a new day (freeze-bridged saves
+   *  count too). Consumers watch for a change against their own last-seen value  see
+   *  DashboardScreen's StreakCelebration  rather than reading this as a boolean, since two
+   *  celebrations in a row need to be distinguishable even if the component never unmounted
+   *  in between. */
+  streakCelebrationToken: number;
+
+  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null) => Promise<string>;
   /** Returns a default account id for the add flows, creating a "Cash" account if none exist. */
   ensureDefaultAccount: () => Promise<string>;
   updateAccount: (id: string, fields: { name: string; cls: string; icon?: string | null }) => Promise<void>;
@@ -310,17 +387,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
   const [prices, setPrices] = useState<Record<string, PriceQuote>>({});
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [householdProfile, setHouseholdProfileState] = useState<HouseholdProfileId>(DEFAULT_HOUSEHOLD_PROFILE);
-  const [guideCity, setGuideCityState] = useState<GuideCityId>(DEFAULT_GUIDE_CITY);
   const [savingsTarget, setSavingsTargetState] = useState<number>(DEFAULT_SAVINGS_TARGET);
   const [reminderCadence, setReminderCadenceState] = useState<ReminderCadence>('off');
+  const [reminderHourOverride, setReminderHourOverrideState] = useState<number | null>(null);
   const [owedReminderEnabled, setOwedReminderEnabledState] = useState(false);
   const [commitmentReminderEnabled, setCommitmentReminderEnabledState] = useState(false);
+  const [motionSetting, setMotionSettingState] = useState<MotionSetting>('full');
+  const [soundEnabled, setSoundEnabledState] = useState(true);
+  const [streakFreeze, setStreakFreezeState] = useState<StreakFreezeState>(NO_STREAK_FREEZE);
+  const [streakPausedSinceDay, setStreakPausedSinceDayState] = useState<number | null>(null);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, householdRaw, cityRaw, savingsTargetRaw, reminderCadenceRaw, owedReminderRaw, commitmentReminderRaw, peopleRows, splitRows, shareRows, paymentRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, savingsTargetRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -332,26 +412,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         listBalanceEntries(),
         getPriceCache(),
         getMeta(ONBOARDING_KEY),
-        getMeta(HOUSEHOLD_PROFILE_KEY),
-        getMeta(GUIDE_CITY_KEY),
         getMeta(SAVINGS_TARGET_KEY),
         getMeta(REMINDER_CADENCE_KEY),
+        getMeta(REMINDER_HOUR_OVERRIDE_KEY),
         getMeta(OWED_REMINDER_KEY),
         getMeta(COMMITMENT_REMINDER_KEY),
+        getMeta(MOTION_SETTING_KEY),
+        getMeta(SOUND_ENABLED_KEY),
+        getMeta(STREAK_FREEZE_MONTH_KEY),
+        getMeta(STREAK_FREEZE_AVAILABLE_KEY),
+        getMeta(STREAK_FREEZE_SPENT_FOR_KEY),
+        getMeta(STREAK_PAUSED_SINCE_KEY),
         dbListPeople(),
         dbListSplits(),
         dbListShares(),
         dbListPayments(),
       ]);
     // A stale or hand-edited preference falls back to the default rather than breaking Budget.
-    setHouseholdProfileState(
-      HOUSEHOLD_PROFILES.some((p) => p.id === householdRaw)
-        ? (householdRaw as HouseholdProfileId)
-        : DEFAULT_HOUSEHOLD_PROFILE
-    );
-    setGuideCityState(
-      GUIDE_CITIES.some((c) => c.id === cityRaw) ? (cityRaw as GuideCityId) : DEFAULT_GUIDE_CITY
-    );
     const parsedTarget = savingsTargetRaw === null ? NaN : Number(savingsTargetRaw);
     setSavingsTargetState(
       Number.isFinite(parsedTarget) && parsedTarget >= 0 ? parsedTarget : DEFAULT_SAVINGS_TARGET
@@ -359,8 +436,43 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
     setReminderCadenceState(isReminderCadence(reminderCadenceRaw) ? reminderCadenceRaw : 'off');
+    const parsedHourOverride = reminderHourOverrideRaw ? Number(reminderHourOverrideRaw) : NaN;
+    setReminderHourOverrideState(
+      Number.isInteger(parsedHourOverride) && parsedHourOverride >= 0 && parsedHourOverride <= 23
+        ? parsedHourOverride
+        : null
+    );
     setOwedReminderEnabledState(owedReminderRaw === 'true');
     setCommitmentReminderEnabledState(commitmentReminderRaw === 'true');
+    const resolvedMotionSetting = isMotionSetting(motionSettingRaw) ? motionSettingRaw : 'full';
+    setMotionSettingState(resolvedMotionSetting);
+    setHapticsEnabled(resolvedMotionSetting !== 'off');
+    // Anything but an explicit 'false' means on, so a fresh install (no row yet) hears it.
+    const resolvedSoundEnabled = soundEnabledRaw !== 'false';
+    setSoundEnabledState(resolvedSoundEnabled);
+    applySoundEnabled(resolvedSoundEnabled);
+
+    // Streak freeze: grant a fresh one if this calendar month hasn't seen one yet. Persist the
+    // grant immediately so it isn't re-decided (and re-written) on every refresh within the
+    // same month.
+    const spentForParsed = streakFreezeSpentForRaw === null ? null : Number(streakFreezeSpentForRaw);
+    const rawFreeze: StreakFreezeState = {
+      grantedMonth: streakFreezeMonthRaw,
+      available: streakFreezeAvailableRaw === 'true',
+      spentForLastDay: Number.isFinite(spentForParsed) ? spentForParsed : null,
+    };
+    const resolvedFreeze = ensureMonthlyFreeze(rawFreeze, new Date());
+    setStreakFreezeState(resolvedFreeze);
+    if (resolvedFreeze !== rawFreeze) {
+      await Promise.all([
+        setMeta(STREAK_FREEZE_MONTH_KEY, resolvedFreeze.grantedMonth ?? ''),
+        setMeta(STREAK_FREEZE_AVAILABLE_KEY, resolvedFreeze.available ? 'true' : 'false'),
+        setMeta(STREAK_FREEZE_SPENT_FOR_KEY, ''),
+      ]);
+    }
+    const parsedPausedSince = streakPausedSinceRaw === null || streakPausedSinceRaw === '' ? NaN : Number(streakPausedSinceRaw);
+    setStreakPausedSinceDayState(Number.isFinite(parsedPausedSince) ? parsedPausedSince : null);
+
     setOnboardingComplete(onboardingFlag === 'true');
     setCategories(cats);
     setTransactions(txns);
@@ -420,6 +532,60 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     if (!ready) return;
     syncStreakWidget(transactions).catch(() => {});
   }, [ready, transactions]);
+
+  // Spend a banked freeze the moment it's actually needed (docs/ui-engagement-plan.md Step 4).
+  // Paused streaks never lapse in the first place, so there is nothing for a freeze to bridge
+  // while `streakPausedSinceDay` is set. Persisting `spentForLastDay` alongside `available:
+  // false` is what keeps `computeStreakWithFreeze` bridging the *same* gap on every later render
+  // without this effect re-firing (see that function's own comment).
+  useEffect(() => {
+    if (!ready || streakPausedSinceDay !== null) return;
+    const { freezeSpent } = computeStreakWithFreeze(transactions, streakFreeze, new Date());
+    if (!freezeSpent) return;
+    const last = lastActiveDay(transactions, new Date());
+    const next: StreakFreezeState = { ...streakFreeze, available: false, spentForLastDay: last };
+    setStreakFreezeState(next);
+    void setMeta(STREAK_FREEZE_AVAILABLE_KEY, 'false');
+    void setMeta(STREAK_FREEZE_SPENT_FOR_KEY, last === null ? '' : String(last));
+  }, [ready, transactions, streakFreeze, streakPausedSinceDay]);
+
+  const streak = useMemo(
+    () => computeStreakPaused(transactions, streakPausedSinceDay, new Date()),
+    [transactions, streakPausedSinceDay]
+  );
+  const { streak: liveStreakForFreeze } = useMemo(
+    () => computeStreakWithFreeze(transactions, streakFreeze, new Date()),
+    [transactions, streakFreeze]
+  );
+  // While paused the pause-frozen value governs (a pause always wins); otherwise the
+  // freeze-aware figure does, since it's a superset of the plain streak that also bridges a
+  // banked freeze.
+  const effectiveStreak = streakPausedSinceDay !== null ? streak : liveStreakForFreeze;
+  const { days: streakWeek, todayIndex: streakTodayIndex } = useMemo(
+    () => computeWeekRing(transactions, new Date()),
+    [transactions]
+  );
+  const streakGraduated = useMemo(() => isStreakGraduated(effectiveStreak), [effectiveStreak]);
+  const streakStartLabel = useMemo(() => {
+    const startDay = streakStartDay(transactions, new Date());
+    if (startDay === null) return null;
+    const d = new Date(startDay * 86_400_000);
+    return `Logging since ${monthLabel(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)}`;
+  }, [transactions]);
+
+  // Fires the Home fire-burst (see DashboardScreen's StreakCelebration): a save that extends the
+  // streak to a new day, freeze-bridged or not, bumps this token once. `null` on the ref means
+  // "haven't seen a real value yet" so the very first load (0 → N, or N on a returning user)
+  // never celebrates  only a genuine increase from an already-known value does.
+  const [streakCelebrationToken, setStreakCelebrationToken] = useState(0);
+  const prevEffectiveStreakRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ready) return;
+    if (prevEffectiveStreakRef.current !== null && effectiveStreak > prevEffectiveStreakRef.current) {
+      setStreakCelebrationToken((t) => t + 1);
+    }
+    prevEffectiveStreakRef.current = effectiveStreak;
+  }, [ready, effectiveStreak]);
 
   /**
    * Targeted refresh for split actions, mirroring `refreshLoanState`. Accounts and balance
@@ -514,12 +680,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setCategories(await listCategories());
   }, []);
 
+  const updateCategoryLabel = useCallback(async (id: string, label: string) => {
+    await dbUpdateCategoryLabel(id, label);
+    setCategories(await listCategories());
+  }, []);
+
   const commitCategorized = useCallback(
     async (
       items: ExtractedTxn[],
       assignments: (string | null)[],
       source: TxnSource = 'extracted',
-      splitDrafts?: (SplitDraft | null)[]
+      splitDrafts?: (SplitDraft | null)[],
+      receiptUris?: (string | null)[]
     ) => {
       const newLearned: NewLearned[] = [];
       const toInsert: NewTxn[] = [];
@@ -554,6 +726,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           categoryId,
           source,
           remark: it.remark,
+          receiptUri: receiptUris?.[i] ?? null,
         });
         draftFor.push(draft);
       }
@@ -725,21 +898,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const saveBudget = useCallback(async (income: number, alloc: Record<string, number>) => {
+    // A category left at (or set to) RM 0 isn't a budget for it, so it's dropped before it's ever
+    // persisted or shown as one.
+    const clean = positiveAllocations(alloc);
     await setExpectedIncome(income);
-    await dbSetAllocations(alloc);
+    await dbSetAllocations(clean);
     // Keep the current month's snapshot in step with the live plan.
     const cur = monthKey(new Date().toISOString())!;
-    await upsertSnapshot(cur, income, alloc);
+    await upsertSnapshot(cur, income, clean);
     setIncome(income);
-    setAlloc(alloc);
-    setSnapshots((prev) => ({ ...prev, [cur]: { income, allocations: alloc } }));
-  }, []);
-
-  const setBenchmarkProfile = useCallback(async (profile: HouseholdProfileId, city: GuideCityId) => {
-    await setMeta(HOUSEHOLD_PROFILE_KEY, profile);
-    await setMeta(GUIDE_CITY_KEY, city);
-    setHouseholdProfileState(profile);
-    setGuideCityState(city);
+    setAlloc(clean);
+    setSnapshots((prev) => ({ ...prev, [cur]: { income, allocations: clean } }));
   }, []);
 
   const setSavingsTarget = useCallback(async (amount: number) => {
@@ -753,6 +922,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setReminderCadenceState(cadence);
   }, []);
 
+  const setReminderHourOverride = useCallback(async (hour: number | null) => {
+    await setMeta(REMINDER_HOUR_OVERRIDE_KEY, hour === null ? '' : String(hour));
+    setReminderHourOverrideState(hour);
+  }, []);
+
   const setOwedReminderEnabled = useCallback(async (on: boolean) => {
     await setMeta(OWED_REMINDER_KEY, on ? 'true' : 'false');
     setOwedReminderEnabledState(on);
@@ -761,6 +935,29 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const setCommitmentReminderEnabled = useCallback(async (on: boolean) => {
     await setMeta(COMMITMENT_REMINDER_KEY, on ? 'true' : 'false');
     setCommitmentReminderEnabledState(on);
+  }, []);
+
+  const setMotionSetting = useCallback(async (setting: MotionSetting) => {
+    await setMeta(MOTION_SETTING_KEY, setting);
+    setMotionSettingState(setting);
+    setHapticsEnabled(setting !== 'off');
+  }, []);
+
+  const setSoundEnabled = useCallback(async (on: boolean) => {
+    await setMeta(SOUND_ENABLED_KEY, on ? 'true' : 'false');
+    setSoundEnabledState(on);
+    applySoundEnabled(on);
+  }, []);
+
+  const pauseStreak = useCallback(async () => {
+    const today = Math.floor(Date.now() / 86_400_000);
+    await setMeta(STREAK_PAUSED_SINCE_KEY, String(today));
+    setStreakPausedSinceDayState(today);
+  }, []);
+
+  const resumeStreak = useCallback(async () => {
+    await setMeta(STREAK_PAUSED_SINCE_KEY, '');
+    setStreakPausedSinceDayState(null);
   }, []);
 
   const resetBudget = useCallback(async () => {
@@ -782,10 +979,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const addAccount = useCallback(
     async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null) => {
-      await dbAddAccount(name, kind, cls, openingValue, asOf, icon);
+      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon);
       const [accts, entries] = await Promise.all([listAccounts(), listBalanceEntries()]);
       setAccounts(accts);
       setBalanceEntries(entries);
+      return created.id;
     },
     []
   );
@@ -1226,6 +1424,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     addCategory,
     deleteCategory,
     updateCategoryIcon,
+    updateCategoryLabel,
     commitCategorized,
     saveTransactionEdits,
     removeTransaction,
@@ -1245,17 +1444,30 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     resetBudget,
     resetAllData,
     resetToOnboarding,
-    householdProfile,
-    guideCity,
-    setBenchmarkProfile,
     savingsTarget,
     setSavingsTarget,
     reminderCadence,
     setReminderCadence,
+    reminderHourOverride,
+    setReminderHourOverride,
     owedReminderEnabled,
     setOwedReminderEnabled,
     commitmentReminderEnabled,
     setCommitmentReminderEnabled,
+    motionSetting,
+    setMotionSetting,
+    soundEnabled,
+    setSoundEnabled,
+    streak: effectiveStreak,
+    streakWeek,
+    streakTodayIndex,
+    streakFreezeAvailable: streakFreeze.available,
+    streakGraduated,
+    streakStartLabel,
+    streakPaused: streakPausedSinceDay !== null,
+    pauseStreak,
+    resumeStreak,
+    streakCelebrationToken,
     addAccount,
     ensureDefaultAccount,
     updateAccount,

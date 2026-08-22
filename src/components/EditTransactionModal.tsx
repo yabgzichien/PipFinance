@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as RNImage, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
 import { todayISO } from '../lib/duplicates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
+import { deleteReceiptImage } from '../lib/receiptStorage';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -46,6 +47,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [linkId, setLinkId] = useState<string | null>(null);
   const [linkEffect, setLinkEffect] = useState<LinkEffect>('subtract');
   const [splitting, setSplitting] = useState(false);
+  const [viewingReceipt, setViewingReceipt] = useState(false);
 
   const openId = txn?.id;
   useEffect(() => {
@@ -58,6 +60,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setLinkId(null);
       setLinkEffect('subtract');
       setSplitting(false);
+      setViewingReceipt(false);
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -139,6 +142,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     const label = txn.merchantRaw || currentCatLabel;
     confirmAction('Delete transaction?', `Remove “${label}”? This can’t be undone.`, 'Delete', async () => {
       await removeTransaction(txn.id);
+      if (txn.receiptUri) deleteReceiptImage(txn.receiptUri);
       onClose();
     });
   };
@@ -158,6 +162,21 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {!!txn.receiptUri && (
+            <Pressable
+              onPress={() => setViewingReceipt(true)}
+              style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, marginTop: 0, marginBottom: 18 }]}
+              hitSlop={4}
+            >
+              <RNImage source={{ uri: txn.receiptUri }} style={[styles.receiptThumb, { borderColor: colorTheme.line }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>Receipt photo</Text>
+                <Text style={[styles.splitSub, { color: colorTheme.ink2 }]}>Tap to view</Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+            </Pressable>
+          )}
+
           {/* type toggle — a transfer (e.g. a DCA contribution) can never be flipped into an
               expense or income here; it moves money between two accounts, not into a category. */}
           {type === 'transfer' ? (
@@ -326,6 +345,22 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             : undefined
         }
       />
+
+      <Modal
+        visible={viewingReceipt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewingReceipt(false)}
+      >
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewingReceipt(false)}>
+          {!!txn.receiptUri && (
+            <RNImage source={{ uri: txn.receiptUri }} style={styles.viewerImage} resizeMode="contain" />
+          )}
+          <Pressable onPress={() => setViewingReceipt(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+            <Icon name="x" size={22} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Modal>
   );
 }
@@ -383,6 +418,10 @@ const styles = StyleSheet.create({
   },
   splitTitle: { fontFamily: uiFont(700), fontSize: 14 },
   splitSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
+  receiptThumb: { width: 44, height: 44, borderRadius: 10, borderWidth: 1 },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
+  viewerClose: { position: 'absolute', right: 18, padding: 8 },
   remarkInput: {
     borderWidth: 1,
     borderRadius: radius.sm,

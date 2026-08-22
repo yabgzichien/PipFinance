@@ -158,6 +158,9 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       price_myr     REAL,
       created_at    TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS deleted_default_categories (
+      id  TEXT PRIMARY KEY NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_txn_created ON transactions (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_split_txn ON splits (txn_id);
     CREATE INDEX IF NOT EXISTS idx_share_split ON split_shares (split_id);
@@ -195,6 +198,14 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   // Migration: a free-text remark the user can attach to a transaction.
   try {
     await db.execAsync('ALTER TABLE transactions ADD COLUMN remark TEXT');
+  } catch {
+    // column already present
+  }
+
+  // Migration: a saved photo of the receipt that produced this transaction, kept only
+  // when the user opts in on the scan's review screen.
+  try {
+    await db.execAsync('ALTER TABLE transactions ADD COLUMN receipt_uri TEXT');
   } catch {
     // column already present
   }
@@ -259,10 +270,21 @@ async function ensureSeedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
  * Insert every default category and fix up income kinds. Used both for the
  * idempotent startup seed (via ensureSeedCategories) and the full data reset
  * (where the categories table has just been emptied).
+ *
+ * Skips any id a user has deliberately deleted (`deleted_default_categories`):
+ * without this, a default category removed via `deleteCategory` would silently
+ * reappear the next time the app is opened, since this seed step would otherwise
+ * treat its absence as "never seeded" rather than "removed on purpose". A full
+ * `resetAllData` clears that tombstone table first, so reset genuinely restores
+ * every default.
  */
 async function seedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
-  for (let i = 0; i < ALL_SEED_CATEGORIES.length; i++) {
-    const c = ALL_SEED_CATEGORIES[i];
+  const deletedRows = await db.getAllAsync<{ id: string }>('SELECT id FROM deleted_default_categories');
+  const deletedIds = new Set(deletedRows.map((r) => r.id));
+
+  let sort = 0;
+  for (const c of ALL_SEED_CATEGORIES) {
+    if (deletedIds.has(c.id)) continue;
     // Upsert rather than INSERT OR IGNORE: the ids that survived the bookkeeping
     // retune ('dining', 'transport', 'other') carry stale labels and sort order on
     // an upgraded database, and defaults are never user-editable, so refreshing
@@ -277,8 +299,9 @@ async function seedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
       c.icon,
       c.hue,
       c.kind,
-      i
+      sort
     );
+    sort += 1;
   }
   const placeholders = INCOME_SEED_IDS.map(() => '?').join(',');
   await db.runAsync(`UPDATE categories SET kind = 'income' WHERE id IN (${placeholders})`, ...INCOME_SEED_IDS);
@@ -309,6 +332,7 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM people;
       DELETE FROM commitment_occurrences;
       DELETE FROM commitments;
+      DELETE FROM deleted_default_categories;
     `);
     await seedCategories(db);
   });

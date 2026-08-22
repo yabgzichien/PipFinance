@@ -44,8 +44,6 @@ const ALLOWLIST = new Set([
   'src/components/AccountLinkField.tsx',
   'src/components/AddCategoryModal.tsx',
   'src/components/AppAlertModal.tsx',
-  'src/components/BenchmarkCard.tsx',
-  'src/components/BenchmarkPicker.tsx',
   'src/components/BottomNav.tsx',
   'src/components/BudgetProgressList.tsx',
   'src/components/CashflowStructure.tsx',

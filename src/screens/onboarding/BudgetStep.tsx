@@ -12,9 +12,9 @@ import { EXPENSE_ICONS } from '../CategoriesScreen';
 import { Icon, type IconName } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { BtnLabel, CatBadge, Eyebrow, PrimaryButton } from '../../components/ui';
-import { PROTECTED_CATEGORY_IDS } from '../../db/categoriesRepo';
+import { NoFallbackCategoryError } from '../../db/categoriesRepo';
 import * as haptics from '../../lib/haptics';
-import { confirmAction } from '../../lib/platformAlert';
+import { confirmAction, notify } from '../../lib/platformAlert';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
 import { useAppData } from '../../state/store';
@@ -69,13 +69,21 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
   };
 
   const removeCategory = (id: string, label: string) => {
-    confirmAction('Delete category?', `Remove "${label}"? This can't be undone.`, 'Delete', () => {
-      setSelected((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      void deleteCategory(id);
+    confirmAction('Delete category?', `Remove "${label}"? This can't be undone.`, 'Delete', async () => {
+      try {
+        await deleteCategory(id);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } catch (e) {
+        if (e instanceof NoFallbackCategoryError) {
+          notify('Add another category first', `"${label}" is your only ${e.kind} category, so there's nowhere to move its transactions. Add another category, then delete this one.`);
+          return;
+        }
+        throw e;
+      }
     });
   };
 
@@ -112,7 +120,6 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
             category list still finishes settling inside half a second. */}
         {expenseCats.map((c, i) => {
           const isSelected = selected.has(c.id);
-          const protectedCat = PROTECTED_CATEGORY_IDS.includes(c.id);
           return (
             <FadeIn key={c.id} delay={Math.min(i, 4) * stagger} offset={8}>
               <View
@@ -153,11 +160,9 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
                 <Pressable onPress={() => startEdit(c.id, c.label, c.icon)} hitSlop={8} style={styles.iconBtn}>
                   <Icon name="pencil" size={15} color={colorTheme.ink2} />
                 </Pressable>
-                {!protectedCat && (
-                  <Pressable onPress={() => removeCategory(c.id, c.label)} hitSlop={8} style={styles.iconBtn}>
-                    <Icon name="trash" size={16} color="#b3261e" />
-                  </Pressable>
-                )}
+                <Pressable onPress={() => removeCategory(c.id, c.label)} hitSlop={8} style={styles.iconBtn}>
+                  <Icon name="trash" size={16} color="#b3261e" />
+                </Pressable>
               </View>
 
               {editingId === c.id && (

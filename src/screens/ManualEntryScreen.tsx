@@ -46,6 +46,7 @@ export function ManualEntryScreen({
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
   const [amountText, setAmountText] = useState(initialAmount ? initialAmount.toFixed(2) : '');
   const [dateText, setDateText] = useState(todayISO());
+  const [dateFocused, setDateFocused] = useState(false);
   const [type, setType] = useState<TxnType>('expense');
   const [cat, setCat] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
@@ -126,25 +127,22 @@ export function ManualEntryScreen({
         <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
           {(['expense', 'income'] as TxnType[]).map((k) => {
             const on = type === k;
+            const activeColor = k === 'expense' ? colorTheme.red : theme.accent;
+            const activeBg = k === 'expense' ? colorTheme.redTint : theme.accentTint;
+            const activeBorder = k === 'expense' ? colorTheme.redSoft : theme.accentSoft;
             return (
-              <Pressable key={k} onPress={() => switchType(k)} style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}>
-                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: colorTheme.ink }]}>{k === 'expense' ? 'Expense' : 'Income'}</Text>
+              <Pressable
+                key={k}
+                onPress={() => switchType(k)}
+                style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: activeBg, borderColor: activeBorder }]}
+              >
+                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: activeColor }]}>{k === 'expense' ? 'Expense' : 'Income'}</Text>
               </Pressable>
             );
           })}
         </View>
 
-        <Eyebrow style={{ marginBottom: 8 }}>{type === 'income' ? 'Source (optional)' : 'Merchant (optional)'}</Eyebrow>
-        <TextInput
-          value={merchant}
-          onChangeText={setMerchant}
-          placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Jaya Grocer'}
-          placeholderTextColor={colorTheme.ink3}
-          style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-          autoFocus={!initialMerchant}
-        />
-
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Amount</Eyebrow>
+        <Eyebrow style={{ marginBottom: 8 }}>Amount</Eyebrow>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
           <TextInput
@@ -187,16 +185,31 @@ export function ManualEntryScreen({
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Date</Eyebrow>
         <TextInput
-          value={dateText}
+          value={dateFocused ? dateText : validDate ? fullDate(validDate) : dateText}
           onChangeText={setDateText}
+          onFocus={() => setDateFocused(true)}
+          onBlur={() => setDateFocused(false)}
+          onSubmitEditing={() => setDateFocused(false)}
+          selectTextOnFocus
           placeholder="YYYY-MM-DD"
           placeholderTextColor={colorTheme.ink3}
           keyboardType="numbers-and-punctuation"
           style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
         />
-        <Text style={[styles.dateHint, { color: colorTheme.ink2 }, !validDate && styles.dateHintBad]}>
-          {validDate ? fullDate(validDate) : 'Enter a valid date (YYYY-MM-DD)'}
-        </Text>
+        {!validDate && (
+          <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
+            Enter a valid date (YYYY-MM-DD)
+          </Text>
+        )}
+
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{type === 'income' ? 'Source (optional)' : 'Merchant (optional)'}</Eyebrow>
+        <TextInput
+          value={merchant}
+          onChangeText={setMerchant}
+          placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Jaya Grocer'}
+          placeholderTextColor={colorTheme.ink3}
+          style={[styles.textInputSm, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+        />
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>Category</Eyebrow>
         <View style={styles.grid}>
@@ -260,7 +273,7 @@ export function ManualEntryScreen({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, marginBottom: 18, borderWidth: 1 },
-  toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999 },
+  toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: 'transparent' },
   toggleBtnOn: { ...shadowToggle },
   toggleText: { fontFamily: uiFont(600), fontSize: 14 },
   toggleTextOn: {},
@@ -273,6 +286,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   dateHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
+  textInputSm: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontFamily: uiFont(600),
+    fontSize: 14,
+  },
   dateHintBad: { color: '#c5402f' },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
   rm: { fontFamily: numFont(600), fontSize: 18 },

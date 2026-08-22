@@ -2,24 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { Card, Eyebrow, TopBar } from '../components/ui';
 import { clearMemory } from '../db/memoryRepo';
 import { getProvider, llmErrorMessage } from '../llm';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
-import { AGING_DAYS } from '../lib/split';
+import * as sound from '../lib/sound';
 import { ensurePermission } from '../notifications';
 import { useAccent, useAccentPreset } from '../state/accent';
 import { useColorSchemeMode, useThemeColors, type ColorSchemeMode } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { radius, uiFont } from '../theme';
+import { motionSettingLabel, MOTION_SETTINGS } from '../theme/motion';
 
 type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
 
 
-export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onResetToOnboarding }: { onBack: () => void; onMigrate?: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onResetToOnboarding?: () => void }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onResetToOnboarding }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onResetToOnboarding?: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -83,14 +85,24 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
         <Eyebrow style={{ marginBottom: 10 }}>Appearance</Eyebrow>
         <Card style={{ padding: 16 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink }]}>Theme</Text>
-          <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 12 }]}>Light, dark, or match your device.</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Theme</Text>
           <ThemeModePicker />
         </Card>
         <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink }]}>Accent color</Text>
-          <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 12 }]}>Choose the color used for buttons, chips, and highlights.</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Accent color</Text>
           <AccentColorPicker />
+        </Card>
+        <Card style={{ padding: 16, marginTop: 12 }}>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Motion and haptics</Text>
+          <MotionSettingPicker />
+        </Card>
+        <Card style={{ padding: 16, marginTop: 12 }}>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Sounds</Text>
+          <SoundPicker />
+        </Card>
+        <Card style={{ padding: 16, marginTop: 12 }}>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Streak</Text>
+          <StreakPausePicker />
         </Card>
 
         {/* Hidden on web rather than disabled: expo-notifications has no web support, and a
@@ -99,24 +111,16 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
           <>
             <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Reminders</Eyebrow>
             <Card style={{ padding: 16 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Log your spending</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 12 }]}>
-                A nudge at 10pm when you have not logged anything. Days you already logged are skipped.
-              </Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Log your spending</Text>
               <LogReminderPicker />
+              <ReminderHourOverridePicker />
             </Card>
             <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Chase what you’re owed</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 12 }]}>
-                A weekly nudge at 10pm once someone has owed you for {AGING_DAYS} days or more.
-              </Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Chase what you’re owed</Text>
               <OwedReminderPicker />
             </Card>
             <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Recurring bills</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 12 }]}>
-                A monthly summary of what's due, plus a nudge for anything overdue.
-              </Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Recurring bills</Text>
               <CommitmentReminderPicker />
             </Card>
           </>
@@ -133,7 +137,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
               role="general"
               icon="sparkles"
               name="Groq · primary"
-              sub="Primary for every task: screenshots, documents, and tips."
               model={settings.groqModel}
               apiKey={settings.groqKey}
             />
@@ -145,21 +148,20 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
               role="docs"
               icon="receipt"
               name="Gemini · fallback"
-              sub="Used only if Groq fails, and for PDFs Groq can't read."
               model={settings.geminiModel}
               apiKey={settings.geminiKey}
             />
-
-            <Text style={[styles.help, { color: colorTheme.ink2 }]}>The provider keys and models are fixed by the app configuration.</Text>
           </>
         )}
 
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Learning</Eyebrow>
+        <View style={[styles.eyebrowRow, { marginTop: 26, marginBottom: 10 }]}>
+          <Eyebrow>Learning</Eyebrow>
+          <InfoButton entry="learned_merchants" />
+        </View>
         <Card style={{ padding: 16 }}>
           <View style={styles.providerRow}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>{learnedCount} learned merchant{learnedCount === 1 ? '' : 's'}</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Pip suggests these categories automatically.</Text>
             </View>
             <Pressable onPress={resetLearned} disabled={learnedCount === 0} style={styles.resetBtn}>
               <Icon name="trash" size={16} color={learnedCount === 0 ? colorTheme.ink3 : '#b3261e'} />
@@ -175,7 +177,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>
                 {hasBudget ? `RM ${expectedIncome.toFixed(2)} income · ${allocationCount} categor${allocationCount === 1 ? 'y' : 'ies'}` : 'No budget set'}
               </Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Clear your monthly budget plan.</Text>
             </View>
             <Pressable onPress={resetBudgetConfirm} disabled={!hasBudget} style={styles.resetBtn}>
               <Icon name="trash" size={16} color={!hasBudget ? colorTheme.ink3 : '#b3261e'} />
@@ -195,7 +196,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Recurring bills & investments</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Set up monthly bills or a DCA investment, and tick them off each time they're paid.</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -211,23 +211,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Categories</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Add, edit, and reorder your spending and income categories.</Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
-
-        {onMigrate && (
-          <Pressable
-            onPress={onMigrate}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="receipt" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Import / migrate data</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Read past transactions from a PDF, image, CSV, Excel, or Word file.</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -243,7 +226,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Advanced import</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Copy a prompt, use any AI (Claude, ChatGPT, Gemini…) to extract your statements, then paste the JSON here.</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -259,7 +241,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Financial reports & export</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Export your Balance Sheet, Income Statement, Excel (.xlsx), CSV, PDF, or HTML statistics report.</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -275,7 +256,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
                 <Icon name="alert" size={13} color="#b3261e" />
                 <Text style={[styles.providerName, { color: '#b3261e' }]}>Reset all data</Text>
               </View>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Delete every transaction, learned merchant, and your budget, then restore the default categories. This can't be undone.</Text>
             </View>
             <Pressable onPress={resetAllConfirm} style={styles.resetBtn}>
               <Icon name="trash" size={16} color="#b3261e" />
@@ -291,7 +271,6 @@ export function SettingsScreen({ onBack, onMigrate, onAdvancedImport, onOpenExpo
                 <Icon name="alert" size={13} color="#b3261e" />
                 <Text style={[styles.providerName, { color: '#b3261e' }]}>Reset & go to setup</Text>
               </View>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>Wipe all data and return to the setup wizard. Useful for a full fresh start. This can't be undone.</Text>
             </View>
             <Pressable onPress={resetToOnboardingConfirm} style={styles.resetBtn}>
               <Icon name="trash" size={16} color="#b3261e" />
@@ -345,6 +324,46 @@ function LogReminderPicker() {
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+const REMINDER_HOUR_OVERRIDE_OPTIONS: { hour: number | null; label: string }[] = [
+  { hour: null, label: 'Auto' },
+  { hour: 21, label: '9 PM' },
+  { hour: 22, label: '10 PM' },
+  { hour: 23, label: '11 PM' },
+];
+
+/** Auto / 9 PM / 10 PM / 11 PM, same pill shape as ThemeModePicker. Hidden once the log
+ *  reminder itself is off, since a fire-hour override is meaningless with nothing scheduled to fire
+ *  (docs/ui-engagement-plan.md Step 7, item 1: autonomy over the behaviour-inferred hour). */
+function ReminderHourOverridePicker() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { reminderCadence, reminderHourOverride, setReminderHourOverride } = useAppData();
+  if (reminderCadence === 'off') return null;
+  return (
+    <View style={{ marginTop: 10 }}>
+      <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 8 }]}>When</Text>
+      <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+        {REMINDER_HOUR_OVERRIDE_OPTIONS.map((opt) => {
+          const on = reminderHourOverride === opt.hour;
+          return (
+            <Pressable
+              key={opt.label}
+              onPress={() => void setReminderHourOverride(opt.hour)}
+              style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+            >
+              <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+                {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -428,6 +447,93 @@ function ThemeModePicker() {
   );
 }
 
+/** Two-pill On/Paused, same shape as OwedReminderPicker (docs/ui-engagement-plan.md Step 4).
+ *  "On" is first and reads as the affirmative state, matching every other reminder pair on this
+ *  screen; "Paused" is the one the user reaches for, not the default. */
+function StreakPausePicker() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { streakPaused, pauseStreak, resumeStreak } = useAppData();
+  return (
+    <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+      {[false, true].map((paused) => {
+        const on = streakPaused === paused;
+        return (
+          <Pressable
+            key={String(paused)}
+            onPress={() => void (paused ? pauseStreak() : resumeStreak())}
+            style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+              {paused ? 'Paused' : 'On'}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Full/Reduced/Off, same pill shape as ThemeModePicker (docs/ui-engagement-plan.md Step 1). */
+function MotionSettingPicker() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { motionSetting, setMotionSetting } = useAppData();
+  return (
+    <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+      {MOTION_SETTINGS.map((setting) => {
+        const on = motionSetting === setting;
+        return (
+          <Pressable
+            key={setting}
+            onPress={() => void setMotionSetting(setting)}
+            style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+              {motionSettingLabel(setting)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Two-pill Off/On for the save chime, same shape as OwedReminderPicker. Turning it on plays
+ *  the chime immediately so the user hears what they just chose without staging a save. */
+function SoundPicker() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { soundEnabled, setSoundEnabled } = useAppData();
+  return (
+    <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+      {[false, true].map((value) => {
+        const on = soundEnabled === value;
+        return (
+          <Pressable
+            key={String(value)}
+            onPress={async () => {
+              await setSoundEnabled(value);
+              if (value) sound.payoff();
+            }}
+            style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+              {value ? 'On' : 'Off'}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** Row of preset swatches for picking the app's accent color, same visual pattern as the
  *  category-color picker in AddCategoryModal (tap a circle, checkmark on the active one). */
 function AccentColorPicker() {
@@ -460,7 +566,6 @@ function ProviderCard({
   role,
   icon,
   name,
-  sub,
   model,
   apiKey,
 }: {
@@ -468,7 +573,6 @@ function ProviderCard({
   role: ProviderRole;
   icon: IconName;
   name: string;
-  sub: string;
   model: string;
   apiKey: string;
 }) {
@@ -499,7 +603,6 @@ function ProviderCard({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.providerName, { color: colorTheme.ink }]}>{name}</Text>
-          <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>{sub}</Text>
         </View>
       </View>
 
@@ -540,6 +643,7 @@ function ReadonlyField({ label, children }: { label: string; children: React.Rea
 const styles = StyleSheet.create({
   root: { flex: 1 },
   dangerCard: { borderColor: 'rgba(179,38,30,0.28)', backgroundColor: 'rgba(179,38,30,0.03)' },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   providerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   providerBadge: {
     width: 38,
@@ -569,7 +673,6 @@ const styles = StyleSheet.create({
   },
   testBtnText: { fontFamily: uiFont(600), fontSize: 14.5 },
   result: { fontFamily: uiFont(600), fontSize: 13, lineHeight: 18 },
-  help: { fontFamily: uiFont(500), fontSize: 12, lineHeight: 17, paddingHorizontal: 4, paddingTop: 12 },
   migrateRow: { padding: 16, borderRadius: radius.md, borderWidth: 1 },
   resetBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8 },
   resetText: { fontFamily: uiFont(600), fontSize: 13.5 },

@@ -26,9 +26,6 @@ export function fromCents(cents: number): number {
  * three shares each rounding up a third of a cent hands out a cent nobody paid. Assigning
  * against a running cumulative target instead makes the rounding error cancel rather than
  * accumulate, so the total is exact by construction at any number of participants.
- *
- * Ported from `apportion` in belanjawankuBudget.ts, which solves the same problem for
- * whole-ringgit budget lines.
  */
 export function apportionCents(weights: number[], totalCents: number): number[] {
   const total = weights.reduce((s, w) => s + w, 0);

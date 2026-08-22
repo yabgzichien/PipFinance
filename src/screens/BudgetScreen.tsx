@@ -2,16 +2,12 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BenchmarkCard } from '../components/BenchmarkCard';
-import { BenchmarkPicker } from '../components/BenchmarkPicker';
 import { BudgetProgressList } from '../components/BudgetProgressList';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { Pip } from '../components/Pip';
 import { SavingsHabitCard } from '../components/SavingsHabitCard';
 import { Amount, Body, BtnLabel, Card, Caption, Eyebrow, Label, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
-import { getBenchmark } from '../lib/belanjawanku';
-import { benchmarkGaps } from '../lib/belanjawankuBudget';
 import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { computeSavingsHabit } from '../lib/savingsHabit';
 import { allocatedTotal, averageMonthlySpend, budgetHash, categoryStatus, currentMonthKey, leftover, txnMonthKey } from '../lib/budget';
@@ -41,14 +37,10 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
     hasBudget,
     getCachedAdvice,
     saveAdvice,
-    householdProfile,
-    guideCity,
-    setBenchmarkProfile,
     savingsTarget,
     setSavingsTarget,
   } = useAppData();
   const [editing, setEditing] = useState(false);
-  const [pickingHousehold, setPickingHousehold] = useState(false);
   const [advice, setAdvice] = useState<string | null>(null);
   const [adviceBusy, setAdviceBusy] = useState(false);
   const [adviceErr, setAdviceErr] = useState('');
@@ -63,13 +55,6 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
     return m;
   }, [monthExpenses]);
 
-  const benchmark = useMemo(() => getBenchmark(householdProfile, guideCity), [householdProfile, guideCity]);
-  // Three-month average, the same window `useCreditProfile` feeds the coach, so the gaps quoted
-  // here and the ones Pip narrates are always the same numbers.
-  const gaps = useMemo(
-    () => benchmarkGaps(benchmark, averageMonthlySpend(transactions, new Date(), 3)),
-    [benchmark, transactions]
-  );
   const habit = useMemo(
     () => computeSavingsHabit(transactions, savingsTarget),
     [transactions, savingsTarget]
@@ -189,21 +174,11 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
         </Card>
 
         {/* per-category. Kept directly under the summary: "how is this month going" is the
-            screen's core job, and the benchmark and habit cards below are the deeper read. */}
+            screen's core job, and the habit card below is the deeper read. */}
         <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>This month · {monthName()}</Eyebrow>
         <BudgetProgressList allocations={allocations} spentByCat={spentByCat} catById={catById} />
 
-        <BenchmarkCard
-          benchmark={benchmark}
-          gaps={gaps}
-          onChangeHousehold={() => setPickingHousehold(true)}
-        />
-
-        <SavingsHabitCard
-          habit={habit}
-          guideSuggestion={benchmark.savings}
-          onSetTarget={(amount) => void setSavingsTarget(amount)}
-        />
+        <SavingsHabitCard habit={habit} onSetTarget={(amount) => void setSavingsTarget(amount)} />
 
         <Pressable
           onPress={onOpenRecap}
@@ -227,17 +202,6 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
           </PrimaryButton>
         </View>
       </ScrollView>
-
-      <BenchmarkPicker
-        visible={pickingHousehold}
-        profile={householdProfile}
-        city={guideCity}
-        onClose={() => setPickingHousehold(false)}
-        onSave={(p, c) => {
-          void setBenchmarkProfile(p, c);
-          setPickingHousehold(false);
-        }}
-      />
     </View>
   );
 }

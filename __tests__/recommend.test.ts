@@ -1,5 +1,5 @@
-import { suggestByKey, suggestForMerchant } from '../src/lib/recommend';
-import type { MemoryMap } from '../src/lib/types';
+import { autoFillStats, suggestByKey, suggestForMerchant } from '../src/lib/recommend';
+import type { CategorySuggestion, MemoryMap } from '../src/lib/types';
 
 const MEMORY: MemoryMap = {
   tealive: 'coffee',
@@ -29,5 +29,34 @@ describe('suggestForMerchant', () => {
 
   it('returns null for an unseen merchant', () => {
     expect(suggestForMerchant(MEMORY, 'Nandos')).toBeNull();
+  });
+});
+
+describe('autoFillStats', () => {
+  it('counts learned-source suggestions as filled, out of the total lines', () => {
+    const suggestions: (CategorySuggestion | null)[] = [
+      { categoryId: 'coffee', source: 'learned' },
+      { categoryId: 'transport', source: 'learned' },
+      { categoryId: 'fuel', source: 'guess' },
+      null,
+    ];
+    expect(autoFillStats(suggestions)).toEqual({ filled: 2, total: 4 });
+  });
+
+  it('returns zero filled when nothing was learned', () => {
+    const suggestions: (CategorySuggestion | null)[] = [{ categoryId: 'fuel', source: 'guess' }, null];
+    expect(autoFillStats(suggestions)).toEqual({ filled: 0, total: 2 });
+  });
+
+  it('returns all-filled when every line matched memory', () => {
+    const suggestions: (CategorySuggestion | null)[] = [
+      { categoryId: 'coffee', source: 'learned' },
+      { categoryId: 'fuel', source: 'learned' },
+    ];
+    expect(autoFillStats(suggestions)).toEqual({ filled: 2, total: 2 });
+  });
+
+  it('handles an empty scan', () => {
+    expect(autoFillStats([])).toEqual({ filled: 0, total: 0 });
   });
 });

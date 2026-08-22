@@ -47,6 +47,9 @@ export interface Transaction {
    *  this field existed keep working unchanged; the DB and repo always resolve it to a real
    *  value (string or null), it is only "possibly absent" from the type's point of view. */
   remark?: string | null;
+  /** Local file URI of a saved receipt photo, kept only when the user opted in while
+   *  scanning. Optional for the same reason as `remark`; null for every other source. */
+  receiptUri?: string | null;
 }
 
 /** merchantKey -> categoryId, the learned memory. */

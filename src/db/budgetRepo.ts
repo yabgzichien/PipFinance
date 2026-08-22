@@ -30,7 +30,8 @@ export async function getAllocations(): Promise<Record<string, number>> {
     'SELECT category_id, amount FROM budget_allocation'
   );
   const map: Record<string, number> = {};
-  for (const r of rows) map[r.category_id] = r.amount;
+  // A category allocated RM 0 isn't a budget for it, so it's skipped rather than surfaced as one.
+  for (const r of rows) if (r.amount > 0) map[r.category_id] = r.amount;
   return map;
 }
 

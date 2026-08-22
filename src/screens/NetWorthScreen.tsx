@@ -313,8 +313,8 @@ function HeroSparkline({ values }: { values: number[] }) {
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       <Defs>
         <LinearGradient id="nwSpk" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="rgba(255,255,255,0.30)" />
-          <Stop offset="1" stopColor="rgba(255,255,255,0)" />
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={0.3} />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
         </LinearGradient>
       </Defs>
       <Path d={area} fill="url(#nwSpk)" />

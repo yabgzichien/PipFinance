@@ -36,6 +36,12 @@
         }
       ],
       [
+        "react-native-document-scanner-plugin",
+        {
+          "cameraPermission": "Pip needs the camera to scan your statement or receipt."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
@@ -60,6 +66,13 @@
               "updatePeriodMillis": 1800000
             }
           ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "microphonePermission": false
         }
       ]
     ]

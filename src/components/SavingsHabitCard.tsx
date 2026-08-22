@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { savingsStepUp, type SavingsHabit } from '../lib/savingsHabit';
+import type { SavingsHabit } from '../lib/savingsHabit';
 import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -16,19 +16,15 @@ import { InfoButton } from './InfoButton';
  */
 export function SavingsHabitCard({
   habit,
-  guideSuggestion,
   onSetTarget,
 }: {
   habit: SavingsHabit;
-  /** What Belanjawanku recommends this household save monthly, if anything. */
-  guideSuggestion?: number;
   onSetTarget: (amount: number) => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(habit.target));
-  const stepUp = savingsStepUp(habit, guideSuggestion);
 
   const save = () => {
     const parsed = Math.max(0, parseFloat(draft.replace(/[^0-9.]/g, '')) || 0);
@@ -72,24 +68,6 @@ export function SavingsHabitCard({
         </Text>
       )}
 
-      {/* The "increase gradually" half of the advice, offered only once the borrower has proved
-          they can hold the smaller amount. Never auto-applied: raising it is their call. */}
-      {stepUp !== null && !editing && (
-        <View style={[styles.stepUp, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-          <Text style={[styles.stepUpText, { color: theme.onTint }]}>
-            You have kept this up {habit.monthsKept} month{habit.monthsKept === 1 ? '' : 's'} in a
-            row. The national guide suggests RM {fmt(stepUp)} for your household.
-          </Text>
-          <Pressable
-            onPress={() => onSetTarget(stepUp)}
-            style={({ pressed }) => [styles.stepUpBtn, { backgroundColor: theme.accent, opacity: pressed ? 0.8 : 1 }]}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.stepUpBtnText, { color: theme.accentInk }]}>Raise to RM {fmt(stepUp)}</Text>
-          </Pressable>
-        </View>
-      )}
-
       {editing ? (
         <View style={styles.editRow}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
@@ -130,21 +108,6 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   target: { fontFamily: uiFont(700), fontSize: 16, marginTop: 3 },
-  stepUp: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-  },
-  stepUpText: { fontFamily: uiFont(500), fontSize: 12.5, lineHeight: 18 },
-  stepUpBtn: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  stepUpBtnText: { fontFamily: uiFont(700), fontSize: 12.5 },
   streak: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   flame: { fontSize: 15 },
   streakText: { fontFamily: uiFont(700), fontSize: 13 },

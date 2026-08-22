@@ -6,6 +6,7 @@ import type { Account } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, uiFont } from '../theme';
+import { AddAccountModal } from './AddAccountModal';
 import { Icon, type IconName } from './Icon';
 
 /**
@@ -37,6 +38,7 @@ export function AccountLinkField({
   required?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const active = accounts.filter((a) => !a.archived);
@@ -101,9 +103,29 @@ export function AccountLinkField({
                 />
               ))}
             </ScrollView>
+            <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
+            <Pressable
+              onPress={() => {
+                setOpen(false);
+                setCreating(true);
+              }}
+              style={styles.option}
+            >
+              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+              <Text style={[styles.optionText, { color: theme.accent }]}>Create new account</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
+
+      <AddAccountModal
+        visible={creating}
+        onClose={() => setCreating(false)}
+        onCreated={(id) => {
+          setCreating(false);
+          choose(id);
+        }}
+      />
     </View>
   );
 }
@@ -160,6 +182,7 @@ const styles = StyleSheet.create({
   },
   menuTitle: { fontFamily: uiFont(700), fontSize: 13, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
   menuScroll: { flexGrow: 0 },
+  menuDivider: { height: StyleSheet.hairlineWidth, marginVertical: 4 },
   option: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
   optionIconSpacer: { width: 16 },
   optionText: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },

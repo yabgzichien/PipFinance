@@ -1,9 +1,10 @@
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { Image as RNImage, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { B, Body, BubbleText, Caption, Label, PipSays, TopBar } from '../components/ui';
+import { scanDocument } from '../lib/documentScanner';
 import { notify } from '../lib/platformAlert';
 import { SAMPLE_STATEMENTS } from '../data/sampleStatements';
 import { useAccent } from '../state/accent';
@@ -19,26 +20,27 @@ export interface PickedImage {
 /**
  * The add hub. Screenshot-of-an-app-you-already-have-open is the mechanism the business plan
  * leads with (docs/ui-design-plan.md §5) — a competitor already owns "AI reads a receipt", not
- * "reads whatever's already on your screen" — so that row is first and open by default, not
- * third and collapsed behind an accordion. Receipt and manual entry follow; file import (the
- * least common path — a PDF/CSV export, not a screenshot) is folded under "More ways to add".
+ * "reads whatever's already on your screen" — so scanning is first and open by default, not
+ * collapsed behind an accordion.
+ *
+ * There is exactly ONE scan row. It used to be two ("statement or e-wallet" and "receipt"),
+ * which read as duplicates and made the user classify the document before the camera even
+ * opened. Now every capture hands off to ScanKindScreen, which asks which it was — a question
+ * you can only answer sensibly once you're looking at the thing you photographed. Manual entry
+ * follows as a quiet secondary row, so only the scan card carries the loud dashed drop-target
+ * styling.
  */
 export function AttachScreen({
   hasKey,
   onClose,
   onPicked,
   onManual,
-  onImport,
-  onReceipt,
   showSamples = false,
 }: {
   hasKey: boolean;
   onClose: () => void;
   onPicked: (img: PickedImage) => void;
   onManual: () => void;
-  onImport: () => void;
-  /** Open the itemised-receipt scanner (one purchase, many lines). */
-  onReceipt: () => void;
   /** Offer the bundled demo statements as one-tap samples (used during the judge tour)
    *  alongside the real upload options, so the app never injects an image on its own. */
   showSamples?: boolean;
@@ -47,13 +49,12 @@ export function AttachScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const [busy, setBusy] = useState(false);
-  // Camera-vs-gallery is a detail of HOW you hand over a statement, not a separate thing to add.
-  // Expanded by default: the statement/e-wallet row is the differentiator (see file header), so
-  // it should never need an extra tap to reveal its own options.
-  const [statementOpen, setStatementOpen] = useState(true);
-  const [moreOpen, setMoreOpen] = useState(false);
+  // Camera-vs-gallery is a detail of HOW you hand the image over, not a separate thing to add.
+  // Expanded by default: scanning is the differentiator (see file header), so it should never
+  // need an extra tap to reveal its own options.
+  const [scanOpen, setScanOpen] = useState(true);
   useEffect(() => {
-    if (showSamples) setStatementOpen(true);
+    if (showSamples) setScanOpen(true);
   }, [showSamples]);
 
   const handleResult = (res: ImagePicker.ImagePickerResult) => {
@@ -90,6 +91,19 @@ export function AttachScreen({
     if (busy) return;
     setBusy(true);
     try {
+      // Native builds get the live-edge-detected scanner (a bounding box tracks the statement
+      // on screen and crops to it on capture); web has no native side for it and keeps the
+      // plain camera picker below. 'unavailable' also falls through here: an Expo Go build
+      // without the dev-client native module degrades to the same plain picker rather than
+      // dead-ending the user.
+      if (Platform.OS !== 'web') {
+        const outcome = await scanDocument();
+        if (outcome.status === 'picked') {
+          onPicked(outcome.image);
+          return;
+        }
+        if (outcome.status === 'cancelled') return;
+      }
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
         notify('Permission needed', 'Allow camera access to snap a receipt.');
@@ -113,8 +127,8 @@ export function AttachScreen({
         <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm }}>
           <PipSays expr="curious">
             <BubbleText>
-              Screenshot the app you already have open and I’ll read it, or add <B>one purchase</B> a
-              different way.
+              Scan a <B>receipt</B> or a screenshot of the app you already have open, and I’ll read
+              it. I’ll ask which it was afterwards.
             </BubbleText>
           </PipSays>
         </View>
@@ -132,14 +146,15 @@ export function AttachScreen({
         <View style={styles.group}>
           <SourceButton
             icon="scan"
-            title="Scan a statement or e-wallet"
-            sub="A screenshot listing several transactions, the fastest way in"
-            onPress={() => setStatementOpen((v) => !v)}
+            title="Scan"
+            sub="A receipt, an e-wallet screenshot, or a bank statement"
+            onPress={() => setScanOpen((v) => !v)}
             disabled={busy}
-            expanded={statementOpen}
+            expanded={scanOpen}
+            tone="primary"
           />
 
-          {statementOpen && (
+          {scanOpen && (
             <View style={[styles.nested, { borderLeftColor: theme.accentSoft }]}>
               {showSamples && (
                 <>
@@ -177,40 +192,13 @@ export function AttachScreen({
 
         <View style={styles.group}>
           <SourceButton
-            icon="receipt"
-            title="Scan a receipt"
-            sub="Reads every line item. Split it with friends if you shared."
-            onPress={onReceipt}
-            disabled={busy}
-          />
-        </View>
-
-        <View style={styles.group}>
-          <SourceButton
             icon="pencil"
             title="Enter it manually"
             sub="Type one expense or income yourself"
             onPress={onManual}
             disabled={busy}
+            tone="quiet"
           />
-        </View>
-
-        <View style={styles.group}>
-          <SourceButton
-            icon="wallet"
-            title="More ways to add"
-            sub="Import a PDF, image, CSV, Excel, or Word statement"
-            onPress={() => setMoreOpen((v) => !v)}
-            disabled={busy}
-            expanded={moreOpen}
-          />
-          {moreOpen && (
-            <View style={[styles.nested, { borderLeftColor: theme.accentSoft }]}>
-              <Pressable onPress={onImport} disabled={busy} style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}>
-                <Label weight={700} color={theme.accent}>Import a file →</Label>
-              </Pressable>
-            </View>
-          )}
         </View>
 
         <Caption color={colorTheme.ink2} style={styles.hint}>
@@ -228,6 +216,7 @@ function SourceButton({
   onPress,
   disabled,
   expanded,
+  tone = 'quiet',
 }: {
   icon: IconName;
   title: string;
@@ -237,9 +226,14 @@ function SourceButton({
   /** Set on a row that opens options in place — the chevron then points down/up rather than
    *  right, so it never promises a screen change it does not make. */
   expanded?: boolean;
+  /** Only the scan row is 'primary': dashed drop-target border and an accent icon tile. When
+   *  every row shouted at the same volume the hub read as a wall of identical cards, so the
+   *  secondary ways in are plain solid rows with a neutral tile. */
+  tone?: 'primary' | 'quiet';
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const primary = tone === 'primary';
   return (
     <Pressable
       onPress={onPress}
@@ -249,14 +243,15 @@ function SourceButton({
       accessibilityState={expanded === undefined ? undefined : { expanded }}
       style={({ pressed }) => [
         styles.source,
+        primary && styles.sourceDashed,
         { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
-        expanded && styles.sourceOn,
-        expanded && { borderColor: theme.accentSoft, backgroundColor: theme.accentTint },
+        primary && expanded && styles.sourceOn,
+        primary && expanded && { borderColor: theme.accentSoft, backgroundColor: theme.accentTint },
         { opacity: disabled ? 0.6 : pressed ? 0.9 : 1 },
       ]}
     >
-      <View style={[styles.sourceIcon, { backgroundColor: theme.accentTint }]}>
-        <Icon name={icon} size={24} color={theme.accent} />
+      <View style={[styles.sourceIcon, { backgroundColor: primary ? theme.accentTint : colorTheme.bg }]}>
+        <Icon name={icon} size={24} color={primary ? theme.accent : colorTheme.ink2} />
       </View>
       <View style={{ flex: 1 }}>
         <Body weight={700}>{title}</Body>
@@ -332,8 +327,8 @@ const styles = StyleSheet.create({
     padding: spacing.base,
     borderRadius: radius.md,
     borderWidth: 1.5,
-    borderStyle: 'dashed',
   },
+  sourceDashed: { borderStyle: 'dashed' },
   sourceOn: { borderStyle: 'solid' },
   sourceIcon: {
     width: 48,

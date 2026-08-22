@@ -1,5 +1,4 @@
 import { getDb } from './db';
-import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Category } from '../lib/types';
 
 interface CatRow {
@@ -79,26 +78,60 @@ export async function updateCategoryIcon(id: string, icon: string): Promise<void
   await db.runAsync('UPDATE categories SET icon = ? WHERE id = ?', icon, id);
 }
 
-/**
- * The two generic categories that can never be deleted  they are the
- * reassignment targets when other categories are removed.
- */
-export const PROTECTED_CATEGORY_IDS = [DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID];
+/** Rename a category. Allowed on every category, including the protected generics. */
+export async function updateCategoryLabel(id: string, label: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE categories SET label = ? WHERE id = ?', label.trim(), id);
+}
 
 /**
- * Delete a category (defaults allowed, except the protected generics). Any
- * transactions or learned mappings pointing at it are reassigned to the generic
- * of the same kind ('other' for expense, 'income' for income) so nothing dangles.
+ * Thrown by `deleteCategory` when the category being removed is the last one
+ * of its kind (expense/income)  there would be nowhere to reassign its
+ * transactions. Callers should catch this and prompt the user to add a
+ * replacement category before deleting.
+ */
+export class NoFallbackCategoryError extends Error {
+  constructor(public kind: 'expense' | 'income') {
+    super(`Cannot delete the last ${kind} category`);
+  }
+}
+
+/**
+ * Delete any category, including the generic "Other Expenses"/"Other Income"
+ * ones  nothing is permanently locked. Any transactions or learned mappings
+ * pointing at it are reassigned to another category of the same kind (any
+ * remaining one, preferring another default) so nothing dangles. If it's the
+ * last category of its kind, deletion is refused via NoFallbackCategoryError
+ * since there'd be no valid reassignment target.
+ *
+ * A deleted default is also tombstoned in `deleted_default_categories`, so the
+ * startup reseed (`seedCategories` in db.ts) knows not to bring it back  without
+ * this, deleting a default category would only last until the app is next closed
+ * and reopened. Custom categories need no such tombstone: they are never seeded.
  */
 export async function deleteCategory(id: string): Promise<void> {
-  if (PROTECTED_CATEGORY_IDS.includes(id)) return;
   const db = await getDb();
-  const row = await db.getFirstAsync<{ kind: string }>('SELECT kind FROM categories WHERE id = ?', id);
-  const fallbackId = row?.kind === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID;
+  const row = await db.getFirstAsync<{ kind: string; is_default: number }>(
+    'SELECT kind, is_default FROM categories WHERE id = ?',
+    id
+  );
+  if (!row) return;
+  const kind = row.kind === 'income' ? 'income' : 'expense';
+  const fallback = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM categories WHERE kind = ? AND id != ? ORDER BY is_default DESC, sort ASC LIMIT 1',
+    row.kind,
+    id
+  );
+  if (!fallback) {
+    throw new NoFallbackCategoryError(kind);
+  }
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE transactions SET category_id = ? WHERE category_id = ?', fallbackId, id);
+    await db.runAsync('UPDATE transactions SET category_id = ? WHERE category_id = ?', fallback.id, id);
     await db.runAsync('DELETE FROM merchant_memory WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM budget_allocation WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM categories WHERE id = ?', id);
+    if (row.is_default) {
+      await db.runAsync('INSERT OR IGNORE INTO deleted_default_categories (id) VALUES (?)', id);
+    }
   });
 }

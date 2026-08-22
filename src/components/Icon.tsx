@@ -13,7 +13,7 @@ export type IconName =
   | 'chevronDown' | 'scan' | 'trending' | 'clock' | 'arrowRight' | 'search' | 'gallery' | 'wallet'
   | 'trash' | 'sliders' | 'gear' | 'alert' | 'pencil' | 'gift' | 'return' | 'percent'
   | 'home' | 'scale' | 'signal' | 'book' | 'shield' | 'store' | 'download' | 'file' | 'table'
-  | 'copy' | 'upload' | 'code';
+  | 'copy' | 'upload' | 'code' | 'pin';
 
 type RenderFn = (stroke: string, sw: number) => React.ReactNode;
 
@@ -319,6 +319,13 @@ const ICONS: Record<IconName, RenderFn> = {
     <G fill="none" stroke={s} strokeWidth={w}>
       <Path d="M8 6L3 12l5 6" />
       <Path d="M16 6l5 6-5 6" />
+    </G>
+  ),
+  pin: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Path d="M12 2a5 5 0 00-5 5c0 3.2 3.4 6.7 4.3 7.6a1 1 0 001.4 0C13.6 13.7 17 10.2 17 7a5 5 0 00-5-5z" />
+      <Circle cx={12} cy={7} r={2} />
+      <Line x1={12} y1={14.6} x2={12} y2={22} />
     </G>
   ),
 };

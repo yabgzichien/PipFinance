@@ -19,7 +19,6 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
         <StreakWidget
           streak={data.streak}
           dots={data.dots}
-          coverage={data.coverage}
         />
       );
       break;
@@ -32,7 +31,6 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
           <StreakWidget
             streak={data.streak}
             dots={data.dots}
-            coverage={data.coverage}
           />
         );
       }

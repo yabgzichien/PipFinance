@@ -5,13 +5,14 @@
 // skips step by step, which stays honest about what didn't get set up rather than silently
 // marking everything done. See docs/superpowers/specs/2026-08-21-onboarding-setup-wizard-design.md.
 import React, { useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FadeIn } from '../components/Motion';
 import { ProgressTrack, TopBar } from '../components/ui';
 import * as haptics from '../lib/haptics';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useBackHandler, useExitConfirm } from '../state/useBackHandler';
 import { spacing } from '../theme';
 import { BudgetStep } from './onboarding/BudgetStep';
 import { NotificationsStep } from './onboarding/NotificationsStep';
@@ -19,11 +20,9 @@ import { PipIntroStep } from './onboarding/PipIntroStep';
 import { RecurringPaymentStep } from './onboarding/RecurringPaymentStep';
 import { WidgetStep } from './onboarding/WidgetStep';
 
-/** Widget setup only applies where the app actually ships a widget target. */
-const HAS_WIDGET_STEP = Platform.OS === 'android';
-const TOTAL_STEPS = HAS_WIDGET_STEP ? 5 : 4;
-
 const STEP_TITLES = ['', 'Budget', 'Recurring payment', 'Notifications', 'Widget'];
+const TOTAL_STEPS = STEP_TITLES.length;
+const LAST_STEP = TOTAL_STEPS - 1;
 
 export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
@@ -43,7 +42,7 @@ export function OnboardingScreen() {
   };
 
   const advance = () => {
-    if (step >= 3 && (!HAS_WIDGET_STEP || step === 4)) {
+    if (step >= LAST_STEP) {
       finish();
       return;
     }
@@ -57,7 +56,17 @@ export function OnboardingScreen() {
     setStep((s) => s - 1);
   };
 
-  const stepIndexForProgress = step >= 4 ? 4 : step;
+  // The wizard's intro step is the app's true front door — there's no screen further back to
+  // fall through to, so hardware/gesture back gets the same "press again to exit" gate Home
+  // uses once onboarding is done.
+  const confirmExit = useExitConfirm();
+  useBackHandler(() => {
+    if (step > 0) {
+      goBack();
+      return true;
+    }
+    return confirmExit();
+  });
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -65,7 +74,7 @@ export function OnboardingScreen() {
         <View style={{ paddingTop: insets.top + 4 }}>
           <TopBar title={STEP_TITLES[step]} onBack={goBack} />
           <View style={{ paddingHorizontal: 18, paddingTop: 2 }}>
-            <ProgressTrack pct={((stepIndexForProgress + 1) / TOTAL_STEPS) * 100} height={5} />
+            <ProgressTrack pct={((step + 1) / TOTAL_STEPS) * 100} height={5} />
           </View>
         </View>
       )}
@@ -78,7 +87,7 @@ export function OnboardingScreen() {
         {step === 1 && <BudgetStep onNext={advance} onSkip={advance} />}
         {step === 2 && <RecurringPaymentStep onNext={advance} onSkip={advance} />}
         {step === 3 && <NotificationsStep onNext={advance} onSkip={advance} />}
-        {step === 4 && HAS_WIDGET_STEP && <WidgetStep onFinish={finish} />}
+        {step === 4 && <WidgetStep onFinish={finish} />}
       </FadeIn>
     </View>
   );

@@ -4,6 +4,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Icon } from '../components/Icon';
+import { Pip } from '../components/Pip';
 import { MonthVsNormalCard } from '../components/CashflowStructure';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
@@ -12,9 +13,15 @@ import { detectObligations } from '../lib/obligations';
 import { computeExpenseStructure } from '../lib/spendingProfile';
 import { monthLabel } from '../lib/dates';
 import { fmt } from '../lib/format';
-import { availableMonths, computeAdherence, monthlyIncomeStatement, spentByCategory } from '../lib/recap';
-import { getBenchmark } from '../lib/belanjawanku';
-import { benchmarkGaps, gapTrend } from '../lib/belanjawankuBudget';
+import {
+  availableMonths,
+  categoryComparisons,
+  computeAdherence,
+  hasComparisonData,
+  monthlyIncomeStatement,
+  prevMonthKey,
+  spentByCategory,
+} from '../lib/recap';
 import { netWorthSeries } from '../lib/networth';
 import type { Category } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -23,13 +30,6 @@ import { useThemeColors } from '../state/colorScheme';
 import type { StructuralColors } from '../theme';
 import { useAppData } from '../state/store';
 import { numFont, platformShadow, shadowCard, uiFont } from '../theme';
-
-/** The 'YYYY-MM' before the given one. */
-function prevMonthKey(mk: string): string {
-  const [y, m] = mk.split('-').map(Number);
-  const d = new Date(y, m - 2, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
@@ -118,6 +118,12 @@ function IncomeHero({
       <View style={styles.hero}>
       <HeroGradient positive={positive} />
       <View style={styles.heroBlob} />
+      {/* Unconditional, not gated on `positive`: this is Pip proud you reviewed the month, not
+          a verdict on the number (docs/ui-engagement-plan.md §1). No color override  same
+          accent-colored Pip as everywhere else in the app, not a flat white cutout. */}
+      <View style={styles.heroPip}>
+        <Pip size={40} expr="proud" />
+      </View>
 
       <Text style={styles.heroEyebrow}>Income Statement · {monthLabel(month)}</Text>
 
@@ -246,7 +252,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { transactions, catById, snapshots, accounts, balanceEntries, householdProfile, guideCity } = useAppData();
+  const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage } = useAppData();
 
   const snapshotMonths = useMemo(() => Object.keys(snapshots), [snapshots]);
   const months = useMemo(
@@ -264,13 +270,17 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const snapshot = snapshots[month];
   const allocations = snapshot?.allocations ?? {};
   const adherence = useMemo(() => computeAdherence(allocations, spentByCat), [allocations, spentByCat]);
-  const benchmark = useMemo(() => getBenchmark(householdProfile, guideCity), [householdProfile, guideCity]);
-  const monthGaps = useMemo(() => benchmarkGaps(benchmark, spentByCat), [benchmark, spentByCat]);
-  /** The same comparison a month earlier, so a standing gap can be reported as tracking. */
-  const prevMonthGaps = useMemo(
-    () => benchmarkGaps(benchmark, spentByCategory(transactions, prevMonthKey(month))),
-    [benchmark, transactions, month]
-  );
+  // Competence feedback, never achievement theatre (docs/ui-engagement-plan.md Step 5): real
+  // numbers that grow with use. `memory` is already the full loaded map, so its size is the
+  // "merchants Pip knows" count with no separate query. `coverage` is the 90-day data-
+  // completeness signal, computed once in the store and otherwise unused since
+  // `ui-design-plan.md` §3 evicted it from Home  it finds a home here, with room to explain it.
+  const merchantsKnown = Object.keys(memory).length;
+  // The winnable, shame-free comparison from §2.6: a user versus their own last month, per
+  // category, biggest current spend first. Only rendered with real history on both sides.
+  const comparisons = useMemo(() => categoryComparisons(transactions, month), [transactions, month]);
+  const showComparisons = useMemo(() => hasComparisonData(transactions, month), [transactions, month]);
+
   const hasBudget = Object.keys(allocations).length > 0;
   const budgetedIds = useMemo(() => Object.keys(allocations), [allocations]);
   const unbudgetedSpent = useMemo(
@@ -316,29 +326,8 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
         });
       }
     }
-    // One line against the national reference budget, so the recap measures the month against
-    // more than a target the borrower set for themselves. Flexible lines only: the guide's
-    // essential figures are minimums, so exceeding those is not a finding worth a warning.
-    const worst = monthGaps.find((g) => g.kind === 'flexible');
-    if (worst) {
-      // A gap that has been there for months is tracking, not news. Repeating the identical
-      // warning every month is how a real signal turns into something the reader skips, so the
-      // wording follows the trend and only the first month reads as a fresh finding.
-      const trend = gapTrend(worst, prevMonthGaps.find((g) => g.lineId === worst.lineId));
-      const headline = `${worst.label} ran RM ${fmt(worst.overBy)} above the national Belanjawanku guide for your household: RM ${fmt(worst.actualAmount)} against RM ${fmt(worst.guideAmount)}.`;
-      const TREND_SUFFIX: Record<typeof trend, string> = {
-        new: '',
-        unchanged: ' About the same as last month.',
-        improving: ' Closer than last month.',
-        worsening: ' Wider than last month.',
-      };
-      out.push({
-        type: trend === 'improving' ? 'caution' : 'warn',
-        text: headline + TREND_SUFFIX[trend],
-      });
-    }
     return out;
-  }, [adherence, catById, monthGaps, prevMonthGaps]);
+  }, [adherence, catById]);
 
   const stripRef = useRef<ScrollView>(null);
 
@@ -429,6 +418,46 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
         {/* How this month sat against the borrower's own baseline. Independent of the budget,
             so it renders whether or not one has been set. */}
         <MonthVsNormalCard monthIncome={statement.income} floor={incomeFloor} structure={monthStructure} />
+
+        {/* Competence feedback (docs/ui-engagement-plan.md Step 5): two real, growing numbers,
+            never a badge. */}
+        <Card style={styles.competenceCard}>
+          <View style={styles.competenceStat}>
+            <Text style={[styles.competenceVal, { color: colorTheme.ink }]}>{merchantsKnown}</Text>
+            <Text style={[styles.competenceLabel, { color: colorTheme.ink2 }]}>merchant{merchantsKnown === 1 ? '' : 's'} Pip knows</Text>
+          </View>
+          <View style={[styles.competenceDivider, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.competenceStat}>
+            <Text style={[styles.competenceVal, { color: colorTheme.ink }]}>{coverage.daysCovered}/{coverage.windowDays}</Text>
+            <Text style={[styles.competenceLabel, { color: colorTheme.ink2 }]}>days covered</Text>
+          </View>
+        </Card>
+
+        {/* You versus your own last month (§2.6): the only comparison in the app, and it is
+            against no one but the borrower's own history. Both directions read neutrally  up
+            is information, not a verdict (§1). */}
+        {showComparisons && (
+          <>
+            <View style={styles.sectionHead}>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>You vs. last month</Text>
+            </View>
+            <Card style={styles.listCard}>
+              {comparisons.slice(0, 5).map((c, i) => {
+                const cat = catById[c.catId] ?? fallback;
+                return (
+                  <View key={c.catId} style={[styles.compareRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line }]]}>
+                    <CatBadge category={cat} size={30} rad={9} />
+                    <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.compareNow, { color: colorTheme.ink }]}>RM {fmt(c.current)}</Text>
+                      <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>Last month RM {fmt(c.previous)}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
+          </>
+        )}
 
         {hasBudget ? (
           <>
@@ -570,6 +599,7 @@ const styles = StyleSheet.create({
   heroShadowPos: platformShadow('#0c2214', 0.28, 24, { width: 0, height: 14 }, 8),
   heroShadowNeg: platformShadow('#5a0a14', 0.32, 24, { width: 0, height: 14 }, 8),
   heroBlob: { position: 'absolute', top: -50, right: -40, width: 160, height: 160, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
+  heroPip: { position: 'absolute', top: 14, right: 16 },
   heroEyebrow: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1.1, color: 'rgba(255,255,255,0.50)', textTransform: 'uppercase', marginBottom: 16 },
   heroLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10 },
   heroLineBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.10)', paddingTop: 10 },
@@ -595,6 +625,19 @@ const styles = StyleSheet.create({
   signalText: { fontFamily: uiFont(700), fontSize: 11 },
 
   listCard: { marginHorizontal: 16, marginTop: 4, borderRadius: 20, overflow: 'hidden' },
+
+  // competence feedback
+  competenceCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  competenceStat: { flex: 1, alignItems: 'center' },
+  competenceVal: { fontFamily: numFont(700), fontSize: 19 },
+  competenceLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 2, textAlign: 'center' },
+  competenceDivider: { width: 1, height: 30 },
+
+  // month-over-month comparison
+  compareRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 11 },
+  compareLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5 },
+  compareNow: { fontFamily: numFont(700), fontSize: 13.5 },
+  comparePrev: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
 
   // category row
   catRow: { paddingHorizontal: 16, paddingVertical: 11 },

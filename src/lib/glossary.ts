@@ -7,15 +7,10 @@ export interface GlossaryEntry {
 /** Glossary content for InfoButton/GlossaryModal, mirroring LenderConsole's GLOSSARY shape
  *  (LenderConsole/app/tokens.ts) so the two apps explain shared concepts consistently. */
 export const GLOSSARY: Record<string, GlossaryEntry> = {
-  belanjawanku: {
-    term: 'Belanjawanku',
-    short: "Malaysia's official reference budget: what a decent standard of living costs per month.",
-    body: 'Published annually by the Social Wellbeing Research Centre at Universiti Malaya together with the EPF, with a separate figure for each household type in twelve cities. Pip compares your spending against this published figure instead of a number the app made up. The essential categories are a minimum, not a target, so spending above them only matters when the category is discretionary.',
-  },
   pay_yourself_first: {
     term: 'Pay yourself first',
     short: 'Set aside savings the moment income arrives, before spending on anything else.',
-    body: "The habit this app tracks: keep a fixed amount back each month, ideally as soon as you get paid. Belanjawanku's own recommendation is a starting point, but the target is yours to set and raise.",
+    body: 'The habit this app tracks: keep a fixed amount back each month, ideally as soon as you get paid. Start at an amount that survives a bad month, then raise it as your income grows.',
   },
   safe_income: {
     term: 'Safe monthly income',
@@ -59,5 +54,10 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       'Committed: recurring outflows at a steady amount, like rent or an instalment. Fixed; cannot be cut this month.\n\n' +
       'Essential: necessary spending that still moves, like food or fuel. Can compress, but never disappears.\n\n' +
       'Flexible: everything else. The part you could genuinely redirect if a month came in weak.',
+  },
+  learned_merchants: {
+    term: 'Learned merchants',
+    short: 'Merchants Pip remembers the category for, so future scans fill it in on their own.',
+    body: 'Every time you categorize a transaction, Pip notes which category you picked for that merchant. Next time the same merchant turns up in a scan or import, it is pre-filled with that category instead of asking again. Resetting clears everything Pip has learned, so every merchant goes back to needing a category picked by hand.',
   },
 };

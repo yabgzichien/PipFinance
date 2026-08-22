@@ -1,22 +1,36 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
+import { PipWearsHat } from '../components/Pip';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
+import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
+import { currentMonthKey } from '../lib/budget';
 import { todayISO } from '../lib/duplicates';
 import { defaultLinkEffect } from '../lib/networth';
-import { suggestForMerchant } from '../lib/recommend';
+import { prevMonthKey } from '../lib/recap';
+import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction } from '../lib/types';
 import { useAppData, type NewLearned } from '../state/store';
+import { useBackHandler } from '../state/useBackHandler';
 import { useThemeColors } from '../state/colorScheme';
 import { AttachScreen, type PickedImage } from './AttachScreen';
 import { CategorizeScreen, type PendingSettlement } from './CategorizeScreen';
 import { ExtractScreen } from './ExtractScreen';
-import { ImportScreen } from './ImportScreen';
 import { ManualEntryScreen } from './ManualEntryScreen';
 import { ReceiptScanScreen, type ReceiptSplitResult } from './ReceiptScanScreen';
 import { SavedScreen } from './SavedScreen';
+import { ScanKindScreen } from './ScanKindScreen';
 
-type Phase = 'attach' | 'extract' | 'guessing' | 'categorize' | 'manual' | 'receipt' | 'split' | 'saved' | 'import';
+type Phase =
+  | 'attach'
+  | 'kind'
+  | 'extract'
+  | 'guessing'
+  | 'categorize'
+  | 'manual'
+  | 'receipt'
+  | 'split'
+  | 'saved';
 
 const GUESS_TIMEOUT_MS = 12000;
 
@@ -28,17 +42,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+type AddFlowProps = {
+  onClose: () => void;
+  initialPhase?: Phase;
+};
+
 /**
  * The add-a-receipt flow: Attach → Extract → Categorize → Saved.
  * Mirrors the design's state machine but wired to the real LLM + SQLite.
+ *
+ * Pip wears his straw hat for the whole flow. The wrapper exists because every phase below is its
+ * own early return, and because <PipSays> is shared with screens outside this flow, so the hat has
+ * to be scoped by where a Pip is rendered rather than by which component renders it.
  */
-export function AddFlow({
-  onClose,
-  initialPhase = 'attach',
-}: {
-  onClose: () => void;
-  initialPhase?: Phase;
-}) {
+export function AddFlow(props: AddFlowProps) {
+  return (
+    <PipWearsHat>
+      <AddFlowPhases {...props} />
+    </PipWearsHat>
+  );
+}
+
+function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById } = useAppData();
   const colorTheme = useThemeColors();
 
@@ -52,20 +77,71 @@ export function AddFlow({
   const [result, setResult] = useState<Transaction[]>([]);
   const [newLearned, setNewLearned] = useState<NewLearned[]>([]);
   const [hasKey, setHasKey] = useState(true);
+  // The memory-matched suggestions from this scan (source: 'learned' only, not AI guesses),
+  // carried from onExtracted to onCategorized so the auto-fill competence signal
+  // (docs/ui-engagement-plan.md Step 5) reflects what Pip actually knew at extraction time,
+  // not what the user ends up picking after reviewing.
+  const [learnedThisScan, setLearnedThisScan] = useState<(CategorySuggestion | null)[]>([]);
+  const [autoFill, setAutoFill] = useState<{ current: AutoFillStats; lastMonth: AutoFillStats } | null>(null);
+  // The real extraction round-trip, carried from ExtractScreen to the Saved screen's "Read in
+  // Ns" payoff line (docs/ui-engagement-plan.md Step 2). Null for any path that never ran a
+  // live extraction (manual entry, receipt scan, a cached re-review).
+  const [extractElapsedMs, setExtractElapsedMs] = useState<number | null>(null);
 
   useEffect(() => {
     getLLM().then((llm) => setHasKey(llm.can('extract')));
   }, []);
 
-  const onPicked = (img: PickedImage) => {
-    setImage(img);
-    setCached(undefined);
+  // Named so hardware/gesture back can call the exact same transition as each phase's own back
+  // button below — the two must never disagree about where back goes.
+  const backToAttach = () => setPhase('attach');
+  // Both readers were reached by answering the kind question, so back re-asks it. Getting the
+  // answer wrong costs one tap, not another trip to the camera.
+  const backToKind = () => setPhase(image ? 'kind' : 'attach');
+  const backFromManualOrSplit = () => setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
+  const backFromCategorize = () => {
+    setCached(extracted);
     setPhase('extract');
   };
 
-  const onExtracted = async (items: ExtractedTxn[], accountId: string | null) => {
+  useBackHandler(() => {
+    if (phase === 'receipt' || phase === 'extract') {
+      backToKind();
+      return true;
+    }
+    if (phase === 'kind') {
+      backToAttach();
+      return true;
+    }
+    if (phase === 'manual' || phase === 'split') {
+      backFromManualOrSplit();
+      return true;
+    }
+    if (phase === 'categorize') {
+      backFromCategorize();
+      return true;
+    }
+    // attach / guessing / saved: nothing further back within the flow, so close it —
+    // the same as tapping this phase's own close button.
+    onClose();
+    return true;
+  });
+
+  // The hub has one scan button and therefore no idea what it just captured. Rather than guess,
+  // hand off to the kind question, which routes to the itemised reader or the batch reader.
+  const onPicked = (img: PickedImage) => {
+    setImage(img);
+    setCached(undefined);
+    setExtractElapsedMs(null);
+    setAutoFill(null);
+    setReceiptResult(null);
+    setPhase('kind');
+  };
+
+  const onExtracted = async (items: ExtractedTxn[], accountId: string | null, elapsedMs: number | null) => {
     setExtracted(items);
     setLinkId(accountId);
+    setExtractElapsedMs(elapsedMs);
 
     const learned: (CategorySuggestion | null)[] = items.map((it) => {
       const s = suggestForMerchant(memory, it.merchant);
@@ -74,6 +150,7 @@ export function AddFlow({
       // only pre-fill if the learned category matches this item's kind
       return cat && cat.kind === it.type ? { categoryId: s, source: 'learned' } : null;
     });
+    setLearnedThisScan(learned);
 
     const missing = learned.map((s, i) => (s ? -1 : i)).filter((i) => i !== -1);
     if (missing.length === 0) {
@@ -134,15 +211,31 @@ export function AddFlow({
     for (const s of settlements) {
       if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
     }
+
+    // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
+    // scan Pip already knew, next to the same measure for last calendar month.
+    const stats = autoFillStats(learnedThisScan);
+    const month = currentMonthKey();
+    const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
+    setAutoFill({ current: stats, lastMonth });
+
     setResult(created);
     setNewLearned(learned);
     setPhase('saved');
   };
 
   const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {
-    const { created, newLearned: learned } = await commitCategorized([item], [categoryId], 'manual', [split]);
+    const { created, newLearned: learned } = await commitCategorized(
+      [item],
+      [categoryId],
+      'manual',
+      [split],
+      [receiptResult?.photoUri ?? null]
+    );
     setResult(created);
     setNewLearned(learned);
+    setExtractElapsedMs(null);
+    setAutoFill(null);
     setPhase('saved');
   };
 
@@ -153,13 +246,18 @@ export function AddFlow({
         onClose={onClose}
         onPicked={onPicked}
         onManual={() => setPhase('manual')}
-        onImport={() => setPhase('import')}
-        onReceipt={() => setPhase('receipt')}
       />
     );
   }
-  if (phase === 'import') {
-    return <ImportScreen onClose={onClose} />;
+  if (phase === 'kind' && image) {
+    return (
+      <ScanKindScreen
+        image={image}
+        onBack={backToAttach}
+        onReceipt={() => setPhase('receipt')}
+        onHistory={() => setPhase('extract')}
+      />
+    );
   }
   if (phase === 'guessing') {
     return (
@@ -173,7 +271,8 @@ export function AddFlow({
   if (phase === 'receipt') {
     return (
       <ReceiptScanScreen
-        onBack={() => setPhase('attach')}
+        initialImage={image ?? undefined}
+        onBack={backToKind}
         onManualInstead={() => {
           setReceiptResult(null);
           setPhase('split');
@@ -189,7 +288,7 @@ export function AddFlow({
     return (
       <ManualEntryScreen
         categories={categories}
-        onBack={() => setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach')}
+        onBack={backFromManualOrSplit}
         onComplete={onManualComplete}
         // Three ways in, three honest titles: a scanned receipt lands here already filled in, the
         // no-receipt path is a bare split, and 'manual' is a plain typed entry.
@@ -208,7 +307,7 @@ export function AddFlow({
         image={image}
         cachedItems={cached}
         linkId={linkId}
-        onBack={() => setPhase('attach')}
+        onBack={backToKind}
         onDone={onExtracted}
       />
     );
@@ -220,13 +319,12 @@ export function AddFlow({
         suggestions={suggestions}
         categories={categories}
         linkId={linkId}
-        onBack={() => {
-          setCached(extracted);
-          setPhase('extract');
-        }}
+        onBack={backFromCategorize}
         onComplete={onCategorized}
       />
     );
   }
-  return <SavedScreen result={result} newLearned={newLearned} catById={catById} onDone={onClose} />;
+  return (
+    <SavedScreen result={result} newLearned={newLearned} catById={catById} elapsedMs={extractElapsedMs} autoFill={autoFill} onDone={onClose} />
+  );
 }

@@ -8,6 +8,7 @@ import { catColorsForHue } from '../lib/catColors';
 import { currentMonthKey, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
 import { fmt } from '../lib/format';
+import { categoryComparisons, hasComparisonData } from '../lib/recap';
 import type { Category, TxnType } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
@@ -42,6 +43,18 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
   }, [monthTxns, kind]);
 
   const pieData = breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid }));
+
+  // You versus your own last month (docs/ui-engagement-plan.md Step 5, §2.6). Expense-only,
+  // matching spentByCategory; only shown once real history exists on both sides.
+  const cur = currentMonthKey();
+  const showComparisons = kind === 'expense' && hasComparisonData(transactions, cur);
+  const comparisonByCat = useMemo(() => {
+    if (kind !== 'expense') return {};
+    const out: Record<string, number> = {};
+    for (const c of categoryComparisons(transactions, cur)) out[c.catId] = c.previous;
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, kind]);
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -101,6 +114,9 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                     <View style={{ alignItems: 'flex-end', marginRight: 4 }}>
                       <Text style={[styles.primary, { color: colorTheme.ink }]}>{primary}</Text>
                       <Text style={[styles.secondary, { color: colorTheme.ink2 }]}>{secondary}</Text>
+                      {showComparisons && b.catId in comparisonByCat && (
+                        <Text style={[styles.compare, { color: colorTheme.ink3 }]}>Last month RM {fmt(comparisonByCat[b.catId])}</Text>
+                      )}
                     </View>
                     <Icon name="chevronRight" size={15} color={colorTheme.ink3} />
                   </Pressable>
@@ -135,6 +151,7 @@ const styles = StyleSheet.create({
   label: { flex: 1, fontFamily: uiFont(600), fontSize: 14.5 },
   primary: { fontFamily: uiFont(700), fontSize: 14.5 },
   secondary: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 1 },
+  compare: { fontFamily: uiFont(500), fontSize: 10, marginTop: 1 },
   emptyTitle: { fontFamily: uiFont(700), fontSize: 17 },
   emptySub: { fontFamily: uiFont(500), fontSize: 13.5, marginTop: 6, textAlign: 'center' },
 });
