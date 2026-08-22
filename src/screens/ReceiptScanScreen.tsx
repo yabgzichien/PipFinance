@@ -5,8 +5,9 @@
 // reconciles to, because that is what left the account.
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AddPersonModal } from '../components/AddPersonModal';
 import { Icon } from '../components/Icon';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { scanDocument } from '../lib/documentScanner';
@@ -39,6 +40,8 @@ type Phase = 'capture' | 'reading' | 'assign';
 
 export function ReceiptScanScreen({
   initialImage,
+  cachedReceipt,
+  onScanned,
   onBack,
   onDone,
   onManualInstead,
@@ -47,6 +50,12 @@ export function ReceiptScanScreen({
    *  ScanKindScreen that it was a receipt. When set, this screen skips straight to reading it;
    *  its own capture screen stays reachable as the retry surface if that read fails. */
   initialImage?: PickedImage;
+  /** A previous read of this same image, handed back in when the user backed out to the kind
+   *  question and returned. Lets the screen skip straight to 'assign' instead of paying for
+   *  another LLM round-trip (and the "reading" loading beat) to re-read a receipt already read. */
+  cachedReceipt?: ScannedReceipt | null;
+  /** Fired once a fresh read succeeds, so the caller can remember it for next time. */
+  onScanned?: (receipt: ScannedReceipt) => void;
   onBack: () => void;
   onDone: (result: ReceiptSplitResult) => void;
   /** Escape hatch: split a typed total instead of a photographed receipt. */
@@ -57,7 +66,7 @@ export function ReceiptScanScreen({
   const colorTheme = useThemeColors();
   const { people, addPerson } = useAppData();
 
-  const [phase, setPhase] = useState<Phase>(initialImage ? 'reading' : 'capture');
+  const [phase, setPhase] = useState<Phase>(cachedReceipt ? 'assign' : initialImage ? 'reading' : 'capture');
   const [error, setError] = useState('');
   const [pickedImage, setPickedImage] = useState<PickedImage | null>(initialImage ?? null);
   const [keepPhoto, setKeepPhoto] = useState(false);
@@ -66,7 +75,7 @@ export function ReceiptScanScreen({
   const [surcharges, setSurcharges] = useState<Surcharges>({ serviceChargePct: 0, taxPct: 0 });
   const [chargedText, setChargedText] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
-  const [newName, setNewName] = useState('');
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // The payer is always at the table, and always last, so every rounding residue lands on them.
@@ -93,24 +102,31 @@ export function ReceiptScanScreen({
   const splitting = picked.length > 0;
   const canSave = charged > 0 && (!splitting || !negative);
 
+  // Populates every field the assign screen reads, whether the receipt was just read live or
+  // handed back in as a cache hit.
+  const applyScan = (scanned: ScannedReceipt) => {
+    setReceipt(scanned);
+    setLines(
+      scanned.items.map((it, i) => ({
+        id: `l${i}`,
+        label: it.quantity && it.quantity > 1 ? `${it.quantity}× ${it.label}` : it.label,
+        amount: it.amount,
+        assignedTo: [],
+      }))
+    );
+    setSurcharges(derivedSurcharges(scanned));
+    const fallbackTotal = scanned.items.reduce((s, it) => s + it.amount, 0);
+    setChargedText((scanned.total ?? fallbackTotal).toFixed(2));
+  };
+
   const read = async (image: PickedImage) => {
     setPickedImage(image);
     setPhase('reading');
     setError('');
     try {
       const scanned = await scanReceiptImage(image.base64, image.mime);
-      setReceipt(scanned);
-      setLines(
-        scanned.items.map((it, i) => ({
-          id: `l${i}`,
-          label: it.quantity && it.quantity > 1 ? `${it.quantity}× ${it.label}` : it.label,
-          amount: it.amount,
-          assignedTo: [],
-        }))
-      );
-      setSurcharges(derivedSurcharges(scanned));
-      const fallbackTotal = scanned.items.reduce((s, it) => s + it.amount, 0);
-      setChargedText((scanned.total ?? fallbackTotal).toFixed(2));
+      applyScan(scanned);
+      onScanned?.(scanned);
       setPhase('assign');
     } catch (e) {
       setError(llmErrorMessage(e));
@@ -119,8 +135,14 @@ export function ReceiptScanScreen({
   };
 
   // Mount-once: the add hub already has the image, so reading starts without a second capture.
-  // A failed read falls through to 'capture' above, which is why that screen survives.
+  // A failed read falls through to 'capture' above, which is why that screen survives. A cache
+  // hit (the user backed out and came right back) skips the read entirely — no spinner, no
+  // "reading it line by line" beat for a receipt already read.
   useEffect(() => {
+    if (cachedReceipt) {
+      applyScan(cachedReceipt);
+      return;
+    }
     if (initialImage) read(initialImage);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -196,17 +218,9 @@ export function ReceiptScanScreen({
       )
     );
 
-  const addNew = async () => {
-    const name = newName.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    try {
-      const person = await addPerson(name);
-      setPicked((prev) => (prev.includes(person.id) ? prev : [...prev, person.id]));
-      setNewName('');
-    } finally {
-      setBusy(false);
-    }
+  const addNew = async (name: string) => {
+    const person = await addPerson(name);
+    setPicked((prev) => (prev.includes(person.id) ? prev : [...prev, person.id]));
   };
 
   const removePerson = (id: string) => {
@@ -318,64 +332,35 @@ export function ReceiptScanScreen({
         {/* Hidden on web rather than disabled: expo-file-system's persistent storage has no web
             support, so a toggle that silently keeps nothing is worse than one not offered. */}
         {Platform.OS !== 'web' && (
-          <Card style={[styles.keepRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={{ flex: 1 }}>
+          <View style={[styles.keepRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+            <View style={styles.keepInfo}>
               <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>Keep this receipt photo</Text>
               <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>View it later from the transaction</Text>
             </View>
-            <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-              {[false, true].map((v) => {
-                const on = keepPhoto === v;
-                return (
-                  <Pressable
-                    key={String(v)}
-                    onPress={() => setKeepPhoto(v)}
-                    style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on }}
-                  >
-                    <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-                      {v ? 'On' : 'Off'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </Card>
+            <Switch
+              value={keepPhoto}
+              onValueChange={setKeepPhoto}
+              trackColor={{ false: colorTheme.line2, true: theme.accent }}
+              thumbColor="#ffffff"
+              ios_backgroundColor={colorTheme.line2}
+              accessibilityRole="switch"
+              accessibilityLabel="Keep this receipt photo"
+              accessibilityState={{ checked: keepPhoto }}
+            />
+          </View>
         )}
 
         <Text style={[styles.label, { color: colorTheme.ink2 }]}>Who was at the table (optional)</Text>
-        {unpicked.length > 0 && (
-          <View style={styles.chipWrap}>
-            {unpicked.map((p) => (
-              <Pressable key={p.id} onPress={() => setPicked((prev) => [...prev, p.id])} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-                <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
-                <Text style={[styles.chipText, { color: theme.onTint }]}>{p.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-        <View style={styles.addRow}>
-          <TextInput
-            value={newName}
-            onChangeText={setNewName}
-            placeholder="Add a name"
-            placeholderTextColor={colorTheme.ink3}
-            style={[styles.nameInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-            autoCapitalize="words"
-            returnKeyType="done"
-            onSubmitEditing={addNew}
-          />
-          <Pressable
-            onPress={addNew}
-            style={[
-              styles.addBtn,
-              newName.trim() ? { backgroundColor: theme.accent } : [styles.addBtnOff, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }],
-            ]}
-            disabled={!newName.trim() || busy}
-            accessibilityLabel="Add this person"
-          >
-            <Icon name="plus" size={18} color={newName.trim() ? colors.onAccent : colorTheme.ink3} stroke={2.4} />
+        <View style={styles.chipWrap}>
+          {unpicked.map((p) => (
+            <Pressable key={p.id} onPress={() => setPicked((prev) => [...prev, p.id])} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
+              <Text style={[styles.chipText, { color: theme.onTint }]}>{p.name}</Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={() => setAddPersonOpen(true)} style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
+            <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>Add a name</Text>
           </Pressable>
         </View>
 
@@ -530,6 +515,8 @@ export function ReceiptScanScreen({
           <BtnLabel>{splitting ? 'Use this split' : 'Use this receipt'}</BtnLabel>
         </PrimaryButton>
       </View>
+
+      <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
     </View>
   );
 }
@@ -635,13 +622,19 @@ const styles = StyleSheet.create({
   sourceTitle: { fontFamily: uiFont(700), fontSize: 15 },
   sourceSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 2 },
 
-  keepRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginTop: 16, borderWidth: 1 },
+  keepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: radius.md,
+  },
+  keepInfo: { flex: 1 },
   keepTitle: { fontFamily: uiFont(700), fontSize: 14 },
   keepSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
-  modeToggle: { flexDirection: 'row', borderRadius: 999, padding: 3, borderWidth: 1 },
-  modeBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999 },
-  modeText: { fontFamily: uiFont(700), fontSize: 13 },
-  modeTextOn: { color: '#fff' },
 
   label: { fontFamily: uiFont(600), fontSize: 12.5, marginTop: 18, marginBottom: 9 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
@@ -655,18 +648,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   chipText: { fontFamily: uiFont(600), fontSize: 13 },
-  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  nameInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontFamily: uiFont(600),
-    fontSize: 14.5,
-  },
-  addBtn: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
-  addBtnOff: { borderWidth: 1 },
+  addChip: { borderStyle: 'dashed' },
   tableRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   tableChip: {
     flexDirection: 'row',
