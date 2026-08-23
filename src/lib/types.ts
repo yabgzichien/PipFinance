@@ -52,6 +52,23 @@ export interface Transaction {
   receiptUri?: string | null;
 }
 
+export type ReliefOrigin = 'auto' | 'commitment' | 'manual';
+export type EvidenceState = 'complete' | 'missing-cert' | 'no-image' | 'weak-unnamed';
+
+/** A tag linking a transaction (in full or in part) to an LHDN relief line for a given year
+ *  of assessment. See docs/superpowers/specs/2026-08-23-tax-relief-tagging-design.md. */
+export interface ReliefTag {
+  id: string;
+  txnId: string;
+  code: string;
+  ya: number;
+  amount: number;
+  origin: ReliefOrigin;
+  certImageUri: string | null;
+  einvoiceImageUri: string | null;
+  createdAt: string;
+}
+
 /** merchantKey -> categoryId, the learned memory. */
 export type MemoryMap = Record<string, string>;
 
