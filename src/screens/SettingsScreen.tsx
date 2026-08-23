@@ -21,7 +21,7 @@ type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
 
 
-export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onResetToOnboarding }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onResetToOnboarding?: () => void }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onResetToOnboarding }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onResetToOnboarding?: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -196,6 +196,21 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Recurring bills & investments</Text>
+            </View>
+            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+          </Pressable>
+        )}
+
+        {onOpenTax && (
+          <Pressable
+            onPress={onOpenTax}
+            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
+          >
+            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+              <Icon name="receipt" size={16} color={theme.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Tax relief</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>

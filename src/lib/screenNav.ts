@@ -20,7 +20,8 @@ export type Screen =
   | 'export'
   | 'commitments'
   | 'categoryDetail'
-  | 'netWorthHistory';
+  | 'netWorthHistory'
+  | 'tax';
 
 /** The destinations reachable from more than one place, so their own "back" has to return
  * wherever the user actually came from rather than a fixed screen. */
@@ -40,6 +41,8 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
       return 'settings';
     case 'netWorthHistory':
       return 'networth';
+    case 'tax':
+      return 'settings';
     case 'export':
       return origins.exportOrigin;
     case 'owed':
