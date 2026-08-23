@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon';
 import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
 import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
-import { computeUsage, evidenceState, isRequestable, type ReliefUsage } from '../lib/relief';
+import { computeUsage, evidenceState, isRequestable, yaForDate, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
 import { addReliefTag, listReliefTags } from '../db/reliefRepo';
 import { saveOrDownloadExport } from '../lib/financialExport';
@@ -19,8 +19,16 @@ import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { colors, radius, uiFont } from '../theme';
 
-const AVAILABLE_YAS = Object.keys(RELIEF_SCHEDULES).map(Number).sort((a, b) => b - a);
+// The current calendar year is always offered even when no schedule is registered for it yet:
+// `scheduleForYA` falls forward to the latest known figures, so the year is usable, and hiding
+// it would leave this year's tags with no chip to view them under.
+const AVAILABLE_YAS = Array.from(
+  new Set([...Object.keys(RELIEF_SCHEDULES).map(Number), new Date().getFullYear()])
+).sort((a, b) => b - a);
 
+/** Days left in the transaction's own month. Everything here is local time, matching how
+ *  `todayKey()` writes `txn.date`: mixing in a UTC month would misreport the window for the
+ *  first hours of a new local month in any timezone ahead of UTC. */
 function daysUntilMonthEnd(txnDate: string): number {
   const [y, m] = txnDate.split('-').map(Number);
   const lastDay = new Date(y, m, 0).getDate();
@@ -58,8 +66,11 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
     [schedule, tags]
   );
   const usageByCode = useMemo(() => Object.fromEntries(usage.map((u) => [u.code, u])), [usage]);
+  // Sum `capUsed` over top-level lines only: a parent's `capUsed` already folds in its
+  // children's contributions (see `computeUsage`), so this counts every child claim exactly
+  // once, and reports what actually counts toward the caps rather than a raw over-cap total.
   const totalClaimed = usage.filter((u) => !schedule?.lines.find((l) => l.code === u.code)?.parent)
-    .reduce((s, u) => s + u.claimed, 0);
+    .reduce((s, u) => s + u.capUsed, 0);
 
   const requestable = useMemo(() => {
     if (!schedule || !tags) return [];
@@ -229,16 +240,26 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             </View>
             {manualSearch.trim().length > 0 &&
               transactions
-                .filter((t) => t.merchantRaw.toLowerCase().includes(manualSearch.trim().toLowerCase()))
+                // A dateless transaction has no defensible year of assessment, so it can't be
+                // tagged at all: leave it out of the results rather than fail on tap.
+                .filter((t) => !!t.date && t.merchantRaw.toLowerCase().includes(manualSearch.trim().toLowerCase()))
                 .slice(0, 15)
                 .map((t) => (
                   <Pressable
                     key={t.id}
                     onPress={async () => {
-                      if (!schedule) return;
-                      const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya, amount: t.amount, origin: 'manual' });
-                      setTags((prev) => [...(prev ?? []), created]);
-                      setEditingTagId(created.id);
+                      if (!schedule || !t.date) return;
+                      // The tag's year of assessment comes from the transaction's own date, not
+                      // the chip the user happens to be browsing: searching from YA 2025 and
+                      // tapping a 2026 row must still file it under 2026.
+                      const txnYa = yaForDate(t.date);
+                      const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya: txnYa, amount: t.amount, origin: 'manual' });
+                      if (txnYa === ya) {
+                        setTags((prev) => [...(prev ?? []), created]);
+                        setEditingTagId(created.id);
+                      } else {
+                        notify('Tagged under YA ' + txnYa, 'This transaction is dated in ' + txnYa + ', so it was filed there. Switch to YA ' + txnYa + ' to edit it.');
+                      }
                       setAddingManually(false);
                       setManualSearch('');
                     }}

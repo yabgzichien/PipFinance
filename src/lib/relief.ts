@@ -1,7 +1,7 @@
 // src/lib/relief.ts
 // Pure logic for tax relief tagging: which line a transaction matches, whether a tag's
 // evidence is good enough, whether its e-Invoice request window is still open, and how
-// claimed amounts consume nested aggregate caps. No DB/UI imports  see reliefRepo.ts for
+// claimed amounts consume nested aggregate caps. No DB/UI imports: see reliefRepo.ts for
 // persistence and TaxScreen.tsx for the UI that renders these.
 import type { ScannedReceipt } from './parseReceipt';
 import type { ReliefLine, ReliefSchedule } from './reliefSchedule';
@@ -44,7 +44,7 @@ export function matchRelief(
 /**
  * Decision order matters: no-image is checked before missing-cert (a cert photo with
  * nothing else attached still counts as having *an* image), and weak-unnamed only applies to
- * non-commitment tags  a tag created via the commitment-payment auto-tagging flow already has
+ * non-commitment tags. A tag created via the commitment-payment auto-tagging flow already has
  * bill-level evidence by construction regardless of which relief line it landed on.
  */
 export function evidenceState(tag: ReliefTag, txn: Transaction, line: ReliefLine): EvidenceState {
@@ -56,12 +56,18 @@ export function evidenceState(tag: ReliefTag, txn: Transaction, line: ReliefLine
 
 /** The right to request an individual e-Invoice for a plain receipt expires at the end of
  *  the transaction's calendar month (research doc §3.4). Only ever true for weak-unnamed
- *  evidence  everything else either already has stronger proof or isn't the kind of line
- *  an e-Invoice request applies to. */
+ *  evidence: everything else either already has stronger proof or isn't the kind of line
+ *  an e-Invoice request applies to.
+ *
+ *  `today`'s month is read through local-time accessors, never `toISOString()`, because
+ *  `txn.date` is a local-time key written by `todayKey()`. Comparing a local date string
+ *  against a UTC month would misjudge the window for the first hours of every new month in
+ *  any timezone ahead of UTC, Malaysia's own UTC+8 included. */
 export function isRequestable(evidence: EvidenceState, txn: Transaction, today: Date): boolean {
   if (evidence !== 'weak-unnamed') return false;
   if (!txn.date) return false;
-  return txn.date.slice(0, 7) === today.toISOString().slice(0, 7);
+  const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  return txn.date.slice(0, 7) === currentMonth;
 }
 
 export interface ReliefUsage {
@@ -75,7 +81,7 @@ export interface ReliefUsage {
 /**
  * Sums tags per line, then applies parent-aggregate capping: a line with `parent` set draws
  * on a shared pool bounded by the parent's own `cap`. Siblings consume that shared pool in
- * schedule-list order  a line earlier in `reliefSchedule.ts`'s array effectively has
+ * schedule-list order: a line earlier in `reliefSchedule.ts`'s array effectively has
  * priority over a later one when the aggregate runs out, which is why sibling order in the
  * schedule data is a real product decision, not cosmetic.
  */

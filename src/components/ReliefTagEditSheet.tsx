@@ -76,9 +76,15 @@ export function ReliefTagEditSheet({
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (res.canceled || !res.assets?.length) return;
       const asset = res.assets[0];
-      const uri = saveReceiptImage(asset.uri, asset.mimeType ?? 'image/jpeg');
-      await updateReliefTag(tag.id, { [field]: uri });
-      onChanged();
+      try {
+        const uri = saveReceiptImage(asset.uri, asset.mimeType ?? 'image/jpeg');
+        await updateReliefTag(tag.id, { [field]: uri });
+        onChanged();
+      } catch {
+        // A failed copy just means no attached photo, not a lost tag: say so and leave the
+        // tag exactly as it was.
+        notify('Could not attach', 'That photo could not be saved. Try again.');
+      }
     } finally {
       setBusy(false);
     }

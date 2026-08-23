@@ -111,25 +111,34 @@ describe('evidenceState', () => {
 });
 
 describe('isRequestable', () => {
+  // `today` is built from local-time components on purpose: `txn.date` is a local-time key, so
+  // the comparison inside `isRequestable` is local-vs-local. Constructing these from UTC strings
+  // would make the outcome depend on the machine's timezone offset.
+  const localDate = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h);
+
   it('is true only for weak-unnamed evidence dated in the current month', () => {
-    const today = new Date('2025-06-20T00:00:00.000Z');
-    expect(isRequestable('weak-unnamed', txn({ date: '2025-06-05' }), today)).toBe(true);
+    expect(isRequestable('weak-unnamed', txn({ date: '2025-06-05' }), localDate(2025, 6, 20))).toBe(true);
   });
 
   it('is false once the transaction month has passed', () => {
-    const today = new Date('2025-07-01T00:00:00.000Z');
-    expect(isRequestable('weak-unnamed', txn({ date: '2025-06-05' }), today)).toBe(false);
+    expect(isRequestable('weak-unnamed', txn({ date: '2025-06-05' }), localDate(2025, 7, 1))).toBe(false);
+  });
+
+  it('uses the local month, not the UTC one, at a month boundary', () => {
+    // Midnight local on the 1st: in any timezone ahead of UTC this instant is still the
+    // previous month in UTC, so a UTC-based comparison would wrongly call June requestable.
+    expect(isRequestable('weak-unnamed', txn({ date: '2025-06-30' }), localDate(2025, 7, 1, 0))).toBe(false);
+    expect(isRequestable('weak-unnamed', txn({ date: '2025-07-01' }), localDate(2025, 7, 1, 0))).toBe(true);
   });
 
   it('is false for any evidence state other than weak-unnamed', () => {
-    const today = new Date('2025-06-20T00:00:00.000Z');
+    const today = localDate(2025, 6, 20);
     expect(isRequestable('complete', txn({ date: '2025-06-05' }), today)).toBe(false);
     expect(isRequestable('no-image', txn({ date: '2025-06-05' }), today)).toBe(false);
   });
 
   it('is false when the transaction has no date', () => {
-    const today = new Date('2025-06-20T00:00:00.000Z');
-    expect(isRequestable('weak-unnamed', txn({ date: null }), today)).toBe(false);
+    expect(isRequestable('weak-unnamed', txn({ date: null }), localDate(2025, 6, 20))).toBe(false);
   });
 });
 

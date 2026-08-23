@@ -89,7 +89,13 @@ import {
 import { findCommitmentMatch, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
 import { matchSourceCategory } from '../lib/import';
 import type { ParsedCommitment } from '../lib/advancedImport';
-import { addReliefTag, getReliefMemoryMap, listReliefTags } from '../db/reliefRepo';
+import {
+  addReliefTag,
+  deleteReliefTagsForTxns as dbDeleteReliefTagsForTxns,
+  getReliefMemoryMap,
+  getReliefTagsForTxn,
+  listReliefTags,
+} from '../db/reliefRepo';
 import { evidenceState, isRequestable, matchRelief, yaForDate } from '../lib/relief';
 import { scheduleForYA } from '../lib/reliefSchedule';
 import type { ScannedReceipt } from '../lib/parseReceipt';
@@ -207,7 +213,7 @@ interface AppData {
   /** 90-day data-coverage signal, recomputed from `transactions`. See `lib/coverage.ts`. */
   coverage: Coverage;
   /** Count of the current YA's relief tags whose e-Invoice request window is still open, for
-   *  the Settings "Tax relief" row badge. Backed by a boot-time-only `reliefTags` load  see
+   *  the Settings "Tax relief" row badge. Backed by a boot-time-only `reliefTags` load: see
    *  the effect near `refreshAll` above. */
   taxRequestableCount: number;
   /** Whether the one-time setup has been completed. */
@@ -532,11 +538,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setReady(true));
   }, [refreshAll]);
 
-  // Lightweight, App.tsx-level badge count for the Settings "Tax relief" row  refreshed on
+  // Lightweight, App.tsx-level badge count for the Settings "Tax relief" row: refreshed on
   // boot only, not kept in sync with every tag mutation made inside TaxScreen.tsx (which
   // manages its own `tags` state, reloaded after every change there). See taxRequestableCount.
   useEffect(() => {
-    listReliefTags(yaForDate(new Date().toISOString().slice(0, 10))).then(setReliefTags);
+    listReliefTags(yaForDate(todayKey())).then(setReliefTags);
   }, []);
 
   useEffect(() => {
@@ -764,19 +770,26 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const applyReliefDetection = useCallback(async (created: Transaction[], receipt: ScannedReceipt | null) => {
-    if (created.length === 0) return;
-    const reliefMemory = await getReliefMemoryMap();
-    for (const txn of created) {
-      if (!txn.date) continue;
-      const ya = yaForDate(txn.date);
-      const schedule = scheduleForYA(ya);
-      if (!schedule) continue;
+    // Everything below is best-effort and rides on the save path. The whole point of this
+    // feature is that it costs the user nothing, so a failure in here must never be allowed to
+    // propagate into the caller and abort the save it is hitching a ride on.
+    try {
+      if (created.length === 0) return;
+      const reliefMemory = await getReliefMemoryMap();
       // Line items only ever apply to the single-transaction receipt-scan path; a batch
       // (screenshot import) save always passes receipt: null from AddFlow.tsx.
       const singleItemReceipt = created.length === 1 ? receipt : null;
-      const match = matchRelief(txn, singleItemReceipt, reliefMemory, schedule);
-      if (!match) continue;
-      await addReliefTag({ txnId: txn.id, code: match.code, ya, amount: match.amount, origin: 'auto' });
+      for (const txn of created) {
+        if (!txn.date) continue;
+        const ya = yaForDate(txn.date);
+        const schedule = scheduleForYA(ya);
+        if (!schedule) continue;
+        const match = matchRelief(txn, singleItemReceipt, reliefMemory, schedule);
+        if (!match) continue;
+        await addReliefTag({ txnId: txn.id, code: match.code, ya, amount: match.amount, origin: 'auto' });
+      }
+    } catch {
+      // Silent by design: no tag is a fine outcome, a broken save is not.
     }
   }, []);
 
@@ -799,10 +812,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Deleting a transaction takes its split with it: a receivable with no bill behind it is a
-  // claim on nothing, and leaving the shares would keep inflating net worth forever.
+  // claim on nothing, and leaving the shares would keep inflating net worth forever. Its relief
+  // tags go the same way, for the same reason: a tag on a deleted transaction would keep
+  // counting toward a year's claimed total with nothing left to point at.
   const removeTransaction = useCallback(async (id: string) => {
     await deleteTransaction(id);
     await dbDeleteSplitsForTxns([id]);
+    await dbDeleteReliefTagsForTxns([id]);
     setTransactions(await listTransactions());
     await refreshSplitState();
   }, [refreshSplitState]);
@@ -810,6 +826,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const removeMany = useCallback(async (ids: string[]) => {
     await deleteTransactions(ids);
     await dbDeleteSplitsForTxns(ids);
+    await dbDeleteReliefTagsForTxns(ids);
     setTransactions(await listTransactions());
     await refreshSplitState();
   }, [refreshSplitState]);
@@ -1259,6 +1276,26 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const previewCommitmentMatch = resolveCommitmentMatch;
 
   /**
+   * Tag the transaction behind a paid commitment occurrence against the commitment's mapped
+   * relief line. Idempotent on `(txnId, code)`: pay -> unpay -> pay again on the matched-row
+   * branch leaves the transaction in place, and a row auto-tagged from merchant memory can
+   * later have its commitment ticked, so an unconditional insert would stack duplicates that
+   * double-count against the cap. Wrapped in try/catch for the same reason as
+   * `applyReliefDetection`: this rides on the pay path and must never be able to break it.
+   */
+  const tagCommitmentRelief = useCallback(async (code: string, txnId: string, paidOn: string, amount: number) => {
+    try {
+      const ya = yaForDate(paidOn);
+      if (!scheduleForYA(ya)) return;
+      const existing = await getReliefTagsForTxn(txnId);
+      if (existing.some((t) => t.code === code)) return;
+      await addReliefTag({ txnId, code, ya, amount, origin: 'commitment' });
+    } catch {
+      // Silent by design: no tag is a fine outcome, a broken payment tick is not.
+    }
+  }, []);
+
+  /**
    * Tick a commitment occurrence as paid. Always tries to match an existing ledger row first
    * (same merchant, amount within 5%, dated within a week of the due date) so a bill the user
    * already logged manually — or one that lands via a later bank-statement import — never gets
@@ -1266,12 +1303,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
    * commitment logs a `'transfer'`, not an expense, and moves the target account instead of
    * spending it — see Phase 1's guard test for why that distinction has to hold.
    */
-  const tagCommitmentRelief = useCallback(async (code: string, txnId: string, paidOn: string, amount: number) => {
-    const ya = yaForDate(paidOn);
-    if (!scheduleForYA(ya)) return;
-    await addReliefTag({ txnId, code, ya, amount, origin: 'commitment' });
-  }, []);
-
   const payCommitment = useCallback(
     async (occurrenceId: string, opts?: { amount?: number; paidOn?: string }): Promise<{ matched: boolean }> => {
       const occurrence = commitmentOccurrences.find((o) => o.id === occurrenceId);

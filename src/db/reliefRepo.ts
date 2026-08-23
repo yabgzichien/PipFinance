@@ -97,6 +97,19 @@ export async function deleteReliefTag(id: string): Promise<void> {
   await db.runAsync('DELETE FROM relief_tags WHERE id = ?', id);
 }
 
+/**
+ * Drop the relief tags belonging to these transactions. There are no foreign keys in this
+ * database, so deleting a transaction has to cascade by hand (same as `deleteSplitsForTxns`):
+ * an orphaned tag would keep inflating a year's claimed total for spending that no longer
+ * exists, with no row in the Tax screen left to remove it from.
+ */
+export async function deleteReliefTagsForTxns(txnIds: string[]): Promise<void> {
+  if (txnIds.length === 0) return;
+  const db = await getDb();
+  const placeholders = txnIds.map(() => '?').join(',');
+  await db.runAsync(`DELETE FROM relief_tags WHERE txn_id IN (${placeholders})`, ...txnIds);
+}
+
 // --- Relief memory: merchantKey -> reliefCode, same shape as merchant_memory but its own
 // table so relief learning can be cleared independently of category learning in Settings.
 

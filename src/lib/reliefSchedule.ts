@@ -78,6 +78,19 @@ export const RELIEF_SCHEDULES: Record<number, ReliefSchedule> = {
   2025: RELIEF_SCHEDULE_2025,
 };
 
+/**
+ * Look up a year's schedule, falling forward to the latest registered one for any year beyond
+ * it. Without this, every transaction dated in a year whose real LHDN figures haven't been
+ * entered yet would silently skip relief detection entirely, which reads to the user as the
+ * feature being broken. The returned object keeps its own `ya` field (e.g. 2025), so anything
+ * rendering that value still says honestly which year's cap figures are in force: only the
+ * lookup is forgiving, not the data. A year *before* the earliest schedule still returns null,
+ * since there is nothing to fall back to.
+ */
 export function scheduleForYA(ya: number): ReliefSchedule | null {
-  return RELIEF_SCHEDULES[ya] ?? null;
+  if (RELIEF_SCHEDULES[ya]) return RELIEF_SCHEDULES[ya];
+  const years = Object.keys(RELIEF_SCHEDULES).map(Number);
+  if (years.length === 0) return null;
+  const latest = Math.max(...years);
+  return ya > latest ? RELIEF_SCHEDULES[latest] : null;
 }

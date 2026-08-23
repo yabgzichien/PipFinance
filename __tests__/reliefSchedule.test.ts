@@ -25,11 +25,22 @@ describe('relief schedules', () => {
     });
   }
 
-  it('returns null for a year with no defined schedule', () => {
+  it('returns null for a year before the earliest defined schedule', () => {
     expect(scheduleForYA(1999)).toBeNull();
   });
 
   it('returns the 2025 schedule by year number', () => {
     expect(scheduleForYA(2025)).toBe(RELIEF_SCHEDULES[2025]);
+  });
+
+  it('falls forward to the latest schedule for a year beyond it', () => {
+    const latest = Math.max(...Object.keys(RELIEF_SCHEDULES).map(Number));
+    expect(scheduleForYA(2026)).toBe(RELIEF_SCHEDULES[latest]);
+    expect(scheduleForYA(2030)).toBe(RELIEF_SCHEDULES[latest]);
+  });
+
+  it('keeps the fallen-forward schedule honest about which year its figures are from', () => {
+    const latest = Math.max(...Object.keys(RELIEF_SCHEDULES).map(Number));
+    expect(scheduleForYA(2030)!.ya).toBe(latest);
   });
 });

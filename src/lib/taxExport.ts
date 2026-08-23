@@ -1,7 +1,7 @@
 // src/lib/taxExport.ts
 // Builds the per-YA audit pack: a real PDF (not an HTML-print stand-in, unlike the general
 // financial export) bundling every tagged transaction's evidence images plus a summary table
-// keyed by Form BE line. pdf-lib is pure JS  no native module, works the same on web and
+// keyed by Form BE line. pdf-lib is pure JS: no native module, works the same on web and
 // native via the app's existing saveOrDownloadExport (financialExport.ts:1372).
 import { File } from 'expo-file-system';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';

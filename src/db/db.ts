@@ -358,6 +358,8 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM people;
       DELETE FROM commitment_occurrences;
       DELETE FROM commitments;
+      DELETE FROM relief_tags;
+      DELETE FROM relief_memory;
       DELETE FROM deleted_default_categories;
     `);
     await seedCategories(db);
