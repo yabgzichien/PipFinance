@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { BtnLabel, Caption, PrimaryButton } from './ui';
-import { deleteReliefTag, updateReliefTag } from '../db/reliefRepo';
+import { deleteReliefTag, updateReliefTag, upsertReliefMemory } from '../db/reliefRepo';
 import { evidenceState } from '../lib/relief';
 import type { ReliefSchedule } from '../lib/reliefSchedule';
 import type { ReliefTag, Transaction } from '../lib/types';
@@ -58,6 +58,9 @@ export function ReliefTagEditSheet({
     const n = parseFloat(amountText.replace(/[^0-9.]/g, ''));
     const amount = Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : tag.amount;
     await updateReliefTag(tag.id, { code, amount });
+    if (tag.origin === 'auto' && txn.merchantKey) {
+      await upsertReliefMemory(txn.merchantKey, code);
+    }
     onChanged();
     onClose();
   };
