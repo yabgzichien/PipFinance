@@ -38,6 +38,7 @@
     "expo-status-bar": "~3.0.9",
     "fflate": "^0.8.3",
     "jest-expo": "~54.0.17",
+    "pdf-lib": "^1.17.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

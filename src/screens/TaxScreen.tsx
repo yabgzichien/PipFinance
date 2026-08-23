@@ -9,6 +9,9 @@ import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../componen
 import { computeUsage, evidenceState, isRequestable, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
 import { addReliefTag, listReliefTags } from '../db/reliefRepo';
+import { saveOrDownloadExport } from '../lib/financialExport';
+import { notify } from '../lib/platformAlert';
+import { buildAuditPackPdf } from '../lib/taxExport';
 import type { ReliefTag, Transaction } from '../lib/types';
 import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
@@ -36,6 +39,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const [mappingCommitments, setMappingCommitments] = useState(false);
   const [addingManually, setAddingManually] = useState(false);
   const [manualSearch, setManualSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -248,6 +252,27 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                 ))}
           </Card>
         )}
+
+        <Pressable
+          disabled={exporting || !schedule || !tags || tags.length === 0}
+          onPress={async () => {
+            if (!schedule || !tags) return;
+            setExporting(true);
+            try {
+              const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
+              const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
+              if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
+            } finally {
+              setExporting(false);
+            }
+          }}
+          style={[styles.exportButton, { backgroundColor: theme.accent, opacity: exporting || !tags?.length ? 0.5 : 1 }]}
+        >
+          <Icon name="download" size={16} color={colors.onAccent} />
+          <Text style={{ color: colors.onAccent, fontFamily: uiFont(700), fontSize: 14 }}>
+            {exporting ? 'Building...' : 'Export audit pack'}
+          </Text>
+        </Pressable>
       </ScrollView>
 
       {schedule && (
@@ -287,4 +312,5 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5, paddingVertical: 2 },
   manualRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9, borderTopWidth: 1, borderTopColor: 'transparent' },
   requestableRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.sm, padding: 12, marginTop: 8, gap: 10 },
+  exportButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, paddingVertical: 14, marginTop: 22 },
 });
