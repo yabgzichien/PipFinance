@@ -244,7 +244,7 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
   const commitment: Commitment = {
     id: 'c1', label: 'S&P 500 DCA', merchantKey: 'stockbroker-dca', kind: 'investment', amount: 200,
     categoryId: null, fromAccountId: 'a1', toAccountId: 'a2', dueDay: 15, startMonth: '2026-05',
-    endMonth: null, archived: false, createdAt: '2026-05-01T00:00:00.000Z',
+    endMonth: null, archived: false, createdAt: '2026-05-01T00:00:00.000Z', reliefCode: null,
   };
   const occurrences: CommitmentOccurrence[] = [
     { id: 'o1', commitmentId: 'c1', dueDate: '2026-05-15', month: '2026-05', amount: 200, paidAmount: 200, paidOn: '2026-05-14', status: 'paid', txnId: null, txnCreated: true, unitsAdded: 1.5, priceMYR: 400, createdAt: '2026-05-01T00:00:00.000Z' },

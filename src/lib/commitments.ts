@@ -23,6 +23,9 @@ export interface Commitment {
   endMonth: string | null; // 'YYYY-MM', null = open-ended
   archived: boolean;
   createdAt: string;
+  /** LHDN relief line code this bill counts toward, set once in the Tax screen. Every future
+   *  paid occurrence auto-tags its transaction against this code. Null = not a relief bill. */
+  reliefCode: string | null;
 }
 
 export interface CommitmentOccurrence {

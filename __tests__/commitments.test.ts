@@ -8,7 +8,7 @@ function commitment(over: Partial<Commitment>): Commitment {
     id: 'c1', label: 'Maxis', merchantKey: 'maxis', kind: 'expense', amount: 89,
     categoryId: 'communications', fromAccountId: 'a1', toAccountId: null,
     dueDay: 5, startMonth: '2026-06', endMonth: null, archived: false,
-    createdAt: '2026-06-01T00:00:00.000Z', ...over,
+    createdAt: '2026-06-01T00:00:00.000Z', reliefCode: null, ...over,
   };
 }
 

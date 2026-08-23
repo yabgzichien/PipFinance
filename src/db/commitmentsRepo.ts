@@ -18,6 +18,7 @@ interface CommitmentRow {
   end_month: string | null;
   archived: number;
   created_at: string;
+  relief_code: string | null;
 }
 
 interface OccurrenceRow {
@@ -51,6 +52,7 @@ function toCommitment(r: CommitmentRow): Commitment {
     endMonth: r.end_month,
     archived: !!r.archived,
     createdAt: r.created_at,
+    reliefCode: r.relief_code,
   };
 }
 
@@ -85,6 +87,7 @@ export interface NewCommitment {
   dueDay: number;
   startMonth: string;
   endMonth?: string | null;
+  reliefCode?: string | null;
 }
 
 export async function listCommitments(): Promise<Commitment[]> {
@@ -99,8 +102,8 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
   const createdAt = new Date().toISOString();
   await db.runAsync(
     `INSERT INTO commitments
-       (id, label, merchant_key, kind, amount, category_id, from_account_id, to_account_id, due_day, start_month, end_month, archived, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+       (id, label, merchant_key, kind, amount, category_id, from_account_id, to_account_id, due_day, start_month, end_month, archived, created_at, relief_code)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
     id,
     input.label,
     input.merchantKey,
@@ -112,7 +115,8 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
     input.dueDay,
     input.startMonth,
     input.endMonth ?? null,
-    createdAt
+    createdAt,
+    input.reliefCode ?? null
   );
   return {
     id,
@@ -128,12 +132,13 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
     endMonth: input.endMonth ?? null,
     archived: false,
     createdAt,
+    reliefCode: input.reliefCode ?? null,
   };
 }
 
 export async function updateCommitment(
   id: string,
-  patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth'>>
+  patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth' | 'reliefCode'>>
 ): Promise<void> {
   const db = await getDb();
   const fields: string[] = [];
@@ -145,6 +150,7 @@ export async function updateCommitment(
   if (patch.toAccountId !== undefined) { fields.push('to_account_id = ?'); values.push(patch.toAccountId); }
   if (patch.dueDay !== undefined) { fields.push('due_day = ?'); values.push(patch.dueDay); }
   if (patch.endMonth !== undefined) { fields.push('end_month = ?'); values.push(patch.endMonth); }
+  if (patch.reliefCode !== undefined) { fields.push('relief_code = ?'); values.push(patch.reliefCode); }
   if (fields.length === 0) return;
   values.push(id);
   await db.runAsync(`UPDATE commitments SET ${fields.join(', ')} WHERE id = ?`, ...(values as any[]));

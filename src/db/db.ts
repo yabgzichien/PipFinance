@@ -158,6 +158,22 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       price_myr     REAL,
       created_at    TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS relief_tags (
+      id                 TEXT PRIMARY KEY NOT NULL,
+      txn_id             TEXT NOT NULL,
+      code               TEXT NOT NULL,
+      ya                 INTEGER NOT NULL,
+      amount             REAL NOT NULL,
+      origin             TEXT NOT NULL DEFAULT 'auto',
+      cert_image_uri     TEXT,
+      einvoice_image_uri TEXT,
+      created_at         TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS relief_memory (
+      merchant_key TEXT PRIMARY KEY NOT NULL,
+      relief_code  TEXT NOT NULL,
+      updated_at   TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS deleted_default_categories (
       id  TEXT PRIMARY KEY NOT NULL
     );
@@ -169,6 +185,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     CREATE INDEX IF NOT EXISTS idx_balance_account ON balance_entries (account_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_occ_unique ON commitment_occurrences (commitment_id, due_date);
     CREATE INDEX IF NOT EXISTS idx_occ_month ON commitment_occurrences (month);
+    CREATE INDEX IF NOT EXISTS idx_relief_txn ON relief_tags (txn_id);
+    CREATE INDEX IF NOT EXISTS idx_relief_ya_code ON relief_tags (ya, code);
   `);
 
   // Migration: add the `kind` column for databases created before income
@@ -206,6 +224,14 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   // when the user opts in on the scan's review screen.
   try {
     await db.execAsync('ALTER TABLE transactions ADD COLUMN receipt_uri TEXT');
+  } catch {
+    // column already present
+  }
+
+  // Migration: which relief line a recurring bill counts toward, so its future paid
+  // occurrences can auto-tag without the user re-mapping it every time.
+  try {
+    await db.execAsync('ALTER TABLE commitments ADD COLUMN relief_code TEXT');
   } catch {
     // column already present
   }
