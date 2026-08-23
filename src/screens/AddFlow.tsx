@@ -65,7 +65,7 @@ export function AddFlow(props: AddFlowProps) {
 }
 
 function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById } = useAppData();
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection } = useAppData();
   const colorTheme = useThemeColors();
 
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -196,6 +196,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     settlements: (PendingSettlement | null)[] = []
   ) => {
     const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
+    await applyReliefDetection(created, null);
     // If the whole batch was tagged to an account, move that account's balance
     // per saved row — direction derived from account kind + txn type (an expense
     // reduces an asset / pays down a liability; income does the reverse).
@@ -237,6 +238,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
       [split],
       [receiptResult?.photoUri ?? null]
     );
+    await applyReliefDetection(created, cachedReceipt);
     setResult(created);
     setNewLearned(learned);
     setExtractElapsedMs(null);

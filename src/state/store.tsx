@@ -89,6 +89,10 @@ import {
 import { findCommitmentMatch, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
 import { matchSourceCategory } from '../lib/import';
 import type { ParsedCommitment } from '../lib/advancedImport';
+import { addReliefTag, getReliefMemoryMap } from '../db/reliefRepo';
+import { matchRelief, yaForDate } from '../lib/relief';
+import { scheduleForYA } from '../lib/reliefSchedule';
+import type { ScannedReceipt } from '../lib/parseReceipt';
 
 const ONBOARDING_KEY = 'onboarding_complete';
 // The monthly amount the borrower committed to keeping back. A preference, not ledger data, so
@@ -223,6 +227,11 @@ interface AppData {
     /** Parallel to `items`: the saved receipt photo's URI for that row, or null. */
     receiptUris?: (string | null)[]
   ) => Promise<{ created: Transaction[]; newLearned: NewLearned[] }>;
+  /** Silently tags each created transaction against the current YA's relief schedule, using
+   *  line-item keywords first (when `receipt` is given) and remembered merchant mappings
+   *  second. Writes nothing when nothing matches. Called once per save from AddFlow.tsx, with
+   *  no UI of its own, per the tax-relief-tagging spec's zero-footprint requirement. */
+  applyReliefDetection: (created: Transaction[], receipt: ScannedReceipt | null) => Promise<void>;
   /** People you split bills with, remembered locally so totals can roll up per person. */
   people: Person[];
   splits: Split[];
@@ -346,7 +355,7 @@ interface AppData {
   }) => Promise<void>;
   updateCommitmentEntry: (
     id: string,
-    patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth'>>
+    patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth' | 'reliefCode'>>
   ) => Promise<void>;
   archiveCommitmentEntry: (id: string) => Promise<void>;
   deleteCommitmentEntry: (id: string) => Promise<void>;
@@ -741,6 +750,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [memory]
   );
 
+  const applyReliefDetection = useCallback(async (created: Transaction[], receipt: ScannedReceipt | null) => {
+    if (created.length === 0) return;
+    const reliefMemory = await getReliefMemoryMap();
+    for (const txn of created) {
+      if (!txn.date) continue;
+      const ya = yaForDate(txn.date);
+      const schedule = scheduleForYA(ya);
+      if (!schedule) continue;
+      // Line items only ever apply to the single-transaction receipt-scan path; a batch
+      // (screenshot import) save always passes receipt: null from AddFlow.tsx.
+      const singleItemReceipt = created.length === 1 ? receipt : null;
+      const match = matchRelief(txn, singleItemReceipt, reliefMemory, schedule);
+      if (!match) continue;
+      await addReliefTag({ txnId: txn.id, code: match.code, ya, amount: match.amount, origin: 'auto' });
+    }
+  }, []);
+
   const saveTransactionEdits = useCallback(
     async (
       txn: Transaction,
@@ -1126,7 +1152,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const updateCommitmentEntry = useCallback(
     async (
       id: string,
-      patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth'>>
+      patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth' | 'reliefCode'>>
     ) => {
       await dbUpdateCommitment(id, patch);
       await refreshCommitmentState();
@@ -1227,6 +1253,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
    * commitment logs a `'transfer'`, not an expense, and moves the target account instead of
    * spending it — see Phase 1's guard test for why that distinction has to hold.
    */
+  const tagCommitmentRelief = useCallback(async (code: string, txnId: string, paidOn: string, amount: number) => {
+    const ya = yaForDate(paidOn);
+    if (!scheduleForYA(ya)) return;
+    await addReliefTag({ txnId, code, ya, amount, origin: 'commitment' });
+  }, []);
+
   const payCommitment = useCallback(
     async (occurrenceId: string, opts?: { amount?: number; paidOn?: string }): Promise<{ matched: boolean }> => {
       const occurrence = commitmentOccurrences.find((o) => o.id === occurrenceId);
@@ -1244,6 +1276,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           txnId: match.id,
           txnCreated: false,
         });
+        if (commitment.reliefCode) {
+          await tagCommitmentRelief(commitment.reliefCode, match.id, paidOn, match.amount);
+        }
         await refreshCommitmentState();
         return { matched: true };
       }
@@ -1300,11 +1335,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         unitsAdded,
         priceMYR,
       });
+      if (commitment.reliefCode) {
+        await tagCommitmentRelief(commitment.reliefCode, txn.id, paidOn, paidAmount);
+      }
       setTransactions(await listTransactions());
       await refreshCommitmentState();
       return { matched: false };
     },
-    [commitmentOccurrences, commitments, accounts, prices, resolveCommitmentMatch, recordBalanceLink, refreshCommitmentState]
+    [commitmentOccurrences, commitments, accounts, prices, resolveCommitmentMatch, recordBalanceLink, refreshCommitmentState, tagCommitmentRelief]
   );
 
   /**
@@ -1409,6 +1447,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     updateCategoryIcon,
     updateCategoryLabel,
     commitCategorized,
+    applyReliefDetection,
     saveTransactionEdits,
     removeTransaction,
     removeMany,
