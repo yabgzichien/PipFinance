@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
+import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
 import { computeUsage, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
@@ -11,6 +12,7 @@ import type { ReliefTag } from '../lib/types';
 import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useAppData } from '../state/store';
 import { colors, uiFont } from '../theme';
 
 const AVAILABLE_YAS = Object.keys(RELIEF_SCHEDULES).map(Number).sort((a, b) => b - a);
@@ -19,8 +21,10 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { transactions } = useAppData();
   const [ya, setYa] = useState(AVAILABLE_YAS[0]);
   const [tags, setTags] = useState<ReliefTag[] | null>(null);
+  const [editingTag, setEditingTag] = useState<ReliefTag | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,13 +112,37 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                 RM {fmt(u.capUsed)} / RM {fmt(u.cap)}
               </Caption>
               <ProgressTrack pct={pct} />
+              {children.length === 0 &&
+                (tags ?? []).filter((t) => t.code === line.code).map((t) => {
+                  const txn = transactions.find((x) => x.id === t.txnId);
+                  if (!txn) return null;
+                  return (
+                    <Pressable key={t.id} onPress={() => setEditingTag(t)} style={styles.tagRow}>
+                      <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
+                      <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                    </Pressable>
+                  );
+                })}
               {children.map((child) => {
                 const cu = usageByCode[child.code];
                 if (!cu) return null;
+                const childTags = (tags ?? []).filter((t) => t.code === child.code);
                 return (
-                  <View key={child.code} style={styles.childRow}>
-                    <Caption color={colorTheme.ink2}>{child.label}</Caption>
-                    <Caption color={colorTheme.ink2}>RM {fmt(cu.capUsed)} / RM {fmt(cu.cap)}</Caption>
+                  <View key={child.code} style={styles.childBlock}>
+                    <View style={styles.childRow}>
+                      <Caption color={colorTheme.ink2}>{child.label}</Caption>
+                      <Caption color={colorTheme.ink2}>RM {fmt(cu.capUsed)} / RM {fmt(cu.cap)}</Caption>
+                    </View>
+                    {childTags.map((t) => {
+                      const txn = transactions.find((x) => x.id === t.txnId);
+                      if (!txn) return null;
+                      return (
+                        <Pressable key={t.id} onPress={() => setEditingTag(t)} style={styles.tagRow}>
+                          <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
+                          <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 );
               })}
@@ -122,6 +150,16 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           );
         })}
       </ScrollView>
+
+      {schedule && (
+        <ReliefTagEditSheet
+          tag={editingTag}
+          txn={editingTag ? transactions.find((t) => t.id === editingTag.txnId) ?? null : null}
+          schedule={schedule}
+          onClose={() => setEditingTag(null)}
+          onChanged={() => listReliefTags(ya).then(setTags)}
+        />
+      )}
     </View>
   );
 }
@@ -133,4 +171,6 @@ const styles = StyleSheet.create({
   yaChipText: { fontFamily: uiFont(700), fontSize: 13 },
   lineHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   childRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, marginTop: 8 },
+  childBlock: { marginTop: 8 },
+  tagRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, paddingVertical: 4 },
 });
