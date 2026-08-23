@@ -88,10 +88,17 @@ export async function buildAuditPackPdf(
         continue;
       }
       const maxWidth = 300;
-      const scale = Math.min(1, maxWidth / embedded.width);
+      const maxHeight = 400;
+      const scale = Math.min(1, maxWidth / embedded.width, maxHeight / embedded.height);
       const w = embedded.width * scale;
       const h = embedded.height * scale;
-      if (py - h < 40) break; // this v1 pack shows the first images that fit one page per txn
+      if (py - h < 40) {
+        // doesn't fit on this page even after capping both dimensions; note it and keep
+        // going so later, possibly-smaller images for this transaction still get a chance
+        page.drawText('(image too large for this page)', { x: 40, y: py, size: 9, font, color: rgb(0.6, 0.6, 0.6) });
+        py -= 20;
+        continue;
+      }
       page.drawImage(embedded, { x: 40, y: py - h, width: w, height: h });
       py -= h + 20;
     }

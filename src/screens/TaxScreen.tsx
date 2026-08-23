@@ -259,9 +259,13 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             if (!schedule || !tags) return;
             setExporting(true);
             try {
-              const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
-              const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
-              if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
+              try {
+                const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
+                const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
+                if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
+              } catch {
+                notify('Export failed', 'Something went wrong building the audit pack.');
+              }
             } finally {
               setExporting(false);
             }
