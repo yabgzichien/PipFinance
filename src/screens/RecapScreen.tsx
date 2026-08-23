@@ -5,12 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
-import { MonthVsNormalCard } from '../components/CashflowStructure';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
-import { computeIncomeFloor } from '../lib/incomeFloor';
-import { detectObligations } from '../lib/obligations';
-import { computeExpenseStructure } from '../lib/spendingProfile';
 import { monthLabel } from '../lib/dates';
 import { fmt } from '../lib/format';
 import {
@@ -288,19 +284,6 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
     [spentByCat, budgetedIds]
   );
 
-  // "Against your normal": the floor comes from ALL history (a single month cannot establish
-  // what is normal), while the spend split is scoped to the selected month. Obligations are
-  // likewise detected across the full ledger — one month can never prove something recurs —
-  // and then applied to the month, which is why computeExpenseStructure takes them as an arg.
-  const incomeFloor = useMemo(() => computeIncomeFloor(transactions), [transactions]);
-  const monthStructure = useMemo(() => {
-    const obligations = detectObligations(transactions).obligations;
-    return computeExpenseStructure(
-      transactions.filter((t) => txnMonthKey(t) === month),
-      obligations
-    );
-  }, [transactions, month]);
-
   // Month-end net worth for the selected month and the one before it.
   const networth = useMemo(() => {
     if (accounts.length === 0) return null;
@@ -414,10 +397,6 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           net={statement.net}
           networth={networth}
         />
-
-        {/* How this month sat against the borrower's own baseline. Independent of the budget,
-            so it renders whether or not one has been set. */}
-        <MonthVsNormalCard monthIncome={statement.income} floor={incomeFloor} structure={monthStructure} />
 
         {/* Competence feedback (docs/ui-engagement-plan.md Step 5): two real, growing numbers,
             never a badge. */}

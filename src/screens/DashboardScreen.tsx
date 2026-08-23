@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { BudgetProgressList, STATUS_COLOR } from '../components/BudgetProgressList';
 import { FadeIn } from '../components/Motion';
 import { Icon, type IconName } from '../components/Icon';
@@ -250,7 +250,7 @@ export function DashboardScreen({
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
             <View style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}>
-              {sleepy ? <Pip size={36} expr="sleepy" /> : <Pip size={40} expr="idle" float />}
+              {sleepy ? <Pip size={52} expr="sleepy" /> : <Pip size={58} expr="idle" float />}
             </View>
           </View>
         </View>
@@ -318,7 +318,7 @@ export function DashboardScreen({
               {hasBudget ? (
                 <>
                   <View style={styles.sectionHead}>
-                    <Eyebrow>This month · {monthName()}</Eyebrow>
+                    <Eyebrow>Budget This Month - {monthName()}</Eyebrow>
                     <Pressable onPress={onOpenBudget} hitSlop={8}>
                       <Label weight={700} color={theme.accent}>Manage</Label>
                     </Pressable>
@@ -482,20 +482,36 @@ function StreakCard({
       <View style={styles.streakLeft}>
         <View style={styles.flameTile}>
           <View style={{ width: 26, height: 32 }}>
+            {/* Outer body — gold silhouette with a tall centre peak, a deep valley to its left and
+                notched shoulders either side, so the flame keeps a jagged flat-icon edge at 26px. */}
             <Animated.View style={[StyleSheet.absoluteFill, outerFlameStyle]}>
-              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
-                <Path d="M9 1C9 1 14.5 6.5 14.5 11.5C14.5 15 12 17.5 9 17.5C6 17.5 3.5 15 3.5 11.5C3.5 8.5 5.5 6.5 5.5 6.5C5.5 6.5 6 9.5 9 9.5C9 9.5 7.5 7.5 9 4C9.5 5.5 11.5 7.5 11.5 9.5C13 8 12.5 5.5 11 3.5C14 5.5 15.5 8.5 15.5 11.5C15.5 16.5 12.5 20.5 9 21.5C5.5 20.5 2.5 16.5 2.5 11.5C2.5 5.5 9 1 9 1Z" fill={colorTheme.amber} />
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M49 12.5C53.5 22 57 32 58.6 39.6C61.1 33.2 65.4 28.9 70 26.8C73.2 33.8 79.6 47.2 80 64C80.4 82.2 62.9 99 41 99C19.1 99 1.6 82.2 2 64C2.2 56.2 4.1 51.4 7.6 46.8C9.1 39.9 17 26.7 25.2 20C26.7 27.2 30.7 36.2 36.6 42.6C40.1 46.2 43.1 42.2 44.6 35C45.7 29.6 47.2 20 49 12.5Z"
+                  fill="#faa81a"
+                />
               </Svg>
             </Animated.View>
+            {/* Mid tongue — inner orange flame plus the detached spark riding above the peak. */}
             <Animated.View style={[StyleSheet.absoluteFill, midFlameStyle]}>
-              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
-                <Ellipse cx={9} cy={13.5} rx={3.2} ry={5.2} fill="#f2901e" />
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M34.5 42C38 47.5 41.5 51.5 43.5 55.5C45.5 51.5 48 48 51 45.5C55.5 52 58.5 60 58.5 67.5C58.5 78.5 50.7 88.5 41 88.5C31.3 88.5 23.5 78.5 23.5 67.5C23.5 58.5 28.5 48.5 34.5 42Z"
+                  fill="#f26a22"
+                />
+                <Path
+                  d="M38.6 1C41.7 6.2 43.2 11.2 42.2 15.2C41.1 19.7 36.6 21.1 33.6 17.7C31 14.7 31.6 8.4 38.6 1Z"
+                  fill="#f26a22"
+                />
               </Svg>
             </Animated.View>
+            {/* Hot core — the red droplet at the base of the inner flame. */}
             <Animated.View style={[StyleSheet.absoluteFill, coreFlameStyle]}>
-              <Svg width={26} height={32} viewBox="0 0 18 22" fill="none">
-                <Ellipse cx={9} cy={15} rx={1.8} ry={3.2} fill="#fac438" />
-                <Ellipse cx={9} cy={16.5} rx={0.9} ry={1.6} fill="#fff2c4" />
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M42.5 61C46 67 49 72.5 49 77.5C49 82.5 46 86 42.5 86C39 86 36 82.5 36 77.5C36 72.5 39 67 42.5 61Z"
+                  fill="#e2402a"
+                />
               </Svg>
             </Animated.View>
           </View>
@@ -525,15 +541,17 @@ function StreakCard({
                 done
                   ? [styles.dotDone, { backgroundColor: theme.accent }]
                   : i === todayIndex
-                    ? [styles.dotToday, { backgroundColor: theme.accentSoft }]
+                    ? styles.dotToday
                     : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
               ]}
             >
-              {done && (
+              {done ? (
                 <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
                   <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
                 </Svg>
-              )}
+              ) : i === todayIndex ? (
+                <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
+              ) : null}
             </View>
           ))}
         </View>
@@ -545,6 +563,33 @@ function StreakCard({
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open your activity calendar">
       {card}
     </Pressable>
+  );
+}
+
+/** Today's dot hasn't been earned yet — spin a ring in place of the soft-fill circle so "today,
+ *  not logged yet" reads as pending rather than as a fourth, undocumented dot state. */
+function TodayDotSpinner({ color, trackColor }: { color: string; trackColor: string }) {
+  const spin = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (reducedMotion) {
+      spin.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 2600, easing: Easing.linear, useNativeDriver: true })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin, reducedMotion]);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View style={reducedMotion ? undefined : { transform: [{ rotate }] }}>
+      <Svg width={17} height={17} viewBox="0 0 17 17" fill="none">
+        <Circle cx={8.5} cy={8.5} r={7} stroke={trackColor} strokeWidth={2} />
+        <Path d="M8.5 1.5a7 7 0 0 1 6.06 3.5" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      </Svg>
+    </Animated.View>
   );
 }
 

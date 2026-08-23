@@ -6,6 +6,7 @@ import {
 import {
   generateExcelWorkbook,
   generateCSV,
+  csvToHtmlTable,
   generateHTMLReport,
   generatePrintablePDFHtml,
   generateAdvancedImportJSON,
@@ -126,6 +127,36 @@ describe('generateCSV', () => {
     expect(csv).toContain('"Total Expenses",500');
     expect(csv).toContain('"Net Income / Savings",4000');
     expect(csv).toContain('=== TRANSACTION LEDGER ===');
+  });
+});
+
+describe('csvToHtmlTable', () => {
+  const txns = [
+    makeTxn({ type: 'income', categoryId: 'salary', amount: 4500, date: '2026-06-01' }),
+    makeTxn({ type: 'expense', categoryId: 'food', amount: 500, date: '2026-06-05', merchantRaw: 'Ah <Fatt> "Kopitiam"' }),
+  ];
+  const accounts = [makeAcct({ id: 'a1' })];
+  const entries = [makeEntry({ value: 6000 })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Nurul');
+
+  it('renders the CSV report as a real HTML table instead of raw text', () => {
+    const csv = generateCSV(bundle);
+    const html = csvToHtmlTable(csv);
+
+    expect(html).toContain('<table>');
+    expect(html).toContain('<tr class="section"><td colspan="8">TRANSACTION LEDGER</td></tr>');
+    // Row cells land in their own <td>, not a single comma-joined blob.
+    expect(html).toMatch(/<td>Nurul<\/td>/);
+    expect(html).toMatch(/<td>4500<\/td>/);
+  });
+
+  it('escapes HTML special characters in cell content', () => {
+    const csv = generateCSV(bundle);
+    const html = csvToHtmlTable(csv);
+
+    expect(html).toContain('Ah &lt;Fatt&gt; &quot;Kopitiam&quot;');
+    expect(html).not.toContain('Ah <Fatt>');
   });
 });
 

@@ -16,6 +16,10 @@ describe('backTargetFor', () => {
     expect(backTargetFor('advancedImport', origins)).toBe('settings');
   });
 
+  it('returns netWorthHistory to networth', () => {
+    expect(backTargetFor('netWorthHistory', origins)).toBe('networth');
+  });
+
   it('returns owed, calendar and export to wherever they were opened from', () => {
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'home' })).toBe('home');
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'transactions' })).toBe('transactions');

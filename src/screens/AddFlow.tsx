@@ -7,6 +7,7 @@ import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
 import { currentMonthKey } from '../lib/budget';
 import { todayISO } from '../lib/duplicates';
 import { defaultLinkEffect } from '../lib/networth';
+import { type ScannedReceipt } from '../lib/parseReceipt';
 import { prevMonthKey } from '../lib/recap';
 import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction } from '../lib/types';
@@ -74,6 +75,9 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   const [cached, setCached] = useState<ExtractedTxn[] | undefined>(undefined);
   const [linkId, setLinkId] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<ReceiptSplitResult | null>(null);
+  // Set once ReceiptScanScreen actually reads the picked image, so backing out to the kind
+  // question and choosing "receipt" again reuses the read instead of paying for another one.
+  const [cachedReceipt, setCachedReceipt] = useState<ScannedReceipt | null>(null);
   const [result, setResult] = useState<Transaction[]>([]);
   const [newLearned, setNewLearned] = useState<NewLearned[]>([]);
   const [hasKey, setHasKey] = useState(true);
@@ -135,6 +139,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     setExtractElapsedMs(null);
     setAutoFill(null);
     setReceiptResult(null);
+    setCachedReceipt(null);
     setPhase('kind');
   };
 
@@ -272,6 +277,8 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     return (
       <ReceiptScanScreen
         initialImage={image ?? undefined}
+        cachedReceipt={cachedReceipt}
+        onScanned={setCachedReceipt}
         onBack={backToKind}
         onManualInstead={() => {
           setReceiptResult(null);

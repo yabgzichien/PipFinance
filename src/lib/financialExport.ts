@@ -276,6 +276,95 @@ export function generateCSV(data: FinancialReportData): string {
   return lines.join('\n');
 }
 
+/** Parse a single CSV line into cells, honoring double-quoted fields. */
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      cells.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
+/**
+ * Render a generated CSV report as a self-contained, themed HTML table
+ * (instead of raw comma-separated text) so it can be shown in a WebView
+ * preview on native platforms that lack a spreadsheet viewer.
+ */
+export function csvToHtmlTable(csvText: string): string {
+  const rows = csvText.split('\n').map(parseCsvLine);
+  const rowsHtml = rows
+    .map((cells) => {
+      const isBlank = cells.length === 1 && cells[0].trim() === '';
+      if (isBlank) return '<tr class="spacer"><td>&nbsp;</td></tr>';
+
+      const isSection = cells.length === 1 && cells[0].trim().length > 0;
+      if (isSection) {
+        const label = cells[0].replace(/^=+\s*|\s*=+$/g, '');
+        return `<tr class="section"><td colspan="8">${escapeHtml(label)}</td></tr>`;
+      }
+
+      const tds = cells.map((c) => `<td>${escapeHtml(c)}</td>`).join('');
+      return `<tr>${tds}</tr>`;
+    })
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg: #0d1310; --card-bg: #141c17; --card-border: rgba(255,255,255,0.08);
+      --ink: #f0f4f1; --ink-dim: #8fa094; --accent: #22c55e; --accent-tint: rgba(34,197,94,0.12);
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f5f7f5; --card-bg: #ffffff; --card-border: rgba(0,0,0,0.08);
+        --ink: #141c17; --ink-dim: #5c6c60; --accent: #15803d; --accent-tint: rgba(21,128,61,0.08);
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--ink); padding: 12px 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    td { padding: 6px 8px; border-bottom: 1px solid var(--card-border); white-space: nowrap; }
+    tr:last-child td { border-bottom: none; }
+    tr.section td { font-weight: 700; color: var(--accent); background: var(--accent-tint); padding-top: 10px; padding-bottom: 10px; white-space: normal; }
+    tr.spacer td { padding: 2px; border-bottom: none; }
+    tr:not(.section):not(.spacer):hover td { background: var(--card-bg); }
+  </style>
+</head>
+<body>
+  <table>
+    ${rowsHtml}
+  </table>
+</body>
+</html>`;
+}
+
 // ---------------------------------------------------------------------------
 // 2b. ADVANCED IMPORT JSON EXPORT
 // Same shape the Advanced Import screen's parseJSON() reads back (see

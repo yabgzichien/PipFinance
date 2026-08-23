@@ -28,6 +28,7 @@ import { BudgetScreen } from './src/screens/BudgetScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { NetWorthScreen } from './src/screens/NetWorthScreen';
+import { NetWorthHistoryScreen } from './src/screens/NetWorthHistoryScreen';
 import { OwedScreen } from './src/screens/OwedScreen';
 import { RecapScreen } from './src/screens/RecapScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
@@ -375,7 +376,8 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onAdd={() => setScreen('add')}
         />
       )}
-      {screen === 'networth' && <NetWorthScreen onBack={goBack} />}
+      {screen === 'networth' && <NetWorthScreen onBack={goBack} onOpenHistory={() => setScreen('netWorthHistory')} />}
+      {screen === 'netWorthHistory' && <NetWorthHistoryScreen onBack={goBack} />}
       {screen === 'breakdown' && (
         <BreakdownScreen
           onBack={goBack}

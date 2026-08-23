@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 import { Icon, type IconName } from '../components/Icon';
 import { Amount, Card, Eyebrow, IconButton, TopBar } from '../components/ui';
 import {
@@ -20,6 +21,7 @@ import {
   type ReportPeriodType,
 } from '../lib/bookkeeping';
 import {
+  csvToHtmlTable,
   generateAdvancedImportJSON,
   generateCSV,
   generateExcelWorkbook,
@@ -609,28 +611,42 @@ export function ExportScreen({
             />
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
-            {selectedFormat === 'pdf' || selectedFormat === 'html' ? (
-              Platform.OS === 'web' ? (
-                // On Web, render in an interactive iframe
-                <View style={styles.webPreviewWrap}>
-                  <iframe
-                    srcDoc={previewContent}
-                    title="Report Preview"
-                    style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
-                  />
-                </View>
-              ) : (
-                <Card style={{ padding: 14 }}>
-                  <Text style={[styles.previewRawText, { color: themeColors.ink }]}>{previewContent}</Text>
-                </Card>
-              )
-            ) : (
+          {selectedFormat === 'json' ? (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
               <Card style={{ padding: 14 }}>
                 <Text style={[styles.previewRawText, { color: themeColors.ink }]}>{previewContent}</Text>
               </Card>
-            )}
-          </ScrollView>
+            </ScrollView>
+          ) : Platform.OS === 'web' ? (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
+              {/* On Web, render in an interactive iframe */}
+              <View style={styles.webPreviewWrap}>
+                <iframe
+                  srcDoc={
+                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
+                      ? csvToHtmlTable(previewContent)
+                      : previewContent
+                  }
+                  title="Report Preview"
+                  style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
+                />
+              </View>
+            </ScrollView>
+          ) : (
+            // On native, render the actual document/table instead of dumping raw markup/CSV text
+            <View style={[styles.webPreviewWrap, { flex: 1, margin: 16, marginTop: 0 }]}>
+              <WebView
+                source={{
+                  html:
+                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
+                      ? csvToHtmlTable(previewContent)
+                      : previewContent,
+                }}
+                style={{ flex: 1, backgroundColor: 'transparent' }}
+                originWhitelist={['*']}
+              />
+            </View>
+          )}
         </View>
       </Modal>
     </View>

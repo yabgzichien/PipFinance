@@ -8,7 +8,7 @@ import { B, BtnLabel, BubbleText, Card, CatBadge, CategoryChip, Eyebrow, PipSays
 import { shortDate } from '../lib/dates';
 import { findDuplicate, todayISO } from '../lib/duplicates';
 import { fmt } from '../lib/format';
-import { assignImported } from '../lib/import';
+import { assignImported, detectSourceVocabulary, pendingLabel, resolvePending, PENDING_CAT } from '../lib/import';
 import { DROP, type Category, type ExtractedTxn, type TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -16,6 +16,10 @@ import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+
+// Hues for categories the import wants to create, cycled so a batch of new
+// labels does not come out all the same colour. Matches AddCategoryModal.
+const NEW_CAT_HUES = [12, 42, 70, 120, 162, 200, 248, 286, 330];
 
 interface Row {
   item: ExtractedTxn; // working copy (amount/type editable)
@@ -45,11 +49,26 @@ export function ImportReviewScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { categories, catById, memory, transactions } = useAppData();
+  const { categories, catById, memory, transactions, addCategory } = useAppData();
   const today = useMemo(() => todayISO(), []);
 
+  // Does this file carry its own category taxonomy (a tracker export) rather
+  // than free-text hints (a statement)? If so, offer to keep it as-is instead
+  // of folding labels like "Toll" or "fyy" into the built-in buckets.
+  const vocabulary = useMemo(() => detectSourceVocabulary(items, categories), [items, categories]);
+  const newLabels = useMemo(
+    () => vocabulary.labels.filter((l) => l.existingId === null),
+    [vocabulary]
+  );
+  const offerKeep = vocabulary.isTracker && newLabels.length > 0;
+  const [keepSource, setKeepSource] = useState(offerKeep);
+  const [saving, setSaving] = useState(false);
+
+  const assign = (keep: boolean) =>
+    assignImported(items, memory, categories, catById, keep ? vocabulary : null);
+
   const [rows, setRows] = useState<Row[]>(() => {
-    const cats = assignImported(items, memory, categories, catById);
+    const cats = assign(offerKeep);
     return items.map((item, i) => {
       const isDup = !!findDuplicate(transactions, { merchant: item.merchant, amount: item.amount, date: item.date }, today);
       return { item: { ...item }, categoryId: cats[i], include: !isDup, isDup };
@@ -57,16 +76,65 @@ export function ImportReviewScreen({
   });
   const [editing, setEditing] = useState<number | null>(null);
 
+  // Stand-in categories for labels that do not exist yet, so the preview and
+  // the row editor can show them before anything is written to the database.
+  const pendingCats = useMemo<Category[]>(
+    () =>
+      newLabels.map((l, i) => ({
+        id: `${PENDING_CAT}${l.label}`,
+        label: l.label,
+        icon: 'dots',
+        hue: NEW_CAT_HUES[i % NEW_CAT_HUES.length],
+        kind: l.kind,
+        isDefault: false,
+      })),
+    [newLabels]
+  );
+  const displayCats = useMemo(
+    () => (keepSource ? [...categories, ...pendingCats] : categories),
+    [keepSource, categories, pendingCats]
+  );
+  const displayCatById = useMemo(
+    () => Object.fromEntries(displayCats.map((c) => [c.id, c])) as Record<string, Category>,
+    [displayCats]
+  );
+
   const included = rows.filter((r) => r.include).length;
   const dupCount = rows.filter((r) => r.isDup).length;
 
   const patchRow = (i: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
 
-  const confirm = () => {
-    const outItems = rows.map((r) => r.item);
-    const assignments = rows.map((r) => (r.include ? r.categoryId : DROP));
-    onConfirm(outItems, assignments);
+  /** Re-file every row under the other scheme, keeping the tick boxes as they are. */
+  const toggleKeepSource = (keep: boolean) => {
+    setKeepSource(keep);
+    const cats = assign(keep);
+    setRows((prev) => prev.map((r, i) => ({ ...r, categoryId: cats[i] })));
+  };
+
+  const confirm = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const outItems = rows.map((r) => r.item);
+      let assignments: (string | null)[] = rows.map((r) => (r.include ? r.categoryId : DROP));
+
+      // Create the source's own categories, but only the ones still in use once
+      // the user has finished unticking and re-filing rows.
+      const wanted = new Set(assignments.map((a) => pendingLabel(a)).filter(Boolean) as string[]);
+      if (wanted.size > 0) {
+        const created: Record<string, string> = {};
+        for (const cat of pendingCats) {
+          if (!wanted.has(cat.label)) continue;
+          created[cat.label] = await addCategory(cat.label, cat.icon, cat.hue, cat.kind);
+        }
+        assignments = resolvePending(assignments, created);
+      }
+
+      onConfirm(outItems, assignments);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -83,11 +151,65 @@ export function ImportReviewScreen({
           </BubbleText>
         </PipSays>
 
+        {offerKeep && (
+          <Card style={{ padding: 14, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Pressable onPress={() => toggleKeepSource(!keepSource)} hitSlop={6} style={{ padding: 2 }}>
+              <View
+                style={[
+                  styles.box,
+                  { borderColor: colorTheme.line },
+                  keepSource && { backgroundColor: theme.accent, borderColor: theme.accent },
+                ]}
+              >
+                {keepSource && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
+              </View>
+            </Pressable>
+            <Pressable style={{ flex: 1 }} onPress={() => toggleKeepSource(!keepSource)}>
+              <Text style={[styles.merchant, { color: colorTheme.ink }]}>
+                Keep this file’s own categories
+              </Text>
+              <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
+                {keepSource
+                  ? `Adds ${newLabels.map((l) => l.label).join(', ')}`
+                  : 'Off: rows go into your existing categories instead'}
+              </Text>
+            </Pressable>
+          </Card>
+        )}
+
+        {onToggleUpdateAccountBalances !== undefined && (
+          <Card style={{ padding: 14, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Pressable
+              onPress={() => onToggleUpdateAccountBalances(!updateAccountBalances)}
+              hitSlop={6}
+              style={{ padding: 2 }}
+            >
+              <View
+                style={[
+                  styles.box,
+                  { borderColor: colorTheme.line },
+                  updateAccountBalances && { backgroundColor: theme.accent, borderColor: theme.accent },
+                ]}
+              >
+                {updateAccountBalances && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
+              </View>
+            </Pressable>
+            <Pressable style={{ flex: 1 }} onPress={() => onToggleUpdateAccountBalances(!updateAccountBalances)}>
+              <Text style={[styles.merchant, { color: colorTheme.ink }]}>
+                Update asset & liability balances
+              </Text>
+              <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
+                Apply imported income and expenses to adjust asset and liability account balances
+              </Text>
+            </Pressable>
+          </Card>
+        )}
+
         <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{included} of {rows.length} selected</Eyebrow>
 
         <Card style={{ overflow: 'hidden' }}>
           {rows.map((r, i) => {
-            const cat = catById[r.categoryId] ?? fallback;
+            const cat = displayCatById[r.categoryId] ?? fallback;
             const income = r.item.type === 'income';
             return (
               <View key={i} style={[styles.row, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }, !r.include && styles.rowOff]}>
@@ -119,38 +241,10 @@ export function ImportReviewScreen({
             );
           })}
         </Card>
-
-        {onToggleUpdateAccountBalances !== undefined && (
-          <Card style={{ padding: 14, marginTop: 14, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <Pressable
-              onPress={() => onToggleUpdateAccountBalances(!updateAccountBalances)}
-              hitSlop={6}
-              style={{ padding: 2 }}
-            >
-              <View
-                style={[
-                  styles.box,
-                  { borderColor: colorTheme.line },
-                  updateAccountBalances && { backgroundColor: theme.accent, borderColor: theme.accent },
-                ]}
-              >
-                {updateAccountBalances && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
-              </View>
-            </Pressable>
-            <Pressable style={{ flex: 1 }} onPress={() => onToggleUpdateAccountBalances(!updateAccountBalances)}>
-              <Text style={[styles.merchant, { color: colorTheme.ink }]}>
-                Update asset & liability balances
-              </Text>
-              <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
-                Apply imported income and expenses to adjust asset and liability account balances
-              </Text>
-            </Pressable>
-          </Card>
-        )}
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
-        <PrimaryButton onPress={confirm} disabled={included === 0}>
+        <PrimaryButton onPress={confirm} disabled={included === 0 || saving}>
           <Icon name="check" size={19} color="#fff" stroke={2.4} />
           <BtnLabel>Import {included} transaction{included === 1 ? '' : 's'}</BtnLabel>
         </PrimaryButton>
@@ -158,7 +252,7 @@ export function ImportReviewScreen({
 
       <RowEditModal
         row={editing != null ? rows[editing] : null}
-        categories={categories}
+        categories={displayCats}
         onClose={() => setEditing(null)}
         onSave={(patch) => {
           if (editing != null) patchRow(editing, patch);

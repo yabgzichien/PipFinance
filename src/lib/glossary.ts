@@ -7,11 +7,6 @@ export interface GlossaryEntry {
 /** Glossary content for InfoButton/GlossaryModal, mirroring LenderConsole's GLOSSARY shape
  *  (LenderConsole/app/tokens.ts) so the two apps explain shared concepts consistently. */
 export const GLOSSARY: Record<string, GlossaryEntry> = {
-  pay_yourself_first: {
-    term: 'Pay yourself first',
-    short: 'Set aside savings the moment income arrives, before spending on anything else.',
-    body: 'The habit this app tracks: keep a fixed amount back each month, ideally as soon as you get paid. Start at an amount that survives a bad month, then raise it as your income grows.',
-  },
   safe_income: {
     term: 'Safe monthly income',
     short: 'A conservative floor to budget against when your earnings swing month to month.',

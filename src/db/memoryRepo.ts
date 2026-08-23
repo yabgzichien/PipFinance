@@ -68,3 +68,16 @@ export async function recordAutoFill(monthKey: string, stats: AutoFillStats): Pr
   const merged: AutoFillStats = { filled: existing.filled + stats.filled, total: existing.total + stats.total };
   await setMeta(autoFillMetaKey(monthKey), JSON.stringify(merged));
 }
+
+const longestStreakMetaKey = 'longestStreak';
+
+/** The user's longest recorded streak so far (days). */
+export async function getLongestStreak(): Promise<number> {
+  const raw = await getMeta(longestStreakMetaKey);
+  return raw ? Number(raw) || 0 : 0;
+}
+
+/** Persist the user's longest recorded streak (days). */
+export async function setLongestStreak(days: number): Promise<void> {
+  await setMeta(longestStreakMetaKey, String(days));
+}

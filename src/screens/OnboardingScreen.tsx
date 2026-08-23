@@ -1,34 +1,40 @@
 // src/screens/OnboardingScreen.tsx
-// The app's front door: a 5-step setup wizard (Pip intro, budget, recurring payment,
-// notifications, widget) rather than a single "Get started" screen. Every step after the
-// intro can be skipped  there is deliberately no skip-all shortcut, so a user in a hurry
-// skips step by step, which stays honest about what didn't get set up rather than silently
-// marking everything done. See docs/superpowers/specs/2026-08-21-onboarding-setup-wizard-design.md.
+// The app's front door setup wizard:
+// 1. Pip intro: "Know your money."
+// 2. Old money manager import ask:
+//    - If user imports via Advanced Import: branches directly to Notifications -> Widget.
+//    - If user has nothing to import: branches to Budget -> Recurring payment -> Notifications -> Widget.
+// Every step after the intro can be skipped individually.
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FadeIn } from '../components/Motion';
 import { ProgressTrack, TopBar } from '../components/ui';
 import * as haptics from '../lib/haptics';
+import {
+  getPreviousWizardStep,
+  getWizardNavInfo,
+  type WizardStep,
+} from '../lib/onboardingNav';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useBackHandler, useExitConfirm } from '../state/useBackHandler';
 import { spacing } from '../theme';
+import { AdvancedImportScreen } from './AdvancedImportScreen';
 import { BudgetStep } from './onboarding/BudgetStep';
+import { ImportStep } from './onboarding/ImportStep';
 import { NotificationsStep } from './onboarding/NotificationsStep';
 import { PipIntroStep } from './onboarding/PipIntroStep';
 import { RecurringPaymentStep } from './onboarding/RecurringPaymentStep';
 import { WidgetStep } from './onboarding/WidgetStep';
 
-const STEP_TITLES = ['', 'Budget', 'Recurring payment', 'Notifications', 'Widget'];
-const TOTAL_STEPS = STEP_TITLES.length;
-const LAST_STEP = TOTAL_STEPS - 1;
-
 export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const colorTheme = useThemeColors();
   const { completeOnboarding } = useAppData();
-  const [step, setStep] = useState(0);
+
+  const [step, setStep] = useState<WizardStep>('intro');
+  const [hasImported, setHasImported] = useState(false);
   // Which way the wizard last moved. Forward, the incoming step rises into place; back, it
   // settles down from above, so the direction of travel is legible without a slide transition.
   const [back, setBack] = useState(false);
@@ -41,19 +47,17 @@ export function OnboardingScreen() {
     void completeOnboarding();
   };
 
-  const advance = () => {
-    if (step >= LAST_STEP) {
-      finish();
-      return;
-    }
+  const advance = (nextStep: WizardStep) => {
     setBack(false);
-    setStep((s) => s + 1);
+    setStep(nextStep);
   };
 
   const goBack = () => {
+    const prev = getPreviousWizardStep(step, hasImported);
+    if (!prev) return;
     haptics.tap();
     setBack(true);
-    setStep((s) => s - 1);
+    setStep(prev);
   };
 
   // The wizard's intro step is the app's true front door — there's no screen further back to
@@ -61,20 +65,22 @@ export function OnboardingScreen() {
   // uses once onboarding is done.
   const confirmExit = useExitConfirm();
   useBackHandler(() => {
-    if (step > 0) {
+    if (step !== 'intro') {
       goBack();
       return true;
     }
     return confirmExit();
   });
 
+  const navInfo = getWizardNavInfo(step, hasImported);
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
-      {step > 0 && (
+      {navInfo && (
         <View style={{ paddingTop: insets.top + 4 }}>
-          <TopBar title={STEP_TITLES[step]} onBack={goBack} />
+          <TopBar title={navInfo.title} onBack={goBack} />
           <View style={{ paddingHorizontal: 18, paddingTop: 2 }}>
-            <ProgressTrack pct={((step + 1) / TOTAL_STEPS) * 100} height={5} />
+            <ProgressTrack pct={navInfo.progressPct} height={5} />
           </View>
         </View>
       )}
@@ -83,11 +89,45 @@ export function OnboardingScreen() {
           state worth preserving across a move, and the back button re-enters an earlier one
           fresh rather than showing a half-filled form the user already skipped past. */}
       <FadeIn key={step} style={styles.fill} offset={back ? -14 : 16}>
-        {step === 0 && <PipIntroStep onNext={advance} />}
-        {step === 1 && <BudgetStep onNext={advance} onSkip={advance} />}
-        {step === 2 && <RecurringPaymentStep onNext={advance} onSkip={advance} />}
-        {step === 3 && <NotificationsStep onNext={advance} onSkip={advance} />}
-        {step === 4 && <WidgetStep onFinish={finish} />}
+        {step === 'intro' && <PipIntroStep onNext={() => advance('import')} />}
+        {step === 'import' && (
+          <ImportStep
+            onStartImport={() => advance('advanced_import')}
+            onSkip={() => {
+              setHasImported(false);
+              advance('budget');
+            }}
+          />
+        )}
+        {step === 'advanced_import' && (
+          <AdvancedImportScreen
+            onClose={goBack}
+            onSuccess={() => {
+              setHasImported(true);
+              advance('notifications');
+            }}
+            isWizard
+          />
+        )}
+        {step === 'budget' && (
+          <BudgetStep
+            onNext={() => advance('recurring')}
+            onSkip={() => advance('recurring')}
+          />
+        )}
+        {step === 'recurring' && (
+          <RecurringPaymentStep
+            onNext={() => advance('notifications')}
+            onSkip={() => advance('notifications')}
+          />
+        )}
+        {step === 'notifications' && (
+          <NotificationsStep
+            onNext={() => advance('widget')}
+            onSkip={() => advance('widget')}
+          />
+        )}
+        {step === 'widget' && <WidgetStep onFinish={finish} />}
       </FadeIn>
     </View>
   );

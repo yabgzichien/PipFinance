@@ -1,5 +1,5 @@
 // src/screens/BudgetWizard.tsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
@@ -15,7 +15,7 @@ import { useAppData } from '../state/store';
 import { useBackHandler } from '../state/useBackHandler';
 import { numFont, radius, uiFont } from '../theme';
 
-export function BudgetWizard({ onDone }: { onDone: () => void }) {
+export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -23,8 +23,6 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
     transactions,
     categories,
     saveBudget,
-    savingsTarget,
-    setSavingsTarget,
   } = useAppData();
   const expenseCats = useMemo(() => categories.filter((c) => c.kind === 'expense'), [categories]);
   const avg = useMemo(() => averageMonthlySpend(transactions, new Date(), 3), [transactions]);
@@ -38,20 +36,23 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState(false);
-  // Pay-yourself-first is part of the plan, not a side note, so it gets a real row and is saved
-  // with the budget. It is deliberately NOT a category allocation: savings is not spending, and
-  // giving it a category would pollute the expense taxonomy the adherence maths runs on.
-  const [savingsText, setSavingsText] = useState(String(savingsTarget));
+  const [autoSelectedAll, setAutoSelectedAll] = useState(false);
 
+  // Categories load asynchronously, so select them all as soon as they arrive rather than
+  // starting the picker empty and forcing the user to tap through every one.
+  useEffect(() => {
+    if (autoSelectedAll || expenseCats.length === 0) return;
+    setChosen(new Set(expenseCats.map((c) => c.id)));
+    setAutoSelectedAll(true);
+  }, [expenseCats, autoSelectedAll]);
   const income = Math.max(0, parseFloat(incomeText.replace(/[^0-9.]/g, '')) || 0);
-  const savings = Math.max(0, parseFloat(savingsText.replace(/[^0-9.]/g, '')) || 0);
   const allocations = useMemo(() => {
     const out: Record<string, number> = {};
     for (const id of chosen) out[id] = Math.max(0, parseFloat((amounts[id] ?? '').replace(/[^0-9.]/g, '')) || 0);
     return out;
   }, [chosen, amounts]);
   const total = allocatedTotal(allocations);
-  const left = leftover(income, allocations) - savings;
+  const left = leftover(income, allocations);
 
   const toggle = (id: string) =>
     setChosen((prev) => {
@@ -71,8 +72,6 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
 
   const finish = async () => {
     await saveBudget(income, allocations);
-    // The savings commitment made here is what the Budget screen's habit card tracks from now on.
-    await setSavingsTarget(savings);
     onDone();
   };
 
@@ -80,7 +79,7 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
 
   // Named so hardware/gesture back can call the exact same transition as the TopBar's own back
   // button below — the two must never disagree about where back goes.
-  const goBack = () => (step === 0 ? onDone() : setStep((s) => s - 1));
+  const goBack = () => (step === 0 ? (onBack ? onBack() : onDone()) : setStep((s) => s - 1));
   useBackHandler(() => {
     goBack();
     return true;
@@ -158,29 +157,6 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
             </Pressable>
             <View style={{ height: 14 }} />
 
-            {/* Savings sits at the top of the list, ahead of every spending row, because that is
-                literally what pay-yourself-first means. */}
-            <Card style={[styles.allocRow, styles.savingsRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <View style={[styles.savingsBadge, { backgroundColor: colorTheme.surface }]}>
-                <Icon name="shield" size={18} color={theme.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.allocLabel, { color: colorTheme.ink }]} numberOfLines={1}>Kept for savings</Text>
-              </View>
-              <View style={[styles.allocInputWrap, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rmSmall, { color: colorTheme.ink2 }]}>RM</Text>
-                <TextInput
-                  value={savingsText}
-                  onChangeText={setSavingsText}
-                  keyboardType="decimal-pad"
-                  placeholder="0"
-                  placeholderTextColor={colorTheme.ink3}
-                  style={[styles.allocInput, { color: colorTheme.ink }]}
-                  accessibilityLabel="Monthly savings"
-                />
-              </View>
-            </Card>
-
             {chosenCats.map((c) => {
               return (
                 <Card key={c.id} style={styles.allocRow}>
@@ -218,15 +194,11 @@ export function BudgetWizard({ onDone }: { onDone: () => void }) {
                 {left < 0 ? `Over by RM ${fmt(-left)}` : `RM ${fmt(left)} left`}
               </Text>
             </View>
-            {/* Named explicitly so the savings commitment is never silently folded into "left". */}
-            {savings > 0 && (
-              <Text style={[styles.savingsFootnote, { color: colorTheme.ink2 }]}>Plus RM {fmt(savings)} kept for savings.</Text>
-            )}
           </View>
         )}
         <PrimaryButton
           onPress={() => (step < 2 ? setStep((s) => s + 1) : finish())}
-          disabled={(step === 0 && income <= 0) || (step === 1 && chosen.size === 0)}
+          disabled={step === 1 && chosen.size === 0}
         >
           {step < 2 ? (
             <>
@@ -273,8 +245,5 @@ const styles = StyleSheet.create({
   allocInput: { fontFamily: numFont(700), fontSize: 16, minWidth: 80, textAlign: 'right', paddingVertical: 8 },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: 1 },
   summary: { flexDirection: 'row', justifyContent: 'space-between' },
-  savingsRow: {},
-  savingsBadge: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  savingsFootnote: { fontFamily: uiFont(500), fontSize: 12, marginTop: 6 },
   summaryText: { fontFamily: uiFont(600), fontSize: 13 },
 });

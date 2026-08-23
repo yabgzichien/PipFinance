@@ -29,6 +29,15 @@ For each transaction row found, output:
 
 Skip ONLY: running balance lines, statement totals, opening/closing balances, disclosures, headers/footers.
 
+MATRIX / SUMMARY TABLES
+Many trackers keep an overview tab laid out as a grid, where each ROW is a category and each COLUMN is a month (e.g. rows "Allowance", "Salary", "Other Income", "Rental", "Insurance", "Car Installment", "Phone Bill", "Electricity"; columns "Jan" … "Dec"). This data is REAL and is usually recorded nowhere else, so read these tabs too, not only the row-per-transaction journals.
+- Emit one transaction per filled month cell, dated the last day of that month.
+- Use the ROW label as the category, and the ROW label as the description.
+- Income rows (allowance, salary, scholarship, loan disbursement, angpao, claims, refunds) are POSITIVE. Cost rows are NEGATIVE.
+- SKIP: any budget / target column (often the first numeric column, headed "Budget" or "Monthly Budget"), every "Total" / "Net" row and column, and any cell showing a spreadsheet error such as #REF! or #DIV/0!.
+- Treat a blank cell, "-", or 0 as no transaction. Do not emit a row for it.
+- NEVER double count. If a category is already itemised row-by-row on a monthly journal tab, do NOT also emit that category's cells from the summary tab. Emit summary cells ONLY for categories that appear nowhere in the journals.
+
 ──────────────────────────────────────
 SECTION 2 — ACCOUNT BALANCES
 ──────────────────────────────────────

@@ -54,7 +54,6 @@ import { refreshPrices as fetchPrices } from '../prices';
 import { budgetHash, currentMonthKey, monthKey, positiveAllocations } from '../lib/budget';
 import { computeCoverage, type Coverage } from '../lib/coverage';
 import { getMeta, setMeta } from '../db/metaRepo';
-import { DEFAULT_SAVINGS_TARGET } from '../lib/savingsHabit';
 import { isReminderCadence, type ReminderCadence } from '../lib/reminders';
 import { setHapticsEnabled } from '../lib/haptics';
 import { setSoundEnabled as applySoundEnabled } from '../lib/sound';
@@ -94,7 +93,6 @@ import type { ParsedCommitment } from '../lib/advancedImport';
 const ONBOARDING_KEY = 'onboarding_complete';
 // The monthly amount the borrower committed to keeping back. A preference, not ledger data, so
 // it lives in app_meta rather than earning a table of its own.
-const SAVINGS_TARGET_KEY = 'savings_target';
 // Local reminder preferences. Both default to off so the OS permission prompt only ever
 // appears because the user reached for it in Settings. Deliberately survive `resetAllData`,
 // `resetToOnboarding` and demo-profile loads: this is how the owner of the phone wants to be
@@ -264,8 +262,6 @@ interface AppData {
   /** Wipe all data AND reset onboarding so the setup wizard re-appears. */
   resetToOnboarding: () => Promise<void>;
   /** Monthly pay-yourself-first commitment. Motivation only. */
-  savingsTarget: number;
-  setSavingsTarget: (amount: number) => Promise<void>;
   /** How often to nudge about logging spending. `'off'` disables the reminder entirely. */
   reminderCadence: ReminderCadence;
   setReminderCadence: (cadence: ReminderCadence) => Promise<void>;
@@ -387,7 +383,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
   const [prices, setPrices] = useState<Record<string, PriceQuote>>({});
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [savingsTarget, setSavingsTargetState] = useState<number>(DEFAULT_SAVINGS_TARGET);
   const [reminderCadence, setReminderCadenceState] = useState<ReminderCadence>('off');
   const [reminderHourOverride, setReminderHourOverrideState] = useState<number | null>(null);
   const [owedReminderEnabled, setOwedReminderEnabledState] = useState(false);
@@ -400,7 +395,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, savingsTargetRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -412,7 +407,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         listBalanceEntries(),
         getPriceCache(),
         getMeta(ONBOARDING_KEY),
-        getMeta(SAVINGS_TARGET_KEY),
         getMeta(REMINDER_CADENCE_KEY),
         getMeta(REMINDER_HOUR_OVERRIDE_KEY),
         getMeta(OWED_REMINDER_KEY),
@@ -428,11 +422,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         dbListShares(),
         dbListPayments(),
       ]);
-    // A stale or hand-edited preference falls back to the default rather than breaking Budget.
-    const parsedTarget = savingsTargetRaw === null ? NaN : Number(savingsTargetRaw);
-    setSavingsTargetState(
-      Number.isFinite(parsedTarget) && parsedTarget >= 0 ? parsedTarget : DEFAULT_SAVINGS_TARGET
-    );
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
     setReminderCadenceState(isReminderCadence(reminderCadenceRaw) ? reminderCadenceRaw : 'off');
@@ -909,12 +898,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setIncome(income);
     setAlloc(clean);
     setSnapshots((prev) => ({ ...prev, [cur]: { income, allocations: clean } }));
-  }, []);
-
-  const setSavingsTarget = useCallback(async (amount: number) => {
-    const clean = Math.max(0, Math.round(amount));
-    await setMeta(SAVINGS_TARGET_KEY, String(clean));
-    setSavingsTargetState(clean);
   }, []);
 
   const setReminderCadence = useCallback(async (cadence: ReminderCadence) => {
@@ -1444,8 +1427,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     resetBudget,
     resetAllData,
     resetToOnboarding,
-    savingsTarget,
-    setSavingsTarget,
     reminderCadence,
     setReminderCadence,
     reminderHourOverride,

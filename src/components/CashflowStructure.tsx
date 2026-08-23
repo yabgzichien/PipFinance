@@ -319,12 +319,9 @@ export function MonthVsNormalCard({
     <Card style={styles.recapCard}>
       {/* Two InfoButtons, not one: this card covers both the income-floor comparison above and
           the committed/essential/flexible split below, and each has its own glossary entry. */}
-      <View style={styles.head}>
-        <Text style={[styles.kicker, { color: colorTheme.ink2 }]}>AGAINST YOUR NORMAL</Text>
-        <View style={styles.headInfoGroup}>
-          <InfoButton entry="income_floor" />
-          {hasSpend && <InfoButton entry="committed_spend" />}
-        </View>
+      <View style={styles.headInfoGroup}>
+        <InfoButton entry="income_floor" />
+        {hasSpend && <InfoButton entry="committed_spend" />}
       </View>
 
       {floor.reliable && monthIncome > 0 && (

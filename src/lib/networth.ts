@@ -127,6 +127,21 @@ export function netWorthSeries(accounts: Account[], entries: BalanceEntry[], mon
   });
 }
 
+/** Every 'YYYY-MM' key from the earliest balance entry through the current month, inclusive
+ *  and oldest first. Empty when there's no balance history yet. */
+export function monthsWithData(entries: BalanceEntry[], now: Date = new Date()): string[] {
+  if (entries.length === 0) return [];
+  const earliest = entries.reduce((min, e) => (e.asOf < min ? e.asOf : min), entries[0].asOf);
+  const [startYear, startMonth] = earliest.slice(0, 7).split('-').map(Number);
+  const cursor = new Date(startYear, startMonth - 1, 1);
+  const out: string[] = [];
+  while (cursor <= now) {
+    out.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return out;
+}
+
 export type LinkEffect = 'add' | 'subtract';
 
 /** Smart default for how a linked transaction moves an account's balance. */

@@ -97,18 +97,153 @@ export function matchSourceCategory(
   return null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Source category vocabulary
+//
+// Exports from a tracker (a spreadsheet the user already keeps by hand) carry
+// their own category labels: a small set repeated over many rows. Those labels
+// are the user's own taxonomy and must survive the import intact. A label like
+// "Toll" or "Fuel" would otherwise be swallowed by the broad `travelling`
+// keyword list, and "fyy" would land in the default bucket. Statements, by
+// contrast, carry varied free-text hints that SHOULD be keyword-mapped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Prefix marking a category the import wants but that does not exist yet. */
+export const PENDING_CAT = 'pending:';
+
+export interface SourceLabel {
+  /** Display casing (the most common spelling seen in the document). */
+  label: string;
+  kind: TxnType;
+  /** How many rows carried this label. */
+  count: number;
+  /** Existing category with this exact label, or null if it must be created. */
+  existingId: string | null;
+}
+
+export interface SourceVocabulary {
+  /** True when the hints look like a tracker's own taxonomy rather than free text. */
+  isTracker: boolean;
+  labels: SourceLabel[];
+}
+
+// A tracker needs enough rows for the ratio to mean anything, a small label
+// set, and each label repeated rather than used once.
+const TRACKER_MIN_ROWS = 10;
+const TRACKER_MAX_LABELS = 15;
+const TRACKER_MIN_ROWS_PER_LABEL = 5;
+
+const vocabKey = (kind: TxnType, label: string) => `${kind} ${label.trim().toLowerCase()}`;
+
 /**
- * Choose a category for each imported row: learned memory first (only when its
- * kind matches the row), then the source-document category hint, then the
- * generic fallback for the row's kind.
+ * Inventory the category labels an import carries, and judge whether they look
+ * like a tracker's own taxonomy. `isTracker` is advisory: the caller decides
+ * whether to actually honour the vocabulary (see `assignImported`).
+ */
+export function detectSourceVocabulary(
+  items: ExtractedTxn[],
+  categories: Category[]
+): SourceVocabulary {
+  const groups = new Map<string, { kind: TxnType; count: number; casings: Map<string, number> }>();
+  let hinted = 0;
+
+  for (const it of items) {
+    const raw = typeof it.categoryHint === 'string' ? it.categoryHint.trim() : '';
+    if (!raw) continue;
+    hinted++;
+    const key = vocabKey(it.type, raw);
+    let g = groups.get(key);
+    if (!g) {
+      g = { kind: it.type, count: 0, casings: new Map() };
+      groups.set(key, g);
+    }
+    g.count++;
+    g.casings.set(raw, (g.casings.get(raw) ?? 0) + 1);
+  }
+
+  const labels: SourceLabel[] = [...groups.values()].map((g) => {
+    // Most common spelling wins; insertion order breaks ties, so the first
+    // spelling seen is kept when two are equally common.
+    let label = '';
+    let best = -1;
+    for (const [casing, n] of g.casings) {
+      if (n > best) {
+        best = n;
+        label = casing;
+      }
+    }
+    const existing = categories.find(
+      (c) => c.kind === g.kind && c.label.trim().toLowerCase() === label.toLowerCase()
+    );
+    return { label, kind: g.kind, count: g.count, existingId: existing ? existing.id : null };
+  });
+
+  const isTracker =
+    hinted >= TRACKER_MIN_ROWS &&
+    labels.length > 0 &&
+    labels.length <= TRACKER_MAX_LABELS &&
+    hinted / labels.length >= TRACKER_MIN_ROWS_PER_LABEL;
+
+  return { isTracker, labels };
+}
+
+/** The source label behind a `pending:` id, or null for a real id. */
+export function pendingLabel(id: string | null | undefined): string | null {
+  return typeof id === 'string' && id.startsWith(PENDING_CAT)
+    ? id.slice(PENDING_CAT.length)
+    : null;
+}
+
+/**
+ * Swap `pending:` ids for the real category ids created at commit time. A label
+ * missing from `created` was declined by the user, so its rows are dropped
+ * rather than silently filed somewhere they were never meant to go.
+ */
+export function resolvePending(
+  assignments: (string | null)[],
+  created: Record<string, string>
+): (string | null)[] {
+  return assignments.map((a) => {
+    const label = pendingLabel(a);
+    if (label === null) return a;
+    return created[label] ?? DROP;
+  });
+}
+
+/** label+kind → the category id to use, real or `pending:`-prefixed. */
+function vocabularyIndex(vocabulary: SourceVocabulary): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const l of vocabulary.labels) {
+    index.set(vocabKey(l.kind, l.label), l.existingId ?? `${PENDING_CAT}${l.label}`);
+  }
+  return index;
+}
+
+/**
+ * Choose a category for each imported row.
+ *
+ * When `vocabulary` is passed the document's own labels win outright  the user
+ * asked to keep them, so they beat both learned memory and keyword mapping.
+ * Rows the document did not label, and every row when no vocabulary is passed,
+ * fall through to the original order: learned memory (only when its kind
+ * matches the row), then the category hint, then the generic fallback.
  */
 export function assignImported(
   items: ExtractedTxn[],
   memory: MemoryMap,
   categories: Category[],
-  catById: Record<string, Category>
+  catById: Record<string, Category>,
+  vocabulary?: SourceVocabulary | null
 ): string[] {
+  const sourceIds = vocabulary ? vocabularyIndex(vocabulary) : null;
+
   return items.map((it) => {
+    if (sourceIds) {
+      const raw = typeof it.categoryHint === 'string' ? it.categoryHint.trim() : '';
+      const fromSource = raw ? sourceIds.get(vocabKey(it.type, raw)) : undefined;
+      if (fromSource) return fromSource;
+    }
+
     const learned = suggestForMerchant(memory, it.merchant);
     if (learned && catById[learned] && catById[learned].kind === it.type) return learned;
 

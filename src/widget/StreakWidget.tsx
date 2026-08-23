@@ -77,10 +77,10 @@ export function StreakWidget({ streak, dots }: StreakWidgetProps) {
       >
         <FlexWidget
           style={{
-            width: 32,
-            height: 32,
+            width: 45,
+            height: 45,
             backgroundColor: '#faf7f2',
-            borderRadius: 10,
+            borderRadius: 14,
             alignItems: 'center',
             justifyContent: 'center',
           }}
@@ -88,8 +88,8 @@ export function StreakWidget({ streak, dots }: StreakWidgetProps) {
           <SvgWidget
             svg={COIN_MASCOT_SVG}
             style={{
-              width: 28,
-              height: 28,
+              width: 40,
+              height: 40,
             }}
           />
         </FlexWidget>

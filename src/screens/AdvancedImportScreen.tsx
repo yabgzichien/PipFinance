@@ -169,7 +169,15 @@ type Phase =
   | 'error';
 
 
-export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
+export function AdvancedImportScreen({
+  onClose,
+  onSuccess,
+  isWizard = false,
+}: {
+  onClose: () => void;
+  onSuccess?: () => void;
+  isWizard?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -430,7 +438,7 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
               </>
             ) : (
               <>
-                Got a long PDF or spreadsheet? Copy the prompt, open your favourite AI, attach your files, and paste the JSON back.{'\n'}No API key needed.
+                Got a long PDF or spreadsheet? Copy the prompt, open your favourite AI, attach your files, and paste the JSON back.
               </>
             )}
           </BubbleText>
@@ -452,9 +460,9 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
               )}
             </Card>
             <View style={{ marginTop: 22 }}>
-              <PrimaryButton onPress={onClose}>
-                <Icon name="check" size={18} color="#fff" stroke={2.4} />
-                <BtnLabel>Done</BtnLabel>
+              <PrimaryButton onPress={() => { (onSuccess ?? onClose)(); }}>
+                <Icon name={isWizard ? 'arrowRight' : 'check'} size={18} color="#fff" stroke={2.4} />
+                <BtnLabel>{isWizard ? 'Continue setup' : 'Done'}</BtnLabel>
               </PrimaryButton>
             </View>
           </>
@@ -490,27 +498,8 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
         {phase === 'accountReview' && (
           <>
             <View style={{ marginTop: 20 }}>
-              <Eyebrow style={{ marginBottom: 12 }}>
-                {parsedAccounts.filter((a) => a.include).length} of {parsedAccounts.length} accounts selected
-              </Eyebrow>
-
-              {/* Legend */}
-              <View style={styles.legendRow}>
-                <View style={[styles.kindDot, { backgroundColor: theme.accent }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Asset</Text>
-                <View style={[styles.kindDot, { backgroundColor: colorTheme.amber, marginLeft: 12 }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Liability (outstanding balance)</Text>
-              </View>
-
-              <Card style={{ padding: 14, marginTop: 10 }}>
-                <AccountReviewList
-                  accounts={parsedAccounts}
-                  onChange={setParsedAccounts}
-                />
-              </Card>
-
               {parsedTxns.length > 0 && (
-                <Card style={{ padding: 14, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <Card style={{ padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Pressable
                     onPress={() => setUpdateAccountBalances((prev) => !prev)}
                     hitSlop={6}
@@ -538,6 +527,25 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
                   </Pressable>
                 </Card>
               )}
+
+              <Eyebrow style={{ marginBottom: 12 }}>
+                {parsedAccounts.filter((a) => a.include).length} of {parsedAccounts.length} accounts selected
+              </Eyebrow>
+
+              {/* Legend */}
+              <View style={styles.legendRow}>
+                <View style={[styles.kindDot, { backgroundColor: theme.accent }]} />
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Asset</Text>
+                <View style={[styles.kindDot, { backgroundColor: colorTheme.amber, marginLeft: 12 }]} />
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Liability (outstanding balance)</Text>
+              </View>
+
+              <Card style={{ padding: 14, marginTop: 10 }}>
+                <AccountReviewList
+                  accounts={parsedAccounts}
+                  onChange={setParsedAccounts}
+                />
+              </Card>
             </View>
 
             <View style={{ marginTop: 18, gap: 10 }}>

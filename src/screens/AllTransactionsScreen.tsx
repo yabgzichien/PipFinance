@@ -244,19 +244,6 @@ export function AllTransactionsScreen({
           </Pressable>
         )}
 
-        {owedTotal > 0 && !selectMode && (
-          <Pressable onPress={onOpenOwed} style={[styles.owedBanner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-            <Icon name="gift" size={18} color={theme.accent} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>RM {fmt(owedTotal)} owed to you</Text>
-              <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                From {openShares.length} shared {openShares.length === 1 ? 'bill' : 'bills'}
-              </Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
-
         {shown.length === 0 ? (
           <Card style={{ padding: 26, alignItems: 'center' }}>
             <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
@@ -279,6 +266,19 @@ export function AllTransactionsScreen({
                   <Amount value={totalIncome} size={20} weight={700} color={theme.accent} />
                 </Card>
               </View>
+            )}
+
+            {owedTotal > 0 && !selectMode && (
+              <Pressable onPress={onOpenOwed} style={[styles.owedBanner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+                <Icon name="gift" size={18} color={theme.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>RM {fmt(owedTotal)} owed to you</Text>
+                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
+                    From {openShares.length} shared {openShares.length === 1 ? 'bill' : 'bills'}
+                  </Text>
+                </View>
+                <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+              </Pressable>
             )}
 
             <Text style={[styles.countLine, { color: colorTheme.ink2 }]}>

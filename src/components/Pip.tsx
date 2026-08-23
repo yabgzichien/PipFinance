@@ -693,15 +693,35 @@ export function Pip({
             <BlinkCover expr={expr} fill={fill} blink={blink} />
             <Mouth expr={expr} INK={INK} />
             {expr === 'sleepy' && (
-              <Path
-                d="M74 20 L82 20 L74 27 L82 27"
-                stroke={INK}
-                strokeWidth={1.6}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.7}
-              />
+              <>
+                <Path
+                  d="M74 26 L81 26 L74 32 L81 32"
+                  stroke={INK}
+                  strokeWidth={1.6}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.7}
+                />
+                <Path
+                  d="M79 18 L85.5 18 L79 23.5 L85.5 23.5"
+                  stroke={INK}
+                  strokeWidth={1.3}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.55}
+                />
+                <Path
+                  d="M84 11.5 L89 11.5 L84 16 L89 16"
+                  stroke={INK}
+                  strokeWidth={1}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.4}
+                />
+              </>
             )}
           </>
         )}

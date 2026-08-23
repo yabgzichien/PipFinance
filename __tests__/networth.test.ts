@@ -5,6 +5,7 @@ import {
   netWorth,
   groupByClass,
   netWorthSeries,
+  monthsWithData,
   defaultLinkEffect,
   applyEffect,
 } from '../src/lib/networth';
@@ -96,6 +97,23 @@ describe('netWorthSeries', () => {
       { monthKey: '2026-05', assets: 1000, liabilities: 500, net: 500 },
       { monthKey: '2026-06', assets: 1200, liabilities: 300, net: 900 },
     ]);
+  });
+});
+
+describe('monthsWithData', () => {
+  it('returns every month from the earliest entry through now, inclusive', () => {
+    const entries = [entry({ asOf: '2026-03-10' }), entry({ asOf: '2026-05-20' })];
+    expect(monthsWithData(entries, new Date(2026, 5, 15))).toEqual(['2026-03', '2026-04', '2026-05', '2026-06']);
+  });
+  it('is empty when there are no entries yet', () => {
+    expect(monthsWithData([], new Date(2026, 5, 15))).toEqual([]);
+  });
+  it('is a single month when the earliest entry is this month', () => {
+    expect(monthsWithData([entry({ asOf: '2026-06-02' })], new Date(2026, 5, 15))).toEqual(['2026-06']);
+  });
+  it('picks the earliest asOf across multiple accounts, unsorted input', () => {
+    const entries = [entry({ accountId: 'a', asOf: '2026-04-01' }), entry({ accountId: 'b', asOf: '2026-01-15' }), entry({ accountId: 'a', asOf: '2026-02-01' })];
+    expect(monthsWithData(entries, new Date(2026, 1, 20))).toEqual(['2026-01', '2026-02']);
   });
 });
 
