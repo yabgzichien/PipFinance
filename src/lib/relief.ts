@@ -44,13 +44,13 @@ export function matchRelief(
 /**
  * Decision order matters: no-image is checked before missing-cert (a cert photo with
  * nothing else attached still counts as having *an* image), and weak-unnamed only applies to
- * discretionary spending (`commitmentEligible: false`)  a recurring bill's own receipt is
- * already as good as evidence gets, there is no buyer-name expectation to fall short of.
+ * non-commitment tags  a tag created via the commitment-payment auto-tagging flow already has
+ * bill-level evidence by construction regardless of which relief line it landed on.
  */
 export function evidenceState(tag: ReliefTag, txn: Transaction, line: ReliefLine): EvidenceState {
   if (!txn.receiptUri && !tag.certImageUri) return 'no-image';
   if (line.requiresCert && !tag.certImageUri) return 'missing-cert';
-  if (!line.commitmentEligible && !tag.einvoiceImageUri && !tag.certImageUri) return 'weak-unnamed';
+  if (tag.origin !== 'commitment' && !tag.einvoiceImageUri && !tag.certImageUri) return 'weak-unnamed';
   return 'complete';
 }
 

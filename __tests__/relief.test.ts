@@ -94,9 +94,14 @@ describe('evidenceState', () => {
     expect(evidenceState(tag({}), t, lifestyleLine)).toBe('weak-unnamed');
   });
 
-  it('is complete for a commitment-eligible line once it has a receipt, with no e-Invoice required', () => {
+  it('is complete for a commitment-origin tag once it has a receipt, with no e-Invoice required', () => {
     const t = txn({ receiptUri: 'file:///r1.jpg' });
-    expect(evidenceState(tag({ code: 'sspn' }), t, sspnLine)).toBe('complete');
+    expect(evidenceState(tag({ code: 'sspn', origin: 'commitment' }), t, sspnLine)).toBe('complete');
+  });
+
+  it('is weak-unnamed for a non-commitment-origin tag even on a commitment-eligible line', () => {
+    const t = txn({ receiptUri: 'file:///r1.jpg' });
+    expect(evidenceState(tag({ code: 'sspn', origin: 'auto' }), t, sspnLine)).toBe('weak-unnamed');
   });
 
   it('is complete for discretionary spending once an e-Invoice photo is attached', () => {
