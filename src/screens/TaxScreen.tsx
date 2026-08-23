@@ -24,7 +24,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const { transactions } = useAppData();
   const [ya, setYa] = useState(AVAILABLE_YAS[0]);
   const [tags, setTags] = useState<ReliefTag[] | null>(null);
-  const [editingTag, setEditingTag] = useState<ReliefTag | null>(null);
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +45,8 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const usageByCode = useMemo(() => Object.fromEntries(usage.map((u) => [u.code, u])), [usage]);
   const totalClaimed = usage.filter((u) => !schedule?.lines.find((l) => l.code === u.code)?.parent)
     .reduce((s, u) => s + u.claimed, 0);
+
+  const editingTag = editingTagId ? (tags ?? []).find((t) => t.id === editingTagId) ?? null : null;
 
   const topLevelLines = schedule?.lines.filter((l) => !l.parent) ?? [];
   const childrenByParent = useMemo(() => {
@@ -117,7 +119,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                   const txn = transactions.find((x) => x.id === t.txnId);
                   if (!txn) return null;
                   return (
-                    <Pressable key={t.id} onPress={() => setEditingTag(t)} style={styles.tagRow}>
+                    <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
                       <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
                       <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
                     </Pressable>
@@ -137,7 +139,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                       const txn = transactions.find((x) => x.id === t.txnId);
                       if (!txn) return null;
                       return (
-                        <Pressable key={t.id} onPress={() => setEditingTag(t)} style={styles.tagRow}>
+                        <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
                           <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
                           <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
                         </Pressable>
@@ -156,7 +158,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           tag={editingTag}
           txn={editingTag ? transactions.find((t) => t.id === editingTag.txnId) ?? null : null}
           schedule={schedule}
-          onClose={() => setEditingTag(null)}
+          onClose={() => setEditingTagId(null)}
           onChanged={() => listReliefTags(ya).then(setTags)}
         />
       )}
