@@ -1,19 +1,20 @@
 // src/screens/TaxScreen.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
+import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
 import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
 import { computeUsage, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
-import { listReliefTags } from '../db/reliefRepo';
+import { addReliefTag, listReliefTags } from '../db/reliefRepo';
 import type { ReliefTag } from '../lib/types';
 import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { colors, uiFont } from '../theme';
+import { colors, radius, uiFont } from '../theme';
 
 const AVAILABLE_YAS = Object.keys(RELIEF_SCHEDULES).map(Number).sort((a, b) => b - a);
 
@@ -21,10 +22,13 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { transactions } = useAppData();
+  const { transactions, commitments, updateCommitmentEntry } = useAppData();
   const [ya, setYa] = useState(AVAILABLE_YAS[0]);
   const [tags, setTags] = useState<ReliefTag[] | null>(null);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [mappingCommitments, setMappingCommitments] = useState(false);
+  const [addingManually, setAddingManually] = useState(false);
+  const [manualSearch, setManualSearch] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -151,6 +155,58 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             </Card>
           );
         })}
+
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+          <Pressable onPress={() => setMappingCommitments(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
+            <Icon name="clock" size={16} color={theme.accent} />
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Map a commitment</Text>
+          </Pressable>
+          <Pressable onPress={() => setAddingManually(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
+            <Icon name="search" size={16} color={theme.accent} />
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Add manually</Text>
+          </Pressable>
+        </View>
+
+        {addingManually && (
+          <Card style={{ padding: 14, marginTop: 14 }}>
+            <View style={[styles.searchRow, { borderColor: colorTheme.line2 }]}>
+              <Icon name="search" size={15} color={colorTheme.ink3} />
+              <TextInput
+                value={manualSearch}
+                onChangeText={setManualSearch}
+                placeholder="Search transactions"
+                placeholderTextColor={colorTheme.ink3}
+                style={[styles.searchInput, { color: colorTheme.ink }]}
+              />
+              <Pressable onPress={() => setAddingManually(false)} hitSlop={8}>
+                <Icon name="x" size={16} color={colorTheme.ink3} />
+              </Pressable>
+            </View>
+            {manualSearch.trim().length > 0 &&
+              transactions
+                .filter((t) => t.merchantRaw.toLowerCase().includes(manualSearch.trim().toLowerCase()))
+                .slice(0, 15)
+                .map((t) => (
+                  <Pressable
+                    key={t.id}
+                    onPress={async () => {
+                      if (!schedule) return;
+                      const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya, amount: t.amount, origin: 'manual' });
+                      setTags((prev) => [...(prev ?? []), created]);
+                      setEditingTagId(created.id);
+                      setAddingManually(false);
+                      setManualSearch('');
+                    }}
+                    style={styles.manualRow}
+                  >
+                    <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
+                      {t.merchantRaw}
+                    </Text>
+                    <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                  </Pressable>
+                ))}
+          </Card>
+        )}
       </ScrollView>
 
       {schedule && (
@@ -160,6 +216,16 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           schedule={schedule}
           onClose={() => setEditingTagId(null)}
           onChanged={() => listReliefTags(ya).then(setTags)}
+        />
+      )}
+
+      {schedule && (
+        <MapCommitmentSheet
+          visible={mappingCommitments}
+          commitments={commitments}
+          schedule={schedule}
+          onPick={(id, code) => updateCommitmentEntry(id, { reliefCode: code })}
+          onClose={() => setMappingCommitments(false)}
         />
       )}
     </View>
@@ -175,4 +241,8 @@ const styles = StyleSheet.create({
   childRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, marginTop: 8 },
   childBlock: { marginTop: 8 },
   tagRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, paddingVertical: 4 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14, alignSelf: 'flex-start' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 9 },
+  searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5, paddingVertical: 2 },
+  manualRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9, borderTopWidth: 1, borderTopColor: 'transparent' },
 });
