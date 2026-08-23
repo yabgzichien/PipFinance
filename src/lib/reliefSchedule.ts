@@ -32,12 +32,12 @@ export const RELIEF_SCHEDULE_2025: ReliefSchedule = {
     {
       code: 'lifestyle', label: 'Lifestyle', formField: 'G9', cap: 2500,
       matchKeywords: ['book', 'magazine', 'newspaper', 'laptop', 'smartphone', 'tablet', 'computer', 'internet', 'broadband', 'unifi', 'course', 'skill'],
-      commitmentEligible: true, requiresCert: null,
+      commitmentEligible: false, requiresCert: null,
     },
     {
       code: 'sports', label: 'Sports & fitness', formField: 'G10', cap: 1000,
       matchKeywords: ['gym', 'fitness', 'sports equipment', 'racket', 'yoga', 'membership'],
-      commitmentEligible: true, requiresCert: null,
+      commitmentEligible: false, requiresCert: null,
     },
     {
       code: 'medical', label: 'Medical (aggregate)', formField: 'G6-G8', cap: 10000,
