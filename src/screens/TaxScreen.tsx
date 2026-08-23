@@ -6,10 +6,10 @@ import { Icon } from '../components/Icon';
 import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
 import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
-import { computeUsage, type ReliefUsage } from '../lib/relief';
+import { computeUsage, evidenceState, isRequestable, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
 import { addReliefTag, listReliefTags } from '../db/reliefRepo';
-import type { ReliefTag } from '../lib/types';
+import type { ReliefTag, Transaction } from '../lib/types';
 import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -17,6 +17,13 @@ import { useAppData } from '../state/store';
 import { colors, radius, uiFont } from '../theme';
 
 const AVAILABLE_YAS = Object.keys(RELIEF_SCHEDULES).map(Number).sort((a, b) => b - a);
+
+function daysUntilMonthEnd(txnDate: string): number {
+  const [y, m] = txnDate.split('-').map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const today = new Date();
+  return Math.max(0, lastDay - today.getDate());
+}
 
 export function TaxScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -49,6 +56,20 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const usageByCode = useMemo(() => Object.fromEntries(usage.map((u) => [u.code, u])), [usage]);
   const totalClaimed = usage.filter((u) => !schedule?.lines.find((l) => l.code === u.code)?.parent)
     .reduce((s, u) => s + u.claimed, 0);
+
+  const requestable = useMemo(() => {
+    if (!schedule || !tags) return [];
+    const today = new Date();
+    const result: { tag: ReliefTag; txn: Transaction; line: ReliefLine }[] = [];
+    for (const t of tags) {
+      const line = schedule.lines.find((l) => l.code === t.code);
+      const txn = transactions.find((x) => x.id === t.txnId);
+      if (!line || !txn) continue;
+      const evidence = evidenceState(t, txn, line);
+      if (isRequestable(evidence, txn, today)) result.push({ tag: t, txn, line });
+    }
+    return result;
+  }, [schedule, tags, transactions]);
 
   const editingTag = editingTagId ? (tags ?? []).find((t) => t.id === editingTagId) ?? null : null;
 
@@ -100,6 +121,26 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
               Scan a receipt or map a bill to get started. Pip tags relief-eligible spending
               automatically as you go.
             </Caption>
+          </View>
+        )}
+
+        {requestable.length > 0 && (
+          <View style={{ marginTop: tags && tags.length > 0 ? 16 : 0 }}>
+            <Eyebrow style={{ marginBottom: 8 }}>Requestable this month</Eyebrow>
+            {requestable.map(({ tag, txn, line }) => {
+              const daysLeft = daysUntilMonthEnd(txn.date!);
+              return (
+                <Pressable key={tag.id} onPress={() => setEditingTagId(tag.id)} style={[styles.requestableRow, { borderColor: colorTheme.line2 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
+                      {txn.merchantRaw || line.label}
+                    </Text>
+                    <Caption color={colorTheme.ink2}>{line.label}</Caption>
+                  </View>
+                  <Caption color={theme.accent}>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</Caption>
+                </Pressable>
+              );
+            })}
           </View>
         )}
 
@@ -245,4 +286,5 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 9 },
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5, paddingVertical: 2 },
   manualRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9, borderTopWidth: 1, borderTopColor: 'transparent' },
+  requestableRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.sm, padding: 12, marginTop: 8, gap: 10 },
 });

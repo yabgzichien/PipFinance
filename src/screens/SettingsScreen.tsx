@@ -21,7 +21,7 @@ type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
 
 
-export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onResetToOnboarding }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onResetToOnboarding?: () => void }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -212,6 +212,11 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Tax relief</Text>
             </View>
+            {taxRequestableCount > 0 && (
+              <View style={[styles.countBadge, { backgroundColor: theme.accent }]}>
+                <Text style={styles.countBadgeText}>{taxRequestableCount}</Text>
+              </View>
+            )}
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
         )}
@@ -691,6 +696,8 @@ const styles = StyleSheet.create({
   migrateRow: { padding: 16, borderRadius: radius.md, borderWidth: 1 },
   resetBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8 },
   resetText: { fontFamily: uiFont(600), fontSize: 13.5 },
+  countBadge: { minWidth: 20, height: 20, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, marginRight: 8 },
+  countBadgeText: { color: '#fff', fontFamily: uiFont(700), fontSize: 11 },
 
   /* theme mode picker */
   modeToggle: { flexDirection: 'row', borderRadius: 999, padding: 3, borderWidth: 1 },

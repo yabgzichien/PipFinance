@@ -89,8 +89,8 @@ import {
 import { findCommitmentMatch, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
 import { matchSourceCategory } from '../lib/import';
 import type { ParsedCommitment } from '../lib/advancedImport';
-import { addReliefTag, getReliefMemoryMap } from '../db/reliefRepo';
-import { matchRelief, yaForDate } from '../lib/relief';
+import { addReliefTag, getReliefMemoryMap, listReliefTags } from '../db/reliefRepo';
+import { evidenceState, isRequestable, matchRelief, yaForDate } from '../lib/relief';
 import { scheduleForYA } from '../lib/reliefSchedule';
 import type { ScannedReceipt } from '../lib/parseReceipt';
 
@@ -140,6 +140,7 @@ import {
   type PaymentEvidence,
   type Person,
   type PriceQuote,
+  type ReliefTag,
   type Split,
   type SplitDraft,
   type SplitPayment,
@@ -205,6 +206,10 @@ interface AppData {
   pricesAsOf: string | null;
   /** 90-day data-coverage signal, recomputed from `transactions`. See `lib/coverage.ts`. */
   coverage: Coverage;
+  /** Count of the current YA's relief tags whose e-Invoice request window is still open, for
+   *  the Settings "Tax relief" row badge. Backed by a boot-time-only `reliefTags` load  see
+   *  the effect near `refreshAll` above. */
+  taxRequestableCount: number;
   /** Whether the one-time setup has been completed. */
   onboardingComplete: boolean;
   /** Mark the one-time setup complete. */
@@ -402,6 +407,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [streakPausedSinceDay, setStreakPausedSinceDayState] = useState<number | null>(null);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
+  const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
 
   const refreshAll = useCallback(async () => {
     const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
@@ -525,6 +531,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       .catch((e) => console.warn('Failed to load app data', e))
       .finally(() => setReady(true));
   }, [refreshAll]);
+
+  // Lightweight, App.tsx-level badge count for the Settings "Tax relief" row  refreshed on
+  // boot only, not kept in sync with every tag mutation made inside TaxScreen.tsx (which
+  // manages its own `tags` state, reloaded after every change there). See taxRequestableCount.
+  useEffect(() => {
+    listReliefTags(yaForDate(new Date().toISOString().slice(0, 10))).then(setReliefTags);
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -1423,6 +1436,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const coverage = useMemo(() => computeCoverage(transactions), [transactions]);
 
+  const taxRequestableCount = useMemo(() => {
+    const today = new Date();
+    const ya = yaForDate(today.toISOString().slice(0, 10));
+    const schedule = scheduleForYA(ya);
+    if (!schedule) return 0;
+    let count = 0;
+    for (const t of reliefTags) {
+      const line = schedule.lines.find((l) => l.code === t.code);
+      const txn = transactions.find((x) => x.id === t.txnId);
+      if (!line || !txn) continue;
+      if (isRequestable(evidenceState(t, txn, line), txn, today)) count++;
+    }
+    return count;
+  }, [reliefTags, transactions]);
+
   const value: AppData = {
     onboardingComplete,
     completeOnboarding,
@@ -1441,6 +1469,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     accountValues,
     pricesAsOf,
     coverage,
+    taxRequestableCount,
     refreshAll,
     addCategory,
     deleteCategory,

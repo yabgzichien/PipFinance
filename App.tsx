@@ -181,7 +181,7 @@ function StatusClock({ color }: { color: string }) {
 }
 
 function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
-  const { ready, onboardingComplete } = useAppData();
+  const { ready, onboardingComplete, taxRequestableCount } = useAppData();
   const accentTheme = useAccent();
   const theme = useThemeColors();
   useWebFocusRing(accentTheme.accent);
@@ -332,6 +332,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onOpenCategories={() => setScreen('categories')}
           onOpenCommitments={() => setScreen('commitments')}
           onOpenTax={() => setScreen('tax')}
+          taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />
       )}
