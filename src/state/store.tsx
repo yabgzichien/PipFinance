@@ -138,6 +138,7 @@ import { merchantKey } from '../lib/normalize';
 import { listFxRates } from '../db/fxRepo';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
+import { notify } from '../lib/platformAlert';
 import {
   DROP,
   type Account,
@@ -346,7 +347,7 @@ interface AppData {
   deleteAccount: (id: string) => Promise<void>;
   setBalance: (accountId: string, value: number, asOf: string) => Promise<void>;
   /** Adjust a linked account's balance. `amount` must already be in THAT account's own
-   *  currency (see `deriveNative`) — `balance_entries.value` is native to the account, never
+   *  currency (see `deriveNative`): `balance_entries.value` is native to the account, never
    *  assumed MYR. */
   recordBalanceLink: (accountId: string, amount: number, effect: LinkEffect, asOf: string) => Promise<void>;
   addHolding: (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null) => Promise<void>;
@@ -884,40 +885,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   /**
-   * Record money received against a share.
-   *
-   * No income transaction is written, on purpose. Being paid back is not earnings, it is a
-   * receivable converting into cash, and booking it as income would inflate the income figures
-   * elsewhere in the app. The cash side is a balance movement on whichever account the money
-   * landed in; passing no account leaves the cash to arrive with the next balance scan instead.
-   */
-  const settleShare = useCallback(
-    async (
-      shareId: string,
-      amount: number,
-      paidOn: string,
-      evidence: PaymentEvidence,
-      matchedMerchant: string | null,
-      accountId: string | null
-    ) => {
-      const result = await dbRecordPayment(shareId, amount, paidOn, evidence, matchedMerchant, accountId);
-      if (!result) return;
-      if (accountId) {
-        const entries = await listBalanceEntries();
-        const mine = entries.filter((e) => e.accountId === accountId);
-        const latestAsOf = mine.reduce((m, e) => (e.asOf > m ? e.asOf : m), '');
-        await dbAddBalanceEntry(
-          accountId,
-          applyEffect(currentValue(mine), amount, 'add'),
-          paidOn > latestAsOf ? paidOn : latestAsOf
-        );
-      }
-      await refreshSplitState();
-    },
-    [refreshSplitState]
-  );
-
-  /**
    * Give up on a share. The money that never came back was consumption after all, so it becomes
    * a real expense dated today, carrying the original bill's category, and the share is stamped
    * with that transaction so the write-off stays traceable.
@@ -1069,7 +1036,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // A linked transaction nudges an account's balance: new = current ± amount. `amount` must
-  // already be in the target account's own currency  `balance_entries.value` is native to
+  // already be in the target account's own currency: `balance_entries.value` is native to
   // the account (Task 9), never assumed MYR, so every caller is responsible for converting
   // a MYR-denominated figure (via `deriveNative`) before it reaches here.
   const recordBalanceLink = useCallback(
@@ -1310,7 +1277,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * A commitment's `amount` (and its occurrences' `paidAmount`) has no currency concept of its
-   * own — it's always MYR. `recordBalanceLink`, though, now needs the target account's OWN
+   * own: it's always MYR. `recordBalanceLink`, though, now needs the target account's OWN
    * currency (Task 9: `balance_entries.value` is native, not always MYR), so every commitment
    * payment path below converts through this first. A deleted/missing account falls back to
    * MYR (nothing to convert against); `deriveNative`/`rateFor` already no-op for a MYR account.
@@ -1322,6 +1289,53 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       return deriveNative(myrAmount, currency, rateFor(rates, currency));
     },
     [accounts]
+  );
+
+  /**
+   * Record money received against a share.
+   *
+   * No income transaction is written, on purpose. Being paid back is not earnings, it is a
+   * receivable converting into cash, and booking it as income would inflate the income figures
+   * elsewhere in the app. The cash side is a balance movement on whichever account the money
+   * landed in; passing no account leaves the cash to arrive with the next balance scan instead.
+   *
+   * Routed through `recordBalanceLink` (rather than writing `balance_entries` directly, as this
+   * used to) so the destination account's own currency is honoured: `amount` here is always MYR
+   * (the receivables/split system is MYR-only), and the account picker at both call sites
+   * (OwedScreen's SettleSheet, AddFlow's repayment flow) has no currency filter, so the
+   * destination can be any active currency. `recordBalanceLink`'s `'add'` effect is exactly
+   * what this needs, matching the unconditional `'add'` this code already applied before.
+   */
+  const settleShare = useCallback(
+    async (
+      shareId: string,
+      amount: number,
+      paidOn: string,
+      evidence: PaymentEvidence,
+      matchedMerchant: string | null,
+      accountId: string | null
+    ) => {
+      // Resolved BEFORE dbRecordPayment below: a missing rate on the destination account must
+      // fail here, with nothing recorded, rather than marking the share settled with no
+      // matching balance movement.
+      let nativeAmount: number | null = null;
+      if (accountId) {
+        try {
+          const rates = ratesFromCache(await listFxRates());
+          nativeAmount = nativeForAccount(amount, accountId, rates);
+        } catch (e) {
+          notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
+          return;
+        }
+      }
+      const result = await dbRecordPayment(shareId, amount, paidOn, evidence, matchedMerchant, accountId);
+      if (!result) return;
+      if (accountId && nativeAmount != null) {
+        await recordBalanceLink(accountId, nativeAmount, 'add', paidOn);
+      }
+      await refreshSplitState();
+    },
+    [refreshSplitState, recordBalanceLink, nativeForAccount]
   );
 
   /**
@@ -1363,6 +1377,30 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       // `paidAmount` is always MYR (commitments have no currency of their own); every
       // recordBalanceLink below needs it re-expressed in the target account's own currency.
       const rates = ratesFromCache(await listFxRates());
+      // The investment target, resolved once up front: both the currency check below and the
+      // holding-vs-cost-only branch further down need to know which kind of account it is.
+      const investTarget =
+        commitment.kind === 'investment' && commitment.toAccountId
+          ? accounts.find((a) => a.id === commitment.toAccountId)
+          : undefined;
+
+      // Every currency conversion this tick will need, resolved BEFORE any write below. A
+      // missing rate must fail here, with nothing created yet, rather than partway through:
+      // throwing after `addTransactions` would leave a ledger row with no matching balance
+      // movement and the occurrence stuck "scheduled", inviting a duplicate tap.
+      let fromNative: number | null = null;
+      let targetNative: number | null = null;
+      try {
+        if (commitment.fromAccountId) {
+          fromNative = nativeForAccount(paidAmount, commitment.fromAccountId, rates);
+        }
+        if (investTarget && !isHolding(investTarget)) {
+          targetNative = nativeForAccount(paidAmount, investTarget.id, rates);
+        }
+      } catch (e) {
+        notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
+        return { matched: false };
+      }
 
       const created = await addTransactions([
         {
@@ -1377,28 +1415,27 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       ]);
       const txn = created[0];
 
-      if (commitment.fromAccountId) {
-        await recordBalanceLink(commitment.fromAccountId, nativeForAccount(paidAmount, commitment.fromAccountId, rates), 'subtract', paidOn);
+      if (commitment.fromAccountId && fromNative != null) {
+        await recordBalanceLink(commitment.fromAccountId, fromNative, 'subtract', paidOn);
       }
 
       let unitsAdded: number | null = null;
       let priceMYR: number | null = null;
-      if (commitment.kind === 'investment' && commitment.toAccountId) {
-        const target = accounts.find((a) => a.id === commitment.toAccountId);
-        if (target && isHolding(target)) {
-          const quote = prices[target.symbol as string];
+      if (investTarget) {
+        if (isHolding(investTarget)) {
+          const quote = prices[investTarget.symbol as string];
           // A holding always moves cost basis; quantity only moves when a price is cached —
           // offline or a brand-new symbol resolves its units later, in `refreshPrices` above.
           if (quote) {
             unitsAdded = Math.round((paidAmount / quote.priceMYR) * 1e8) / 1e8;
             priceMYR = quote.priceMYR;
-            await dbUpdateHoldingQuantity(target.id, (target.quantity ?? 0) + unitsAdded);
+            await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) + unitsAdded);
           }
-          await dbUpdateHoldingCost(target.id, (target.cost ?? 0) + paidAmount);
-        } else if (target) {
+          await dbUpdateHoldingCost(investTarget.id, (investTarget.cost ?? 0) + paidAmount);
+        } else if (targetNative != null) {
           // Cost-only target (ASB, EPF, unit trusts, gold savings): no ticker to size units
           // against, so the account's balance IS the invested-amount tracker.
-          await recordBalanceLink(target.id, nativeForAccount(paidAmount, target.id, rates), 'add', paidOn);
+          await recordBalanceLink(investTarget.id, targetNative, 'add', paidOn);
         }
       }
 
@@ -1435,25 +1472,45 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (occurrence.status !== 'paid' && occurrence.status !== 'late') return;
 
       if (occurrence.txnCreated) {
-        if (occurrence.txnId) await removeTransaction(occurrence.txnId);
         const paidAmount = occurrence.paidAmount ?? occurrence.amount;
         const today = todayKey();
         // Same MYR-to-native conversion as payCommitment above, for the same reason.
         const rates = ratesFromCache(await listFxRates());
+        const investTarget =
+          commitment.kind === 'investment' && commitment.toAccountId
+            ? accounts.find((a) => a.id === commitment.toAccountId)
+            : undefined;
 
-        if (commitment.fromAccountId) {
-          await recordBalanceLink(commitment.fromAccountId, nativeForAccount(paidAmount, commitment.fromAccountId, rates), 'add', today);
+        // Resolved BEFORE removeTransaction below: throwing after the ledger row is already
+        // gone would leave the occurrence stuck "paid" with a txnId that no longer resolves.
+        let fromNative: number | null = null;
+        let targetNative: number | null = null;
+        try {
+          if (commitment.fromAccountId) {
+            fromNative = nativeForAccount(paidAmount, commitment.fromAccountId, rates);
+          }
+          if (investTarget && !isHolding(investTarget)) {
+            targetNative = nativeForAccount(paidAmount, investTarget.id, rates);
+          }
+        } catch (e) {
+          notify("Couldn't undo this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
+          return;
         }
 
-        if (commitment.kind === 'investment' && commitment.toAccountId) {
-          const target = accounts.find((a) => a.id === commitment.toAccountId);
-          if (target && isHolding(target)) {
+        if (occurrence.txnId) await removeTransaction(occurrence.txnId);
+
+        if (commitment.fromAccountId && fromNative != null) {
+          await recordBalanceLink(commitment.fromAccountId, fromNative, 'add', today);
+        }
+
+        if (investTarget) {
+          if (isHolding(investTarget)) {
             if (occurrence.unitsAdded != null) {
-              await dbUpdateHoldingQuantity(target.id, (target.quantity ?? 0) - occurrence.unitsAdded);
+              await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) - occurrence.unitsAdded);
             }
-            await dbUpdateHoldingCost(target.id, Math.max(0, (target.cost ?? 0) - paidAmount));
-          } else if (target) {
-            await recordBalanceLink(target.id, nativeForAccount(paidAmount, target.id, rates), 'subtract', today);
+            await dbUpdateHoldingCost(investTarget.id, Math.max(0, (investTarget.cost ?? 0) - paidAmount));
+          } else if (targetNative != null) {
+            await recordBalanceLink(investTarget.id, targetNative, 'subtract', today);
           }
         }
       }

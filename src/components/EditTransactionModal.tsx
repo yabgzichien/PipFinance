@@ -161,7 +161,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
     // re-derives the MYR column itself from the row's own frozen rate.
     await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
-    // The row's MYR-equivalent, converted at the row's own frozen rate (never today's) — used
+    // The row's MYR-equivalent, converted at the row's own frozen rate (never today's), used
     // both for its own bookkeeping and, below, as the starting point for converting into the
     // linked account's own currency.
     const myrAmount = txn.fxRate != null ? round2(amount * txn.fxRate) : amount;

@@ -42,7 +42,7 @@ export function deriveMyr(entered: number, currency: string, rate: number | null
 }
 
 /**
- * Convert a MYR figure into an account's own currency — the inverse of `deriveMyr`. Needed
+ * Convert a MYR figure into an account's own currency: the inverse of `deriveMyr`. Needed
  * wherever a balance-link write (`recordBalanceLink`) must land in `balance_entries.value`,
  * which is native to the account rather than always MYR: a transaction's canonical MYR
  * amount, or a commitment's MYR-denominated payment, has to be re-expressed in whatever

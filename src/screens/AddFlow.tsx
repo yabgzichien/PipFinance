@@ -6,10 +6,11 @@ import { getLLM } from '../llm';
 import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
 import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
-import { deriveNative } from '../lib/currency';
+import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
+import { notify } from '../lib/platformAlert';
 import { type ScannedReceipt } from '../lib/parseReceipt';
 import { prevMonthKey } from '../lib/recap';
 import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
@@ -198,45 +199,61 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     splitDrafts: (SplitDraft | null)[] = [],
     settlements: (PendingSettlement | null)[] = []
   ) => {
-    const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
-    await applyReliefDetection(created, null);
-    // If the whole batch was tagged to an account, move that account's balance
-    // per saved row — direction derived from account kind + txn type (an expense
-    // reduces an asset / pays down a liability; income does the reverse).
+    // If the whole batch is tagged to an account, resolve its own-currency rate BEFORE
+    // committing anything below: a missing rate must fail here, with nothing created yet,
+    // rather than throwing partway through the per-row balance-link loop, which would leave
+    // some rows committed and linked and others not, with the screen never advancing (this
+    // is called fire-and-forget from CategorizeScreen, with no try/catch anywhere upstream).
     const account = linkId ? accounts.find((a) => a.id === linkId) : null;
-    if (account) {
-      // `created` is the kept rows in order, so drop the same items commitCategorized dropped
-      // to line the drafts back up with them.
-      const keptDrafts = items.map((_, i) => splitDrafts[i] ?? null).filter((_, i) => assignments[i] !== DROP);
-      // A receipt/extract-scan item is always MYR (currency detection here is Task 10's job),
-      // and so is a split's gross (splits stay MYR-only until Task 11). The linked account's
-      // balance, though, is native to ITS OWN currency (Task 9), so every MYR figure below has
-      // to be converted before it reaches recordBalanceLink.
-      const rates = ratesFromCache(await listFxRates());
-      const rate = rateFor(rates, account.currency);
-      for (let k = 0; k < created.length; k++) {
-        const t = created[k];
-        // A split row saved at the payer's own share, but the whole bill left the account, so
-        // the balance moves by the gross or the cash side is short by what friends owe.
-        const moved = keptDrafts[k]?.gross ?? t.amount;
-        await recordBalanceLink(account.id, deriveNative(moved, account.currency, rate), defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
+    let rate: number | null = null;
+    if (account && account.currency !== BASE_CURRENCY) {
+      rate = rateFor(ratesFromCache(await listFxRates()), account.currency);
+      if (rate == null) {
+        notify("Couldn't save this batch", `No cached exchange rate for ${account.currency}. Try again when you're online.`);
+        return;
       }
     }
-    // Repayments the user confirmed: settled against the receivable, never written as income.
-    for (const s of settlements) {
-      if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
+
+    try {
+      const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
+      await applyReliefDetection(created, null);
+      // If the whole batch was tagged to an account, move that account's balance
+      // per saved row — direction derived from account kind + txn type (an expense
+      // reduces an asset / pays down a liability; income does the reverse).
+      if (account) {
+        // `created` is the kept rows in order, so drop the same items commitCategorized dropped
+        // to line the drafts back up with them.
+        const keptDrafts = items.map((_, i) => splitDrafts[i] ?? null).filter((_, i) => assignments[i] !== DROP);
+        for (let k = 0; k < created.length; k++) {
+          const t = created[k];
+          // A split row saved at the payer's own share, but the whole bill left the account, so
+          // the balance moves by the gross or the cash side is short by what friends owe. `moved`
+          // is always MYR (receipt/extract-scan items and splits are MYR-only today); `rate` was
+          // already validated above, so this conversion cannot throw.
+          const moved = keptDrafts[k]?.gross ?? t.amount;
+          await recordBalanceLink(account.id, deriveNative(moved, account.currency, rate), defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
+        }
+      }
+      // Repayments the user confirmed: settled against the receivable, never written as income.
+      for (const s of settlements) {
+        if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
+      }
+
+      // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
+      // scan Pip already knew, next to the same measure for last calendar month.
+      const stats = autoFillStats(learnedThisScan);
+      const month = currentMonthKey();
+      const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
+      setAutoFill({ current: stats, lastMonth });
+
+      setResult(created);
+      setNewLearned(learned);
+      setPhase('saved');
+    } catch (e) {
+      // Surfaced rather than left as a silent unhandled rejection: CategorizeScreen calls this
+      // fire-and-forget, so nothing else in the chain would ever tell the user this failed.
+      notify("Couldn't save this batch", e instanceof Error ? e.message : 'Something went wrong.');
     }
-
-    // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
-    // scan Pip already knew, next to the same measure for last calendar month.
-    const stats = autoFillStats(learnedThisScan);
-    const month = currentMonthKey();
-    const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
-    setAutoFill({ current: stats, lastMonth });
-
-    setResult(created);
-    setNewLearned(learned);
-    setPhase('saved');
   };
 
   const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {

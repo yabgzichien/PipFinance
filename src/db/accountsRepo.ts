@@ -65,7 +65,7 @@ export async function listBalanceEntries(): Promise<BalanceEntry[]> {
 }
 
 /** Create an account and seed its opening balance entry. `openingValue` is native to
- *  `currency` — `balance_entries.value` stores the account's own currency, never MYR. */
+ *  `currency`: `balance_entries.value` stores the account's own currency, never MYR. */
 export async function addAccount(
   name: string,
   kind: AccountKind,
