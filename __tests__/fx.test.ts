@@ -1,5 +1,5 @@
-// __tests__/fx.test.ts
 import { ratesFromCache, rateFor, isStale, staleLabel, FX_STALE_MS, type FxRate } from '../src/lib/fx';
+import { fetchRateMYR } from '../src/prices/fx';
 
 function rate(over: Partial<FxRate>): FxRate {
   return { code: 'CNY', rateMyr: 0.63, asOf: '2026-08-23T00:00:00.000Z', ...over };
@@ -63,5 +63,12 @@ describe('staleLabel', () => {
 
   it('returns an empty string for an unparseable timestamp', () => {
     expect(staleLabel('nope')).toBe('');
+  });
+});
+
+describe('fetchRateMYR', () => {
+  it('returns 1 for MYR immediately without network', async () => {
+    expect(await fetchRateMYR('MYR')).toBe(1);
+    expect(await fetchRateMYR('myr')).toBe(1);
   });
 });

@@ -10,6 +10,7 @@ import {
   toQuantityUnitPrice,
   type TickerResult,
 } from '../lib/prices';
+import { fetchRateMYR } from './fx';
 
 const SEARCH = 'https://query1.finance.yahoo.com/v1/finance/search';
 const CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
@@ -51,8 +52,8 @@ export async function quotesMYR(symbols: string[]): Promise<Record<string, { pri
   const fx: Record<string, number> = {};
   await Promise.all(
     currencies.map(async (cur) => {
-      const r = await chart(`${cur}MYR=X`);
-      if (r) fx[cur] = r.price;
+      const r = await fetchRateMYR(cur);
+      if (r != null) fx[cur] = r;
     })
   );
 
