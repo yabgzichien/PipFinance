@@ -1,6 +1,7 @@
 // __tests__/currency.test.ts
 import { BASE_CURRENCY, SUPPORTED_CURRENCIES, currencyMeta, decimalsFor } from '../src/lib/currencies';
 import { round2, deriveMyr, parseActiveCurrencies, isMultiCurrency } from '../src/lib/currency';
+import { rederiveOnEdit } from '../src/lib/currency';
 
 describe('currency table', () => {
   it('has MYR as the base and lists it first', () => {
@@ -97,5 +98,26 @@ describe('isMultiCurrency', () => {
 
   it('is true once a second currency is active', () => {
     expect(isMultiCurrency(['MYR', 'CNY'])).toBe(true);
+  });
+});
+
+describe('rederiveOnEdit', () => {
+  it('reuses the frozen rate so correcting a typo does not reprice the row', () => {
+    // A March dinner entered at 0.63. Editing it in August must not use August's rate.
+    expect(rederiveOnEdit(130, 'CNY', 0.63)).toEqual({ amount: 81.9, nativeAmount: 130, fxRate: 0.63 });
+  });
+
+  it('treats the edited number as the native figure, not the MYR figure', () => {
+    const result = rederiveOnEdit(130, 'CNY', 0.63);
+    expect(result.nativeAmount).toBe(130);
+    expect(result.amount).not.toBe(130);
+  });
+
+  it('passes a MYR row straight through', () => {
+    expect(rederiveOnEdit(130, 'MYR', null)).toEqual({ amount: 130, nativeAmount: null, fxRate: null });
+  });
+
+  it('throws when a foreign row has lost its frozen rate rather than assuming parity', () => {
+    expect(() => rederiveOnEdit(130, 'CNY', null)).toThrow(/rate/i);
   });
 });

@@ -62,3 +62,18 @@ export function parseActiveCurrencies(raw: string | null): string[] {
 export function isMultiCurrency(active: string[]): boolean {
   return active.length > 1;
 }
+
+/**
+ * Re-derive a row after the user edits its amount.
+ *
+ * The number coming out of an edit field is the NATIVE amount, because that is what the
+ * row displays. Writing it straight into `amount` would set the MYR column to a yuan
+ * figure and leave `native_amount` stale, which is the single most likely way to corrupt
+ * this feature. This helper exists so no caller has to remember that.
+ *
+ * The frozen rate is reused deliberately: correcting a typo in March's dinner must not
+ * silently reprice it at today's rate.
+ */
+export function rederiveOnEdit(entered: number, currency: string, frozenRate: number | null): MyrDerivation {
+  return deriveMyr(entered, currency, frozenRate);
+}
