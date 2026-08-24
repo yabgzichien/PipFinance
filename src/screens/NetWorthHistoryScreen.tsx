@@ -1,10 +1,12 @@
 // src/screens/NetWorthHistoryScreen.tsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Amount, Body, Caption, Card, Label, Title, TopBar } from '../components/ui';
+import { listFxRates } from '../db/fxRepo';
 import { monthLabel } from '../lib/dates';
+import { ratesFromCache } from '../lib/fx';
 import { fmt } from '../lib/format';
 import { monthsWithData, netWorthSeries, type NetWorthPoint } from '../lib/networth';
 import { useAccent } from '../state/accent';
@@ -22,9 +24,17 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { accounts, balanceEntries } = useAppData();
   const [search, setSearch] = useState('');
+  const [rates, setRates] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    listFxRates().then((fx) => setRates(ratesFromCache(fx)));
+  }, []);
 
   const monthKeys = useMemo(() => monthsWithData(balanceEntries), [balanceEntries]);
-  const series = useMemo(() => netWorthSeries(accounts, balanceEntries, monthKeys), [accounts, balanceEntries, monthKeys]);
+  const series = useMemo(
+    () => netWorthSeries(accounts, balanceEntries, monthKeys, rates),
+    [accounts, balanceEntries, monthKeys, rates]
+  );
 
   // Newest first, each carrying its delta vs the previous (older) month.
   const rows: Row[] = useMemo(

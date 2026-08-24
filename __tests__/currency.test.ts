@@ -1,7 +1,7 @@
 // __tests__/currency.test.ts
 import { BASE_CURRENCY, SUPPORTED_CURRENCIES, currencyMeta, decimalsFor } from '../src/lib/currencies';
 import { round2, deriveMyr, parseActiveCurrencies, isMultiCurrency } from '../src/lib/currency';
-import { rederiveOnEdit } from '../src/lib/currency';
+import { rederiveOnEdit, deriveNative } from '../src/lib/currency';
 
 describe('currency table', () => {
   it('has MYR as the base and lists it first', () => {
@@ -66,6 +66,33 @@ describe('deriveMyr', () => {
 
   it('throws on a non-positive rate', () => {
     expect(() => deriveMyr(128, 'CNY', 0)).toThrow(/rate/i);
+  });
+});
+
+describe('deriveNative', () => {
+  it('leaves a MYR amount alone', () => {
+    expect(deriveNative(128, 'MYR', null)).toBe(128);
+  });
+
+  it('ignores a supplied rate when the currency is MYR', () => {
+    expect(deriveNative(128, 'MYR', 0.63)).toBe(128);
+  });
+
+  it('is the exact inverse of deriveMyr for a foreign currency', () => {
+    const { amount } = deriveMyr(128, 'CNY', 0.63);
+    expect(deriveNative(amount, 'CNY', 0.63)).toBe(128);
+  });
+
+  it('rounds the native amount to 2dp', () => {
+    expect(deriveNative(13.59, 'CNY', 0.6321)).toBe(21.5);
+  });
+
+  it('throws on a foreign currency with no rate rather than assuming parity', () => {
+    expect(() => deriveNative(128, 'CNY', null)).toThrow(/rate/i);
+  });
+
+  it('throws on a non-positive rate', () => {
+    expect(() => deriveNative(128, 'CNY', 0)).toThrow(/rate/i);
   });
 });
 

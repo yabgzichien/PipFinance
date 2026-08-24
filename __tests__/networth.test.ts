@@ -8,6 +8,7 @@ import {
   monthsWithData,
   defaultLinkEffect,
   applyEffect,
+  toMyrValues,
 } from '../src/lib/networth';
 import type { Account, BalanceEntry } from '../src/lib/types';
 
@@ -114,6 +115,60 @@ describe('monthsWithData', () => {
   it('picks the earliest asOf across multiple accounts, unsorted input', () => {
     const entries = [entry({ accountId: 'a', asOf: '2026-04-01' }), entry({ accountId: 'b', asOf: '2026-01-15' }), entry({ accountId: 'a', asOf: '2026-02-01' })];
     expect(monthsWithData(entries, new Date(2026, 1, 20))).toEqual(['2026-01', '2026-02']);
+  });
+});
+
+describe('toMyrValues', () => {
+  it('leaves MYR accounts untouched and needs no rate table', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' })];
+    const result = toMyrValues(accounts, { a: 1000 }, {});
+    expect(result.valueById).toEqual({ a: 1000 });
+    expect(result.unconvertible).toEqual([]);
+  });
+
+  it('converts a foreign account at the supplied rate', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    const result = toMyrValues(accounts, { a: 12000 }, { CNY: 0.63 });
+    expect(result.valueById).toEqual({ a: 7560 });
+    expect(result.unconvertible).toEqual([]);
+  });
+
+  it('EXCLUDES an account with no rate rather than counting it at parity', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' }), acct({ id: 'b', currency: 'CNY' })];
+    const result = toMyrValues(accounts, { a: 1000, b: 12000 }, {});
+    expect(result.valueById).toEqual({ a: 1000 });
+    expect(result.valueById.b).toBeUndefined();
+    expect(result.unconvertible).toEqual(['b']);
+  });
+
+  it('feeds netWorth a total that omits the unconvertible account', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' }), acct({ id: 'b', currency: 'CNY' })];
+    const { valueById } = toMyrValues(accounts, { a: 1000, b: 12000 }, {});
+    expect(netWorth(accounts, valueById).net).toBe(1000);
+  });
+
+  it('rounds converted values to 2dp', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    expect(toMyrValues(accounts, { a: 128 }, { CNY: 0.6321 }).valueById.a).toBe(80.91);
+  });
+
+  it('skips archived accounts', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY', archived: true })];
+    expect(toMyrValues(accounts, { a: 12000 }, {}).unconvertible).toEqual([]);
+  });
+});
+
+describe('netWorthSeries with rates', () => {
+  it('defaults to an empty rate table so existing MYR-only callers are unaffected', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' })];
+    const entries = [entry({ accountId: 'a', value: 500, asOf: '2026-05-01' })];
+    expect(netWorthSeries(accounts, entries, ['2026-05'])[0].net).toBe(500);
+  });
+
+  it('converts foreign balances in each month point', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    const entries = [entry({ accountId: 'a', value: 1000, asOf: '2026-05-01' })];
+    expect(netWorthSeries(accounts, entries, ['2026-05'], { CNY: 0.63 })[0].net).toBe(630);
   });
 });
 

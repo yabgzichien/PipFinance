@@ -64,27 +64,30 @@ export async function listBalanceEntries(): Promise<BalanceEntry[]> {
   return rows.map(toEntry);
 }
 
-/** Create an account and seed its opening balance entry. */
+/** Create an account and seed its opening balance entry. `openingValue` is native to
+ *  `currency` — `balance_entries.value` stores the account's own currency, never MYR. */
 export async function addAccount(
   name: string,
   kind: AccountKind,
   cls: string,
   openingValue: number,
   asOf: string,
-  icon?: string | null
+  icon?: string | null,
+  currency: string = 'MYR'
 ): Promise<Account> {
   const db = await getDb();
   const id = genId();
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon) VALUES (?, ?, ?, ?, 0, ?, ?)',
+      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon, currency) VALUES (?, ?, ?, ?, 0, ?, ?, ?)',
       id,
       name,
       kind,
       cls,
       now,
-      icon ?? null
+      icon ?? null,
+      currency
     );
     await db.runAsync(
       'INSERT INTO balance_entries (id, account_id, value, as_of, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -95,7 +98,7 @@ export async function addAccount(
       now
     );
   });
-  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null, currency: 'MYR' };
+  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null, currency };
 }
 
 export async function updateAccount(id: string, fields: { name: string; cls: string; icon?: string | null }): Promise<void> {

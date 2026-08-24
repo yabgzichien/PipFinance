@@ -42,6 +42,27 @@ export function deriveMyr(entered: number, currency: string, rate: number | null
 }
 
 /**
+ * Convert a MYR figure into an account's own currency — the inverse of `deriveMyr`. Needed
+ * wherever a balance-link write (`recordBalanceLink`) must land in `balance_entries.value`,
+ * which is native to the account rather than always MYR: a transaction's canonical MYR
+ * amount, or a commitment's MYR-denominated payment, has to be re-expressed in whatever
+ * currency the target account itself keeps its balance in.
+ *
+ * Throws rather than falling back to parity when a foreign rate is missing, the same
+ * write-boundary throw `deriveMyr` uses on the way in: silently landing the MYR figure into a
+ * foreign account at 1:1 is the exact bug this feature exists to fix.
+ */
+export function deriveNative(myrAmount: number, currency: string, rate: number | null): number {
+  if (currency === BASE_CURRENCY) {
+    return round2(myrAmount);
+  }
+  if (rate == null || !Number.isFinite(rate) || rate <= 0) {
+    throw new Error(`No usable FX rate for ${currency}`);
+  }
+  return round2(myrAmount / rate);
+}
+
+/**
  * Read the `active_currencies` meta value. MYR is forced in and placed first: the base
  * currency can never be deactivated, and a stored value missing it would otherwise hide
  * ringgit from the user's own picker.

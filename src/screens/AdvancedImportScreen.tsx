@@ -41,8 +41,11 @@ import {
 } from '../components/ui';
 import { addAccount, listAccounts } from '../db/accountsRepo';
 import { addTransactions } from '../db/txnRepo';
+import { listFxRates } from '../db/fxRepo';
 import { DROP, type Account, type ExtractedTxn } from '../lib/types';
+import { deriveNative } from '../lib/currency';
 import { todayISO } from '../lib/duplicates';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { merchantKey } from '../lib/normalize';
 import { defaultLinkEffect } from '../lib/networth';
 import { buildPrompt, parseJSON, type ParsedAccount, type ParsedCommitment, type ParsedTransfer, type ParseResult } from '../lib/advancedImport';
@@ -304,6 +307,11 @@ export function AdvancedImportScreen({
 
       // 3. Update account balances with imported transactions if option enabled.
       if (updateAccountBalances) {
+        // Imported transactions and transfers are always MYR (this import format has no
+        // per-row currency; see ExtractedTxn.currency's contract). A matched target account,
+        // though, may be an existing foreign-denominated one (Task 9), so its balance link
+        // has to convert MYR into the account's own currency first.
+        const rates = ratesFromCache(await listFxRates());
         const existingAccounts = await listAccounts();
         const allAccounts = [
           ...newlyCreatedAccounts,
@@ -326,7 +334,8 @@ export function AdvancedImportScreen({
 
           if (targetAccount) {
             const effect = defaultLinkEffect(targetAccount.kind, txn.type);
-            await recordBalanceLink(targetAccount.id, txn.amount, effect, txn.date ?? today);
+            const linkAmount = deriveNative(txn.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+            await recordBalanceLink(targetAccount.id, linkAmount, effect, txn.date ?? today);
           }
         }
 
@@ -345,7 +354,8 @@ export function AdvancedImportScreen({
             const searchName = t.account.trim().toLowerCase();
             const targetAccount = allAccounts2.find((a) => a.name.trim().toLowerCase() === searchName);
             if (targetAccount) {
-              await recordBalanceLink(targetAccount.id, t.amount, 'subtract', t.date ?? today);
+              const linkAmount = deriveNative(t.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+              await recordBalanceLink(targetAccount.id, linkAmount, 'subtract', t.date ?? today);
             }
           }
         }

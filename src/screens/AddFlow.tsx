@@ -4,8 +4,11 @@ import { PipWearsHat } from '../components/Pip';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
 import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
+import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
+import { deriveNative } from '../lib/currency';
 import { todayISO } from '../lib/duplicates';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
 import { type ScannedReceipt } from '../lib/parseReceipt';
 import { prevMonthKey } from '../lib/recap';
@@ -205,12 +208,18 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
       // `created` is the kept rows in order, so drop the same items commitCategorized dropped
       // to line the drafts back up with them.
       const keptDrafts = items.map((_, i) => splitDrafts[i] ?? null).filter((_, i) => assignments[i] !== DROP);
+      // A receipt/extract-scan item is always MYR (currency detection here is Task 10's job),
+      // and so is a split's gross (splits stay MYR-only until Task 11). The linked account's
+      // balance, though, is native to ITS OWN currency (Task 9), so every MYR figure below has
+      // to be converted before it reaches recordBalanceLink.
+      const rates = ratesFromCache(await listFxRates());
+      const rate = rateFor(rates, account.currency);
       for (let k = 0; k < created.length; k++) {
         const t = created[k];
         // A split row saved at the payer's own share, but the whole bill left the account, so
         // the balance moves by the gross or the cash side is short by what friends owe.
         const moved = keptDrafts[k]?.gross ?? t.amount;
-        await recordBalanceLink(account.id, moved, defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
+        await recordBalanceLink(account.id, deriveNative(moved, account.currency, rate), defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
       }
     }
     // Repayments the user confirmed: settled against the receivable, never written as income.

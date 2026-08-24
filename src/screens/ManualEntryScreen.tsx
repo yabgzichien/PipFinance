@@ -12,7 +12,7 @@ import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
-import { BASE_CURRENCY, isMultiCurrency, round2 } from '../lib/currency';
+import { BASE_CURRENCY, deriveNative, isMultiCurrency, round2 } from '../lib/currency';
 import { decimalsFor } from '../lib/currencies';
 import { fmtMoney } from '../lib/format';
 import { rateFor, ratesFromCache } from '../lib/fx';
@@ -108,7 +108,14 @@ export function ManualEntryScreen({
   const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
-  const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null;
+  // The linked account's balance is native to ITS OWN currency (Task 9), which may differ
+  // from the row's own currency. No conversion (and so no rate) is needed when the row's
+  // currency already matches the account's, or the account is MYR; otherwise the account's
+  // own rate must be cached, or `deriveNative` would throw at save time.
+  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
+  const linkConvertible =
+    !linkAccount || linkAccount.currency === currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
+  const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null && linkConvertible;
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -151,8 +158,8 @@ export function ManualEntryScreen({
     if (!canSave || !cat || !validDate || rate == null) return;
     // The figure the user typed, in `currency`: native for a foreign row, MYR for a plain one.
     const amt = round2(amount);
-    // Accounts are MYR-denominated today (Task 9 territory), so the balance link always needs
-    // the MYR-equivalent even when the row itself is saved and displayed in a foreign currency.
+    // The row's own MYR-equivalent (used both for the saved row's bookkeeping and, below, as
+    // the starting point for converting into the linked account's currency).
     const myrAmt = currency === BASE_CURRENCY ? amt : round2(amt * rate);
     const item: ExtractedTxn = {
       merchant: merchant.trim(),
@@ -166,8 +173,16 @@ export function ManualEntryScreen({
       fxRate: currency === BASE_CURRENCY ? null : rate,
     };
     // The balance moves by the full bill even when the row records only a share, because the
-    // whole amount is what actually left the account.
-    if (linkId) await recordBalanceLink(linkId, myrAmt, linkEffect, validDate);
+    // whole amount is what actually left the account. Accounts are natively denominated
+    // (Task 9): when the row's own currency already matches the linked account's, the row's
+    // native amount is used unconverted rather than round-tripped through MYR (which could
+    // drift a cent from double rounding); otherwise the MYR-equivalent is converted into the
+    // account's own currency at the account's own rate (the inverse of `deriveMyr`).
+    if (linkId && linkAccount) {
+      const linkAmt =
+        linkAccount.currency === currency ? amt : deriveNative(myrAmt, linkAccount.currency, rateFor(rates, linkAccount.currency));
+      await recordBalanceLink(linkId, linkAmt, linkEffect, validDate);
+    }
     onComplete(item, cat, activeSplit);
   };
 

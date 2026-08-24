@@ -5,6 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { InstitutionBadge } from '../components/InstitutionBadge';
 import { InstitutionField } from '../components/InstitutionField';
 import { BalanceScanScreen } from './BalanceScanScreen';
@@ -12,8 +13,12 @@ import { ScanBalanceButton } from '../components/ScanBalanceButton';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../components/ui';
+import { getActiveCurrencies } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { BASE_CURRENCY, isMultiCurrency } from '../lib/currency';
+import { fmt, fmtMoney } from '../lib/format';
+import { isStale, ratesFromCache, staleLabel } from '../lib/fx';
 import { matchInstitution } from '../lib/institutions';
 import { confirmAction } from '../lib/platformAlert';
 import {
@@ -22,6 +27,7 @@ import {
   groupByClass,
   netWorth,
   netWorthSeries,
+  toMyrValues,
   type ClassGroup,
 } from '../lib/networth';
 import { groupHoldings, holdingProfit, isHolding, subFromType, toQuantityUnitPrice, typeFromSub, type HoldingGroup, type TickerResult } from '../lib/prices';
@@ -43,6 +49,13 @@ function timeOf(iso: string | null): string {
 const RED = '#c5402f';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtPx = (n: number): string => (n >= 1000 ? fmt(n) : String(Math.round(n * 100) / 100));
+
+/** The quiet "≈ RM x, rate 12 Aug" hint under a foreign account's native balance. */
+function fxSubtitle(currency: string, myrValue: number, fxAsOf: Record<string, string>): string {
+  const asOf = fxAsOf[currency];
+  const stale = asOf && isStale(asOf) ? `, ${staleLabel(asOf)}` : '';
+  return `≈ ${fmtMoney(myrValue, BASE_CURRENCY)}${stale}`;
+}
 
 /** Ticker badge style + label by holding sub-type (and Bursa vs US for stocks). */
 function badgeFor(sub: string, symbol: string): { bg: string; clr: string; lbl: string } {
@@ -73,6 +86,12 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [profitMode, setProfitMode] = useState<ValueMode>('amount');
+  // Cached FX rates (code → MYR rate) and each rate's own cache timestamp (code → asOf), for
+  // converting native account balances into MYR and showing a staleness hint. Loaded once on
+  // mount; empty until then, so a MYR-only user's screen renders exactly as before this load
+  // resolves (`toMyrValues`/`netWorthSeries` both default a missing rate to "MYR only").
+  const [rates, setRates] = useState<Record<string, number>>({});
+  const [fxAsOf, setFxAsOf] = useState<Record<string, string>>({});
 
   const hasHoldings = useMemo(() => accounts.some(isHolding), [accounts]);
 
@@ -92,11 +111,24 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasHoldings]);
 
-  const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
-  const groups = useMemo(() => groupByClass(accounts, accountValues), [accounts, accountValues]);
+  useEffect(() => {
+    listFxRates().then((fx) => {
+      setRates(ratesFromCache(fx));
+      setFxAsOf(Object.fromEntries(fx.map((r) => [r.code, r.asOf])));
+    });
+  }, []);
+
+  // Native balances (accountValues) converted to MYR for every total/grouping; an account
+  // with no cached rate is excluded rather than counted at parity (see toMyrValues).
+  const { valueById: myrValues, unconvertible } = useMemo(
+    () => toMyrValues(accounts, accountValues, rates),
+    [accounts, accountValues, rates]
+  );
+  const nw = useMemo(() => netWorth(accounts, myrValues), [accounts, myrValues]);
+  const groups = useMemo(() => groupByClass(accounts, myrValues), [accounts, myrValues]);
   const series = useMemo(
-    () => netWorthSeries(accounts, balanceEntries, lastMonths(6)).map((p) => p.net),
-    [accounts, balanceEntries]
+    () => netWorthSeries(accounts, balanceEntries, lastMonths(6), rates).map((p) => p.net),
+    [accounts, balanceEntries, rates]
   );
   const editing = editingId ? accounts.find((a) => a.id === editingId) ?? null : null;
   const groupLots = useMemo(
@@ -158,6 +190,8 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
             onRefresh={doRefresh}
             onTapManual={setEditingId}
             onTapGroup={setGroupSymbol}
+            unconvertible={unconvertible}
+            fxAsOf={fxAsOf}
           />
         ))}
 
@@ -170,7 +204,11 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
                 key={row.account.id}
                 name={row.account.name}
                 cls={row.clsLabel}
-                value={row.value}
+                nativeValue={accountValues[row.account.id] ?? 0}
+                myrValue={row.value}
+                currency={row.account.currency}
+                unconvertible={unconvertible.includes(row.account.id)}
+                fxAsOf={fxAsOf}
                 customIcon={row.account.icon}
                 isLast={i === arr.length - 1}
                 onPress={() => setEditingId(row.account.id)}
@@ -401,6 +439,8 @@ function AssetClassCard({
   onRefresh,
   onTapManual,
   onTapGroup,
+  unconvertible,
+  fxAsOf,
 }: {
   g: ClassGroup;
   accountValues: Record<string, number>;
@@ -411,6 +451,8 @@ function AssetClassCard({
   onRefresh: () => void;
   onTapManual: (id: string) => void;
   onTapGroup: (symbol: string) => void;
+  unconvertible: string[];
+  fxAsOf: Record<string, string>;
 }) {
   const colorTheme = useThemeColors();
   const holdings = g.accounts.filter((x) => isHolding(x.account)).map((x) => x.account);
@@ -431,14 +473,51 @@ function AssetClassCard({
           );
         })}
         {manual.map(({ account, value }, i) => (
-          <ManualRowD key={account.id} icon={icon} customIcon={account.icon} name={account.name} sub={g.label} value={value} isLast={i === manual.length - 1} onPress={() => onTapManual(account.id)} />
+          <ManualRowD
+            key={account.id}
+            icon={icon}
+            customIcon={account.icon}
+            name={account.name}
+            sub={g.label}
+            nativeValue={accountValues[account.id] ?? 0}
+            myrValue={value}
+            currency={account.currency}
+            unconvertible={unconvertible.includes(account.id)}
+            fxAsOf={fxAsOf}
+            isLast={i === manual.length - 1}
+            onPress={() => onTapManual(account.id)}
+          />
         ))}
       </View>
     </>
   );
 }
 
-function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { icon: IconName; name: string; sub: string; value: number; isLast: boolean; onPress: () => void; customIcon?: string | null }) {
+function ManualRowD({
+  icon,
+  name,
+  sub,
+  nativeValue,
+  myrValue,
+  currency,
+  unconvertible,
+  fxAsOf,
+  isLast,
+  onPress,
+  customIcon,
+}: {
+  icon: IconName;
+  name: string;
+  sub: string;
+  nativeValue: number;
+  myrValue: number;
+  currency: string;
+  unconvertible: boolean;
+  fxAsOf: Record<string, string>;
+  isLast: boolean;
+  onPress: () => void;
+  customIcon?: string | null;
+}) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const inst = matchInstitution(name);
@@ -449,6 +528,7 @@ function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { i
     customIcon.startsWith('http') ||
     customIcon.startsWith('/')
   );
+  const foreign = currency !== BASE_CURRENCY;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
       {inst ? (
@@ -466,7 +546,14 @@ function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { i
         <Text style={[styles.rowName, { color: colorTheme.ink }]} numberOfLines={1}>{name}</Text>
         <Text style={[styles.rowSub, { color: colorTheme.ink2 }]} numberOfLines={1}>{sub}</Text>
       </View>
-      <Text style={[styles.rowVal, { color: colorTheme.ink }]}>RM {fmt(value)}</Text>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.rowVal, { color: colorTheme.ink }]}>{fmtMoney(nativeValue, currency)}</Text>
+        {foreign && (
+          <Text style={[styles.rowFx, { color: colorTheme.ink3 }]} numberOfLines={1}>
+            {unconvertible ? 'rate unavailable' : fxSubtitle(currency, myrValue, fxAsOf)}
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -527,7 +614,29 @@ function HoldingRowD({
   );
 }
 
-function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name: string; cls: string; value: number; isLast: boolean; onPress: () => void; customIcon?: string | null }) {
+function LiabilityRowD({
+  name,
+  cls,
+  nativeValue,
+  myrValue,
+  currency,
+  unconvertible,
+  fxAsOf,
+  isLast,
+  onPress,
+  customIcon,
+}: {
+  name: string;
+  cls: string;
+  nativeValue: number;
+  myrValue: number;
+  currency: string;
+  unconvertible: boolean;
+  fxAsOf: Record<string, string>;
+  isLast: boolean;
+  onPress: () => void;
+  customIcon?: string | null;
+}) {
   const colorTheme = useThemeColors();
   const inst = matchInstitution(name);
   const isCustomImage = customIcon && (
@@ -537,6 +646,7 @@ function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name
     customIcon.startsWith('http') ||
     customIcon.startsWith('/')
   );
+  const foreign = currency !== BASE_CURRENCY;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
       {inst ? (
@@ -556,7 +666,14 @@ function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name
           <Text style={[styles.liabChip, { color: colorTheme.red }]}>{cls}</Text>
         </View>
       </View>
-      <Text style={[styles.rowVal, { color: colorTheme.red }]}>-RM {fmt(value)}</Text>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.rowVal, { color: colorTheme.red }]}>-{fmtMoney(nativeValue, currency)}</Text>
+        {foreign && (
+          <Text style={[styles.rowFx, { color: colorTheme.ink3 }]} numberOfLines={1}>
+            {unconvertible ? 'rate unavailable' : fxSubtitle(currency, myrValue, fxAsOf)}
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -624,15 +741,19 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   const [costText, setCostText] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [customIcon, setCustomIcon] = useState<string | null>(null);
+  // A manually-created account's own currency (holdings stay MYR-only, priced via quotesMYR).
+  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
 
   const reset = () => {
     setKind('asset'); setCls('cash'); setName(''); setValueText('');
     setHoldingMode(false); setCoin(null); setQtyText(''); setCostText('');
-    setCustomIcon(null);
+    setCustomIcon(null); setCurrency(BASE_CURRENCY);
   };
   const close = () => { reset(); onClose(); };
 
-  // On open, either preset to a specific ticker ("add another lot") or start fresh.
+  // On open, either preset to a specific ticker ("add another lot") or start fresh. Also
+  // (re)loads the active-currency list each time the sheet opens, mirroring ManualEntryScreen.
   useEffect(() => {
     if (!visible) return;
     if (preset) {
@@ -641,6 +762,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
     } else {
       reset();
     }
+    getActiveCurrencies().then(setActiveCurrencies);
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchKind = (k: AccountKind) => {
@@ -687,7 +809,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
       const cost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
       await addHolding(name.trim() || coin.name, sub, coin.id, ticker, Math.round(quantity * 1e8) / 1e8, cost, customIcon);
     } else {
-      await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon);
+      await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon, currency);
     }
     close();
   };
@@ -784,7 +906,11 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                {isMultiCurrency(activeCurrencies) ? (
+                  <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
+                ) : (
+                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                )}
                 <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
             </>
@@ -1083,7 +1209,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{account.currency === BASE_CURRENCY ? 'RM' : account.currency}</Text>
                 <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" selectTextOnFocus style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
               <Text style={[styles.hint, { color: colorTheme.ink2 }]}>Saving a new value records it as of today.</Text>
@@ -1117,7 +1243,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
                 {history.map((e, i) => (
                   <View key={e.id} style={[styles.histRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
                     <Text style={[styles.histDate, { color: colorTheme.ink2 }]}>{shortDate(e.asOf)}</Text>
-                    <Text style={[styles.histVal, { color: colorTheme.ink }]}>RM {fmt(e.value)}</Text>
+                    <Text style={[styles.histVal, { color: colorTheme.ink }]}>{fmtMoney(e.value, account.currency)}</Text>
                   </View>
                 ))}
               </Card>
@@ -1245,6 +1371,7 @@ const styles = StyleSheet.create({
   rowSub: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
   rowVal: { fontFamily: numFont(700), fontSize: 14 },
   rowProfit: { fontFamily: numFont(700), fontSize: 11.5, marginTop: 1 },
+  rowFx: { fontFamily: uiFont(500), fontSize: 10.5, marginTop: 1, maxWidth: 120 },
   badge: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   badgeTick: { fontFamily: numFont(700), fontSize: 11, lineHeight: 13 },
   badgeLbl: { fontFamily: uiFont(500), fontSize: 11, opacity: 0.75, lineHeight: 9 },

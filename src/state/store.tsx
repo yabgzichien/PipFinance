@@ -135,6 +135,9 @@ const STREAK_PAUSED_SINCE_KEY = 'streak_paused_since';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
+import { listFxRates } from '../db/fxRepo';
+import { rateFor, ratesFromCache } from '../lib/fx';
+import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import {
   DROP,
   type Account,
@@ -336,12 +339,15 @@ interface AppData {
    *  in between. */
   streakCelebrationToken: number;
 
-  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null) => Promise<string>;
+  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string) => Promise<string>;
   /** Returns a default account id for the add flows, creating a "Cash" account if none exist. */
   ensureDefaultAccount: () => Promise<string>;
   updateAccount: (id: string, fields: { name: string; cls: string; icon?: string | null }) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
   setBalance: (accountId: string, value: number, asOf: string) => Promise<void>;
+  /** Adjust a linked account's balance. `amount` must already be in THAT account's own
+   *  currency (see `deriveNative`) — `balance_entries.value` is native to the account, never
+   *  assumed MYR. */
   recordBalanceLink: (accountId: string, amount: number, effect: LinkEffect, asOf: string) => Promise<void>;
   addHolding: (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null) => Promise<void>;
   updateHoldingQuantity: (id: string, quantity: number) => Promise<void>;
@@ -1021,8 +1027,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addAccount = useCallback(
-    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null) => {
-      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon);
+    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string) => {
+      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon, currency);
       const [accts, entries] = await Promise.all([listAccounts(), listBalanceEntries()]);
       setAccounts(accts);
       setBalanceEntries(entries);
@@ -1062,7 +1068,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setBalanceEntries(await listBalanceEntries());
   }, []);
 
-  // A linked transaction nudges an account's balance: new = current ± amount.
+  // A linked transaction nudges an account's balance: new = current ± amount. `amount` must
+  // already be in the target account's own currency  `balance_entries.value` is native to
+  // the account (Task 9), never assumed MYR, so every caller is responsible for converting
+  // a MYR-denominated figure (via `deriveNative`) before it reaches here.
   const recordBalanceLink = useCallback(
     async (accountId: string, amount: number, effect: LinkEffect, asOf: string) => {
       const entries = await listBalanceEntries();
@@ -1300,6 +1309,22 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
+   * A commitment's `amount` (and its occurrences' `paidAmount`) has no currency concept of its
+   * own — it's always MYR. `recordBalanceLink`, though, now needs the target account's OWN
+   * currency (Task 9: `balance_entries.value` is native, not always MYR), so every commitment
+   * payment path below converts through this first. A deleted/missing account falls back to
+   * MYR (nothing to convert against); `deriveNative`/`rateFor` already no-op for a MYR account.
+   */
+  const nativeForAccount = useCallback(
+    (myrAmount: number, accountId: string, rates: Record<string, number>): number => {
+      const account = accounts.find((a) => a.id === accountId);
+      const currency = account?.currency ?? BASE_CURRENCY;
+      return deriveNative(myrAmount, currency, rateFor(rates, currency));
+    },
+    [accounts]
+  );
+
+  /**
    * Tick a commitment occurrence as paid. Always tries to match an existing ledger row first
    * (same merchant, amount within 5%, dated within a week of the due date) so a bill the user
    * already logged manually — or one that lands via a later bank-statement import — never gets
@@ -1335,6 +1360,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const paidAmount = opts?.amount ?? commitment.amount;
       const paidOn = opts?.paidOn ?? todayKey();
       const status = paidOn <= occurrence.dueDate ? 'paid' : 'late';
+      // `paidAmount` is always MYR (commitments have no currency of their own); every
+      // recordBalanceLink below needs it re-expressed in the target account's own currency.
+      const rates = ratesFromCache(await listFxRates());
 
       const created = await addTransactions([
         {
@@ -1350,7 +1378,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const txn = created[0];
 
       if (commitment.fromAccountId) {
-        await recordBalanceLink(commitment.fromAccountId, paidAmount, 'subtract', paidOn);
+        await recordBalanceLink(commitment.fromAccountId, nativeForAccount(paidAmount, commitment.fromAccountId, rates), 'subtract', paidOn);
       }
 
       let unitsAdded: number | null = null;
@@ -1370,7 +1398,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         } else if (target) {
           // Cost-only target (ASB, EPF, unit trusts, gold savings): no ticker to size units
           // against, so the account's balance IS the invested-amount tracker.
-          await recordBalanceLink(target.id, paidAmount, 'add', paidOn);
+          await recordBalanceLink(target.id, nativeForAccount(paidAmount, target.id, rates), 'add', paidOn);
         }
       }
 
@@ -1390,7 +1418,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       await refreshCommitmentState();
       return { matched: false };
     },
-    [commitmentOccurrences, commitments, accounts, prices, resolveCommitmentMatch, recordBalanceLink, refreshCommitmentState, tagCommitmentRelief]
+    [commitmentOccurrences, commitments, accounts, prices, resolveCommitmentMatch, recordBalanceLink, refreshCommitmentState, tagCommitmentRelief, nativeForAccount]
   );
 
   /**
@@ -1410,9 +1438,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         if (occurrence.txnId) await removeTransaction(occurrence.txnId);
         const paidAmount = occurrence.paidAmount ?? occurrence.amount;
         const today = todayKey();
+        // Same MYR-to-native conversion as payCommitment above, for the same reason.
+        const rates = ratesFromCache(await listFxRates());
 
         if (commitment.fromAccountId) {
-          await recordBalanceLink(commitment.fromAccountId, paidAmount, 'add', today);
+          await recordBalanceLink(commitment.fromAccountId, nativeForAccount(paidAmount, commitment.fromAccountId, rates), 'add', today);
         }
 
         if (commitment.kind === 'investment' && commitment.toAccountId) {
@@ -1423,7 +1453,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             }
             await dbUpdateHoldingCost(target.id, Math.max(0, (target.cost ?? 0) - paidAmount));
           } else if (target) {
-            await recordBalanceLink(target.id, paidAmount, 'subtract', today);
+            await recordBalanceLink(target.id, nativeForAccount(paidAmount, target.id, rates), 'subtract', today);
           }
         }
       }
@@ -1432,7 +1462,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setTransactions(await listTransactions());
       await refreshCommitmentState();
     },
-    [commitmentOccurrences, commitments, accounts, removeTransaction, recordBalanceLink, refreshCommitmentState]
+    [commitmentOccurrences, commitments, accounts, removeTransaction, recordBalanceLink, refreshCommitmentState, nativeForAccount]
   );
 
   /** For a bill that genuinely did not apply this month — no ledger effect either way. */

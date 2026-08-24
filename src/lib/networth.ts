@@ -1,6 +1,8 @@
 // src/lib/networth.ts
 // Pure, deterministic balance-sheet logic. No UI/DB imports  unit-tested.
 import type { Account, AccountKind, BalanceEntry, TxnType } from './types';
+import { rateFor } from './fx';
+import { round2 } from './currency';
 
 export interface ClassMeta {
   id: string;
@@ -76,6 +78,41 @@ export function netWorth(accounts: Account[], valueById: Record<string, number>)
   return { assets, liabilities, net: assets - liabilities };
 }
 
+export interface ConvertedValues {
+  /** MYR values, keyed by account id. An account with no usable rate is absent. */
+  valueById: Record<string, number>;
+  /** Account ids that could not be converted, for the "rate unavailable" row hint. */
+  unconvertible: string[];
+}
+
+/**
+ * Convert native account values into MYR.
+ *
+ * An account with no rate is omitted from `valueById` entirely rather than defaulting to
+ * its native number. `netWorth` and `groupByClass` both read `valueById[id] ?? 0`, so
+ * omission excludes it from the total, which is the required behaviour: counting a foreign
+ * balance at 1:1 is the bug this feature exists to fix, and doing it in a fallback path
+ * would make it look deliberate.
+ */
+export function toMyrValues(
+  accounts: Account[],
+  valueById: Record<string, number>,
+  rates: Record<string, number>
+): ConvertedValues {
+  const out: Record<string, number> = {};
+  const unconvertible: string[] = [];
+  for (const a of accounts) {
+    if (a.archived) continue;
+    const rate = rateFor(rates, a.currency);
+    if (rate == null) {
+      unconvertible.push(a.id);
+      continue;
+    }
+    out[a.id] = round2((valueById[a.id] ?? 0) * rate);
+  }
+  return { valueById: out, unconvertible };
+}
+
 export interface ClassGroup {
   cls: string;
   label: string;
@@ -115,14 +152,22 @@ export interface NetWorthPoint extends NetWorth {
   monthKey: string;
 }
 
-/** Month-end net worth for each 'YYYY-MM' key (latest reading on or before month end). */
-export function netWorthSeries(accounts: Account[], entries: BalanceEntry[], monthKeys: string[]): NetWorthPoint[] {
+/** Month-end net worth for each 'YYYY-MM' key (latest reading on or before month end). The
+ *  default empty rate table plus `rateFor` short-circuiting MYR to 1 means every existing
+ *  MYR-only caller is unaffected. */
+export function netWorthSeries(
+  accounts: Account[],
+  entries: BalanceEntry[],
+  monthKeys: string[],
+  rates: Record<string, number> = {}
+): NetWorthPoint[] {
   const byAccount: Record<string, BalanceEntry[]> = {};
   for (const e of entries) (byAccount[e.accountId] ??= []).push(e);
   return monthKeys.map((mk) => {
     const upper = `${mk}-31`; // string upper bound for the month (safe for YYYY-MM-DD compare)
-    const valueById: Record<string, number> = {};
-    for (const a of accounts) valueById[a.id] = accountValueAsOf(byAccount[a.id] ?? [], upper);
+    const native: Record<string, number> = {};
+    for (const a of accounts) native[a.id] = accountValueAsOf(byAccount[a.id] ?? [], upper);
+    const { valueById } = toMyrValues(accounts, native, rates);
     return { monthKey: mk, ...netWorth(accounts, valueById) };
   });
 }

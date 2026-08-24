@@ -3,9 +3,11 @@ import { Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, Scr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
-import { BASE_CURRENCY, round2 } from '../lib/currency';
+import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
 import { decimalsFor } from '../lib/currencies';
 import { todayISO } from '../lib/duplicates';
+import { listFxRates } from '../db/fxRepo';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { deleteReceiptImage } from '../lib/receiptStorage';
@@ -51,6 +53,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [linkEffect, setLinkEffect] = useState<LinkEffect>('subtract');
   const [splitting, setSplitting] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState(false);
+  // Cached rates, refreshed each time a transaction is opened for editing: needed to convert
+  // this row's MYR-equivalent into a linked account's own currency (Task 9), since
+  // `balance_entries.value` is native to the account rather than always MYR.
+  const [rates, setRates] = useState<Record<string, number>>({});
 
   const openId = txn?.id;
   useEffect(() => {
@@ -67,6 +73,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setLinkEffect('subtract');
       setSplitting(false);
       setViewingReceipt(false);
+      listFxRates().then((fx) => setRates(ratesFromCache(fx)));
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -117,6 +124,14 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const decimals = decimalsFor(txn.currency);
   const currencyLabel = txn.currency === BASE_CURRENCY ? 'RM' : txn.currency;
 
+  // The linked account's balance is native to ITS OWN currency (Task 9). No conversion (and
+  // so no rate) is needed when the row's currency already matches the account's, or the
+  // account is MYR; otherwise the account's own rate must be cached, or `deriveNative` would
+  // throw on save.
+  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
+  const linkConvertible =
+    !linkAccount || linkAccount.currency === txn.currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
+
   const switchType = (t: TxnType) => {
     if (t === type) return;
     setType(t);
@@ -146,11 +161,20 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
     // re-derives the MYR column itself from the row's own frozen rate.
     await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
-    // Accounts are MYR-denominated today, so a foreign row's balance-link adjustment needs the
-    // MYR-equivalent, converted at the row's own frozen rate (never today's), same principle
-    // as ManualEntryScreen's save.
+    // The row's MYR-equivalent, converted at the row's own frozen rate (never today's) — used
+    // both for its own bookkeeping and, below, as the starting point for converting into the
+    // linked account's own currency.
     const myrAmount = txn.fxRate != null ? round2(amount * txn.fxRate) : amount;
-    if (linkId) await recordBalanceLink(linkId, myrAmount, linkEffect, txn.date ?? todayISO());
+    // Accounts are natively denominated (Task 9): when the row's own currency already matches
+    // the linked account's, its native amount is used unconverted rather than round-tripped
+    // through MYR (which could drift a cent from double rounding); otherwise the MYR-equivalent
+    // is converted into the account's own currency at the account's own rate (the inverse of
+    // `deriveMyr`), same principle as ManualEntryScreen's save.
+    if (linkId && linkAccount) {
+      const linkAmount =
+        linkAccount.currency === txn.currency ? amount : deriveNative(myrAmount, linkAccount.currency, rateFor(rates, linkAccount.currency));
+      await recordBalanceLink(linkId, linkAmount, linkEffect, txn.date ?? todayISO());
+    }
     onClose();
   };
 
@@ -330,7 +354,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </View>
 
           <View style={{ marginTop: 20 }}>
-            <PrimaryButton onPress={save} height={52}>
+            <PrimaryButton onPress={save} height={52} disabled={!linkConvertible}>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
               <BtnLabel>Save changes</BtnLabel>
             </PrimaryButton>
