@@ -38,18 +38,37 @@ export interface NewReliefTag {
 
 export async function listReliefTags(ya: number): Promise<ReliefTag[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<ReliefTagRow>('SELECT * FROM relief_tags WHERE ya = ? ORDER BY created_at DESC', ya);
+  const rows = await db.getAllAsync<ReliefTagRow>(
+    `SELECT rt.* FROM relief_tags rt
+     JOIN transactions t ON t.id = rt.txn_id
+     WHERE rt.ya = ? AND t.currency = 'MYR'
+     ORDER BY rt.created_at DESC`,
+    ya
+  );
   return rows.map(toReliefTag);
 }
 
 export async function getReliefTagsForTxn(txnId: string): Promise<ReliefTag[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<ReliefTagRow>('SELECT * FROM relief_tags WHERE txn_id = ? ORDER BY created_at DESC', txnId);
+  const rows = await db.getAllAsync<ReliefTagRow>(
+    `SELECT rt.* FROM relief_tags rt
+     JOIN transactions t ON t.id = rt.txn_id
+     WHERE rt.txn_id = ? AND t.currency = 'MYR'
+     ORDER BY rt.created_at DESC`,
+    txnId
+  );
   return rows.map(toReliefTag);
 }
 
 export async function addReliefTag(input: NewReliefTag): Promise<ReliefTag> {
   const db = await getDb();
+  const txn = await db.getFirstAsync<{ currency: string }>(
+    'SELECT currency FROM transactions WHERE id = ?',
+    input.txnId
+  );
+  if (txn && txn.currency !== 'MYR') {
+    throw new Error('Only ringgit transactions are eligible for LHDN tax relief');
+  }
   const id = genId();
   const createdAt = new Date().toISOString();
   await db.runAsync(

@@ -1,4 +1,4 @@
-import { computeUsage, evidenceState, isRequestable, matchRelief, yaForDate } from '../src/lib/relief';
+import { computeUsage, evidenceState, isRequestable, matchRelief, reliefEligibility, yaForDate } from '../src/lib/relief';
 import { RELIEF_SCHEDULE_2025 } from '../src/lib/reliefSchedule';
 import type { ReliefLine, ReliefSchedule } from '../src/lib/reliefSchedule';
 import type { ReliefTag, Transaction } from '../src/lib/types';
@@ -190,5 +190,26 @@ describe('computeUsage', () => {
       expect(u.claimed).toBe(0);
       expect(u.capUsed).toBe(0);
     }
+  });
+});
+
+describe('foreign currency exclusion', () => {
+  it('never auto-tags a non-MYR transaction', () => {
+    const memory = { popularbookstore: 'lifestyle' };
+    const myrMatch = matchRelief(txn({ id: 't1', merchantRaw: 'Popular Bookstore', merchantKey: 'popularbookstore', amount: 80, currency: 'MYR' }), null, memory, RELIEF_SCHEDULE_2025);
+    const cnyMatch = matchRelief(txn({ id: 't2', merchantRaw: 'Popular Bookstore', merchantKey: 'popularbookstore', amount: 80, currency: 'CNY' }), null, memory, RELIEF_SCHEDULE_2025);
+    expect(myrMatch).toEqual({ code: 'lifestyle', amount: 80 });
+    expect(cnyMatch).toBeNull();
+  });
+
+  it('reports a non-MYR transaction as ineligible with a reason', () => {
+    expect(reliefEligibility(txn({ currency: 'CNY' }))).toEqual({
+      eligible: false,
+      reason: 'Only ringgit spending can be claimed for LHDN relief.',
+    });
+  });
+
+  it('reports a MYR transaction as eligible', () => {
+    expect(reliefEligibility(txn({ currency: 'MYR' })).eligible).toBe(true);
   });
 });

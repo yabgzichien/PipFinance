@@ -3,9 +3,27 @@
 // evidence is good enough, whether its e-Invoice request window is still open, and how
 // claimed amounts consume nested aggregate caps. No DB/UI imports: see reliefRepo.ts for
 // persistence and TaxScreen.tsx for the UI that renders these.
+import { BASE_CURRENCY } from './currency';
 import type { ScannedReceipt } from './parseReceipt';
 import type { ReliefLine, ReliefSchedule } from './reliefSchedule';
 import type { EvidenceState, ReliefTag, Transaction } from './types';
+
+export interface ReliefEligibility {
+  eligible: boolean;
+  reason?: string;
+}
+
+/**
+ * LHDN reliefs require Malaysian-sourced spending with local documentation, and
+ * `relief_tags.amount` is a fixed figure filed against a year of assessment, so it can
+ * never be a converted number. Foreign rows are excluded outright.
+ */
+export function reliefEligibility(txn: Transaction): ReliefEligibility {
+  if (txn.currency !== BASE_CURRENCY) {
+    return { eligible: false, reason: 'Only ringgit spending can be claimed for LHDN relief.' };
+  }
+  return { eligible: true };
+}
 
 /** A transaction dated in a given calendar year always counts toward that same year of
  *  assessment (research doc §1.6). Dates in this app are stored as 'YYYY-MM-DD' strings, so
@@ -27,6 +45,7 @@ export function matchRelief(
   reliefMemory: Record<string, string>,
   schedule: ReliefSchedule
 ): { code: string; amount: number } | null {
+  if (!reliefEligibility(txn).eligible) return null;
   if (receipt) {
     for (const item of receipt.items) {
       const label = item.label.toLowerCase();

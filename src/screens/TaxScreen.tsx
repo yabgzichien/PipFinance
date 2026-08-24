@@ -6,14 +6,14 @@ import { Icon } from '../components/Icon';
 import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
 import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
-import { computeUsage, evidenceState, isRequestable, yaForDate, type ReliefUsage } from '../lib/relief';
+import { computeUsage, evidenceState, isRequestable, reliefEligibility, yaForDate, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
 import { addReliefTag, listReliefTags } from '../db/reliefRepo';
 import { saveOrDownloadExport } from '../lib/financialExport';
 import { notify } from '../lib/platformAlert';
 import { buildAuditPackPdf } from '../lib/taxExport';
 import type { ReliefTag, Transaction } from '../lib/types';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -177,33 +177,49 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                 // tagged at all: leave it out of the results rather than fail on tap.
                 .filter((t) => !!t.date && t.merchantRaw.toLowerCase().includes(manualSearch.trim().toLowerCase()))
                 .slice(0, 15)
-                .map((t) => (
-                  <Pressable
-                    key={t.id}
-                    onPress={async () => {
-                      if (!schedule || !t.date) return;
-                      // The tag's year of assessment comes from the transaction's own date, not
-                      // the chip the user happens to be browsing: searching from YA 2025 and
-                      // tapping a 2026 row must still file it under 2026.
-                      const txnYa = yaForDate(t.date);
-                      const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya: txnYa, amount: t.amount, origin: 'manual' });
-                      if (txnYa === ya) {
-                        setTags((prev) => [...(prev ?? []), created]);
-                        setEditingTagId(created.id);
-                      } else {
-                        notify('Tagged under YA ' + txnYa, 'This transaction is dated in ' + txnYa + ', so it was filed there. Switch to YA ' + txnYa + ' to edit it.');
-                      }
-                      setAddingManually(false);
-                      setManualSearch('');
-                    }}
-                    style={styles.manualRow}
-                  >
-                    <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
-                      {t.merchantRaw}
-                    </Text>
-                    <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
-                  </Pressable>
-                ))}
+                .map((t) => {
+                  const eligibility = reliefEligibility(t);
+                  if (!eligibility.eligible) {
+                    return (
+                      <View key={t.id} style={styles.manualRow}>
+                        <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                          <Text style={{ color: colorTheme.ink3, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
+                            {t.merchantRaw}
+                          </Text>
+                          <Caption color={colorTheme.ink3}>{eligibility.reason}</Caption>
+                        </View>
+                        <Caption color={colorTheme.ink3}>{fmtMoney(t.nativeAmount ?? t.amount, t.currency)}</Caption>
+                      </View>
+                    );
+                  }
+                  return (
+                    <Pressable
+                      key={t.id}
+                      onPress={async () => {
+                        if (!schedule || !t.date) return;
+                        // The tag's year of assessment comes from the transaction's own date, not
+                        // the chip the user happens to be browsing: searching from YA 2025 and
+                        // tapping a 2026 row must still file it under 2026.
+                        const txnYa = yaForDate(t.date);
+                        const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya: txnYa, amount: t.amount, origin: 'manual' });
+                        if (txnYa === ya) {
+                          setTags((prev) => [...(prev ?? []), created]);
+                          setEditingTagId(created.id);
+                        } else {
+                          notify('Tagged under YA ' + txnYa, 'This transaction is dated in ' + txnYa + ', so it was filed there. Switch to YA ' + txnYa + ' to edit it.');
+                        }
+                        setAddingManually(false);
+                        setManualSearch('');
+                      }}
+                      style={styles.manualRow}
+                    >
+                      <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
+                        {t.merchantRaw}
+                      </Text>
+                      <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                    </Pressable>
+                  );
+                })}
           </Card>
         )}
 

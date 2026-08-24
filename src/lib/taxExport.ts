@@ -62,7 +62,7 @@ export async function buildAuditPackPdf(
   for (const tag of tags) {
     const txn = transactions.find((t) => t.id === tag.txnId);
     const line = schedule.lines.find((l) => l.code === tag.code);
-    if (!txn || !line) continue;
+    if (!txn || txn.currency !== 'MYR' || !line) continue;
 
     const page = doc.addPage([595, 842]);
     let py = 800;
