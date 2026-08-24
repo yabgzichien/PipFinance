@@ -132,8 +132,13 @@ async function currencyOf(id: string): Promise<{ currency: string; fxRate: numbe
   return { currency: row?.currency ?? BASE_CURRENCY, fxRate: row?.fx_rate ?? null };
 }
 
+/** The columns an edit rewrites, so a caller holding the row in memory can patch it in place
+ *  instead of re-reading the whole ledger to find out what its own edit did. */
+export type TxnAmountPatch = Pick<Transaction, 'amount' | 'nativeAmount'>;
+export type TxnFieldsPatch = TxnAmountPatch & Pick<Transaction, 'type' | 'categoryId' | 'remark'>;
+
 /** `entered` is the NATIVE amount for a foreign row, matching what the edit field shows. */
-export async function updateTransactionAmount(id: string, entered: number): Promise<void> {
+export async function updateTransactionAmount(id: string, entered: number): Promise<TxnAmountPatch> {
   const db = await getDb();
   const { currency, fxRate } = await currencyOf(id);
   const d = rederiveOnEdit(entered, currency, fxRate);
@@ -143,6 +148,7 @@ export async function updateTransactionAmount(id: string, entered: number): Prom
     d.nativeAmount,
     id
   );
+  return { amount: d.amount, nativeAmount: d.nativeAmount };
 }
 
 export async function updateTransactionCategory(id: string, categoryId: string): Promise<void> {
@@ -170,17 +176,19 @@ export async function updateTransactionFields(
   type: TxnType,
   categoryId: string | null,
   remark?: string | null
-): Promise<void> {
+): Promise<TxnFieldsPatch> {
   const db = await getDb();
   const { currency, fxRate } = await currencyOf(id);
   const d = rederiveOnEdit(entered, currency, fxRate);
+  const cleanedRemark = cleanRemark(remark);
   await db.runAsync(
     'UPDATE transactions SET amount = ?, native_amount = ?, type = ?, category_id = ?, remark = ? WHERE id = ?',
     d.amount,
     d.nativeAmount,
     type,
     categoryId,
-    cleanRemark(remark),
+    cleanedRemark,
     id
   );
+  return { amount: d.amount, nativeAmount: d.nativeAmount, type, categoryId, remark: cleanedRemark };
 }

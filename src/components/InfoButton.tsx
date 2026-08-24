@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { GLOSSARY } from '../lib/glossary';
+import { getGlossaryEntry } from '../i18n';
+import { useLanguage } from '../i18n';
 import { useGlossary } from '../state/glossary';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -12,7 +13,8 @@ import { Pip } from './Pip';
 export function InfoButton({ entry, color }: { entry: string; color?: string }) {
   const { open } = useGlossary();
   const colorTheme = useThemeColors();
-  const term = GLOSSARY[entry]?.term ?? 'this';
+  const { language } = useLanguage();
+  const term = getGlossaryEntry(entry, language)?.term ?? 'this';
   return (
     <Pressable
       onPress={() => open(entry)}
@@ -30,10 +32,11 @@ export function InfoButton({ entry, color }: { entry: string; color?: string }) 
  *  Mount once near the app root (see App.tsx) so any InfoButton can open it. */
 export function GlossaryModal() {
   const { openEntry, close } = useGlossary();
+  const { language, isZh } = useLanguage();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   if (!openEntry) return <Modal visible={false} transparent />;
-  const entry = GLOSSARY[openEntry];
+  const entry = getGlossaryEntry(openEntry, language);
   if (!entry) return <Modal visible={false} transparent />;
 
   return (
@@ -44,7 +47,7 @@ export function GlossaryModal() {
           <View style={styles.head}>
             <Pip size={40} expr="curious" />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.eyebrow, { color: colorTheme.ink3 }]}>Glossary</Text>
+              <Text style={[styles.eyebrow, { color: colorTheme.ink3 }]}>{isZh ? '词汇解释' : 'Glossary'}</Text>
               <Text style={[styles.title, { color: colorTheme.ink }]}>{entry.term}</Text>
             </View>
             <Pressable onPress={close} hitSlop={8} accessibilityRole="button" accessibilityLabel="Close" style={[styles.closeBtn, { backgroundColor: colorTheme.surface2 }]}>

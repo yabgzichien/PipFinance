@@ -1,0 +1,67 @@
+// src/i18n/glossary.ts
+import type { GlossaryEntry } from '../lib/glossary';
+import type { SupportedLanguage } from './types';
+import { GLOSSARY as EN_GLOSSARY } from '../lib/glossary';
+
+export const ZH_GLOSSARY: Record<string, GlossaryEntry> = {
+  safe_income: {
+    term: '安全月收入',
+    short: '当收入在各月之间波动时，用于制定预算的保守底线收入。',
+    body: '取自近期各月收入的较低值而非平均值。因为如果按平均值制定预算，在收入低于平均值的月份预算就会失效。以安全底线为基准进行规划，可以在丰收月转化为结余储蓄，而不是在低收月出现资金缺口。',
+  },
+  net_cash_flow: {
+    term: '净现金流',
+    short: '在特定时期内，总收入减去总支出后的剩余金额。',
+    body: '正数表示收入大于支出。观察净现金流的长期趋势比任何单一月份的数据都更有参考价值。',
+  },
+  where_it_goes: {
+    term: '支出分布',
+    short: '支出在各个分类中的分配情况。',
+    body: '将账单按分类（如餐饮、交通、账单等）归集，有助于及时发现预算超支的环节，并为预算页面的分类明细提供支持。',
+  },
+  net_worth: {
+    term: '总净资产',
+    short: '拥有的所有资产减去所有负债后的净值。',
+    body: '资产（现金、储蓄、投资）减去负债（贷款、信用卡欠款）。观察净资产随着时间稳步增长，是衡量财务健康状况最清晰的指标。',
+  },
+  unallocated: {
+    term: '未分配预算',
+    short: '尚未分配给任何分类的预计收入。',
+    body: '停留在未分配中的资金不会受到任何支出额度的限制。将其合理分配到各个分类（包括储蓄），才能让预算真实反映你的消费计划。',
+  },
+  holdings: {
+    term: '持有资产',
+    short: '构成你净资产的各个具体账户、投资或实物资产。',
+    body: '净资产等于你拥有的总资产减去总负债。单独追踪各项资产有助于你了解是哪些项目在带动整体资产增长。',
+  },
+  income_floor: {
+    term: '收入底线',
+    short: '具有确定性的每月稳健收入，而非平均数所掩盖的虚高数字。',
+    body: '对历史月收入进行排序并取稳健的低位水平作为底线，确保在大多数月份都能实现。平均值容易被极个别异常高的月份拉高，而底线收入才是你可以安心依赖的保障。',
+  },
+  committed_spend: {
+    term: '固定、刚性与灵活支出',
+    short: '根据支出的必要性与可调控程度划分的三层消费结构。',
+    body:
+      '固定支出（Committed）：金额固定且按期发生的支出，如房租、贷款分期等，当月无法削减。\n\n' +
+      '刚性支出（Essential）：必要但金额有波动的支出，如基本伙食、日常交通等，可压缩但不可缺少。\n\n' +
+      '灵活支出（Flexible）：其余所有非刚性消费。如果当月收入偏紧，这部分可以随时调减。',
+  },
+  learned_merchants: {
+    term: '智能学习商家',
+    short: 'Pip 会记住你为商家设置的分类，在后续扫描中自动预填。',
+    body: '每当你为一笔交易选择分类时，Pip 都会记录该商家的对应分类。下次在扫描或导入中遇到相同商家时，系统会自动填入该分类，无需手动再次选择。重置学习将清除所有记忆。',
+  },
+  card_direction: {
+    term: '还款 / 消费',
+    short: '该笔交易是降低还是增加了你在该信用卡或贷款账户上的负债。',
+    body: '向信用卡或贷款账户还款会降低欠款（资产负债表负债减少），而在信用卡上刷卡消费则会增加欠款。',
+  },
+};
+
+export function getGlossaryEntry(entryKey: string, lang: SupportedLanguage = 'en'): GlossaryEntry | undefined {
+  if (lang === 'zh') {
+    return ZH_GLOSSARY[entryKey] ?? EN_GLOSSARY[entryKey];
+  }
+  return EN_GLOSSARY[entryKey];
+}

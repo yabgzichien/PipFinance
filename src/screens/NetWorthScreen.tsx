@@ -37,6 +37,7 @@ import type { Account, AccountKind, PriceQuote } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { numFont, platformShadow, radius, shadowCard, shadowToggle, uiFont } from '../theme';
 
 const RED2 = '#c5402f';
@@ -48,7 +49,20 @@ function timeOf(iso: string | null): string {
 
 const RED = '#c5402f';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_ZH = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 const fmtPx = (n: number): string => (n >= 1000 ? fmt(n) : String(Math.round(n * 100) / 100));
+
+function formatClassLabel(cls: string, isZh: boolean, fallbackLabel: string): string {
+  if (!isZh) return fallbackLabel;
+  switch (cls) {
+    case 'cash': return '现金';
+    case 'bank': return '银行账户';
+    case 'investments': return '投资资产';
+    case 'credit': return '信用卡';
+    case 'loans': return '借贷债务';
+    default: return fallbackLabel;
+  }
+}
 
 /** The quiet "≈ RM x, rate 12 Aug" hint under a foreign account's native balance. */
 function fxSubtitle(currency: string, myrValue: number, fxAsOf: Record<string, string>): string {
@@ -78,6 +92,7 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
   const { accounts, balanceEntries, accountValues, prices, pricesAsOf, refreshPrices } = useAppData();
   const [adding, setAdding] = useState(false);
   const [presetCoin, setPresetCoin] = useState<TickerResult | null>(null);
@@ -140,7 +155,10 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   );
 
   const empty = accounts.length === 0;
-  const monthShorts = useMemo(() => lastMonths(6).map((k) => MONTHS_SHORT[parseInt(k.slice(5, 7), 10) - 1]), []);
+  const monthShorts = useMemo(
+    () => lastMonths(6).map((k) => (isZh ? MONTHS_ZH : MONTHS_SHORT)[parseInt(k.slice(5, 7), 10) - 1]),
+    [isZh]
+  );
   const delta = series.length >= 2 ? nw.net - series[series.length - 2] : null;
   const prevMonth = monthShorts[monthShorts.length - 2] ?? '';
 
@@ -156,7 +174,7 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
         <Pressable onPress={onBack} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} hitSlop={6}>
           <Icon name="chevronLeft" size={18} color={colorTheme.ink2} />
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>Net Worth</Text>
+        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('netWorthTitle')}</Text>
         {/* invisible spacer keeps the title centered opposite the back button */}
         <View style={{ width: 36 }} />
       </View>
@@ -174,13 +192,17 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
         {empty && (
           <Card style={{ padding: 22, alignItems: 'center', margin: 16 }}>
             <Icon name="scale" size={40} color={theme.accent} />
-            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>Track what you own and owe</Text>
-            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>Add cash, investments, and loans to see your net worth grow over time.</Text>
+            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
+              {isZh ? '追踪您的资产与负债' : 'Track what you own and owe'}
+            </Text>
+            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+              {isZh ? '添加现金、投资和负债，随时查看您的净资产变化。' : 'Add cash, investments, and loans to see your net worth grow over time.'}
+            </Text>
           </Card>
         )}
 
         {/* Assets */}
-        {groups.assets.length > 0 && <GroupHeader label="Assets" total={nw.assets} color={theme.accent} />}
+        {groups.assets.length > 0 && <GroupHeader label={t('assets')} total={nw.assets} color={theme.accent} />}
         {groups.assets.map((g) => (
           <AssetClassCard
             key={g.cls}
@@ -199,14 +221,14 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
         ))}
 
         {/* Liabilities */}
-        {groups.liabilities.length > 0 && <GroupHeader label="Liabilities" total={nw.liabilities} color={colorTheme.red} />}
+        {groups.liabilities.length > 0 && <GroupHeader label={t('liabilities')} total={nw.liabilities} color={colorTheme.red} />}
         {groups.liabilities.length > 0 && (
           <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
             {flattenLiabs(groups.liabilities).map((row, i, arr) => (
               <LiabilityRowD
                 key={row.account.id}
                 name={row.account.name}
-                cls={row.clsLabel}
+                cls={formatClassLabel(row.account.cls, isZh, row.clsLabel)}
                 nativeValue={accountValues[row.account.id] ?? 0}
                 myrValue={row.value}
                 currency={row.account.currency}
@@ -256,6 +278,7 @@ function HeroCard({
   onOpenHistory: () => void;
 }) {
   const theme = useAccent();
+  const { isZh } = useLanguage();
   const deltaUp = (delta ?? 0) >= 0;
   const prevNet = series.length >= 2 ? series[series.length - 2] : 0;
   const pct = prevNet !== 0 ? (delta ?? 0) / Math.abs(prevNet) * 100 : 0;
@@ -281,7 +304,7 @@ function HeroCard({
       <View style={[styles.heroCircle, { pointerEvents: 'none' }]} />
 
       <View style={styles.heroHead}>
-        <Text style={styles.heroLabel}>Net Worth · 6-month</Text>
+        <Text style={styles.heroLabel}>{isZh ? '净资产 · 6个月' : 'Net Worth · 6-month'}</Text>
         <View style={styles.heroToggle}>
           {(['amount', 'percent'] as ValueMode[]).map((m) => {
             const on = mode === m;
@@ -311,18 +334,18 @@ function HeroCard({
             />
           </Svg>
           <Text style={[styles.deltaText, { color: deltaColor }]}>
-            {deltaUp ? '+' : '−'}{deltaValText} vs {prevMonth}
+            {deltaUp ? '+' : '−'}{deltaValText} {isZh ? `比 ${prevMonth}` : `vs ${prevMonth}`}
           </Text>
         </View>
       )}
 
       <View style={styles.heroTiles}>
         <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>Total assets</Text>
+          <Text style={styles.heroTileLabel}>{isZh ? '总资产' : 'Total assets'}</Text>
           <Text style={[styles.heroTileVal, { color: '#42e893' }]}>RM {fmt(nw.assets)}</Text>
         </View>
         <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>Total liabilities</Text>
+          <Text style={styles.heroTileLabel}>{isZh ? '总负债' : 'Total liabilities'}</Text>
           <Text style={[styles.heroTileVal, { color: '#ff8a80' }]}>RM {fmt(nw.liabilities)}</Text>
         </View>
       </View>
@@ -355,7 +378,7 @@ function HeroSparkline({ values }: { values: number[] }) {
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       <Defs>
-        <LinearGradient id="nwSpk" x1="0" y1="0" x2="0" y2="1">
+        <LinearGradient id="nwSpk" x1="0" y1="0" x2="0.7" y2="1">
           <Stop offset="0" stopColor="#ffffff" stopOpacity={0.3} />
           <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
         </LinearGradient>
@@ -371,6 +394,7 @@ function HeroSparkline({ values }: { values: number[] }) {
 function ScanRow({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   return (
     <View style={styles.scanRow}>
       <Pressable
@@ -381,8 +405,8 @@ function ScanRow({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
           <Icon name="scan" size={16} color="#fff" />
         </View>
         <View>
-          <Text style={styles.scanTitle}>Scan Balance</Text>
-          <Text style={styles.scanSub}>AI reads your bank screenshot</Text>
+          <Text style={styles.scanTitle}>{t('scanBalance')}</Text>
+          <Text style={styles.scanSub}>{t('scanBalanceSub')}</Text>
         </View>
       </Pressable>
       <Pressable onPress={onAdd} style={[styles.addBtn, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
@@ -416,15 +440,18 @@ function ClassChip({ label, sub }: { label: string; sub: string }) {
 function PriceStamp({ asOf, refreshing, onRefresh }: { asOf: string | null; refreshing: boolean; onRefresh: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={[styles.priceStamp, { borderBottomColor: colorTheme.line, backgroundColor: colorTheme.surface2 }]}>
       <View style={styles.liveDot} />
-      <Text style={[styles.priceStampText, { color: colorTheme.ink2 }]}>Prices as of {timeOf(asOf) || ''} today</Text>
+      <Text style={[styles.priceStampText, { color: colorTheme.ink2 }]}>
+        {isZh ? `今日行情截至 ${timeOf(asOf) || ''}` : `Prices as of ${timeOf(asOf) || ''} today`}
+      </Text>
       <Pressable onPress={onRefresh} style={[styles.refreshBtn, { backgroundColor: theme.accentTint }]} hitSlop={6}>
         {refreshing ? (
           <ActivityIndicator size="small" color={theme.accent} />
         ) : (
-          <Text style={[styles.refreshText, { color: theme.accent }]}>↻ Refresh</Text>
+          <Text style={[styles.refreshText, { color: theme.accent }]}>{isZh ? '↻ 刷新' : '↻ Refresh'}</Text>
         )}
       </Pressable>
     </View>
@@ -458,14 +485,16 @@ function AssetClassCard({
   fxAsOf: Record<string, string>;
 }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const holdings = g.accounts.filter((x) => isHolding(x.account)).map((x) => x.account);
   const manual = g.accounts.filter((x) => !isHolding(x.account));
   const hGroups = groupHoldings(holdings, accountValues);
   const hasH = hGroups.length > 0;
   const icon = (CLASS_BY_ID[g.cls]?.icon ?? 'wallet') as IconName;
+  const localizedLabel = formatClassLabel(g.cls, isZh, g.label);
   return (
     <>
-      <ClassChip label={hasH ? `${g.label} · Live prices` : g.label} sub={`RM ${fmt(g.total)}`} />
+      <ClassChip label={hasH ? `${localizedLabel} · ${isZh ? '实时行情' : 'Live prices'}` : localizedLabel} sub={`RM ${fmt(g.total)}`} />
       <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
         {hasH && <PriceStamp asOf={pricesAsOf} refreshing={refreshing} onRefresh={onRefresh} />}
         {hGroups.map((grp, i) => {
@@ -481,7 +510,7 @@ function AssetClassCard({
             icon={icon}
             customIcon={account.icon}
             name={account.name}
-            sub={g.label}
+            sub={localizedLabel}
             nativeValue={accountValues[account.id] ?? 0}
             myrValue={value}
             currency={account.currency}

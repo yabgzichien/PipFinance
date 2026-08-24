@@ -11,6 +11,7 @@ import { fmt } from '../lib/format';
 import { monthsWithData, netWorthSeries, type NetWorthPoint } from '../lib/networth';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { radius, spacing, type as typeScale, uiFont } from '../theme';
 
@@ -22,6 +23,7 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, formatMonthLabel, isZh } = useLanguage();
   const { accounts, balanceEntries } = useAppData();
   const [search, setSearch] = useState('');
   const [rates, setRates] = useState<Record<string, number>>({});
@@ -45,8 +47,8 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => monthLabel(r.monthKey, true).toLowerCase().includes(q));
-  }, [rows, search]);
+    return rows.filter((r) => formatMonthLabel(r.monthKey, true).toLowerCase().includes(q));
+  }, [rows, search, formatMonthLabel]);
 
   // `shown` is already newest-first and chronological, so grouping preserves year order.
   const sections = useMemo(() => {
@@ -64,7 +66,7 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + spacing.xs }}>
-        <TopBar title="Net Worth History" onBack={onBack} />
+        <TopBar title={t('historyTitle')} onBack={onBack} />
       </View>
 
       {rows.length > 0 && (
@@ -73,7 +75,7 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search by month or year"
+            placeholder={isZh ? '按月份或年份搜索' : 'Search by month or year'}
             placeholderTextColor={colorTheme.ink3}
             autoCapitalize="none"
             autoCorrect={false}
@@ -91,29 +93,29 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
         {rows.length === 0 ? (
           <Card style={{ padding: spacing.lg, alignItems: 'center' }}>
             <Icon name="clock" size={36} color={theme.accent} />
-            <Title style={{ marginTop: spacing.sm }}>No history yet</Title>
+            <Title style={{ marginTop: spacing.sm }}>{isZh ? '暂无历史记录' : 'No history yet'}</Title>
             <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.xs }}>
-              Once your accounts have a balance recorded, each month's net worth will show up here.
+              {isZh ? '记录账户余额后，每月的净资产将显示在此处。' : "Once your accounts have a balance recorded, each month's net worth will show up here."}
             </Body>
           </Card>
         ) : shown.length === 0 ? (
           <Card style={{ padding: spacing.lg, alignItems: 'center' }}>
-            <Title>No matching months</Title>
+            <Title>{isZh ? '未找到匹配的月份' : 'No matching months'}</Title>
             <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.xs }}>
-              Try a different month or year.
+              {isZh ? '请尝试不同的月份或年份。' : 'Try a different month or year.'}
             </Body>
           </Card>
         ) : (
           <>
             {!searching && (
               <Caption color={colorTheme.ink2} style={{ marginBottom: spacing.sm }}>
-                {rows.length} month{rows.length === 1 ? '' : 's'} recorded
+                {isZh ? `已记录 ${rows.length} 个月份` : `${rows.length} month${rows.length === 1 ? '' : 's'} recorded`}
               </Caption>
             )}
             {sections.map((section) => (
               <View key={section.year} style={{ marginBottom: spacing.base }}>
                 <Label weight={700} color={colorTheme.ink2} style={{ marginBottom: spacing.sm }}>
-                  {section.year}
+                  {isZh ? `${section.year}年` : section.year}
                 </Label>
                 <Card style={{ overflow: 'hidden' }}>
                   {section.items.map((r, i) => {
@@ -124,10 +126,10 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
                         style={[styles.row, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}
                       >
                         <View style={{ flex: 1 }}>
-                          <Body weight={700}>{monthLabel(r.monthKey, true)}</Body>
+                          <Body weight={700}>{formatMonthLabel(r.monthKey, true)}</Body>
                           {r.delta !== null && (
                             <Label weight={700} color={up ? theme.accent : colorTheme.red} style={{ marginTop: spacing.xs }}>
-                              {up ? '▲' : '▼'} RM {fmt(Math.abs(r.delta))} vs prev month
+                              {up ? '▲' : '▼'} RM {fmt(Math.abs(r.delta))} {isZh ? '比上月' : 'vs prev month'}
                             </Label>
                           )}
                         </View>

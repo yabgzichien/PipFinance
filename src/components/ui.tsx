@@ -11,6 +11,7 @@ import { colors, numFont, platformShadow, radius, shadowCard, type, uiFont } fro
 import { duration as motionDuration, easing as motionEasing } from '../theme/motion';
 import { Icon, type IconName } from './Icon';
 import { Pip, type PipExpr } from './Pip';
+import { useLanguage } from '../i18n';
 
 /* ── text helpers ── */
 
@@ -171,6 +172,8 @@ export function CategoryChip({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { tCat, t } = useLanguage();
+  const label = tCat(category);
   return (
     <Pressable
       onPress={onPress}
@@ -180,17 +183,17 @@ export function CategoryChip({
         selected && { borderColor: theme.accent, backgroundColor: theme.accentTint },
       ]}
       accessibilityRole="radio"
-      accessibilityLabel={category.label}
+      accessibilityLabel={label}
       accessibilityState={{ selected }}
     >
       <CatBadge category={category} size={34} rad={10} />
       <Text style={[styles.chipLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-        {category.label}
+        {label}
       </Text>
       {suggested && !selected && (
         <View style={[styles.learnedTag, { backgroundColor: theme.accentSoft }]}>
           <Icon name="sparkles" size={11} color={theme.accentInk} />
-          <Text style={[styles.learnedTagText, { color: theme.onTint }]}>{suggested === 'guess' ? 'AI guess' : 'learned'}</Text>
+          <Text style={[styles.learnedTagText, { color: theme.onTint }]}>{suggested === 'guess' ? t('aiGuess') : t('learned')}</Text>
         </View>
       )}
       {selected && (

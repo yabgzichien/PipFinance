@@ -1,4 +1,5 @@
 import { derivedSurcharges, parseReceipt, receiptSubtotal } from '../src/lib/parseReceipt';
+import { computeItemized, SELF } from '../src/lib/split';
 
 const FULL = JSON.stringify({
   merchant: 'Nasi Kandar Pelita',
@@ -129,5 +130,59 @@ describe('derivedSurcharges', () => {
   it('has no discount when the receipt printed none', () => {
     const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 100 }] }));
     expect(derivedSurcharges(r).discount).toBeNull();
+  });
+
+  // A 'before' voucher was already off the base when the till computed service and tax, so
+  // the percentages have to be backed out of the DISCOUNTED base. Dividing by the printed
+  // subtotal understates them, and `computeItemizedTotalCents` then discounts a second time.
+  describe("with a 'before' discount", () => {
+    // RM100 of food, RM20 voucher at the till, 10% service on RM80, 6% tax on RM88.
+    const BEFORE = JSON.stringify({
+      items: [{ label: 'Steak', amount: 100 }],
+      subtotal: 100,
+      serviceCharge: 8,
+      tax: 5.28,
+      total: 93.28,
+      discount: { amount: 20, timing: 'before' },
+    });
+
+    it('backs the percentages out of the discounted base, not the printed subtotal', () => {
+      expect(derivedSurcharges(parseReceipt(BEFORE))).toEqual({
+        serviceChargePct: 10,
+        taxPct: 6,
+        discount: { unit: 'amount', value: 20, timing: 'before' },
+      });
+    });
+
+    it('an all-mine itemised split reconciles against what was actually charged', () => {
+      const receipt = parseReceipt(BEFORE);
+      const result = computeItemized(
+        [{ id: 'l1', label: 'Steak', amount: 100, assignedTo: [SELF] }],
+        derivedSurcharges(receipt),
+        93.28,
+        [SELF]
+      );
+      expect(result.computedTotal).toBeCloseTo(93.28, 2);
+      expect(result.difference).toBeCloseTo(0, 2);
+    });
+  });
+
+  // The 'after' case is unchanged: a discount line printed below the tax means service and
+  // tax really were computed on the full subtotal.
+  it("leaves an 'after' discount reading against the full subtotal", () => {
+    const r = parseReceipt(
+      JSON.stringify({
+        items: [{ label: 'A', amount: 100 }],
+        subtotal: 100,
+        serviceCharge: 10,
+        tax: 6.6,
+        discount: { amount: 20, timing: 'after' },
+      })
+    );
+    expect(derivedSurcharges(r)).toEqual({
+      serviceChargePct: 10,
+      taxPct: 6,
+      discount: { unit: 'amount', value: 20, timing: 'after' },
+    });
   });
 });

@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { Icon } from '../components/Icon';
@@ -11,10 +11,12 @@ import { fmt } from '../lib/format';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
 import type { Category, Transaction } from '../lib/types';
+import type { AccentTheme } from '../state/accent';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
-import { radius, uiFont } from '../theme';
+import { radius, shadowCard, uiFont, type StructuralColors } from '../theme';
 
 /** The date used to sort/bucket a transaction: its own date, else when it was logged. */
 function txnDateOnly(t: Transaction): string {
@@ -22,6 +24,107 @@ function txnDateOnly(t: Transaction): string {
 }
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+
+/** How long typing has to pause before the whole ledger is re-filtered. Long enough that a
+ *  normal typing cadence runs the filter once instead of once per letter, short enough that
+ *  the list still feels like it is answering the keystroke. */
+const SEARCH_DEBOUNCE_MS = 180;
+
+interface Section {
+  key: string;
+  label: string;
+  data: Transaction[];
+}
+
+interface OwedInfo {
+  owed: number;
+  gross: number;
+}
+
+/**
+ * One ledger row. Split out and memoised because the list is virtualised now: re-rendering the
+ * handful of on-screen rows on every keystroke is the whole point of windowing, and an inline
+ * arrow function per row would defeat it.
+ *
+ * The card chrome (surface, side borders, rounded first/last corners) lives on the row rather
+ * than on a wrapping `Card`, since a virtualised list has nowhere to hang a wrapper. The rows
+ * are opaque and flush, so the group still reads as a single card.
+ */
+const TxnRow = React.memo(function TxnRow({
+  txn,
+  cat,
+  owed,
+  first,
+  last,
+  selectMode,
+  isSel,
+  theme,
+  colorTheme,
+  onPress,
+  onLongPress,
+}: {
+  txn: Transaction;
+  cat: Category;
+  owed: OwedInfo | undefined;
+  first: boolean;
+  last: boolean;
+  selectMode: boolean;
+  isSel: boolean;
+  theme: AccentTheme;
+  colorTheme: StructuralColors;
+  onPress: (t: Transaction) => void;
+  onLongPress: (id: string) => void;
+}) {
+  const { tCat, formatShortDate, isZh } = useLanguage();
+  const income = txn.type === 'income';
+  const transfer = txn.type === 'transfer';
+  const catLabel = tCat(cat);
+  const description = txn.remark?.trim() || (txn.merchantRaw && txn.merchantRaw !== cat.label ? txn.merchantRaw : '');
+  return (
+    <Pressable
+      onPress={() => onPress(txn)}
+      onLongPress={() => onLongPress(txn.id)}
+      delayLongPress={250}
+      style={({ pressed }) => [
+        styles.row,
+        styles.rowChrome,
+        { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+        first && styles.rowFirst,
+        last && styles.rowLast,
+        !first && styles.divider,
+        (pressed || isSel) && { backgroundColor: colorTheme.surface2 },
+      ]}
+    >
+      {selectMode && (
+        <View style={[styles.checkbox, { borderColor: colorTheme.line }, isSel && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
+          {isSel && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
+        </View>
+      )}
+      <CatBadge category={cat} size={40} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.merchant, { color: colorTheme.ink }]} numberOfLines={1}>
+          {transfer ? (isZh ? '转账' : 'Transfer') : catLabel}
+        </Text>
+        <Text style={[styles.sub, { color: colorTheme.ink2 }]} numberOfLines={1}>
+          {description ? `${description} · ` : ''}
+          {formatShortDate(txn.date ?? txn.createdAt)}
+        </Text>
+        {/* A split row shows only the payer's share, which reads as a suspiciously
+            cheap dinner without this. */}
+        {owed && (
+          <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
+            <Icon name="gift" size={10} color={theme.accentInk} />
+            <Text style={[styles.owedChipText, { color: theme.onTint }]}>
+              {isZh ? `待收 RM ${fmt(owed.owed)} · 共 RM ${fmt(owed.gross)}` : `RM ${fmt(owed.owed)} owed · split of RM ${fmt(owed.gross)}`}
+            </Text>
+          </View>
+        )}
+      </View>
+      <Amount value={txn.nativeAmount ?? txn.amount} currency={txn.currency} size={15} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
+      {!selectMode && <Icon name="pencil" size={15} color={colorTheme.ink3} />}
+    </Pressable>
+  );
+});
 
 export function AllTransactionsScreen({
   onBack,
@@ -37,9 +140,20 @@ export function AllTransactionsScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatMonthLabel, isZh } = useLanguage();
   const { transactions, categories, catById, removeMany, splits, shares, openShares } = useAppData();
 
+  // `search` is what the box shows and must update on the keystroke; `query` is what the
+  // ledger is filtered against and lags it by a beat. Filtering thousands of rows on every
+  // letter is what made the keyboard feel like it was catching up.
   const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (search === query) return;
+    const id = setTimeout(() => setQuery(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [search, query]);
+
   const [monthFilter, setMonthFilter] = useState<Set<string>>(new Set());
   const [catFilter, setCatFilter] = useState<Set<string>>(new Set());
   const [dateFrom, setDateFrom] = useState('');
@@ -89,7 +203,7 @@ export function AllTransactionsScreen({
     if (catFilter.size > 0) list = list.filter((t) => catFilter.has(t.categoryId ?? 'other'));
     if (validFrom) list = list.filter((t) => txnDateOnly(t) >= validFrom);
     if (validTo) list = list.filter((t) => txnDateOnly(t) <= validTo);
-    const q = search.trim().toLowerCase();
+    const q = query.trim().toLowerCase();
     if (q) {
       list = list.filter((t) => {
         const cat = catById[t.categoryId ?? 'other'] ?? fallback;
@@ -101,10 +215,10 @@ export function AllTransactionsScreen({
       });
     }
     return list;
-  }, [transactions, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, search, catById]);
+  }, [transactions, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, query, catById]);
 
   /** `shown`, sorted newest-first and bucketed into month sections for the sectioned list. */
-  const sections = useMemo(() => {
+  const sections = useMemo<Section[]>(() => {
     const groups = new Map<string, Transaction[]>();
     for (const t of shown) {
       const mk = txnMonthKey(t) ?? '';
@@ -113,8 +227,9 @@ export function AllTransactionsScreen({
     }
     for (const list of groups.values()) list.sort((a, b) => txnDateOnly(b).localeCompare(txnDateOnly(a)));
     const keys = [...groups.keys()].sort((a, b) => (a && b ? b.localeCompare(a) : a ? -1 : 1));
-    return keys.map((k) => ({ key: k, label: k ? monthLabel(k, true) : 'No date', items: groups.get(k)! }));
-  }, [shown]);
+    // `key` is the section's React key, so the undated bucket needs a real one, not ''.
+    return keys.map((k) => ({ key: k || 'no-date', label: k ? formatMonthLabel(k, true) : (isZh ? '无日期' : 'No date'), data: groups.get(k)! }));
+  }, [shown, formatMonthLabel, isZh]);
 
   const toggleMonth = (m: string) =>
     setMonthFilter((prev) => { const next = new Set(prev); next.has(m) ? next.delete(m) : next.add(m); return next; });
@@ -137,10 +252,6 @@ export function AllTransactionsScreen({
   );
   const filterTotal = useMemo(() => shown.reduce((s, t) => s + t.amount, 0), [shown]);
 
-  const enterSelect = (id: string) => {
-    setSelectMode(true);
-    setSelected(new Set([id]));
-  };
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -156,15 +267,129 @@ export function AllTransactionsScreen({
   const deleteSelected = () => {
     const ids = [...selected];
     if (ids.length === 0) return;
-    confirmAction('Delete selected?', `Remove ${ids.length} transaction${ids.length === 1 ? '' : 's'}? This can’t be undone.`, 'Delete', async () => {
-      await removeMany(ids);
-      cancelSelect();
-    });
+    confirmAction(
+      t('delete'),
+      isZh ? `确定删除选中的 ${ids.length} 笔交易吗？此操作无法撤销。` : `Remove ${ids.length} transaction${ids.length === 1 ? '' : 's'}? This can’t be undone.`,
+      t('delete'),
+      async () => {
+        await removeMany(ids);
+        cancelSelect();
+      }
+    );
   };
-  const onRowPress = (t: Transaction) => {
-    if (selectMode) toggleSelect(t.id);
-    else setEditing(t);
-  };
+  // Stable across renders so `TxnRow`'s memo actually holds while the user types or scrolls.
+  const onRowPress = useCallback(
+    (t: Transaction) => {
+      if (selectMode) toggleSelect(t.id);
+      else setEditing(t);
+    },
+    [selectMode]
+  );
+  const onRowLongPress = useCallback((id: string) => {
+    setSelectMode(true);
+    setSelected(new Set([id]));
+  }, []);
+
+  const keyExtractor = useCallback((t: Transaction) => t.id, []);
+  const renderItem = useCallback(
+    ({ item, index, section }: { item: Transaction; index: number; section: Section }) => (
+      <TxnRow
+        txn={item}
+        cat={catById[item.categoryId ?? 'other'] ?? fallback}
+        owed={owedByTxn[item.id]}
+        first={index === 0}
+        last={index === section.data.length - 1}
+        selectMode={selectMode}
+        isSel={selected.has(item.id)}
+        theme={theme}
+        colorTheme={colorTheme}
+        onPress={onRowPress}
+        onLongPress={onRowLongPress}
+      />
+    ),
+    [catById, owedByTxn, selectMode, selected, theme, colorTheme, onRowPress, onRowLongPress]
+  );
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: Section }) => (
+      <Text style={[styles.monthHeader, { color: colorTheme.ink2 }]}>{section.label}</Text>
+    ),
+    [colorTheme]
+  );
+  const renderSectionFooter = useCallback(() => <View style={styles.sectionGap} />, []);
+
+  const listHeader = (
+    <>
+      {advancedActive && !selectMode && (
+        <Pressable onPress={clearAdvancedFilters} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          <Icon name="sliders" size={16} color={colorTheme.ink2} />
+          <Text style={[styles.filterText, { color: colorTheme.ink }]}>
+            {[
+              monthFilter.size > 0 ? (isZh ? `${monthFilter.size} 个月份` : `${monthFilter.size} month${monthFilter.size === 1 ? '' : 's'}`) : null,
+              catFilter.size > 0 ? (isZh ? `${catFilter.size} 个分类` : `${catFilter.size} categor${catFilter.size === 1 ? 'y' : 'ies'}`) : null,
+              validFrom || validTo ? (isZh ? '日期范围' : 'date range') : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+          <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
+            <Icon name="x" size={12} color={colorTheme.ink2} />
+            <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>{t('clear')}</Text>
+          </View>
+        </Pressable>
+      )}
+
+      {filtered && !selectMode && (
+        <Pressable onPress={onClearFilter} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {filterCat && <CatBadge category={filterCat} size={28} rad={8} />}
+          <Text style={[styles.filterText, { color: colorTheme.ink }]}>
+            {shown.length} {filterCat ? tCat(filterCat) : ''} · RM {filterTotal.toFixed(2)}
+          </Text>
+          <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
+            <Icon name="x" size={12} color={colorTheme.ink2} />
+            <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>{t('clear')}</Text>
+          </View>
+        </Pressable>
+      )}
+
+      {shown.length > 0 && (
+        <>
+          {!filtered && !advancedActive && !query.trim() && (
+            <View style={styles.summary}>
+              <Card style={styles.summaryCard}>
+                <Eyebrow>{isZh ? '支出' : 'Spent'}</Eyebrow>
+                <Amount value={totalSpent} size={20} weight={700} />
+              </Card>
+              <Card style={styles.summaryCard}>
+                <Eyebrow>{isZh ? '收入' : 'Received'}</Eyebrow>
+                <Amount value={totalIncome} size={20} weight={700} color={theme.accent} />
+              </Card>
+            </View>
+          )}
+
+          {owedTotal > 0 && !selectMode && (
+            <Pressable onPress={onOpenOwed} style={[styles.owedBanner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Icon name="gift" size={18} color={theme.accent} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>
+                  {isZh ? `待收回 RM ${fmt(owedTotal)}` : `RM ${fmt(owedTotal)} owed to you`}
+                </Text>
+                <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
+                  {isZh ? `来自 ${openShares.length} 笔分摊账单` : `From ${openShares.length} shared ${openShares.length === 1 ? 'bill' : 'bills'}`}
+                </Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+            </Pressable>
+          )}
+
+          <Text style={[styles.countLine, { color: colorTheme.ink2 }]}>
+            {selectMode
+              ? (isZh ? '点击以选择' : 'Tap to select')
+              : (isZh ? `共 ${shown.length} 条记录 · 点击编辑，长按多选` : `${shown.length} record${shown.length === 1 ? '' : 's'} · tap to edit, long-press to select`)}
+          </Text>
+        </>
+      )}
+    </>
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -172,14 +397,16 @@ export function AllTransactionsScreen({
         {selectMode ? (
           <View style={styles.selectBar}>
             <IconButton name="x" onPress={cancelSelect} size={19} />
-            <Text style={[styles.selectTitle, { color: colorTheme.ink }]}>{selected.size} selected</Text>
+            <Text style={[styles.selectTitle, { color: colorTheme.ink }]}>
+              {isZh ? `已选择 ${selected.size} 项` : `${selected.size} selected`}
+            </Text>
             <Pressable onPress={deleteSelected} hitSlop={8} style={styles.delAction} disabled={selected.size === 0}>
               <Icon name="trash" size={20} color={selected.size === 0 ? colorTheme.ink3 : '#b3261e'} />
             </Pressable>
           </View>
         ) : (
           <TopBar
-            title={filtered ? filterCat?.label ?? 'Filtered' : 'All transactions'}
+            title={filtered ? (filterCat ? tCat(filterCat) : (isZh ? '已筛选' : 'Filtered')) : t('allTransactionsTitle')}
             onBack={onBack}
             right={
               <View>
@@ -197,7 +424,7 @@ export function AllTransactionsScreen({
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search transactions"
+            placeholder={t('searchTransactionsPlaceholder')}
             placeholderTextColor={colorTheme.ink3}
             autoCapitalize="none"
             autoCorrect={false}
@@ -211,136 +438,34 @@ export function AllTransactionsScreen({
         </View>
       )}
 
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
-        {advancedActive && !selectMode && (
-          <Pressable onPress={clearAdvancedFilters} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <Icon name="sliders" size={16} color={colorTheme.ink2} />
-            <Text style={[styles.filterText, { color: colorTheme.ink }]}>
-              {[
-                monthFilter.size > 0 ? `${monthFilter.size} month${monthFilter.size === 1 ? '' : 's'}` : null,
-                catFilter.size > 0 ? `${catFilter.size} categor${catFilter.size === 1 ? 'y' : 'ies'}` : null,
-                validFrom || validTo ? 'date range' : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-            <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
-              <Icon name="x" size={12} color={colorTheme.ink2} />
-              <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>Clear</Text>
-            </View>
-          </Pressable>
-        )}
-
-        {filtered && !selectMode && (
-          <Pressable onPress={onClearFilter} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            {filterCat && <CatBadge category={filterCat} size={28} rad={8} />}
-            <Text style={[styles.filterText, { color: colorTheme.ink }]}>
-              {shown.length} in {filterCat?.label} · RM {filterTotal.toFixed(2)}
-            </Text>
-            <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
-              <Icon name="x" size={12} color={colorTheme.ink2} />
-              <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>Clear</Text>
-            </View>
-          </Pressable>
-        )}
-
-        {shown.length === 0 ? (
+      {/* Windowed, so opening this screen with two years of imported history mounts the rows
+          you can see rather than all of them. */}
+      <SectionList
+        sections={sections}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        renderSectionHeader={renderSectionHeader}
+        renderSectionFooter={renderSectionFooter}
+        stickySectionHeadersEnabled={false}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={
           <Card style={{ padding: 26, alignItems: 'center' }}>
             <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
-              {filtered || advancedActive || search.trim() ? 'No matching transactions' : 'No transactions yet'}
+              {filtered || advancedActive || query.trim() ? (isZh ? '没有匹配的交易' : 'No matching transactions') : (isZh ? '暂无交易记录' : 'No transactions yet')}
             </Text>
             <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-              {filtered || advancedActive || search.trim() ? 'Try clearing a filter or the search.' : 'Tap Add to scan a receipt or a statement.'}
+              {filtered || advancedActive || query.trim() ? (isZh ? '尝试清除筛选条件或搜索词。' : 'Try clearing a filter or the search.') : (isZh ? '点击“记账”开始添加收支。' : 'Tap Add to scan a receipt or a statement.')}
             </Text>
           </Card>
-        ) : (
-          <>
-            {!filtered && !advancedActive && !search.trim() && (
-              <View style={styles.summary}>
-                <Card style={styles.summaryCard}>
-                  <Eyebrow>Spent</Eyebrow>
-                  <Amount value={totalSpent} size={20} weight={700} />
-                </Card>
-                <Card style={styles.summaryCard}>
-                  <Eyebrow>Received</Eyebrow>
-                  <Amount value={totalIncome} size={20} weight={700} color={theme.accent} />
-                </Card>
-              </View>
-            )}
-
-            {owedTotal > 0 && !selectMode && (
-              <Pressable onPress={onOpenOwed} style={[styles.owedBanner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-                <Icon name="gift" size={18} color={theme.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>RM {fmt(owedTotal)} owed to you</Text>
-                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                    From {openShares.length} shared {openShares.length === 1 ? 'bill' : 'bills'}
-                  </Text>
-                </View>
-                <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-              </Pressable>
-            )}
-
-            <Text style={[styles.countLine, { color: colorTheme.ink2 }]}>
-              {selectMode
-                ? 'Tap to select'
-                : `${shown.length} record${shown.length === 1 ? '' : 's'} · tap to edit, long-press to select`}
-            </Text>
-
-            {sections.map((section) => (
-              <View key={section.key || 'no-date'} style={styles.section}>
-                <Text style={[styles.monthHeader, { color: colorTheme.ink2 }]}>{section.label}</Text>
-                <Card style={{ overflow: 'hidden' }}>
-                  {section.items.map((t, i) => {
-                    const cat = catById[t.categoryId ?? 'other'] ?? fallback;
-                    const income = t.type === 'income';
-                    const transfer = t.type === 'transfer';
-                    const isSel = selected.has(t.id);
-                    const description = t.remark?.trim() || (t.merchantRaw && t.merchantRaw !== cat.label ? t.merchantRaw : '');
-                    return (
-                      <Pressable
-                        key={t.id}
-                        onPress={() => onRowPress(t)}
-                        onLongPress={() => enterSelect(t.id)}
-                        delayLongPress={250}
-                        style={({ pressed }) => [styles.row, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }, (pressed || isSel) && { backgroundColor: colorTheme.surface2 }]}
-                      >
-                        {selectMode && (
-                          <View style={[styles.checkbox, { borderColor: colorTheme.line }, isSel && styles.checkboxOn, isSel && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
-                            {isSel && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
-                          </View>
-                        )}
-                        <CatBadge category={cat} size={40} />
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <Text style={[styles.merchant, { color: colorTheme.ink }]} numberOfLines={1}>
-                            {transfer ? 'Transfer' : cat.label}
-                          </Text>
-                          <Text style={[styles.sub, { color: colorTheme.ink2 }]} numberOfLines={1}>
-                            {description ? `${description} · ` : ''}
-                            {shortDate(t.date ?? t.createdAt)}
-                          </Text>
-                          {/* A split row shows only the payer's share, which reads as a suspiciously
-                              cheap dinner without this. */}
-                          {owedByTxn[t.id] && (
-                            <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
-                              <Icon name="gift" size={10} color={theme.accentInk} />
-                              <Text style={[styles.owedChipText, { color: theme.onTint }]}>
-                                RM {fmt(owedByTxn[t.id].owed)} owed · split of RM {fmt(owedByTxn[t.id].gross)}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                        <Amount value={t.nativeAmount ?? t.amount} currency={t.currency} size={15} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
-                        {!selectMode && <Icon name="pencil" size={15} color={colorTheme.ink3} />}
-                      </Pressable>
-                    );
-                  })}
-                </Card>
-              </View>
-            ))}
-          </>
-        )}
-      </ScrollView>
+        }
+        extraData={selected}
+        contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        keyboardShouldPersistTaps="handled"
+      />
 
       <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
       <TransactionFilterModal
@@ -370,7 +495,7 @@ const styles = StyleSheet.create({
   filterDot: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 999, borderWidth: 2 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 13, marginTop: 10 },
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 14, paddingVertical: 11 },
-  section: { marginBottom: 16 },
+  sectionGap: { height: 16 },
   monthHeader: { fontFamily: uiFont(700), fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8, marginLeft: 2 },
   filterChip: {
     flexDirection: 'row',
@@ -388,6 +513,12 @@ const styles = StyleSheet.create({
   summaryCard: { flex: 1, padding: 16, gap: 8 },
   countLine: { fontFamily: uiFont(500), fontSize: 12.5, marginBottom: 10, marginLeft: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
+  // The `Card` that used to wrap each month's rows, redrawn per row so the list can window.
+  // Every row carries the shadow: they are opaque and flush, so each one covers the one above
+  // it and only the group's outer edge is left casting.
+  rowChrome: { borderLeftWidth: 1, borderRightWidth: 1, ...shadowCard },
+  rowFirst: { borderTopWidth: 1, borderTopLeftRadius: radius.md, borderTopRightRadius: radius.md },
+  rowLast: { borderBottomWidth: 1, borderBottomLeftRadius: radius.md, borderBottomRightRadius: radius.md },
   divider: { borderTopWidth: 1 },
   merchant: { fontFamily: uiFont(600), fontSize: 14.5 },
   sub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 1 },
@@ -416,5 +547,4 @@ const styles = StyleSheet.create({
   emptyTitle: { fontFamily: uiFont(700), fontSize: 17 },
   emptySub: { fontFamily: uiFont(500), fontSize: 13.5, marginTop: 6, textAlign: 'center' },
   checkbox: { width: 22, height: 22, borderRadius: 999, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  checkboxOn: {},
 });

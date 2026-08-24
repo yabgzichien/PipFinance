@@ -79,6 +79,20 @@ describe('evidenceState', () => {
     expect(evidenceState(tag({}), t, lifestyleLine)).toBe('no-image');
   });
 
+  it('an attached e-Invoice is an image: a statement-imported txn with one is not no-image', () => {
+    // The strongest proof LHDN accepts, on a row that has no receiptUri because it arrived
+    // via a bank-statement import rather than the receipt scanner.
+    const t = txn({ receiptUri: null });
+    expect(evidenceState(tag({ einvoiceImageUri: 'file:///einv.jpg' }), t, lifestyleLine)).toBe('complete');
+  });
+
+  it('an e-Invoice alone still cannot stand in for a required cert', () => {
+    const t = txn({ receiptUri: null });
+    expect(evidenceState(tag({ code: 'medical.dental', einvoiceImageUri: 'file:///einv.jpg' }), t, dentalLine)).toBe(
+      'missing-cert'
+    );
+  });
+
   it('is missing-cert when the line requires one and none is attached, even with a receipt', () => {
     const t = txn({ receiptUri: 'file:///r1.jpg' });
     expect(evidenceState(tag({ code: 'medical.dental' }), t, dentalLine)).toBe('missing-cert');

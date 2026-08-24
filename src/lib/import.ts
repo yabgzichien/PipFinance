@@ -63,13 +63,10 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   rental:         ['housing', 'rent', 'rental', 'sewa', 'utility', 'utilities', 'electricity', 'water', 'gas', 'lpg', 'maintenance', 'quit rent', 'assessment', 'tnb', 'syabas', 'air selangor', 'indah water'],
   'car-instalment': ['loan repayment', 'debt repayment', 'repayment', 'installment', 'instalment', 'ansuran', 'financing', 'hire purchase', 'mortgage', 'credit card payment', 'ptptn'],
   other:          ['other', 'miscellaneous', 'misc', 'unknown', 'communication', 'internet', 'broadband', 'phone', 'mobile', 'telco', 'prepaid', 'postpaid', 'unifi', 'maxis', 'celcom', 'digi', 'umobile', 'yes', 'astro', 'postage', 'health', 'medical', 'hospital', 'clinic', 'klinik', 'pharmacy', 'doctor', 'dentist', 'medicine', 'guardian', 'watson', 'lab', 'optical', 'education', 'school', 'sekolah', 'tuition', 'tadika', 'nursery', 'childcare', 'college', 'university', 'course', 'exam', 'textbook', 'stationery', 'yuran', 'household', 'shopping', 'shop', 'retail', 'store', 'fashion', 'clothing', 'apparel', 'furniture', 'appliance', 'toiletries', 'personal care', 'salon', 'barber', 'laundry', 'lazada', 'shopee', 'amazon', 'zalora', 'ikea', 'h&m', 'uniqlo'],
-  // income  split by source, the way a P&L is
-  'employment-income': ['salary', 'wage', 'payroll', 'gaji', 'employment', 'remuneration', 'bonus', 'overtime', 'ot claim'],
-  'business-income':   ['business', 'trade', 'sales', 'takings', 'revenue', 'turnover', 'jualan', 'niaga', 'shopee payout', 'lazada payout', 'customer payment'],
-  'gig-income':        ['gig', 'commission', 'incentive', 'platform', 'payout', 'grab payout', 'foodpanda payout', 'delivery earning', 'freelance', 'fee earned'],
-  'transfers-in':      ['allowance', 'elaun', 'stipend', 'subsidy', 'subsistence', 'transfer', 'family support', 'bantuan', 'str', 'bsh', 'aid', 'pocket money'],
-  'investment-income': ['dividend', 'dividen', 'interest', 'faedah', 'yield', 'coupon', 'profit distribution', 'hibah', 'rental income', 'asb', 'tabung haji'],
-  'other-income':      ['other', 'refund', 'rebate', 'return', 'reimbursement', 'collect debt', 'sale of asset', 'windfall'],
+  // income (salary, allowance, other-income)
+  salary:         ['salary', 'wage', 'payroll', 'gaji', 'employment', 'remuneration', 'bonus', 'overtime', 'ot claim', 'gig', 'commission', 'incentive', 'platform', 'payout', 'grab payout', 'foodpanda payout', 'delivery earning', 'freelance', 'fee earned'],
+  allowance:      ['allowance', 'elaun', 'stipend', 'subsidy', 'subsistence', 'transfer', 'transfers', 'family support', 'bantuan', 'str', 'bsh', 'aid', 'pocket money'],
+  'other-income': ['other', 'refund', 'rebate', 'return', 'reimbursement', 'collect debt', 'sale of asset', 'windfall', 'business', 'trade', 'sales', 'takings', 'revenue', 'turnover', 'jualan', 'niaga', 'dividend', 'interest', 'investment'],
 };
 
 /** Map a free-form LLM category description to an app category id of matching kind.

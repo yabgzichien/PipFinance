@@ -17,6 +17,7 @@ import { fmt, fmtMoney } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { colors, radius, uiFont } from '../theme';
 
 // The current calendar year is always offered even when no schedule is registered for it yet:
@@ -40,6 +41,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { transactions, commitments, updateCommitmentEntry } = useAppData();
   const [ya, setYa] = useState(AVAILABLE_YAS[0]);
   const [tags, setTags] = useState<ReliefTag[] | null>(null);
@@ -99,7 +101,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg, paddingTop: insets.top }]}>
-      <TopBar title="Tax relief" onBack={onBack} />
+      <TopBar title={isZh ? '个人所得税减免' : 'Tax relief'} onBack={onBack} />
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
         <View style={styles.yaRow}>
           {AVAILABLE_YAS.map((y) => (
@@ -118,17 +120,21 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
         </View>
 
         <Caption color={colorTheme.ink2} style={{ marginTop: 10 }}>
-          RM {fmt(totalClaimed)} claimed so far for YA {ya}
+          {isZh ? `课税年度 YA ${ya} 目前已申报减免 RM ${fmt(totalClaimed)}` : `RM ${fmt(totalClaimed)} claimed so far for YA ${ya}`}
         </Caption>
 
         <View style={styles.topActionsRow}>
           <Pressable onPress={() => setMappingCommitments(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
             <Icon name="clock" size={16} color={theme.accent} />
-            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Map a commitment</Text>
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
+              {isZh ? '关联定期项目' : 'Map a commitment'}
+            </Text>
           </Pressable>
           <Pressable onPress={() => setAddingManually(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
             <Icon name="search" size={16} color={theme.accent} />
-            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Add manually</Text>
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
+              {isZh ? '手动添加减免' : 'Add manually'}
+            </Text>
           </Pressable>
           <Pressable
             disabled={exporting || !schedule || !tags || tags.length === 0}
@@ -139,9 +145,9 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                 try {
                   const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
                   const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
-                  if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
+                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成报税资料包。' : 'Could not build the audit pack.'));
                 } catch {
-                  notify('Export failed', 'Something went wrong building the audit pack.');
+                  notify(isZh ? '导出失败' : 'Export failed', isZh ? '生成报税资料包时出现问题。' : 'Something went wrong building the audit pack.');
                 }
               } finally {
                 setExporting(false);
@@ -151,7 +157,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           >
             <Icon name="download" size={16} color={theme.accent} />
             <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
-              {exporting ? 'Building...' : 'Export audit pack'}
+              {exporting ? (isZh ? '正在生成...' : 'Building...') : (isZh ? '导出报税资料包' : 'Export audit pack')}
             </Text>
           </Pressable>
         </View>
@@ -163,7 +169,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
               <TextInput
                 value={manualSearch}
                 onChangeText={setManualSearch}
-                placeholder="Search transactions"
+                placeholder={isZh ? '搜索交易记录' : 'Search transactions'}
                 placeholderTextColor={colorTheme.ink3}
                 style={[styles.searchInput, { color: colorTheme.ink }]}
               />
@@ -173,8 +179,6 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             </View>
             {manualSearch.trim().length > 0 &&
               transactions
-                // A dateless transaction has no defensible year of assessment, so it can't be
-                // tagged at all: leave it out of the results rather than fail on tap.
                 .filter((t) => !!t.date && t.merchantRaw.toLowerCase().includes(manualSearch.trim().toLowerCase()))
                 .slice(0, 15)
                 .map((t) => {
@@ -197,16 +201,18 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                       key={t.id}
                       onPress={async () => {
                         if (!schedule || !t.date) return;
-                        // The tag's year of assessment comes from the transaction's own date, not
-                        // the chip the user happens to be browsing: searching from YA 2025 and
-                        // tapping a 2026 row must still file it under 2026.
                         const txnYa = yaForDate(t.date);
                         const created = await addReliefTag({ txnId: t.id, code: schedule.lines[0].code, ya: txnYa, amount: t.amount, origin: 'manual' });
                         if (txnYa === ya) {
                           setTags((prev) => [...(prev ?? []), created]);
                           setEditingTagId(created.id);
                         } else {
-                          notify('Tagged under YA ' + txnYa, 'This transaction is dated in ' + txnYa + ', so it was filed there. Switch to YA ' + txnYa + ' to edit it.');
+                          notify(
+                            isZh ? `已归入 YA ${txnYa}` : `Tagged under YA ${txnYa}`,
+                            isZh
+                              ? `该交易日期属于 ${txnYa} 年，因此已自动归入。请切换至 YA ${txnYa} 进行编辑。`
+                              : `This transaction is dated in ${txnYa}, so it was filed there. Switch to YA ${txnYa} to edit it.`
+                          );
                         }
                         setAddingManually(false);
                         setManualSearch('');
@@ -232,18 +238,19 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
         {tags !== null && tags.length === 0 && (
           <View style={{ paddingTop: 50, alignItems: 'center', paddingHorizontal: 20 }}>
             <Body weight={700} color={colorTheme.ink} style={{ textAlign: 'center' }}>
-              Nothing tagged yet
+              {isZh ? '暂无减免标签' : 'Nothing tagged yet'}
             </Body>
             <Caption color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: 6 }}>
-              Scan a receipt or map a bill to get started. Pip tags relief-eligible spending
-              automatically as you go.
+              {isZh
+                ? '扫描小票或关联定期账单即可开始。Pip 会在记账时自动为您标记符合税收减免的项目。'
+                : 'Scan a receipt or map a bill to get started. Pip tags relief-eligible spending automatically as you go.'}
             </Caption>
           </View>
         )}
 
         {requestable.length > 0 && (
           <View style={{ marginTop: tags && tags.length > 0 ? 16 : 0 }}>
-            <Eyebrow style={{ marginBottom: 8 }}>Requestable this month</Eyebrow>
+            <Eyebrow style={{ marginBottom: 8 }}>{isZh ? '本月可索取发票' : 'Requestable this month'}</Eyebrow>
             {requestable.map(({ tag, txn, line }) => {
               const daysLeft = daysUntilMonthEnd(txn.date!);
               return (
@@ -254,7 +261,9 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
                     </Text>
                     <Caption color={colorTheme.ink2}>{line.label}</Caption>
                   </View>
-                  <Caption color={theme.accent}>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</Caption>
+                  <Caption color={theme.accent}>
+                    {isZh ? `剩余 ${daysLeft} 天` : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
+                  </Caption>
                 </Pressable>
               );
             })}

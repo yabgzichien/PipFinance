@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fmtMoney } from '../lib/format';
-import { computeSplit, validateSplit, type Participant } from '../lib/split';
+import { computeSplit, sharesFromSplit, validateSplit, type Participant } from '../lib/split';
 import type { SplitDraft, SplitMethod } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -64,14 +64,27 @@ export function SplitSheet({
 
   // Re-seed whenever the sheet opens, so re-opening an existing split shows what is already
   // there rather than whatever the last bill happened to leave behind.
+  //
+  // A saved 'shares' split needs its portions recovered from the amounts (`sharesFromSplit`),
+  // because nothing persists the weights themselves. Without that this used to reset every
+  // participant to one share, which re-cut the bill equally on open: a RM120 dinner saved as
+  // 30/60/30 redisplayed as 40/40/40, and "Save split" then wrote those figures for real.
+  // When the portions cannot be recovered faithfully the sheet drops to 'exact', which shows
+  // the saved amounts unchanged rather than inventing a portioning that would alter them.
   useEffect(() => {
     if (!visible) return;
     if (initial && initial.shares.length > 0) {
-      setMethod(initial.method === 'itemized' ? 'exact' : initial.method);
+      // Replayed against the gross the split was SAVED at, not the sheet's current one: the
+      // portions are the user's intent, and re-applying them to an amount edited since is
+      // what they'd expect. `itemized` has no portions to recover and never had.
+      const recovered =
+        initial.method === 'shares' ? sharesFromSplit(initial.gross, initial.ownShare, initial.shares) : null;
+      const unrecoverable = initial.method === 'itemized' || (initial.method === 'shares' && !recovered);
+      setMethod(unrecoverable ? 'exact' : initial.method);
       setPicked(initial.shares.map((s) => s.personId));
       setExacts(Object.fromEntries(initial.shares.map((s) => [s.personId, s.owed.toFixed(2)])));
-      setWeights({});
-      setSelfWeight(1);
+      setWeights(recovered?.weights ?? {});
+      setSelfWeight(recovered?.selfWeight ?? 1);
       setIncludeSelf(initial.ownShare > 0);
     } else {
       setMethod('equal');

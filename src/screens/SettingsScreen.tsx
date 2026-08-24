@@ -16,17 +16,17 @@ import { ensurePermission } from '../notifications';
 import { useAccent, useAccentPreset } from '../state/accent';
 import { useColorSchemeMode, useThemeColors, type ColorSchemeMode } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { motionSettingLabel, MOTION_SETTINGS } from '../theme/motion';
 
 type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
-
-
 export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, formatCadence, formatMotion } = useLanguage();
   const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
@@ -40,7 +40,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
 
   const resetLearned = () => {
     if (learnedCount === 0) return;
-    confirmAction('Reset learning?', `Forget all ${learnedCount} learned merchants? This can’t be undone.`, 'Reset', async () => {
+    confirmAction(t('resetLearningTitle'), t('resetLearningBody', { count: learnedCount }), t('reset'), async () => {
       await clearMemory();
       await refreshAll();
     });
@@ -49,23 +49,23 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const allocationCount = Object.keys(allocations).length;
   const resetBudgetConfirm = () => {
     if (!hasBudget) return;
-    confirmAction('Reset budget?', 'Clear your expected income and all category allocations? This can’t be undone.', 'Reset', () => resetBudget());
+    confirmAction(t('resetBudgetTitle'), t('resetBudgetBody'), t('reset'), () => resetBudget());
   };
 
   const resetAllConfirm = () => {
     confirmAction(
-      'Reset everything?',
-      'This deletes all transactions, learned merchants, and your budget, and restores the default categories. This can’t be undone.',
-      'Reset',
+      t('resetAllDataTitle'),
+      t('resetAllDataBody'),
+      t('reset'),
       () => resetAllData()
     );
   };
 
   const resetToOnboardingConfirm = () => {
     confirmAction(
-      'Reset & go to setup?',
-      'This deletes all transactions, learned merchants, your budget, and restores the default categories. You will be returned to the setup wizard. This can’t be undone.',
-      'Reset & restart',
+      t('resetToSetupTitle'),
+      t('resetToSetupBody'),
+      t('reset'),
       async () => {
         await resetToOnboarding();
         onResetToOnboarding?.();
@@ -84,28 +84,32 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Settings" onBack={onBack} />
+        <TopBar title={t('settingsTitle')} onBack={onBack} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
-        <Eyebrow style={{ marginBottom: 10 }}>Appearance</Eyebrow>
+        <Eyebrow style={{ marginBottom: 10 }}>{t('appearance')}</Eyebrow>
         <Card style={{ padding: 16 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Theme</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('theme')}</Text>
           <ThemeModePicker />
         </Card>
         <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Accent color</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('language')}</Text>
+          <LanguagePicker />
+        </Card>
+        <Card style={{ padding: 16, marginTop: 12 }}>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('accentColor')}</Text>
           <AccentColorPicker />
         </Card>
         <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Motion and haptics</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
           <MotionSettingPicker />
         </Card>
         <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Sounds</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('sounds')}</Text>
           <SoundPicker />
         </Card>
         <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Streak</Text>
+          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('streak')}</Text>
           <StreakPausePicker />
         </Card>
 
@@ -113,18 +117,18 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             control that silently does nothing is worse than one that is not offered. */}
         {Platform.OS !== 'web' && (
           <>
-            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Reminders</Eyebrow>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('reminders')}</Eyebrow>
             <Card style={{ padding: 16 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Log your spending</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('logSpendingReminder')}</Text>
               <LogReminderPicker />
               <ReminderHourOverridePicker />
             </Card>
             <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Chase what you’re owed</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('chaseOwedReminder')}</Text>
               <OwedReminderPicker />
             </Card>
             <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>Recurring bills</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('recurringBillsReminder')}</Text>
               <CommitmentReminderPicker />
             </Card>
           </>
@@ -159,37 +163,41 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
         )}
 
         <View style={[styles.eyebrowRow, { marginTop: 26, marginBottom: 10 }]}>
-          <Eyebrow>Learning</Eyebrow>
+          <Eyebrow>{t('learning')}</Eyebrow>
           <InfoButton entry="learned_merchants" />
         </View>
         <Card style={{ padding: 16 }}>
           <View style={styles.providerRow}>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{learnedCount} learned merchant{learnedCount === 1 ? '' : 's'}</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>
+                {t('learnedMerchantsCount', { count: learnedCount })}
+              </Text>
             </View>
             <Pressable onPress={resetLearned} disabled={learnedCount === 0} style={styles.resetBtn}>
               <Icon name="trash" size={16} color={learnedCount === 0 ? colorTheme.ink3 : '#b3261e'} />
-              <Text style={[styles.resetText, { color: learnedCount === 0 ? colorTheme.ink3 : '#b3261e' }]}>Reset</Text>
+              <Text style={[styles.resetText, { color: learnedCount === 0 ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
             </Pressable>
           </View>
         </Card>
 
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Budget</Eyebrow>
+        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('budget')}</Eyebrow>
         <Card style={{ padding: 16 }}>
           <View style={styles.providerRow}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>
-                {hasBudget ? `RM ${expectedIncome.toFixed(2)} income · ${allocationCount} categor${allocationCount === 1 ? 'y' : 'ies'}` : 'No budget set'}
+                {hasBudget
+                  ? t('budgetSummary', { income: `RM ${expectedIncome.toFixed(2)}`, count: allocationCount })
+                  : t('noBudgetSet')}
               </Text>
             </View>
             <Pressable onPress={resetBudgetConfirm} disabled={!hasBudget} style={styles.resetBtn}>
               <Icon name="trash" size={16} color={!hasBudget ? colorTheme.ink3 : '#b3261e'} />
-              <Text style={[styles.resetText, { color: !hasBudget ? colorTheme.ink3 : '#b3261e' }]}>Reset</Text>
+              <Text style={[styles.resetText, { color: !hasBudget ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
             </Pressable>
           </View>
         </Card>
 
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Data</Eyebrow>
+        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('data')}</Eyebrow>
         {onOpenCommitments && (
           <Pressable
             onPress={onOpenCommitments}
@@ -199,7 +207,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="clock" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Recurring bills & investments</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('recurringBillsInvestments')}</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -214,7 +222,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="receipt" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Tax relief</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('taxRelief')}</Text>
             </View>
             {taxRequestableCount > 0 && (
               <View style={[styles.countBadge, { backgroundColor: theme.accent }]}>
@@ -234,7 +242,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="sliders" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Categories</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('categories')}</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -249,7 +257,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="wallet" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Currencies</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('currencies')}</Text>
               <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
                 {isMultiCurrency(activeCurrencies) ? activeCurrencies.join(', ') : 'MYR only'}
               </Text>
@@ -267,7 +275,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="sparkles" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Advanced import</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('advancedImport')}</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -282,7 +290,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
               <Icon name="download" size={16} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Financial reports & export</Text>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('financialReportsExport')}</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -290,18 +298,18 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
 
         {/* Distinct "danger zone" treatment  this is the one irreversible action on this
             screen, so it shouldn't look like every other settings row. */}
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10, color: '#b3261e' }}>Danger zone</Eyebrow>
+        <Eyebrow style={{ marginTop: 26, marginBottom: 10, color: '#b3261e' }}>{t('dangerZone')}</Eyebrow>
         <Card style={[{ padding: 16 }, styles.dangerCard]}>
           <View style={styles.providerRow}>
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Icon name="alert" size={13} color="#b3261e" />
-                <Text style={[styles.providerName, { color: '#b3261e' }]}>Reset all data</Text>
+                <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetAllData')}</Text>
               </View>
             </View>
             <Pressable onPress={resetAllConfirm} style={styles.resetBtn}>
               <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={[styles.resetText, { color: '#b3261e' }]}>Reset</Text>
+              <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
             </Pressable>
           </View>
         </Card>
@@ -311,12 +319,12 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Icon name="alert" size={13} color="#b3261e" />
-                <Text style={[styles.providerName, { color: '#b3261e' }]}>Reset & go to setup</Text>
+                <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetToSetup')}</Text>
               </View>
             </View>
             <Pressable onPress={resetToOnboardingConfirm} style={styles.resetBtn}>
               <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={[styles.resetText, { color: '#b3261e' }]}>Reset</Text>
+              <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
             </Pressable>
           </View>
         </Card>
@@ -343,11 +351,39 @@ async function withPermission(turningOn: boolean, apply: () => Promise<void>): P
   await apply();
 }
 
+/** Language selector: English / 简体中文 */
+function LanguagePicker() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { language, setLanguage } = useLanguage();
+  return (
+    <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+      {(['en', 'zh'] as const).map((lang) => {
+        const on = language === lang;
+        return (
+          <Pressable
+            key={lang}
+            onPress={() => setLanguage(lang)}
+            style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+          >
+            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
+              {lang === 'en' ? 'English' : '简体中文'}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 /** Off / Daily / Weekly, same pill shape as ThemeModePicker. */
 function LogReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { reminderCadence, setReminderCadence } = useAppData();
+  const { formatCadence } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {REMINDER_CADENCES.map((cadence) => {
@@ -361,7 +397,7 @@ function LogReminderPicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {cadenceLabel(cadence)}
+              {formatCadence(cadence)}
             </Text>
           </Pressable>
         );
@@ -384,10 +420,11 @@ function ReminderHourOverridePicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { reminderCadence, reminderHourOverride, setReminderHourOverride } = useAppData();
+  const { t } = useLanguage();
   if (reminderCadence === 'off') return null;
   return (
     <View style={{ marginTop: 10 }}>
-      <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 8 }]}>When</Text>
+      <Text style={[styles.providerSub, { color: colorTheme.ink2, marginBottom: 8 }]}>{t('reminderWhen')}</Text>
       <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
         {REMINDER_HOUR_OVERRIDE_OPTIONS.map((opt) => {
           const on = reminderHourOverride === opt.hour;
@@ -400,7 +437,7 @@ function ReminderHourOverridePicker() {
               accessibilityState={{ selected: on }}
             >
               <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-                {opt.label}
+                {opt.hour === null ? t('reminderAuto') : opt.label}
               </Text>
             </Pressable>
           );
@@ -415,6 +452,7 @@ function OwedReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { owedReminderEnabled, setOwedReminderEnabled } = useAppData();
+  const { t } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((value) => {
@@ -428,7 +466,7 @@ function OwedReminderPicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {value ? 'On' : 'Off'}
+              {value ? t('on') : t('off')}
             </Text>
           </Pressable>
         );
@@ -442,6 +480,7 @@ function CommitmentReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { commitmentReminderEnabled, setCommitmentReminderEnabled } = useAppData();
+  const { t } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((value) => {
@@ -455,7 +494,7 @@ function CommitmentReminderPicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {value ? 'On' : 'Off'}
+              {value ? t('on') : t('off')}
             </Text>
           </Pressable>
         );
@@ -464,10 +503,10 @@ function CommitmentReminderPicker() {
   );
 }
 
-const THEME_MODE_OPTIONS: { mode: ColorSchemeMode; label: string }[] = [
-  { mode: 'light', label: 'Light' },
-  { mode: 'dark', label: 'Dark' },
-  { mode: 'system', label: 'System' },
+const THEME_MODE_OPTIONS: { mode: ColorSchemeMode; key: 'themeLight' | 'themeDark' | 'themeSystem' }[] = [
+  { mode: 'light', key: 'themeLight' },
+  { mode: 'dark', key: 'themeDark' },
+  { mode: 'system', key: 'themeSystem' },
 ];
 
 /** 3-way Light/Dark/System segmented control, same pill shape as ui.tsx's ValueToggle. */
@@ -475,13 +514,14 @@ function ThemeModePicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { mode, setMode } = useColorSchemeMode();
+  const { t } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {THEME_MODE_OPTIONS.map((opt) => {
         const on = mode === opt.mode;
         return (
           <Pressable key={opt.mode} onPress={() => setMode(opt.mode)} style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}>
-            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>{opt.label}</Text>
+            <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>{t(opt.key)}</Text>
           </Pressable>
         );
       })}
@@ -496,6 +536,7 @@ function StreakPausePicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { streakPaused, pauseStreak, resumeStreak } = useAppData();
+  const { t } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((paused) => {
@@ -509,7 +550,7 @@ function StreakPausePicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {paused ? 'Paused' : 'On'}
+              {paused ? t('paused') : t('on')}
             </Text>
           </Pressable>
         );
@@ -523,6 +564,7 @@ function MotionSettingPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { motionSetting, setMotionSetting } = useAppData();
+  const { formatMotion } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {MOTION_SETTINGS.map((setting) => {
@@ -536,7 +578,7 @@ function MotionSettingPicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {motionSettingLabel(setting)}
+              {formatMotion(setting)}
             </Text>
           </Pressable>
         );
@@ -551,6 +593,7 @@ function SoundPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { soundEnabled, setSoundEnabled } = useAppData();
+  const { t } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((value) => {
@@ -567,7 +610,7 @@ function SoundPicker() {
             accessibilityState={{ selected: on }}
           >
             <Text style={[styles.modeText, { color: colorTheme.ink2 }, on && styles.modeTextOn]}>
-              {value ? 'On' : 'Off'}
+              {value ? t('on') : t('off')}
             </Text>
           </Pressable>
         );
@@ -624,14 +667,29 @@ function ProviderCard({
 
   const runTest = async () => {
     const cfg = configFor(settings, role);
-    if (!cfg.apiKey.trim()) {
+    const keys = cfg.apiKey.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
+    if (keys.length === 0) {
       setTest({ status: 'fail', message: 'No API key is configured.' });
       return;
     }
     setTest({ status: 'busy' });
     try {
-      await getProvider(cfg.provider).test({ apiKey: cfg.apiKey.trim(), model: cfg.model.trim() });
-      setTest({ status: 'ok', message: `Connected to ${getProvider(cfg.provider).label}.` });
+      let ok = false;
+      let lastErr: unknown;
+      for (const k of keys) {
+        try {
+          await getProvider(cfg.provider).test({ apiKey: k, model: cfg.model.trim() });
+          ok = true;
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (ok) {
+        setTest({ status: 'ok', message: `Connected to ${getProvider(cfg.provider).label}.` });
+      } else {
+        throw lastErr;
+      }
     } catch (e) {
       setTest({ status: 'fail', message: `${getProvider(cfg.provider).label}: ${llmErrorMessage(e)}` });
     }

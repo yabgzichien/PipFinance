@@ -27,9 +27,9 @@ const byId = new Map(ALL_SEED_CATEGORIES.map((c) => [c.id, c]));
 const asCategories: Category[] = ALL_SEED_CATEGORIES.map((c) => ({ ...c, isDefault: true }));
 
 describe('default category set', () => {
-  it('has 7 expense + 6 income categories with unique ids and no blank fields', () => {
+  it('has 7 expense + 3 income categories with unique ids and no blank fields', () => {
     expect(EXPENSE_CATEGORIES).toHaveLength(7);
-    expect(INCOME_CATEGORIES).toHaveLength(6);
+    expect(INCOME_CATEGORIES).toHaveLength(3);
     expect(new Set(ALL_SEED_CATEGORIES.map((c) => c.id)).size).toBe(ALL_SEED_CATEGORIES.length);
     for (const c of ALL_SEED_CATEGORIES) {
       expect(c.id).toMatch(/^[a-z][a-z0-9-]*$/);
@@ -67,7 +67,8 @@ describe('CATEGORY_ID_REMAP (retired ids)', () => {
   it('covers every id the old default set used', () => {
     const retired = [
       'fuel', 'groceries', 'coffee', 'shopping', 'health', 'bills', 'fun',
-      'income', 'allowance', 'bonus', 'borrowers-return', 'dividend', 'interest',
+      'income', 'bonus', 'borrowers-return', 'dividend', 'interest',
+      'employment-income', 'business-income', 'gig-income', 'transfers-in', 'investment-income',
     ];
     for (const id of retired) expect(CATEGORY_ID_REMAP[id]).toBeDefined();
   });

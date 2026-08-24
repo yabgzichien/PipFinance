@@ -44,6 +44,7 @@ import { AccentProvider, useAccent } from './src/state/accent';
 import { AlertHostProvider } from './src/state/alertHost';
 import { ColorSchemeProvider, useColorSchemeMode, useThemeColors } from './src/state/colorScheme';
 import { GlossaryProvider } from './src/state/glossary';
+import { LanguageProvider } from './src/i18n';
 import { AppDataProvider, useAppData } from './src/state/store';
 import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
@@ -89,13 +90,15 @@ export default function App() {
         <SafeAreaProvider>
           <AppDataProvider>
             <AccentProvider>
-              <GlossaryProvider>
-                <AlertHostProvider>
-                  <ErrorBoundary>
-                    <Root fontsLoaded={fontsLoaded} />
-                  </ErrorBoundary>
-                </AlertHostProvider>
-              </GlossaryProvider>
+              <LanguageProvider>
+                <GlossaryProvider>
+                  <AlertHostProvider>
+                    <ErrorBoundary>
+                      <Root fontsLoaded={fontsLoaded} />
+                    </ErrorBoundary>
+                  </AlertHostProvider>
+                </GlossaryProvider>
+              </LanguageProvider>
             </AccentProvider>
           </AppDataProvider>
           <ThemedStatusBar />

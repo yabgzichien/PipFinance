@@ -65,9 +65,16 @@ export function matchRelief(
  * nothing else attached still counts as having *an* image), and weak-unnamed only applies to
  * non-commitment tags. A tag created via the commitment-payment auto-tagging flow already has
  * bill-level evidence by construction regardless of which relief line it landed on.
+ *
+ * All three attachments count toward "has an image", the e-Invoice included. Only the receipt
+ * scanner ever writes `receiptUri`, so a transaction that arrived through a bank-statement
+ * import has none; leaving `einvoiceImageUri` out of the check stranded such a tag on
+ * `no-image` forever even after the user attached the strongest proof LHDN accepts, and
+ * (since `isRequestable` only fires on `weak-unnamed`) dropped it out of the "request this
+ * month" list at the same time.
  */
 export function evidenceState(tag: ReliefTag, txn: Transaction, line: ReliefLine): EvidenceState {
-  if (!txn.receiptUri && !tag.certImageUri) return 'no-image';
+  if (!txn.receiptUri && !tag.certImageUri && !tag.einvoiceImageUri) return 'no-image';
   if (line.requiresCert && !tag.certImageUri) return 'missing-cert';
   if (tag.origin !== 'commitment' && !tag.einvoiceImageUri && !tag.certImageUri) return 'weak-unnamed';
   return 'complete';

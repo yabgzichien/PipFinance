@@ -9,6 +9,7 @@ import { notify } from '../lib/platformAlert';
 import { SAMPLE_STATEMENTS } from '../data/sampleStatements';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { radius, spacing } from '../theme';
 
 export interface PickedImage {
@@ -48,6 +49,7 @@ export function AttachScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [busy, setBusy] = useState(false);
   // Camera-vs-gallery is a detail of HOW you hand the image over, not a separate thing to add.
   // Expanded by default: scanning is the differentiator (see file header), so it should never
@@ -61,7 +63,7 @@ export function AttachScreen({
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
     if (!a.base64) {
-      notify('Hmm', "That image couldn't be read. Try another one.");
+      notify('Hmm', isZh ? '无法读取该图片，请尝试其他图片。' : "That image couldn't be read. Try another one.");
       return;
     }
     onPicked({ uri: a.uri, base64: a.base64, mime: a.mimeType ?? 'image/jpeg' });
@@ -73,7 +75,7 @@ export function AttachScreen({
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        notify('Permission needed', 'Allow photo access to attach a screenshot.');
+        notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相册以添加截图。' : 'Allow photo access to attach a screenshot.');
         return;
       }
       const res = await ImagePicker.launchImageLibraryAsync({
@@ -106,7 +108,7 @@ export function AttachScreen({
       }
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        notify('Permission needed', 'Allow camera access to snap a receipt.');
+        notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相机以拍摄小票。' : 'Allow camera access to snap a receipt.');
         return;
       }
       const res = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
@@ -122,13 +124,16 @@ export function AttachScreen({
         contentContainerStyle={{ paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + 32 }}
         showsVerticalScrollIndicator={false}
       >
-        <TopBar title="Add transactions" onBack={onClose} />
+        <TopBar title={isZh ? '记账' : 'Add transactions'} onBack={onClose} />
 
         <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm }}>
           <PipSays expr="curious">
             <BubbleText>
-              Scan a <B>receipt</B> or a screenshot of the app you already have open, and I’ll read
-              it. I’ll ask which it was afterwards.
+              {isZh ? (
+                <>扫描<B>小票</B>或已打开应用的账单截图，我将自动识别。稍后会询问单据类型。</>
+              ) : (
+                <>Scan a <B>receipt</B> or a screenshot of the app you already have open, and I’ll read it. I’ll ask which it was afterwards.</>
+              )}
             </BubbleText>
           </PipSays>
         </View>
@@ -137,7 +142,7 @@ export function AttachScreen({
           <Pressable onPress={onManual} style={[styles.keyNotice, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
             <Icon name="sparkles" size={18} color={theme.accentInk} />
             <Body weight={500} color={theme.onTint} style={{ flex: 1 }}>
-              Scanning isn't available right now. Enter a transaction manually instead.
+              {isZh ? '当前暂无法扫描，请尝试手动记账。' : "Scanning isn't available right now. Enter a transaction manually instead."}
             </Body>
             <Icon name="chevronRight" size={16} color={theme.accentInk} />
           </Pressable>
@@ -146,8 +151,8 @@ export function AttachScreen({
         <View style={styles.group}>
           <SourceButton
             icon="scan"
-            title="Scan"
-            sub="A receipt, an e-wallet screenshot, or a bank statement"
+            title={isZh ? '扫描' : 'Scan'}
+            sub={isZh ? '小票、电子钱包截图或银行对账单' : 'A receipt, an e-wallet screenshot, or a bank statement'}
             onPress={() => setScanOpen((v) => !v)}
             disabled={busy}
             expanded={scanOpen}
@@ -158,7 +163,9 @@ export function AttachScreen({
             <View style={[styles.nested, { borderLeftColor: theme.accentSoft }]}>
               {showSamples && (
                 <>
-                  <Label weight={700} color={colorTheme.ink3} style={{ marginBottom: spacing.sm }}>NO SCREENSHOT HANDY? TAP A SAMPLE</Label>
+                  <Label weight={700} color={colorTheme.ink3} style={{ marginBottom: spacing.sm }}>
+                    {isZh ? '没有现成截图？点击体验示例' : 'NO SCREENSHOT HANDY? TAP A SAMPLE'}
+                  </Label>
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -179,12 +186,14 @@ export function AttachScreen({
                       </Pressable>
                     ))}
                   </ScrollView>
-                  <Body weight={500} color={colorTheme.ink3} style={{ marginTop: spacing.md }}>or use your own</Body>
+                  <Body weight={500} color={colorTheme.ink3} style={{ marginTop: spacing.md }}>
+                    {isZh ? '或使用您自己的截图' : 'or use your own'}
+                  </Body>
                 </>
               )}
               <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: showSamples ? spacing.md : 0 }}>
-                <MiniButton icon="camera" label="Take a photo" onPress={takePhoto} disabled={busy} />
-                <MiniButton icon="gallery" label="From gallery" onPress={pickFromLibrary} disabled={busy} />
+                <MiniButton icon="camera" label={isZh ? '拍照' : 'Take a photo'} onPress={takePhoto} disabled={busy} />
+                <MiniButton icon="gallery" label={isZh ? '从相册选择' : 'From gallery'} onPress={pickFromLibrary} disabled={busy} />
               </View>
             </View>
           )}
@@ -193,8 +202,8 @@ export function AttachScreen({
         <View style={styles.group}>
           <SourceButton
             icon="pencil"
-            title="Enter it manually"
-            sub="Type one expense or income yourself"
+            title={isZh ? '手动记账' : 'Enter it manually'}
+            sub={isZh ? '手动输入一笔支出或收入' : 'Type one expense or income yourself'}
             onPress={onManual}
             disabled={busy}
             tone="quiet"
@@ -202,7 +211,9 @@ export function AttachScreen({
         </View>
 
         <Caption color={colorTheme.ink2} style={styles.hint}>
-          Screenshots are sent to your chosen AI provider only to read the transactions. Manual entries stay on your device.
+          {isZh
+            ? '截图仅发送至您选择的 AI 服务商以提取交易明细。手动记账数据仅保留在您的设备本地。'
+            : 'Screenshots are sent to your chosen AI provider only to read the transactions. Manual entries stay on your device.'}
         </Caption>
       </ScrollView>
     </View>

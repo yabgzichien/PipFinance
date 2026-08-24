@@ -149,10 +149,10 @@ export interface LogReminderInput {
   /**
    * Day number of the last transaction the user logged, or null if they never have.
    *
-   * Comes from `lastActiveDay` in lib/streak.ts, which counts in UTC days. For a row carrying
-   * a `date` the two agree exactly, since a bare YYYY-MM-DD parses as UTC midnight of that
-   * same calendar day. They can differ by one only for an undated row falling back to
-   * `createdAt` that was written in the small hours, which at worst nudges a day early.
+   * Comes from `lastActiveDay` in lib/streak.ts, which counts in LOCAL days on the same
+   * footing as `localDayNumber` below, so for a row carrying a `date` the two agree exactly.
+   * They can differ by one only for an undated row falling back to `createdAt` that was
+   * written in the small hours, which at worst nudges a day early.
    */
   lastLoggedDay: number | null;
   /** Fire hour/minute, already resolved by the caller: the behaviour-inferred window (see

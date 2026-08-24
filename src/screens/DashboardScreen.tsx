@@ -14,7 +14,7 @@ import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
 import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
 import { fmt, fmtCompact } from '../lib/format';
 import { netWorth, netWorthSeries } from '../lib/networth';
-import { lastActiveDay } from '../lib/streak';
+import { lastActiveDay, localDayNumber } from '../lib/streak';
 import { AGING_DAYS, daysBetween } from '../lib/split';
 import * as haptics from '../lib/haptics';
 import type { Category } from '../lib/types';
@@ -23,6 +23,7 @@ import { useNow } from '../state/useNow';
 import { useReducedMotion } from '../state/useReducedMotion';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { shadowCard, spacing } from '../theme';
 import { duration as motionDuration } from '../theme/motion';
 
@@ -79,6 +80,7 @@ export function DashboardScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatGreeting, formatLongDate, isZh } = useLanguage();
   const now = useNow();
   const {
     transactions,
@@ -220,7 +222,9 @@ export function DashboardScreen({
     if (empty) return false;
     const last = lastActiveDay(transactions, now);
     if (last === null) return false;
-    const today = Math.floor(now.getTime() / 86_400_000);
+    // Local day number, the same framing `lastActiveDay` returns; mixing in a UTC one would
+    // read as a day of silence every night between local midnight and the UTC rollover.
+    const today = localDayNumber(now);
     return today - last >= SLEEPY_LAPSED_DAYS;
   }, [empty, transactions, now]);
 
@@ -244,8 +248,8 @@ export function DashboardScreen({
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Caption color={colorTheme.ink2} style={{ marginBottom: spacing.xs }}>{longDate(now)}</Caption>
-            <Title>{greeting(now)}</Title>
+            <Caption color={colorTheme.ink2} style={{ marginBottom: spacing.xs }}>{formatLongDate(now)}</Caption>
+            <Title>{formatGreeting(now)}</Title>
           </View>
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
@@ -318,9 +322,9 @@ export function DashboardScreen({
               {hasBudget ? (
                 <>
                   <View style={styles.sectionHead}>
-                    <Eyebrow>Budget This Month - {monthName()}</Eyebrow>
+                    <Eyebrow>{isZh ? `本月预算 · ${monthName()}` : `Budget This Month · ${monthName()}`}</Eyebrow>
                     <Pressable onPress={onOpenBudget} hitSlop={8}>
-                      <Label weight={700} color={theme.accent}>Manage</Label>
+                      <Label weight={700} color={theme.accent}>{t('manage')}</Label>
                     </Pressable>
                   </View>
                   <BudgetProgressList
@@ -337,8 +341,10 @@ export function DashboardScreen({
                       <Icon name="wallet" size={22} color={theme.accent} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Body weight={700}>Set a monthly budget</Body>
-                      <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Plan income and allocate spend per category.</Label>
+                      <Body weight={700}>{isZh ? '设置月度预算' : 'Set a monthly budget'}</Body>
+                      <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+                        {isZh ? '规划预计收入并设置各分类限额。' : 'Plan income and allocate spend per category.'}
+                      </Label>
                     </View>
                     <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
                   </Card>
@@ -354,7 +360,7 @@ export function DashboardScreen({
           <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
             <PrimaryButton onPress={onScan} height={54}>
               <Icon name="plus" size={21} color="#fff" stroke={2.4} />
-              <BtnLabel>Add your first transaction</BtnLabel>
+              <BtnLabel>{isZh ? '添加您的第一笔交易' : 'Add your first transaction'}</BtnLabel>
               <Icon name="sparkles" size={16} color="#fff" />
             </PrimaryButton>
           </View>
@@ -405,6 +411,7 @@ function StreakCard({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
   // Flame flicker — three layers (outer body, mid tongue, hot core) animate on independent
   // loops so the flame reads as an organic flicker rather than one rigid shape bobbing up and
   // down. All native-driver transforms (rotate/scale/translate), no per-frame JS.
@@ -475,7 +482,7 @@ function StreakCard({
   const card = (
     <Card style={styles.streakCard}>
       {freezeAvailable && (
-        <View style={[styles.streakShield, { backgroundColor: colorTheme.surface }]} accessibilityLabel="A streak freeze is banked for this month">
+        <View style={[styles.streakShield, { backgroundColor: colorTheme.surface }]} accessibilityLabel={isZh ? '本月记账保护卡已生效' : 'A streak freeze is banked for this month'}>
           <Icon name="shield" size={11} color={theme.accent} />
         </View>
       )}
@@ -520,12 +527,12 @@ function StreakCard({
           {graduated && startLabel ? (
             <>
               <Label weight={700}>{startLabel}</Label>
-              <Caption color={colorTheme.ink2}>{paused ? 'Paused' : `${streak}-day run`}</Caption>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? `连续 ${streak} 天` : `${streak}-day run`)}</Caption>
             </>
           ) : (
             <>
               <Title numeric>{streak}</Title>
-              <Caption color={colorTheme.ink2}>{paused ? 'Paused' : 'day streak'}</Caption>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? '天连续记账' : 'day streak')}</Caption>
             </>
           )}
         </View>
@@ -560,7 +567,7 @@ function StreakCard({
   );
   if (!onPress) return card;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open your activity calendar">
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={isZh ? '打开记账日历' : 'Open your activity calendar'}>
       {card}
     </Pressable>
   );
@@ -849,6 +856,7 @@ function CashFlowView({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { tCat, isZh } = useLanguage();
 
   const pieData = useMemo(
     () => breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid })),
@@ -857,13 +865,13 @@ function CashFlowView({
   const topCat = breakdown.length > 0 ? (catById[breakdown[0].catId] ?? fallback) : null;
   const topPct = topCat && spent > 0 ? Math.round((breakdown[0].amt / spent) * 100) : 0;
 
-  const eyebrow = panel === 'spent' ? 'Spent this month' : panel === 'cashflow' ? `Net cash flow · ${monthName()}` : 'Left to spend';
+  const eyebrow = panel === 'spent' ? (isZh ? '本月支出' : 'Spent this month') : panel === 'cashflow' ? (isZh ? `净现金流 · ${monthName()}` : `Net cash flow · ${monthName()}`) : (isZh ? '剩余预算' : 'Left to spend');
   const caption =
     panel === 'spent'
-      ? 'Total expenses this month'
+      ? (isZh ? '本月总支出' : 'Total expenses this month')
       : panel === 'cashflow'
-        ? 'Income − Expenses · this month'
-        : `${daysLeftInMonth()} days left in ${monthName()}`;
+        ? (isZh ? '收入 − 支出 · 本月' : 'Income − Expenses · this month')
+        : (isZh ? `${monthName()} 还剩 ${daysLeftInMonth()} 天` : `${daysLeftInMonth()} days left in ${monthName()}`);
   const heroValue = panel === 'spent' ? spent : panel === 'cashflow' ? net : budgetLeft;
   const heroNegative = heroValue < 0;
   const heroAmount = `RM ${fmtCompact(Math.abs(heroValue))}`;
@@ -902,7 +910,7 @@ function CashFlowView({
         {panel === 'cashflow' && (
           <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
             <Label numeric color={theme.onTint}>{`RM ${fmt(received)}`}</Label>
-            <Caption color={colorTheme.ink2}>income</Caption>
+            <Caption color={colorTheme.ink2}>{isZh ? '收入' : 'income'}</Caption>
           </View>
         )}
       </View>
@@ -913,8 +921,8 @@ function CashFlowView({
           <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
             <PieChart data={pieData} size={56} thickness={11} />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Label weight={500} numberOfLines={1}>{`${topCat.label} · ${topPct}%`}</Label>
-              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>Biggest this month</Caption>
+              <Label weight={500} numberOfLines={1}>{`${tCat(topCat)} · ${topPct}%`}</Label>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>{isZh ? '本月最大支出' : 'Biggest this month'}</Caption>
             </View>
             <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
           </Pressable>
@@ -939,6 +947,7 @@ function NetWorthView({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
   const pos = net >= 0;
   const delta = trend.length >= 2 ? net - trend[trend.length - 2] : null;
   const deltaUp = (delta ?? 0) >= 0;
@@ -949,7 +958,7 @@ function NetWorthView({
       <View style={styles.cashTop}>
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
-            <Eyebrow>Net worth</Eyebrow>
+            <Eyebrow>{t('netWorth')}</Eyebrow>
             <InfoButton entry="net_worth" />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
@@ -964,11 +973,11 @@ function NetWorthView({
               {`${pos ? '' : '−'}RM ${fmtCompact(Math.abs(net))}`}
             </Display>
           </View>
-          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Assets − Liabilities · today</Caption>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{isZh ? '资产 − 负债 · 今日' : 'Assets − Liabilities · today'}</Caption>
         </View>
         <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
           <Label numeric color={theme.onTint}>{`RM ${fmt(assets)}`}</Label>
-          <Caption color={colorTheme.ink2}>assets</Caption>
+          <Caption color={colorTheme.ink2}>{t('assets')}</Caption>
         </View>
       </View>
 
@@ -981,9 +990,9 @@ function NetWorthView({
             <NetWorthSparkline values={trend} color={trendColor} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Label weight={500} numberOfLines={1}>
-                {delta === null ? '6-month trend' : `${deltaUp ? '+' : '−'}RM ${fmt(Math.abs(delta))} vs last month`}
+                {delta === null ? (isZh ? '近6个月趋势' : '6-month trend') : `${deltaUp ? '+' : '−'}RM ${fmt(Math.abs(delta))} ${isZh ? '较上月' : 'vs last month'}`}
               </Label>
-              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>6-month trend</Caption>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>{isZh ? '近6个月趋势' : '6-month trend'}</Caption>
             </View>
             <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
           </Pressable>

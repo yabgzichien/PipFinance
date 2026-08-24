@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BudgetProgressList } from '../components/BudgetProgressList';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
-import { Amount, Body, BtnLabel, Card, Caption, Eyebrow, Label, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
+import { Amount, Body, Card, Caption, Eyebrow, IconButton, Label, ProgressTrack, TopBar } from '../components/ui';
 import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { allocatedTotal, categoryStatus, currentMonthKey, leftover, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
@@ -13,6 +13,7 @@ import { fmt } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { spacing } from '../theme';
 import { BudgetWizard } from './BudgetWizard';
 
@@ -22,6 +23,7 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, formatMonthLabel, isZh } = useLanguage();
   const {
     transactions,
     catById,
@@ -66,7 +68,18 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + spacing.xs }}>
-        <TopBar title="Budget" onBack={onBack} />
+        <TopBar
+          title={t('budgetTitle')}
+          onBack={onBack}
+          right={
+            <IconButton
+              name="pencil"
+              onPress={() => setEditing(true)}
+              size={18}
+              accessibilityLabel="Edit budget"
+            />
+          }
+        />
       </View>
       <ScrollView contentContainerStyle={{ padding: spacing.base, paddingBottom: insets.bottom + spacing.lg }} showsVerticalScrollIndicator={false}>
         {/* summary */}
@@ -74,14 +87,14 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
           <View style={styles.rowBetween}>
             <View>
               <View style={styles.eyebrowRow}>
-                <Eyebrow>Income</Eyebrow>
+                <Eyebrow>{isZh ? '收入' : 'Income'}</Eyebrow>
                 <InfoButton entry="net_cash_flow" />
               </View>
               <Amount value={expectedIncome} size={22} weight={700} />
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <View style={styles.eyebrowRow}>
-                <Eyebrow>{left < 0 ? 'Over' : 'Unallocated'}</Eyebrow>
+                <Eyebrow>{left < 0 ? (isZh ? '超出' : 'Over') : (isZh ? '未分配' : 'Unallocated')}</Eyebrow>
                 {left >= 0 && <InfoButton entry="unallocated" />}
               </View>
               <Amount value={Math.abs(left)} size={22} weight={700} color={left < 0 ? STATUS_COLOR.over : theme.accent} />
@@ -89,7 +102,9 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
           </View>
           <View style={{ marginTop: spacing.md }}>
             <ProgressTrack pct={expectedIncome > 0 ? (allocated / expectedIncome) * 100 : 0} />
-            <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>Allocated RM {fmt(allocated)} of RM {fmt(expectedIncome)}</Caption>
+            <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+              {isZh ? `已分配 RM ${fmt(allocated)} / 计划收入 RM ${fmt(expectedIncome)}` : `Allocated RM ${fmt(allocated)} of RM ${fmt(expectedIncome)}`}
+            </Caption>
           </View>
         </Card>
 
@@ -101,12 +116,13 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
             <Icon name="shield" size={17} color={theme.accent} />
             <View style={{ flex: 1 }}>
               <View style={styles.eyebrowRow}>
-                <Body weight={700}>Safe monthly income RM {fmt(incomeBaseline.baseline)}</Body>
+                <Body weight={700}>{isZh ? `安全月收入 RM ${fmt(incomeBaseline.baseline)}` : `Safe monthly income RM ${fmt(incomeBaseline.baseline)}`}</Body>
                 <InfoButton entry="safe_income" />
               </View>
               <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
-                Your months range RM {fmt(incomeBaseline.low)} to RM {fmt(incomeBaseline.high)}. Plan
-                against the floor, not the average.
+                {isZh
+                  ? `您的月收入在 RM ${fmt(incomeBaseline.low)} 至 RM ${fmt(incomeBaseline.high)} 之间波动。建议按最低收入而非平均收入规划预算。`
+                  : `Your months range RM ${fmt(incomeBaseline.low)} to RM ${fmt(incomeBaseline.high)}. Plan against the floor, not the average.`}
               </Label>
             </View>
           </Card>
@@ -114,7 +130,9 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
 
         {/* per-category. Kept directly under the summary: "how is this month going" is the
             screen's core job. */}
-        <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>This month · {monthName()}</Eyebrow>
+        <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>
+          {isZh ? `本月 · ${formatMonthLabel(currentMonthKey(), false)}` : `This month · ${monthName()}`}
+        </Eyebrow>
         <BudgetProgressList allocations={allocations} spentByCat={spentByCat} catById={catById} />
 
         <Pressable
@@ -126,18 +144,13 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
         >
           <Icon name="trending" size={18} color={theme.accent} />
           <View style={{ flex: 1 }}>
-            <Body weight={700}>Monthly recap</Body>
-            <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>See how each month stacked up against target.</Label>
+            <Body weight={700}>{isZh ? '月度回顾' : 'Monthly recap'}</Body>
+            <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+              {isZh ? '查看每月的预算执行与收支目标达成情况。' : 'See how each month stacked up against target.'}
+            </Label>
           </View>
           <Icon name="chevronRight" size={17} color={colorTheme.ink3} />
         </Pressable>
-
-        <View style={{ marginTop: spacing.lg }}>
-          <PrimaryButton onPress={() => setEditing(true)} height={50}>
-            <Icon name="pencil" size={17} color="#fff" />
-            <BtnLabel>Edit budget</BtnLabel>
-          </PrimaryButton>
-        </View>
       </ScrollView>
     </View>
   );

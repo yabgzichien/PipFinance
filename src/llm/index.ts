@@ -1,14 +1,16 @@
 import { GeminiProvider } from './gemini';
 import { GroqProvider } from './groq';
+import { OpenRouterProvider } from './openrouter';
 import type { LLMProvider } from './types';
 
 /**
- * Provider registry. Groq ships as the default (image-only vision); Gemini is
+ * Provider registry. Groq & OpenRouter handle vision + text; Gemini is
  * document-capable (PDF/CSV/XLSX/DOCX) and powers the file importer.
  */
 const PROVIDERS: Record<string, LLMProvider> = {
   groq: GroqProvider,
   gemini: GeminiProvider,
+  openrouter: OpenRouterProvider,
 };
 
 export function getProvider(id: string): LLMProvider {

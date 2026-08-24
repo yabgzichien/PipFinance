@@ -1,14 +1,13 @@
-// src/screens/CalendarScreen.tsx
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line, Path } from 'react-native-svg';
 import { fmt, fmtMoney } from '../lib/format';
-import { monthLabel } from '../lib/dates';
 import type { Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { colors, numFont, platformShadow, shadowCard, uiFont } from '../theme';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,10 +100,14 @@ function compactAmt(n: number): string {
   return String(Math.round(n));
 }
 
-const WEEKDAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
-const FULL_WEEKDAY = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAY_LABELS_EN = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const WEEKDAY_LABELS_ZH = ['一', '二', '三', '四', '五', '六', '日'];
+const FULL_WEEKDAY_EN = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const FULL_WEEKDAY_ZH = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+const MONTHS_SHORT_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_SHORT_ZH = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 const YEAR_WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const YEAR_WEEKDAY_LABELS_ZH = ['日', '一', '二', '三', '四', '五', '六'];
 
 interface YearCell {
   day: number;
@@ -145,6 +148,7 @@ function buildYearGrid(year: number, month: number): YearCell[] {
 function SummaryCards({ income, expense }: { income: number; expense: number }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={styles.summaryRow}>
       <View
@@ -156,7 +160,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
       >
         <View style={styles.summaryDotRow}>
           <View style={[styles.summaryDot, { backgroundColor: theme.accent }]} />
-          <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>INCOME</Text>
+          <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '收入' : 'INCOME'}</Text>
         </View>
         <Text style={[styles.summaryAmount, { color: colorTheme.ink }]}>RM{fmt(income)}</Text>
       </View>
@@ -169,7 +173,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
       >
         <View style={styles.summaryDotRow}>
           <View style={[styles.summaryDot, { backgroundColor: colorTheme.red }]} />
-          <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>EXPENSE</Text>
+          <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出' : 'EXPENSE'}</Text>
         </View>
         <Text style={[styles.summaryAmount, { color: colorTheme.red }]}>RM{fmt(expense)}</Text>
       </View>
@@ -192,6 +196,7 @@ function MiniMonth({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const weeks = useMemo(() => {
     const cells = buildYearGrid(year, month);
     const rows: YearCell[][] = [];
@@ -199,11 +204,14 @@ function MiniMonth({
     return rows;
   }, [year, month]);
 
+  const monthTitle = isZh ? MONTHS_SHORT_ZH[month - 1] : MONTHS_SHORT_EN[month - 1];
+  const weekdayLabels = isZh ? YEAR_WEEKDAY_LABELS_ZH : YEAR_WEEKDAY_LABELS;
+
   return (
     <View style={styles.miniMonth}>
-      <Text style={[styles.miniMonthTitle, { color: colorTheme.ink }]}>{MONTHS_SHORT[month - 1]}</Text>
+      <Text style={[styles.miniMonthTitle, { color: colorTheme.ink }]}>{monthTitle}</Text>
       <View style={styles.miniWeekdayRow}>
-        {YEAR_WEEKDAY_LABELS.map((w, i) => (
+        {weekdayLabels.map((w, i) => (
           <Text key={i} style={[styles.miniWeekdayLabel, { color: colorTheme.ink3 }]}>{w}</Text>
         ))}
       </View>
@@ -259,9 +267,10 @@ function YearBlock({
   onSelectDay: (year: number, month: number, day: number) => void;
 }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={styles.yearBlock}>
-      <Text style={[styles.yearBlockTitle, { color: colorTheme.ink }]}>{year}</Text>
+      <Text style={[styles.yearBlockTitle, { color: colorTheme.ink }]}>{isZh ? `${year}年` : year}</Text>
       <View style={styles.yearBlockGrid}>
         {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
           <View key={m} style={styles.yearBlockItem}>
@@ -416,18 +425,21 @@ function DayTransactionList({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh, tCat } = useLanguage();
   const { catById } = useAppData();
   // e.g. "Tue, May 26"
   const d = new Date(year, month - 1, day);
   const weekdayIdx = (d.getDay() + 6) % 7; // Mon-first
-  const dateLabel = `${FULL_WEEKDAY[weekdayIdx]}, ${MONTHS_SHORT[month - 1]} ${day}`;
+  const dateLabel = isZh
+    ? `${month}月${day}日 · ${FULL_WEEKDAY_ZH[weekdayIdx]}`
+    : `${FULL_WEEKDAY_EN[weekdayIdx]}, ${MONTHS_SHORT_EN[month - 1]} ${day}`;
 
   return (
     <View style={styles.daySection}>
       <Text style={[styles.daySectionTitle, { color: colorTheme.ink }]}>{dateLabel}</Text>
       {!dayData || dayData.txns.length === 0 ? (
         <View style={[styles.emptyDay, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
-          <Text style={[styles.emptyDayText, { color: colorTheme.ink2 }]}>No transactions</Text>
+          <Text style={[styles.emptyDayText, { color: colorTheme.ink2 }]}>{isZh ? '暂无交易记录' : 'No transactions'}</Text>
         </View>
       ) : (
         <View style={[styles.txnList, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
@@ -442,8 +454,8 @@ function DayTransactionList({
                 />
                 <Text style={[styles.txnMerchant, { color: colorTheme.ink }]} numberOfLines={1}>
                   {t.merchantRaw ||
-                    (t.categoryId ? catById[t.categoryId]?.label : null) ||
-                    (t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Expense')}
+                    (t.categoryId ? tCat(catById[t.categoryId]) : null) ||
+                    (t.type === 'income' ? (isZh ? '收入' : 'Income') : t.type === 'transfer' ? (isZh ? '转账' : 'Transfer') : (isZh ? '支出' : 'Expense'))}
                 </Text>
               </View>
               <Text
@@ -458,7 +470,7 @@ function DayTransactionList({
           ))}
           {/* Net for the day */}
           <View style={[styles.dayNetRow, { backgroundColor: colorTheme.surface2 }]}>
-            <Text style={[styles.dayNetLabel, { color: colorTheme.ink2 }]}>Net</Text>
+            <Text style={[styles.dayNetLabel, { color: colorTheme.ink2 }]}>{isZh ? '结余' : 'Net'}</Text>
             <Text style={[styles.dayNetVal, { color: dayData.net >= 0 ? theme.accentInk : colorTheme.red }]}>
               {dayData.net >= 0 ? '+' : '−'} RM {fmt(Math.abs(dayData.net))}
             </Text>
@@ -483,6 +495,7 @@ export function CalendarScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { formatMonthLabel, isZh } = useLanguage();
   const { transactions } = useAppData();
   const [viewMode, setViewMode] = useState<'month' | 'year'>('month');
 
@@ -525,6 +538,8 @@ export function CalendarScreen({
     setViewMode('month');
   };
 
+  const weekdayLabels = isZh ? WEEKDAY_LABELS_ZH : WEEKDAY_LABELS_EN;
+
   return (
     <View style={[styles.root, { paddingTop: insets.top, backgroundColor: colorTheme.bg }]}>
       {/* ── Nav bar ── */}
@@ -534,7 +549,7 @@ export function CalendarScreen({
             <Path d="M8.5 1.5L1.5 8.5l7 7" stroke={colorTheme.ink2} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>Cash Flow Calendar</Text>
+        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{isZh ? '收支日历' : 'Cash Flow Calendar'}</Text>
         <Pressable
           onPress={() => setViewMode((v) => (v === 'month' ? 'year' : 'month'))}
           style={[styles.navBtn, { backgroundColor: colorTheme.surface }]}
@@ -571,7 +586,7 @@ export function CalendarScreen({
                 <Path d="M7 1L1 7l6 6" stroke={colorTheme.ink2} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
               </Svg>
             </Pressable>
-            <Text style={[styles.monthLabel, { color: colorTheme.ink }]}>{monthLabel(monthKeyFrom(ym))}</Text>
+            <Text style={[styles.monthLabel, { color: colorTheme.ink }]}>{formatMonthLabel(monthKeyFrom(ym))}</Text>
             <Pressable
               onPress={() => setYm((prev) => addMonths(prev, 1))}
               style={[styles.monthNavBtn, { backgroundColor: colorTheme.surface }]}
@@ -589,7 +604,7 @@ export function CalendarScreen({
 
           {/* ── Weekday header ── */}
           <View style={styles.weekdayHeader}>
-            {WEEKDAY_LABELS.map((w) => (
+            {weekdayLabels.map((w) => (
               <Text key={w} style={[styles.weekdayLabel, { color: colorTheme.ink2 }]}>{w}</Text>
             ))}
           </View>

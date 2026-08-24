@@ -128,11 +128,20 @@ export function receiptSubtotal(receipt: ScannedReceipt): number {
 /**
  * Back out the percentages the split sheet edits from the amounts the receipt printed.
  *
- * Service charge is read against the subtotal and tax against subtotal-plus-service, matching
- * the order the receipt itself computes them in. A receipt that printed neither falls back to
+ * Service charge is read against the base and tax against base-plus-service, matching the
+ * order the receipt itself computes them in. A receipt that printed neither falls back to
  * ZERO rather than the 10/6 convention: inventing a charge the paper never showed would
  * silently inflate what everyone at the table owes. The defaults are offered in the UI as a
  * toggle instead, which is a choice the user can see.
+ *
+ * The base is the printed subtotal MINUS a 'before' voucher, because a voucher applied at
+ * the till was already off when the register computed service and tax. Dividing by the full
+ * subtotal instead understates both percentages, and `computeItemizedTotalCents` in
+ * lib/split.ts then subtracts the same voucher a second time before applying them — so the
+ * itemised total lands short of what the card was actually charged and the gap surfaces as a
+ * phantom "difference", which gets shared equally rather than riding proportionally on what
+ * each person ordered. An 'after' discount is a line printed below the tax, so there the
+ * subtotal really is the base and nothing is subtracted here.
  *
  * Percentages are snapped to a whole number when they land within a rounding cent of one, so
  * the usual 10% and 6% come back as "10" and "6" instead of "9.97".
@@ -143,12 +152,17 @@ export function derivedSurcharges(receipt: ScannedReceipt): Surcharges {
     : null;
 
   const subtotal = receiptSubtotal(receipt);
-  if (subtotal <= 0) return { serviceChargePct: 0, taxPct: 0, discount };
+  const base =
+    receipt.discount && receipt.discount.timing === 'before'
+      ? Math.round((subtotal - receipt.discount.amount) * 100) / 100
+      : subtotal;
+  // A voucher that swallowed the whole bill leaves nothing to read a percentage against.
+  if (base <= 0) return { serviceChargePct: 0, taxPct: 0, discount };
 
   const service = receipt.serviceCharge ?? 0;
   const tax = receipt.tax ?? 0;
-  const serviceChargePct = service > 0 ? snap((service / subtotal) * 100) : 0;
-  const taxBase = subtotal + service;
+  const serviceChargePct = service > 0 ? snap((service / base) * 100) : 0;
+  const taxBase = base + service;
   const taxPct = tax > 0 && taxBase > 0 ? snap((tax / taxBase) * 100) : 0;
   return { serviceChargePct, taxPct, discount };
 }

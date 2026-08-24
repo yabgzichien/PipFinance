@@ -1,4 +1,3 @@
-// src/screens/RecapScreen.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +6,6 @@ import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
-import { monthLabel } from '../lib/dates';
 import { fmt } from '../lib/format';
 import {
   availableMonths,
@@ -25,6 +23,7 @@ import type { AccentTheme } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import type { StructuralColors } from '../theme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { numFont, platformShadow, shadowCard, uiFont } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
@@ -98,44 +97,42 @@ function IncomeHero({
   net: number;
   networth: { net: number; delta: number } | null;
 }) {
+  const { formatMonthLabel, isZh } = useLanguage();
   const positive = net >= 0;
   return (
     <View
       style={[
         styles.heroShadowWrap,
         positive ? styles.heroShadowPos : styles.heroShadowNeg,
-        // Android elevation needs an opaque backgroundColor to shadow correctly  without
-        // one, release/Hermes builds render the shadow-casting surface as a plain gray/
-        // white plate instead of a blurred shadow (matches the card's darkest gradient
-        // stop so no seam shows once `hero` fully covers it).
         { backgroundColor: positive ? '#0e3d27' : '#4a0e19' },
       ]}
     >
       <View style={styles.hero}>
       <HeroGradient positive={positive} />
       <View style={styles.heroBlob} />
-      {/* Unconditional, not gated on `positive`: this is Pip proud you reviewed the month, not
-          a verdict on the number (docs/ui-engagement-plan.md §1). No color override  same
-          accent-colored Pip as everywhere else in the app, not a flat white cutout. */}
       <View style={styles.heroPip}>
         <Pip size={40} expr="proud" />
       </View>
 
-      <Text style={styles.heroEyebrow}>Income Statement · {monthLabel(month)}</Text>
+      <Text style={styles.heroEyebrow}>
+        {isZh ? `收支总结 · ${formatMonthLabel(month, true)}` : `Income Statement · ${formatMonthLabel(month, true)}`}
+      </Text>
 
       {/* Income */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>Income</Text>
+        <Text style={styles.heroLineLabel}>{isZh ? '总收入' : 'Income'}</Text>
         <Text style={styles.heroVal}>RM {fmt(income)}</Text>
       </View>
       {/* Expenses */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>Expenses</Text>
+        <Text style={styles.heroLineLabel}>{isZh ? '总支出' : 'Expenses'}</Text>
         <Text style={[styles.heroVal, { color: 'rgba(255,255,255,0.72)' }]}>− RM {fmt(expenses)}</Text>
       </View>
       {/* Net cash flow */}
       <View style={[styles.heroLine, { paddingTop: 12 }]}>
-        <Text style={[styles.heroLineLabel, { color: 'rgba(255,255,255,0.60)', fontFamily: uiFont(700) }]}>Net Cash Flow</Text>
+        <Text style={[styles.heroLineLabel, { color: 'rgba(255,255,255,0.60)', fontFamily: uiFont(700) }]}>
+          {isZh ? '净现金流' : 'Net Cash Flow'}
+        </Text>
         <Text style={[styles.heroNcf, { color: positive ? TINT.ncfUp : TINT.ncfDown }]}>
           {positive ? '+' : '−'} RM {fmt(Math.abs(net))}
         </Text>
@@ -145,14 +142,14 @@ function IncomeHero({
       {networth && (
         <View style={styles.nwStrip}>
           <View>
-            <Text style={styles.nwLabel}>Month-End Net Worth</Text>
+            <Text style={styles.nwLabel}>{isZh ? '月末净资产' : 'Month-End Net Worth'}</Text>
             <Text style={styles.nwVal}>
               {networth.net < 0 ? '− ' : ''}RM {fmt(Math.abs(networth.net))}
             </Text>
           </View>
           <View style={styles.nwDivider} />
           <View>
-            <Text style={styles.nwLabel}>vs. last month</Text>
+            <Text style={styles.nwLabel}>{isZh ? '比上月' : 'vs. last month'}</Text>
             <View style={styles.nwDeltaRow}>
               <Svg width={11} height={11} viewBox="0 0 12 12" fill="none">
                 <Path
@@ -179,6 +176,7 @@ function IncomeHero({
 function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: number; alloc: number; isLast: boolean }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { tCat, isZh } = useLanguage();
   const st = categoryStatus(spent, alloc);
   const color = statusColor(st, theme, colorTheme);
   const ratio = alloc > 0 ? spent / alloc : spent > 0 ? 1.45 : 0;
@@ -192,7 +190,7 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
       <View style={styles.catTop}>
         <View style={styles.catIconLabel}>
           <CatBadge category={cat} size={30} rad={9} />
-          <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
+          <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
         </View>
         <View style={styles.catNums}>
           <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(spent)}</Text>
@@ -200,7 +198,7 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
         </View>
         <View style={[styles.badge, { backgroundColor: statusBg(st, theme), borderColor: statusBorder(st, theme) }]}>
           <Text style={[styles.badgeText, { color }]}>
-            {diff === 0 ? 'On target' : over ? `+${fmt(diff)}` : `−${fmt(diff)}`}
+            {diff === 0 ? (isZh ? '达标' : 'On target') : over ? `+${fmt(diff)}` : `−${fmt(diff)}`}
           </Text>
         </View>
       </View>
@@ -211,8 +209,8 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
       </View>
 
       <View style={styles.catFoot}>
-        <Text style={[styles.catPct, { color }]}>{pct}% of budget</Text>
-        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>budget RM {fmt(alloc)}</Text>
+        <Text style={[styles.catPct, { color }]}>{isZh ? `占预算 ${pct}%` : `${pct}% of budget`}</Text>
+        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>{isZh ? `预算 RM ${fmt(alloc)}` : `budget RM ${fmt(alloc)}`}</Text>
       </View>
     </View>
   );
@@ -248,6 +246,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatMonthLabel, isZh } = useLanguage();
   const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage } = useAppData();
 
   const snapshotMonths = useMemo(() => Object.keys(snapshots), [snapshots]);
@@ -266,14 +265,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const snapshot = snapshots[month];
   const allocations = snapshot?.allocations ?? {};
   const adherence = useMemo(() => computeAdherence(allocations, spentByCat), [allocations, spentByCat]);
-  // Competence feedback, never achievement theatre (docs/ui-engagement-plan.md Step 5): real
-  // numbers that grow with use. `memory` is already the full loaded map, so its size is the
-  // "merchants Pip knows" count with no separate query. `coverage` is the 90-day data-
-  // completeness signal, computed once in the store and otherwise unused since
-  // `ui-design-plan.md` §3 evicted it from Home  it finds a home here, with room to explain it.
   const merchantsKnown = Object.keys(memory).length;
-  // The winnable, shame-free comparison from §2.6: a user versus their own last month, per
-  // category, biggest current spend first. Only rendered with real history on both sides.
   const comparisons = useMemo(() => categoryComparisons(transactions, month), [transactions, month]);
   const showComparisons = useMemo(() => hasComparisonData(transactions, month), [transactions, month]);
 
@@ -296,21 +288,28 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
     const out: { type: InsightType; text: string }[] = [];
     out.push({
       type: adherence.overspends.length === 0 ? 'good' : 'caution',
-      text: `Stayed within budget in ${adherence.withinCount} of ${adherence.totalBudgeted} categories.`,
+      text: isZh
+        ? `在 ${adherence.totalBudgeted} 个分类中，有 ${adherence.withinCount} 个控制在预算内。`
+        : `Stayed within budget in ${adherence.withinCount} of ${adherence.totalBudgeted} categories.`,
     });
     if (adherence.overspends.length === 0) {
-      out.push({ type: 'good', text: 'Nothing went over target this month. 🎉' });
+      out.push({
+        type: 'good',
+        text: isZh ? '本月所有分类均未超出预算！🎉' : 'Nothing went over target this month. 🎉',
+      });
     } else {
       for (const o of adherence.overspends.slice(0, 3)) {
         const cat = catById[o.catId] ?? fallback;
         out.push({
           type: 'warn',
-          text: `${cat.label} over by RM ${fmt(o.over)}: RM ${fmt(o.spent)} of ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
+          text: isZh
+            ? `${tCat(cat)} 超出 RM ${fmt(o.over)}：支出 RM ${fmt(o.spent)} / 预算 RM ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}。`
+            : `${cat.label} over by RM ${fmt(o.over)}: RM ${fmt(o.spent)} of ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
         });
       }
     }
     return out;
-  }, [adherence, catById]);
+  }, [adherence, catById, isZh, tCat]);
 
   const stripRef = useRef<ScrollView>(null);
 
@@ -323,7 +322,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
             <Path d="M8.5 1.5L1.5 8.5l7 7" stroke={colorTheme.ink2} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>Monthly Recap</Text>
+        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('monthlyRecap')}</Text>
         <Pressable onPress={() => setPickerOpen(true)} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} accessibilityRole="button" accessibilityLabel="Select month">
           <Svg width={17} height={17} viewBox="0 0 18 18" fill="none" stroke={colorTheme.ink2} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
             <Rect x={3} y={4} width={12} height={11} rx={2} />
@@ -383,7 +382,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                 },
               ]}
             >
-              <Text style={[styles.monthChipText, { color: colorTheme.ink2 }, on && styles.monthChipTextOn]}>{monthLabel(mk, false)}</Text>
+              <Text style={[styles.monthChipText, { color: colorTheme.ink2 }, on && styles.monthChipTextOn]}>
+                {formatMonthLabel(mk, false)}
+              </Text>
             </Pressable>
           );
         })}
@@ -398,27 +399,10 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           networth={networth}
         />
 
-        {/* Competence feedback (docs/ui-engagement-plan.md Step 5): two real, growing numbers,
-            never a badge. */}
-        <Card style={styles.competenceCard}>
-          <View style={styles.competenceStat}>
-            <Text style={[styles.competenceVal, { color: colorTheme.ink }]}>{merchantsKnown}</Text>
-            <Text style={[styles.competenceLabel, { color: colorTheme.ink2 }]}>merchant{merchantsKnown === 1 ? '' : 's'} Pip knows</Text>
-          </View>
-          <View style={[styles.competenceDivider, { backgroundColor: colorTheme.line }]} />
-          <View style={styles.competenceStat}>
-            <Text style={[styles.competenceVal, { color: colorTheme.ink }]}>{coverage.daysCovered}/{coverage.windowDays}</Text>
-            <Text style={[styles.competenceLabel, { color: colorTheme.ink2 }]}>days covered</Text>
-          </View>
-        </Card>
-
-        {/* You versus your own last month (§2.6): the only comparison in the app, and it is
-            against no one but the borrower's own history. Both directions read neutrally  up
-            is information, not a verdict (§1). */}
         {showComparisons && (
           <>
             <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>You vs. last month</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '对比上月支出' : 'You vs. last month'}</Text>
             </View>
             <Card style={styles.listCard}>
               {comparisons.slice(0, 5).map((c, i) => {
@@ -426,10 +410,12 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                 return (
                   <View key={c.catId} style={[styles.compareRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line }]]}>
                     <CatBadge category={cat} size={30} rad={9} />
-                    <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
+                    <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={[styles.compareNow, { color: colorTheme.ink }]}>RM {fmt(c.current)}</Text>
-                      <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>Last month RM {fmt(c.previous)}</Text>
+                      <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>
+                        {isZh ? `上月 RM ${fmt(c.previous)}` : `Last month RM ${fmt(c.previous)}`}
+                      </Text>
                     </View>
                   </View>
                 );
@@ -442,7 +428,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           <>
             {/* Spending breakdown */}
             <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Spending</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出明细' : 'Spending'}</Text>
               <Text style={[styles.sectionSub, { color: colorTheme.ink2 }]}>RM {fmt(statement.expenses)}</Text>
             </View>
             <Card style={styles.listCard}>
@@ -461,7 +447,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     <View style={[styles.unbudgetedIcon, { backgroundColor: colorTheme.surface2 }]}>
                       <Icon name="dots" size={16} color={colorTheme.ink3} />
                     </View>
-                    <Text style={[styles.catLabel, { color: colorTheme.ink }]}>Unbudgeted</Text>
+                    <Text style={[styles.catLabel, { color: colorTheme.ink }]}>{isZh ? '未列入预算' : 'Unbudgeted'}</Text>
                   </View>
                   <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(unbudgetedSpent)}</Text>
                 </View>
@@ -471,9 +457,11 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
             {/* Where to improve */}
             <View style={styles.improveHead}>
               <View style={[styles.improveTab, { backgroundColor: theme.accent }]} />
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Where to improve</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '改善建议' : 'Where to improve'}</Text>
               <View style={[styles.signalPill, { backgroundColor: theme.accentSoft }]}>
-                <Text style={[styles.signalText, { color: theme.onTint }]}>{insights.length} signals</Text>
+                <Text style={[styles.signalText, { color: theme.onTint }]}>
+                  {isZh ? `${insights.length} 条提醒` : `${insights.length} signals`}
+                </Text>
               </View>
             </View>
             <Card style={styles.listCard}>
@@ -484,7 +472,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           </>
         ) : (
           <View style={styles.emptyPad}>
-            <Text style={[styles.emptyText, { color: colorTheme.ink2 }]}>Category breakdown not available for this month.</Text>
+            <Text style={[styles.emptyText, { color: colorTheme.ink2 }]}>
+              {isZh ? '该月份暂无分类预算数据。' : 'Category breakdown not available for this month.'}
+            </Text>
           </View>
         )}
 
@@ -503,8 +493,12 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
               </Svg>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>Export {monthLabel(month)} Statement</Text>
-              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>Generate PDF, Excel (.xlsx), CSV, or HTML bookkeeping files.</Text>
+              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>
+                {isZh ? `导出 ${formatMonthLabel(month, true)} 财务报表` : `Export ${formatMonthLabel(month, true)} Statement`}
+              </Text>
+              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
+                {isZh ? '生成 PDF、Excel (.xlsx)、CSV 或 HTML 格式对账单。' : 'Generate PDF, Excel (.xlsx), CSV, or HTML bookkeeping files.'}
+              </Text>
             </View>
             <Svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke={colorTheme.ink3} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M6 3l5 5-5 5" />
@@ -520,7 +514,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
         <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
           <Pressable style={[styles.modalSheet, { backgroundColor: colorTheme.surface, paddingBottom: insets.bottom + 16 }]} onPress={() => {}}>
             <View style={[styles.modalHandle, { backgroundColor: colorTheme.line }]} />
-            <Text style={[styles.modalTitle, { color: colorTheme.ink2 }]}>Select month</Text>
+            <Text style={[styles.modalTitle, { color: colorTheme.ink2 }]}>{isZh ? '选择月份' : 'Select month'}</Text>
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
               {months.map((mk) => {
                 const on = mk === month;
@@ -533,7 +527,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     }}
                     style={[styles.monthOption, on && { backgroundColor: theme.accentTint }]}
                   >
-                    <Text style={[styles.monthOptionText, { color: colorTheme.ink }, on && { color: theme.onTint, fontFamily: uiFont(700) }]}>{monthLabel(mk)}</Text>
+                    <Text style={[styles.monthOptionText, { color: colorTheme.ink }, on && { color: theme.onTint, fontFamily: uiFont(700) }]}>
+                      {formatMonthLabel(mk, true)}
+                    </Text>
                     {on && (
                       <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
                         <Path d="M3 8.5l3.2 3.2L13 5" stroke={theme.accent} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />

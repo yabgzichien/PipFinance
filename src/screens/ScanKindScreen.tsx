@@ -11,6 +11,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { Body, BubbleText, Label, PipSays, TopBar } from '../components/ui';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { radius, spacing } from '../theme';
 import type { PickedImage } from './AttachScreen';
 
@@ -31,6 +32,7 @@ export function ScanKindScreen({
 }) {
   const insets = useSafeAreaInsets();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -38,11 +40,11 @@ export function ScanKindScreen({
         contentContainerStyle={{ paddingTop: insets.top + spacing.xs, paddingBottom: insets.bottom + spacing.xl }}
         showsVerticalScrollIndicator={false}
       >
-        <TopBar title="What did you scan?" onBack={onBack} />
+        <TopBar title={isZh ? '您扫描了什么？' : 'What did you scan?'} onBack={onBack} />
 
         <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm }}>
           <PipSays expr="curious">
-            <BubbleText>Got it. Which one is this? I read the two differently.</BubbleText>
+            <BubbleText>{isZh ? '收到！这是哪种单据？两者的识别方式不同。' : 'Got it. Which one is this? I read the two differently.'}</BubbleText>
           </PipSays>
         </View>
 
@@ -57,8 +59,8 @@ export function ScanKindScreen({
         <View style={styles.group}>
           <KindButton
             icon="receipt"
-            title="A receipt"
-            sub="One purchase. I'll read every line item, and you can split it with friends."
+            title={isZh ? '消费小票 / 收据' : 'A receipt'}
+            sub={isZh ? '单笔消费。我会识别每一项明细，您也可以与朋友分摊。' : "One purchase. I'll read every line item, and you can split it with friends."}
             onPress={onReceipt}
           />
         </View>
@@ -66,8 +68,8 @@ export function ScanKindScreen({
         <View style={styles.group}>
           <KindButton
             icon="scan"
-            title="Transaction history"
-            sub="A list of transactions from an e-wallet or bank app. I'll pull them all out."
+            title={isZh ? '对账单 / 交易明细' : 'Transaction history'}
+            sub={isZh ? '电子钱包或银行应用的交易记录列表。我会提取所有明细。' : "A list of transactions from an e-wallet or bank app. I'll pull them all out."}
             onPress={onHistory}
           />
         </View>

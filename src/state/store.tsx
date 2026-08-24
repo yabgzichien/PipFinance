@@ -4,7 +4,6 @@ import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import { getMemoryMap, upsertMemory } from '../db/memoryRepo';
 import {
   addTransactions,
-  deleteTransaction,
   deleteTransactions,
   listTransactions,
   updateTransactionAmount,
@@ -27,6 +26,8 @@ import {
   addAccount as dbAddAccount,
   addBalanceEntry as dbAddBalanceEntry,
   addHolding as dbAddHolding,
+  adjustHoldingCost as dbAdjustHoldingCost,
+  adjustHoldingQuantity as dbAdjustHoldingQuantity,
   deleteAccount as dbDeleteAccount,
   getPriceCache,
   listAccounts,
@@ -59,12 +60,15 @@ import { setHapticsEnabled } from '../lib/haptics';
 import { setSoundEnabled as applySoundEnabled } from '../lib/sound';
 import { isMotionSetting, type MotionSetting } from '../theme/motion';
 import {
+  compute7DayDots,
+  computeStreak,
   computeStreakPaused,
   computeStreakWithFreeze,
   computeWeekRing,
   ensureMonthlyFreeze,
   isStreakGraduated,
   lastActiveDay,
+  localDayNumber,
   streakStartDay,
   NO_STREAK_FREEZE,
   type StreakFreezeState,
@@ -78,6 +82,7 @@ import {
   ensureOccurrences as dbEnsureOccurrences,
   listCommitments as dbListCommitments,
   listOccurrences as dbListOccurrences,
+  listOccurrencesByTxnIds,
   insertOccurrence as dbInsertOccurrence,
   markOccurrencePaid as dbMarkOccurrencePaid,
   resetOccurrence as dbResetOccurrence,
@@ -160,6 +165,22 @@ import {
   type TxnSource,
   type TxnType,
 } from '../lib/types';
+
+/**
+ * Everything `applyOccurrenceReversal` needs to undo a commitment tick, with every currency
+ * conversion already done. Splitting the planning from the applying is what lets a batch
+ * resolve all of its conversions before writing any of them, so a missing rate on the third
+ * row cannot leave the first two half-reversed.
+ */
+interface OccurrenceReversal {
+  fromAccountId: string | null;
+  fromNative: number;
+  holdingId: string | null;
+  unitsAdded: number | null;
+  costMyr: number;
+  cashTargetId: string | null;
+  cashTargetNative: number;
+}
 
 function todayKey(): string {
   const d = new Date();
@@ -570,8 +591,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     listReliefTags(yaForDate(todayKey())).then(setReliefTags);
   }, []);
 
+  // The home-screen widget shows a streak count and seven dots and nothing else. Fixing a typo
+  // in a remark changes neither, so the payload is compared before anything crosses the native
+  // bridge — otherwise every ledger edit re-rendered and re-pushed the widget for no visible
+  // difference.
+  const lastWidgetPayload = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
+    const now = new Date();
+    const payload = `${computeStreak(transactions, now)}|${compute7DayDots(transactions, now)
+      .map((d) => (d ? '1' : '0'))
+      .join('')}`;
+    if (lastWidgetPayload.current === payload) return;
+    lastWidgetPayload.current = payload;
     syncStreakWidget(transactions).catch(() => {});
   }, [ready, transactions]);
 
@@ -830,38 +862,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       txn: Transaction,
       edits: { amount: number; type: TxnType; categoryId: string | null; remark?: string | null }
     ) => {
-      await updateTransactionFields(txn.id, edits.amount, edits.type, edits.categoryId, edits.remark);
+      const patch = await updateTransactionFields(txn.id, edits.amount, edits.type, edits.categoryId, edits.remark);
       // Correcting a category re-teaches Pip for that merchant (expense or income), only if
       // merchant is non-empty. A transfer has no category, so there is nothing to teach.
-      if (txn.merchantKey && edits.categoryId) {
-        await upsertMemory(txn.merchantKey, edits.categoryId);
-      }
-      const [txns, mem] = await Promise.all([listTransactions(), getMemoryMap()]);
-      setTransactions(txns);
-      setMemory(mem);
+      const learnedKey = txn.merchantKey && edits.categoryId ? txn.merchantKey : null;
+      if (learnedKey) await upsertMemory(learnedKey, edits.categoryId!);
+      // Patch the one row, rather than re-reading (and re-mapping) the whole ledger to learn
+      // what this edit just did. `patch` carries the re-derived amount/nativeAmount straight
+      // from the write, so the in-memory row matches the SQLite row column for column.
+      setTransactions((prev) => prev.map((t) => (t.id === txn.id ? { ...t, ...patch } : t)));
+      if (learnedKey) setMemory((prev) => ({ ...prev, [learnedKey]: edits.categoryId! }));
     },
     []
   );
-
-  // Deleting a transaction takes its split with it: a receivable with no bill behind it is a
-  // claim on nothing, and leaving the shares would keep inflating net worth forever. Its relief
-  // tags go the same way, for the same reason: a tag on a deleted transaction would keep
-  // counting toward a year's claimed total with nothing left to point at.
-  const removeTransaction = useCallback(async (id: string) => {
-    await deleteTransaction(id);
-    await dbDeleteSplitsForTxns([id]);
-    await dbDeleteReliefTagsForTxns([id]);
-    setTransactions(await listTransactions());
-    await refreshSplitState();
-  }, [refreshSplitState]);
-
-  const removeMany = useCallback(async (ids: string[]) => {
-    await deleteTransactions(ids);
-    await dbDeleteSplitsForTxns(ids);
-    await dbDeleteReliefTagsForTxns(ids);
-    setTransactions(await listTransactions());
-    await refreshSplitState();
-  }, [refreshSplitState]);
 
   const addPerson = useCallback(
     async (name: string) => {
@@ -884,9 +897,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
    */
   const splitTransaction = useCallback(
     async (txn: Transaction, draft: SplitDraft) => {
-      await updateTransactionAmount(txn.id, draft.ownShare);
+      const patch = await updateTransactionAmount(txn.id, draft.ownShare);
       await dbCreateSplit(txn.id, draft);
-      setTransactions(await listTransactions());
+      setTransactions((prev) => prev.map((t) => (t.id === txn.id ? { ...t, ...patch } : t)));
       await refreshSplitState();
     },
     [refreshSplitState]
@@ -897,9 +910,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     async (txn: Transaction) => {
       const split = splits.find((s) => s.txnId === txn.id);
       if (!split) return;
-      await updateTransactionAmount(txn.id, split.gross);
+      const patch = await updateTransactionAmount(txn.id, split.gross);
       await dbDeleteSplitsForTxns([txn.id]);
-      setTransactions(await listTransactions());
+      setTransactions((prev) => prev.map((t) => (t.id === txn.id ? { ...t, ...patch } : t)));
       await refreshSplitState();
     },
     [splits, refreshSplitState]
@@ -991,7 +1004,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const pauseStreak = useCallback(async () => {
-    const today = Math.floor(Date.now() / 86_400_000);
+    // Local, matching every other day number the streak reasons in (see `localDayNumber`):
+    // a UTC one would freeze the streak on yesterday for anyone pausing in the small hours.
+    const today = localDayNumber(new Date());
     await setMeta(STREAK_PAUSED_SINCE_KEY, String(today));
     setStreakPausedSinceDayState(today);
   }, []);
@@ -1012,11 +1027,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await refreshAll();
   }, [refreshAll]);
 
+  // `refreshAll` matters as much here as in `resetAllData` above, and is easy to miss because
+  // the wizard that follows makes it *look* like a fresh start. Without it SQLite is genuinely
+  // wiped while every array in this provider still holds the pre-reset data, so the user
+  // finishes onboarding and lands on a Dashboard rendering transactions, balances, splits and
+  // commitments that no longer exist — and deleting one of those ghosts runs a DELETE against
+  // an id that isn't there. Nothing else reloads it: App.tsx's "active" listener only syncs the
+  // streak widget. Only force-quitting the app used to clear it.
   const resetToOnboarding = useCallback(async () => {
     await dbResetAllData();
     await setMeta(ONBOARDING_KEY, 'false');
+    await refreshAll();
     setOnboardingComplete(false);
-  }, []);
+  }, [refreshAll]);
 
   const addAccount = useCallback(
     async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string) => {
@@ -1320,6 +1343,120 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   /**
+   * Work out how to undo the money a commitment tick moved: the deduction from the funding
+   * account, and the cost basis (and units) it added to an investment target. Throws if a rate
+   * it needs is missing; writes nothing.
+   *
+   * Shared, because unticking on the Commitments screen and deleting the tick's ledger row from
+   * the Activity list are the same event reached two ways, and only the first used to reverse
+   * anything.
+   */
+  const planOccurrenceReversal = useCallback(
+    async (occurrence: CommitmentOccurrence): Promise<OccurrenceReversal | null> => {
+      const commitment = commitments.find((c) => c.id === occurrence.commitmentId);
+      if (!commitment) return null;
+
+      const paidAmount = occurrence.paidAmount ?? occurrence.amount;
+      // Same MYR-to-native conversion as payCommitment, for the same reason.
+      const rates = ratesFromCache(await listFxRates());
+      const fxRate =
+        occurrence.fxRate ?? (commitment.currency === BASE_CURRENCY ? null : rateFor(rates, commitment.currency));
+      const myrPaidAmount = fxRate != null ? occurrenceMyr(paidAmount, fxRate) : paidAmount;
+      const investTarget =
+        commitment.kind === 'investment' && commitment.toAccountId
+          ? accounts.find((a) => a.id === commitment.toAccountId)
+          : undefined;
+      const holding = investTarget && isHolding(investTarget) ? investTarget : null;
+      const cashTarget = investTarget && !isHolding(investTarget) ? investTarget : null;
+
+      return {
+        fromAccountId: commitment.fromAccountId ?? null,
+        fromNative: commitment.fromAccountId
+          ? nativeForAccount(myrPaidAmount, commitment.fromAccountId, rates)
+          : 0,
+        holdingId: holding?.id ?? null,
+        unitsAdded: occurrence.unitsAdded,
+        costMyr: myrPaidAmount,
+        cashTargetId: cashTarget?.id ?? null,
+        cashTargetNative: cashTarget ? nativeForAccount(myrPaidAmount, cashTarget.id, rates) : 0,
+      };
+    },
+    [commitments, accounts, nativeForAccount]
+  );
+
+  const applyOccurrenceReversal = useCallback(
+    async (plan: OccurrenceReversal) => {
+      const today = todayKey();
+      if (plan.fromAccountId) {
+        await recordBalanceLink(plan.fromAccountId, plan.fromNative, 'add', today);
+      }
+      if (plan.holdingId) {
+        // Subtracted in SQL and clamped at zero (see `adjustHoldingQuantity`). Reading the
+        // holding out of `accounts` and writing back an absolute figure used to send a
+        // brand-new holding NEGATIVE on the first untick, and net worth with it.
+        if (plan.unitsAdded != null) await dbAdjustHoldingQuantity(plan.holdingId, -plan.unitsAdded);
+        await dbAdjustHoldingCost(plan.holdingId, -plan.costMyr);
+        setAccounts(await listAccounts());
+      } else if (plan.cashTargetId) {
+        await recordBalanceLink(plan.cashTargetId, plan.cashTargetNative, 'subtract', today);
+      }
+    },
+    [recordBalanceLink]
+  );
+
+  // Deleting a transaction takes its split with it: a receivable with no bill behind it is a
+  // claim on nothing, and leaving the shares would keep inflating net worth forever. Its relief
+  // tags go the same way, for the same reason: a tag on a deleted transaction would keep
+  // counting toward a year's claimed total with nothing left to point at.
+  //
+  // A commitment occurrence goes the same way, and this is the whole reason these two live
+  // down here rather than up with the other transaction actions: a row created by ticking a
+  // bill paid is the ledger half of that tick, so deleting it has to undo the tick. It used to
+  // leave the Commitments screen showing the month ticked and paid, linked to a transaction
+  // that no longer existed, with the account deduction still applied — and unticking from
+  // there posted a compensating entry for a row it could no longer find. The occurrences are
+  // read from SQLite rather than from `commitmentOccurrences`, so a state array that has not
+  // caught up cannot cause one to be missed.
+  const removeTransactions = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      const occurrences = await listOccurrencesByTxnIds(ids);
+
+      // Planned for the WHOLE batch before any of it is applied, so a missing rate on the
+      // third row cannot leave the first two half-reversed. Only a tick that CREATED its row
+      // moved money; one that merely matched a transaction the user had already logged never
+      // did, so there is nothing of ours to reverse — but its link is still cleared below.
+      let plans: OccurrenceReversal[];
+      try {
+        const planned = await Promise.all(
+          occurrences.map((occ) => (occ.txnCreated ? planOccurrenceReversal(occ) : Promise.resolve(null)))
+        );
+        plans = planned.filter((p): p is OccurrenceReversal => p !== null);
+      } catch (e) {
+        notify("Couldn't delete this", e instanceof Error ? e.message : 'A currency conversion failed.');
+        return;
+      }
+      for (const plan of plans) await applyOccurrenceReversal(plan);
+
+      await deleteTransactions(ids);
+      await dbDeleteSplitsForTxns(ids);
+      await dbDeleteReliefTagsForTxns(ids);
+      for (const occ of occurrences) await dbResetOccurrence(occ.id);
+
+      // Exactly these ids left the table and nothing above writes a transaction, so dropping
+      // them from the array in hand is the same answer as re-reading every remaining row.
+      const removed = new Set(ids);
+      setTransactions((prev) => prev.filter((t) => !removed.has(t.id)));
+      await refreshSplitState();
+      if (occurrences.length > 0) await refreshCommitmentState();
+    },
+    [planOccurrenceReversal, applyOccurrenceReversal, refreshSplitState, refreshCommitmentState]
+  );
+
+  const removeTransaction = useCallback((id: string) => removeTransactions([id]), [removeTransactions]);
+  const removeMany = useCallback((ids: string[]) => removeTransactions(ids), [removeTransactions]);
+
+  /**
    * Record money received against a share.
    *
    * No income transaction is written, on purpose. Being paid back is not earnings, it is a
@@ -1350,14 +1487,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           ? receivableMyr(amount, split.fxRate)
           : amount;
 
-      // Resolved BEFORE dbRecordPayment below: a missing rate on the destination account must
-      // fail here, with nothing recorded, rather than marking the share settled with no
-      // matching balance movement.
-      let nativeAmount: number | null = null;
+      // The rate is resolved BEFORE dbRecordPayment below: a missing one must fail here, with
+      // nothing recorded, rather than marking the share settled with no matching balance
+      // movement. The conversion is repeated afterwards against `result.applied` — this first
+      // pass exists only to make the failure land before anything is written.
+      let rates: Record<string, number> | null = null;
       if (accountId) {
         try {
-          const rates = ratesFromCache(await listFxRates());
-          nativeAmount = nativeForAccount(myrAmount, accountId, rates);
+          rates = ratesFromCache(await listFxRates());
+          nativeForAccount(myrAmount, accountId, rates);
         } catch (e) {
           notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
           return;
@@ -1365,8 +1503,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
       const result = await dbRecordPayment(shareId, amount, paidOn, evidence, matchedMerchant, accountId);
       if (!result) return;
-      if (accountId && nativeAmount != null) {
-        await recordBalanceLink(accountId, nativeAmount, 'add', paidOn);
+      // Credit what the payment ACTUALLY moved, not what was asked for. `recordPayment` caps
+      // at the outstanding balance, so a second "Mark settled" on an already-square share (the
+      // button has no in-flight guard, and a tap that doesn't feel like it registered invites
+      // another) applies nothing and writes no payment row. Crediting `amount` regardless put
+      // the money into the account twice, leaving cash and net worth overstated with nothing
+      // in the payment history to account for it.
+      if (accountId && rates && result.applied > 0) {
+        const appliedMyr =
+          split && split.currency !== BASE_CURRENCY && split.fxRate != null
+            ? receivableMyr(result.applied, split.fxRate)
+            : result.applied;
+        await recordBalanceLink(accountId, nativeForAccount(appliedMyr, accountId, rates), 'add', paidOn);
       }
       await refreshSplitState();
     },
@@ -1466,12 +1614,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           const quote = prices[investTarget.symbol as string];
           // A holding always moves cost basis; quantity only moves when a price is cached —
           // offline or a brand-new symbol resolves its units later, in `refreshPrices` above.
+          //
+          // Both movements go through the `adjust*` helpers, which do the addition in SQL.
+          // Computing `investTarget.quantity + units` here and writing the result back read
+          // from the `accounts` array this closure captured, and nothing below reloaded it:
+          // ticking two due months in a row without leaving the Commitments screen had the
+          // second tick start from the same pre-tick figure and quietly erase the first
+          // month's contribution, with both occurrences still showing a green tick.
           if (quote) {
             unitsAdded = Math.round((myrPaidAmount / quote.priceMYR) * 1e8) / 1e8;
             priceMYR = quote.priceMYR;
-            await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) + unitsAdded);
+            await dbAdjustHoldingQuantity(investTarget.id, unitsAdded);
           }
-          await dbUpdateHoldingCost(investTarget.id, (investTarget.cost ?? 0) + myrPaidAmount);
+          await dbAdjustHoldingCost(investTarget.id, myrPaidAmount);
+          setAccounts(await listAccounts());
         } else if (targetNative != null) {
           // Cost-only target (ASB, EPF, unit trusts, gold savings): no ticker to size units
           // against, so the account's balance IS the invested-amount tracker.
@@ -1503,6 +1659,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
    * it and post a compensating balance entry on every account the tick moved; if the tick only
    * linked a transaction the user already had, leave that row and its history untouched — there
    * is nothing of this feature's making to undo.
+   *
+   * The reversal itself lives in `removeTransactions` now, not here, because deleting the tick's
+   * ledger row from the Activity list has to do exactly the same thing and used to do none of
+   * it. So the created-row case simply deletes the row and lets that path run: it reverses the
+   * money and resets this occurrence in the same pass.
    */
   const unpayCommitment = useCallback(
     async (occurrenceId: string) => {
@@ -1511,51 +1672,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (!occurrence || !commitment) return;
       if (occurrence.status !== 'paid' && occurrence.status !== 'late') return;
 
-      if (occurrence.txnCreated) {
-        const paidAmount = occurrence.paidAmount ?? occurrence.amount;
-        const today = todayKey();
-        // Same MYR-to-native conversion as payCommitment above, for the same reason.
-        const rates = ratesFromCache(await listFxRates());
-        const fxRate =
-          occurrence.fxRate ??
-          (commitment.currency === BASE_CURRENCY ? null : rateFor(rates, commitment.currency));
-        const myrPaidAmount = fxRate != null ? occurrenceMyr(paidAmount, fxRate) : paidAmount;
-        const investTarget =
-          commitment.kind === 'investment' && commitment.toAccountId
-            ? accounts.find((a) => a.id === commitment.toAccountId)
-            : undefined;
+      if (occurrence.txnCreated && occurrence.txnId) {
+        await removeTransactions([occurrence.txnId]);
+        return;
+      }
 
-        // Resolved BEFORE removeTransaction below: throwing after the ledger row is already
-        // gone would leave the occurrence stuck "paid" with a txnId that no longer resolves.
-        let fromNative: number | null = null;
-        let targetNative: number | null = null;
+      // A tick that created a row but has no id to delete shouldn't happen (`payCommitment`
+      // always records both), but the money still moved, so reverse it before resetting.
+      if (occurrence.txnCreated) {
         try {
-          if (commitment.fromAccountId) {
-            fromNative = nativeForAccount(myrPaidAmount, commitment.fromAccountId, rates);
-          }
-          if (investTarget && !isHolding(investTarget)) {
-            targetNative = nativeForAccount(myrPaidAmount, investTarget.id, rates);
-          }
+          const plan = await planOccurrenceReversal(occurrence);
+          if (plan) await applyOccurrenceReversal(plan);
         } catch (e) {
           notify("Couldn't undo this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
           return;
-        }
-
-        if (occurrence.txnId) await removeTransaction(occurrence.txnId);
-
-        if (commitment.fromAccountId && fromNative != null) {
-          await recordBalanceLink(commitment.fromAccountId, fromNative, 'add', today);
-        }
-
-        if (investTarget) {
-          if (isHolding(investTarget)) {
-            if (occurrence.unitsAdded != null) {
-              await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) - occurrence.unitsAdded);
-            }
-            await dbUpdateHoldingCost(investTarget.id, Math.max(0, (investTarget.cost ?? 0) - myrPaidAmount));
-          } else if (targetNative != null) {
-            await recordBalanceLink(investTarget.id, targetNative, 'subtract', today);
-          }
         }
       }
 
@@ -1563,7 +1693,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setTransactions(await listTransactions());
       await refreshCommitmentState();
     },
-    [commitmentOccurrences, commitments, accounts, removeTransaction, recordBalanceLink, refreshCommitmentState, nativeForAccount]
+    [
+      commitmentOccurrences,
+      commitments,
+      removeTransactions,
+      planOccurrenceReversal,
+      applyOccurrenceReversal,
+      refreshCommitmentState,
+    ]
   );
 
   /** For a bill that genuinely did not apply this month — no ledger effect either way. */
@@ -1603,14 +1740,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const coverage = useMemo(() => computeCoverage(transactions), [transactions]);
 
   const taxRequestableCount = useMemo(() => {
+    if (reliefTags.length === 0) return 0;
     const today = new Date();
     const ya = yaForDate(today.toISOString().slice(0, 10));
     const schedule = scheduleForYA(ya);
     if (!schedule) return 0;
+    // Indexed once. A linear `transactions.find` per tag made this a tags × ledger scan that
+    // re-ran on every ledger change, which is the wrong shape for a Settings row badge.
+    const txnById = new Map(transactions.map((t) => [t.id, t]));
+    const lineByCode = new Map(schedule.lines.map((l) => [l.code, l]));
     let count = 0;
     for (const t of reliefTags) {
-      const line = schedule.lines.find((l) => l.code === t.code);
-      const txn = transactions.find((x) => x.id === t.txnId);
+      const line = lineByCode.get(t.code);
+      const txn = txnById.get(t.txnId);
       if (!line || !txn) continue;
       if (isRequestable(evidenceState(t, txn, line), txn, today)) count++;
     }

@@ -21,6 +21,7 @@ import type { Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 
 export function ManualEntryScreen({
@@ -51,6 +52,7 @@ export function ManualEntryScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, formatFullDate, isZh } = useLanguage();
   const { accounts, recordBalanceLink, ensureDefaultAccount } = useAppData();
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
   const [amountText, setAmountText] = useState(initialAmount ? initialAmount.toFixed(2) : '');
@@ -183,7 +185,7 @@ export function ManualEntryScreen({
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={title ?? (startSplitting ? 'Split a bill' : 'Add manually')} onBack={onBack} />
+        <TopBar title={title ?? (startSplitting ? (isZh ? '分摊账单' : 'Split a bill') : (isZh ? '手动记账' : 'Add manually'))} onBack={onBack} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
@@ -200,13 +202,15 @@ export function ManualEntryScreen({
                 onPress={() => switchType(k)}
                 style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: activeBg, borderColor: activeBorder }]}
               >
-                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: activeColor }]}>{k === 'expense' ? 'Expense' : 'Income'}</Text>
+                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: activeColor }]}>
+                  {k === 'expense' ? t('expense') : t('income')}
+                </Text>
               </Pressable>
             );
           })}
         </View>
 
-        <Eyebrow style={{ marginBottom: 8 }}>Amount</Eyebrow>
+        <Eyebrow style={{ marginBottom: 8 }}>{t('amount')}</Eyebrow>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           {isMultiCurrency(activeCurrencies) ? (
             <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
@@ -237,16 +241,16 @@ export function ManualEntryScreen({
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                  {activeSplit ? `Your share: ${fmtMoney(activeSplit.ownShare, currency)}` : 'Split with friends'}
+                  {activeSplit ? (isZh ? `自付部分：${fmtMoney(activeSplit.ownShare, currency)}` : `Your share: ${fmtMoney(activeSplit.ownShare, currency)}`) : (isZh ? '分摊账单' : 'Split with friends')}
                 </Text>
                 <InfoButton entry="split_bill" />
               </View>
               <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {activeSplit
-                  ? `${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)} owed back to you`
+                  ? (isZh ? `待收回 ${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)}` : `${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)} owed back to you`)
                   : amount > 0
-                    ? 'Paid for the table? Record only your share'
-                    : 'Enter the bill amount first'}
+                    ? (isZh ? '全桌买单？只记录您的自付部分' : 'Paid for the table? Record only your share')
+                    : (isZh ? '请先输入账单总额' : 'Enter the bill amount first')}
               </Text>
             </View>
             <Icon name="chevronRight" size={17} color={colorTheme.ink3} />
@@ -257,9 +261,9 @@ export function ManualEntryScreen({
           <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} required />
         </View>
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Date</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
         <TextInput
-          value={dateFocused ? dateText : validDate ? fullDate(validDate) : dateText}
+          value={dateFocused ? dateText : validDate ? formatFullDate(validDate) : dateText}
           onChangeText={setDateText}
           onFocus={() => setDateFocused(true)}
           onBlur={() => setDateFocused(false)}
@@ -272,20 +276,22 @@ export function ManualEntryScreen({
         />
         {!validDate && (
           <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
-            Enter a valid date (YYYY-MM-DD)
+            {isZh ? '请输入有效日期 (YYYY-MM-DD)' : 'Enter a valid date (YYYY-MM-DD)'}
           </Text>
         )}
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{type === 'income' ? 'Source (optional)' : 'Merchant (optional)'}</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>
+          {type === 'income' ? (isZh ? '收入来源（选填）' : 'Source (optional)') : (isZh ? '商家名称（选填）' : 'Merchant (optional)')}
+        </Eyebrow>
         <TextInput
           value={merchant}
           onChangeText={setMerchant}
-          placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Jaya Grocer'}
+          placeholder={type === 'income' ? (isZh ? '例如：工资' : 'e.g. Salary') : (isZh ? '例如：Jaya Grocer' : 'e.g. Jaya Grocer')}
           placeholderTextColor={colorTheme.ink3}
           style={[styles.textInputSm, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
         />
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>Category</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{t('category')}</Eyebrow>
         <View style={styles.grid}>
           {grid.map((c) => (
             <View key={c.id} style={styles.gridCell}>
@@ -295,16 +301,16 @@ export function ManualEntryScreen({
           <View style={styles.gridCell}>
             <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
               <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.addChipText, { color: theme.accent }]}>New category</Text>
+              <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
             </Pressable>
           </View>
         </View>
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Remark (optional)</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Eyebrow>
         <TextInput
           value={remark}
           onChangeText={setRemark}
-          placeholder="e.g. Lunch with a supplier"
+          placeholder={isZh ? '例如：和同事吃午餐' : 'e.g. Lunch with a supplier'}
           placeholderTextColor={colorTheme.ink3}
           style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
           multiline
@@ -314,7 +320,9 @@ export function ManualEntryScreen({
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
         <PrimaryButton onPress={save} disabled={!canSave}>
           <Icon name="check" size={19} color="#fff" stroke={2.4} />
-          <BtnLabel>Add {type === 'income' ? 'income' : 'expense'}</BtnLabel>
+          <BtnLabel>
+            {type === 'income' ? (isZh ? '添加收入' : 'Add income') : (isZh ? '添加支出' : 'Add expense')}
+          </BtnLabel>
         </PrimaryButton>
       </View>
 

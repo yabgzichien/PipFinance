@@ -12,12 +12,14 @@ import { SUPPORTED_CURRENCIES } from '../lib/currencies';
 import { notify } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { colors, radius, uiFont } from '../theme';
 
 export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [active, setActive] = useState<string[] | null>(null);
   const [entry, setEntry] = useState<string>(BASE_CURRENCY);
   // The one row whose fetch/write is in flight  disabled while pending so a second tap
@@ -41,7 +43,10 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
       if (on) {
         const ok = await activateCurrency(code);
         if (!ok) {
-          notify(`Couldn't fetch the ${code} rate.`, "Try again when you're online.");
+          notify(
+            isZh ? `无法获取 ${code} 汇率` : `Couldn't fetch the ${code} rate.`,
+            isZh ? '请检查网络连接后重试。' : "Try again when you're online."
+          );
           return;
         }
       } else {
@@ -70,10 +75,10 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Currencies" onBack={onBack} />
+        <TopBar title={isZh ? '货币设置' : 'Currencies'} onBack={onBack} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
-        <Eyebrow style={{ marginBottom: 10 }}>Active currencies</Eyebrow>
+        <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '启用货币' : 'Active currencies'}</Eyebrow>
         {SUPPORTED_CURRENCIES.map((c, i) => {
           const isBase = c.code === BASE_CURRENCY;
           const on = isBase || active.includes(c.code);
@@ -89,7 +94,7 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
                 </Text>
               </View>
               {isBase ? (
-                <Text style={[styles.baseLabel, { color: colorTheme.ink3 }]}>Base</Text>
+                <Text style={[styles.baseLabel, { color: colorTheme.ink3 }]}>{isZh ? '本位币' : 'Base'}</Text>
               ) : busy ? (
                 <ActivityIndicator color={theme.accent} size="small" />
               ) : (
@@ -110,7 +115,7 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
 
         {isMultiCurrency(active) && (
           <>
-            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Enter new expenses in</Eyebrow>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{isZh ? '记账默认货币' : 'Enter new expenses in'}</Eyebrow>
             <View style={styles.entryWrap}>
               {active.map((code) => {
                 const on = entry === code;

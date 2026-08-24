@@ -27,11 +27,8 @@ export const EXPENSE_CATEGORIES: SeedCategory[] = [
  * those three revenue lines very differently.
  */
 export const INCOME_CATEGORIES: SeedCategory[] = [
-  { id: 'employment-income', label: 'Employment Income', icon: 'wallet', hue: 152, kind: 'income' },
-  { id: 'business-income', label: 'Business & Trade Revenue', icon: 'store', hue: 172, kind: 'income' },
-  { id: 'gig-income', label: 'Gig & Commission Income', icon: 'car', hue: 132, kind: 'income' },
-  { id: 'transfers-in', label: 'Transfers Received', icon: 'gift', hue: 120, kind: 'income' },
-  { id: 'investment-income', label: 'Investment Income', icon: 'trending', hue: 250, kind: 'income' },
+  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 152, kind: 'income' },
+  { id: 'allowance', label: 'Allowance', icon: 'gift', hue: 120, kind: 'income' },
   { id: 'other-income', label: 'Other Income', icon: 'dots', hue: 200, kind: 'income' },
 ];
 
@@ -86,11 +83,15 @@ export const CATEGORY_ID_REMAP: Record<string, string> = {
   recreation: 'entertainment',
   'debt-service': 'other',
   'car-instalment': 'other',
-  // income
-  income: 'employment-income',
-  bonus: 'employment-income',
-  allowance: 'transfers-in',
-  dividend: 'investment-income',
-  interest: 'investment-income',
+  // income (retuned to salary, allowance, other-income)
+  'employment-income': 'salary',
+  'business-income': 'other-income',
+  'gig-income': 'salary',
+  'transfers-in': 'allowance',
+  'investment-income': 'other-income',
+  income: 'salary',
+  bonus: 'salary',
+  dividend: 'other-income',
+  interest: 'other-income',
   'borrowers-return': 'other-income',
 };

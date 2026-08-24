@@ -13,12 +13,28 @@ export interface StreakInput {
   source?: string;
 }
 
-/** UTC day number (days since epoch) of an ISO date/datetime, or null. */
+/** UTC day number (days since epoch) of an ISO date/datetime, or null. A bare 'YYYY-MM-DD'
+ *  parses as UTC midnight, so a row's `date` resolves to the same day number everywhere. */
 function utcDayNumber(iso?: string | null): number | null {
   if (!iso) return null;
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return null;
   return Math.floor(t / 86_400_000);
+}
+
+/**
+ * The day number of the LOCAL calendar day `at` falls on.
+ *
+ * Every cutoff in this file has to be framed this way, not as `Date.now() / 86_400_000`.
+ * A row's `date` is written by `todayKey()` from local accessors, and `utcDayNumber` reads
+ * that key back as a plain calendar day — so in any timezone ahead of UTC there is a window
+ * each night, from local midnight until the UTC day rolls over, where a freshly saved row
+ * carries tomorrow's UTC day number. Against a UTC cutoff it looks future-dated and gets
+ * dropped by `activeDays`, so logging at 00:30 in Malaysia contributed nothing to the
+ * streak while the week ring (which reasons in local dates) lit the same day up.
+ */
+export function localDayNumber(at: Date): number {
+  return Math.floor(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / 86_400_000);
 }
 
 /**
@@ -40,7 +56,7 @@ function activeDays(txns: StreakInput[], today: number): number[] {
  * ledger", which is what the reminder scheduler needs to decide whether to nudge.
  */
 export function lastActiveDay(txns: StreakInput[], now: Date = new Date()): number | null {
-  const today = Math.floor(now.getTime() / 86_400_000);
+  const today = localDayNumber(now);
   const sorted = activeDays(txns, today);
   return sorted.length === 0 ? null : sorted[0];
 }
@@ -70,7 +86,7 @@ function runLength(sortedDaysDesc: number[], maxGap: number): number {
  */
 export function computeStreak(txns: StreakInput[], now: Date = new Date(), graceDays = 1): number {
   const maxGap = graceDays + 1;
-  const today = Math.floor(now.getTime() / 86_400_000);
+  const today = localDayNumber(now);
 
   const last = lastActiveDay(txns, now);
   if (last === null) return 0;
@@ -129,7 +145,7 @@ export function computeStreakWithFreeze(
   graceDays = 1
 ): { streak: number; freezeSpent: boolean } {
   const maxGap = graceDays + 1;
-  const today = Math.floor(now.getTime() / 86_400_000);
+  const today = localDayNumber(now);
 
   const last = lastActiveDay(txns, now);
   if (last === null) return { streak: 0, freezeSpent: false };
@@ -159,7 +175,7 @@ export function isStreakGraduated(streak: number): boolean {
  *  isn't shown, only the month, so a mid-month graduation doesn't read as falsely precise. */
 export function streakStartDay(txns: StreakInput[], now: Date = new Date(), graceDays = 1): number | null {
   const maxGap = graceDays + 1;
-  const today = Math.floor(now.getTime() / 86_400_000);
+  const today = localDayNumber(now);
 
   const last = lastActiveDay(txns, now);
   if (last === null || today - last > maxGap) return null;
@@ -193,9 +209,11 @@ export function computeStreakPaused(
   graceDays = 1
 ): number {
   if (pausedSinceDay === null) return computeStreak(txns, now, graceDays);
-  // Noon on the pause day, so the DST edge (a 23 or 25-hour local day) can't shift which
-  // calendar day this resolves to.
-  const frozenNow = new Date(pausedSinceDay * 86_400_000 + 43_200_000);
+  // LOCAL noon on the pause day, so this round-trips back through `localDayNumber` to exactly
+  // `pausedSinceDay` in every timezone (UTC noon would land on the next calendar day anywhere
+  // past UTC+12), and so the DST edge (a 23 or 25-hour local day) can't shift it either.
+  const anchor = new Date(pausedSinceDay * 86_400_000);
+  const frozenNow = new Date(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate(), 12);
   return computeStreak(txns, frozenNow, graceDays);
 }
 

@@ -13,6 +13,7 @@ import { AGING_DAYS, groupOpenSharesByPerson, type OpenShare, type PersonDebt } 
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { colors, numFont, radius, uiFont } from '../theme';
 
 /**
@@ -25,6 +26,7 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { openShares, accounts, settleShare, writeOffShare } = useAppData();
   const today = useMemo(() => todayISO(), []);
 
@@ -41,9 +43,11 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
 
   const confirmWriteOff = (share: OpenShare) => {
     confirmAction(
-      'Write this off?',
-      `Give up on the ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} ${share.personName} owes you for “${share.merchant}”? It becomes your own expense, dated today.`,
-      'Write off',
+      isZh ? '核销坏账？' : 'Write this off?',
+      isZh
+        ? `确认核销 ${share.personName} 欠您的 “${share.merchant}” 款项 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}？这笔款项将转换为您今天的个人支出。`
+        : `Give up on the ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} ${share.personName} owes you for “${share.merchant}”? It becomes your own expense, dated today.`,
+      isZh ? '核销' : 'Write off',
       () => writeOffShare(share.shareId)
     );
   };
@@ -51,19 +55,25 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Owed to you" onBack={onBack} />
+        <TopBar title={isZh ? '待收应收款' : 'Owed to you'} onBack={onBack} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
         {byPerson.length === 0 ? (
           <>
             <PipSays expr="idle">
-              <BubbleText>Nobody owes you anything right now. Split a bill and I will keep track of it.</BubbleText>
+              <BubbleText>
+                {isZh
+                  ? '目前没人欠您钱。分摊账单后，我会在在此为您追踪款项。'
+                  : 'Nobody owes you anything right now. Split a bill and I will keep track of it.'}
+              </BubbleText>
             </PipSays>
             <Card style={{ padding: 26, alignItems: 'center', marginTop: 14 }}>
-              <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>All square</Text>
+              <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>{isZh ? '账目已结清' : 'All square'}</Text>
               <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-                When you pay for the table, split the bill and only your share counts as spending.
+                {isZh
+                  ? '当您为全桌买单时，分摊账单后只有您自己的那份会计入个人支出。'
+                  : 'When you pay for the table, split the bill and only your share counts as spending.'}
               </Text>
             </Card>
           </>
@@ -72,30 +82,30 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
             {aging.length > 0 && (
               <PipSays expr="curious">
                 <BubbleText>
-                  {aging[0].name} has owed you RM {fmt(aging[0].total)} for {aging[0].oldestDays} days
-                  {aging.length === 2
-                    ? ', and 1 other is overdue too'
-                    : aging.length > 2
-                      ? `, and ${aging.length - 1} others are overdue too`
-                      : ''}
-                  .
+                  {isZh
+                    ? `${aging[0].name} 已欠您 RM ${fmt(aging[0].total)} 达 ${aging[0].oldestDays} 天${aging.length === 2 ? '，另有 1 人也已逾期' : aging.length > 2 ? `，另有 ${aging.length - 1} 人也已逾期` : ''}。`
+                    : `${aging[0].name} has owed you RM ${fmt(aging[0].total)} for ${aging[0].oldestDays} days${aging.length === 2 ? ', and 1 other is overdue too' : aging.length > 2 ? `, and ${aging.length - 1} others are overdue too` : ''}.`}
                 </BubbleText>
               </PipSays>
             )}
 
             <Card style={styles.totalCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Eyebrow>Still owed to you</Eyebrow>
+                <Eyebrow>{isZh ? '待收回款项' : 'Still owed to you'}</Eyebrow>
                 <InfoButton entry="split_bill" />
               </View>
               <Amount value={total} size={30} weight={700} color={theme.accent} />
               <Text style={[styles.totalSub, { color: colorTheme.ink2 }]}>
-                Sitting in Net Worth as an asset, not as spending you never did.
+                {isZh
+                  ? '作为应收款资产计入净资产，而不是您未实际承担的支出。'
+                  : 'Sitting in Net Worth as an asset, not as spending you never did.'}
               </Text>
             </Card>
 
             <Text style={[styles.countLine, { color: colorTheme.ink2 }]}>
-              {byPerson.length} {byPerson.length === 1 ? 'person' : 'people'} · tap to see the bills
+              {isZh
+                ? `${byPerson.length} 位好友 · 点击查看账单`
+                : `${byPerson.length} ${byPerson.length === 1 ? 'person' : 'people'} · tap to see the bills`}
             </Text>
 
             <Card style={{ overflow: 'hidden' }}>
@@ -115,13 +125,14 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                           {p.name}
                         </Text>
                         <Text style={[styles.personSub, { color: colorTheme.ink2 }]}>
-                          {p.shares.length} {p.shares.length === 1 ? 'bill' : 'bills'}
-                          {p.oldestDays > 0 ? ` · oldest ${p.oldestDays}d` : ''}
+                          {isZh
+                            ? `${p.shares.length} 笔账单${p.oldestDays > 0 ? ` · 最长 ${p.oldestDays} 天` : ''}`
+                            : `${p.shares.length} ${p.shares.length === 1 ? 'bill' : 'bills'}${p.oldestDays > 0 ? ` · oldest ${p.oldestDays}d` : ''}`}
                         </Text>
                       </View>
                       {p.oldestDays >= AGING_DAYS && (
                         <View style={[styles.agePill, { backgroundColor: colorTheme.amberSoft }]}>
-                          <Text style={[styles.ageText, { color: colorTheme.amber }]}>Overdue</Text>
+                          <Text style={[styles.ageText, { color: colorTheme.amber }]}>{isZh ? '已逾期' : 'Overdue'}</Text>
                         </View>
                       )}
                       <Amount value={p.total} size={15} weight={700} color={theme.accent} />
@@ -138,12 +149,14 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                               {share.merchant}
                             </Text>
                             <Text style={[styles.shareSub, { color: colorTheme.ink2 }]}>
-                              {shortDate(share.billDate)} · {fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding
+                              {isZh
+                                ? `${shortDate(share.billDate)} · 待还 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}`
+                                : `${shortDate(share.billDate)} · ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding`}
                             </Text>
                           </View>
                           <Pressable onPress={() => setSettling(share)} style={[styles.settleBtn, { backgroundColor: theme.accent }]} hitSlop={4}>
                             <Icon name="check" size={14} color={colors.onAccent} stroke={2.4} />
-                            <Text style={styles.settleText}>Settle</Text>
+                            <Text style={styles.settleText}>{isZh ? '结清' : 'Settle'}</Text>
                           </Pressable>
                           <Pressable onPress={() => confirmWriteOff(share)} hitSlop={8} accessibilityLabel="Write off">
                             <Icon name="trash" size={16} color={colorTheme.ink3} />
@@ -156,8 +169,9 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
             </Card>
 
             <Text style={[styles.footnote, { color: colorTheme.ink3 }]}>
-              When they pay you back through your bank, scan it as usual and Pip will offer to match it
-              against the right debt. Settling here is for cash.
+              {isZh
+                ? '当对方通过银行转账还款给您时，正常扫码记账即可，Pip 会提示将其与应收账款匹配。在此处结清通常用于现金还款。'
+                : 'When they pay you back through your bank, scan it as usual and Pip will offer to match it against the right debt. Settling here is for cash.'}
             </Text>
           </>
         )}
@@ -195,20 +209,21 @@ function SettleSheet({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  // The receivable itself is never a destination: paying into it would be settling a debt with
-  // the debt. It is also derived, so anything written there is overwritten on the next reconcile.
+  const { isZh } = useLanguage();
   const assets = useMemo(
     () => accounts.filter((a) => !a.archived && a.kind === 'asset' && a.cls !== RECEIVABLE_CLS),
     [accounts]
   );
   const [amountText, setAmountText] = useState('');
   const [acct, setAcct] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const openId = share?.shareId;
   React.useEffect(() => {
     if (share) {
       setAmountText(share.outstanding.toFixed(2));
       setAcct(assets[0]?.id ?? null);
+      setSubmitting(false);
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -228,9 +243,13 @@ function SettleSheet({
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>{share.personName} paid you back</Text>
+            <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
+              {isZh ? `${share.personName} 已还款` : `${share.personName} paid you back`}
+            </Text>
             <Text style={[styles.sheetSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
-              {share.merchant} · {fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding
+              {isZh
+                ? `${share.merchant} · 待还 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}`
+                : `${share.merchant} · ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding`}
             </Text>
           </View>
           <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
@@ -238,7 +257,7 @@ function SettleSheet({
           </Pressable>
         </View>
 
-        <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>How much came back</Text>
+        <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '收到还款金额' : 'How much came back'}</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{(share.currency ?? 'MYR') === 'MYR' ? 'RM' : share.currency}</Text>
           <TextInput
@@ -251,11 +270,13 @@ function SettleSheet({
         </View>
         {partial && (
           <Text style={[styles.partialNote, { color: colorTheme.amber }]}>
-            Partial payment. {fmtMoney(share.outstanding - amount, share.currency ?? 'MYR')} stays open.
+            {isZh
+              ? `部分还款。剩余 ${fmtMoney(share.outstanding - amount, share.currency ?? 'MYR')} 保持待收。`
+              : `Partial payment. ${fmtMoney(share.outstanding - amount, share.currency ?? 'MYR')} stays open.`}
           </Text>
         )}
 
-        <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>Where it landed</Text>
+        <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '存入账户' : 'Where it landed'}</Text>
         <View style={styles.acctWrap}>
           {assets.map((a) => {
             const on = acct === a.id;
@@ -283,18 +304,33 @@ function SettleSheet({
               acct === null && { backgroundColor: theme.accentTint, borderColor: theme.accentSoft },
             ]}
           >
-            <Text style={[styles.acctText, { color: colorTheme.ink2 }, acct === null && { color: theme.onTint }]}>Not tracked</Text>
+            <Text style={[styles.acctText, { color: colorTheme.ink2 }, acct === null && { color: theme.onTint }]}>
+              {isZh ? '不追踪账户' : 'Not tracked'}
+            </Text>
           </Pressable>
         </View>
         <Text style={[styles.acctNote, { color: colorTheme.ink3 }]}>
-          No income is recorded. The debt clears and the cash moves, which is what being paid back
-          actually is.
+          {isZh
+            ? '不计入新增收入。系统将清账应收款并增加现金账户余额，精准还原回款本质。'
+            : 'No income is recorded. The debt clears and the cash moves, which is what being paid back actually is.'}
         </Text>
 
         <View style={{ marginTop: 18 }}>
-          <PrimaryButton onPress={() => onSettle(amount, acct)} height={52} disabled={amount <= 0}>
+          <PrimaryButton
+            onPress={() => {
+              if (submitting) return;
+              setSubmitting(true);
+              onSettle(amount, acct);
+            }}
+            height={52}
+            disabled={amount <= 0 || submitting}
+          >
             <Icon name="check" size={18} color="#fff" stroke={2.4} />
-            <BtnLabel>{partial ? `Record ${fmtMoney(amount, share.currency ?? 'MYR')}` : 'Mark settled'}</BtnLabel>
+            <BtnLabel>
+              {partial
+                ? (isZh ? `记录还款 ${fmtMoney(amount, share.currency ?? 'MYR')}` : `Record ${fmtMoney(amount, share.currency ?? 'MYR')}`)
+                : (isZh ? '标记结清' : 'Mark settled')}
+            </BtnLabel>
           </PrimaryButton>
         </View>
       </KeyboardAvoidingView>

@@ -1,10 +1,11 @@
 import React from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { isValidIsoDate, monthLabel } from '../lib/dates';
+import { isValidIsoDate } from '../lib/dates';
 import type { Category } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { Icon } from './Icon';
 import { CategoryChip } from './ui';
@@ -43,6 +44,7 @@ export function TransactionFilterModal({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { formatMonthLabel, isZh } = useLanguage();
 
   const fromInvalid = dateFrom.length > 0 && !isValidIsoDate(dateFrom);
   const toInvalid = dateTo.length > 0 && !isValidIsoDate(dateTo);
@@ -57,7 +59,7 @@ export function TransactionFilterModal({
       >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
-          <Text style={[styles.title, { color: colorTheme.ink }]}>Filter transactions</Text>
+          <Text style={[styles.title, { color: colorTheme.ink }]}>{isZh ? '筛选交易明细' : 'Filter transactions'}</Text>
           <Pressable onPress={onClose} hitSlop={8}>
             <Icon name="x" size={20} color={colorTheme.ink2} />
           </Pressable>
@@ -66,7 +68,7 @@ export function TransactionFilterModal({
         <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
           {months.length > 0 && (
             <>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Month</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '月份' : 'Month'}</Text>
               <View style={styles.chipRow}>
                 {months.map((m) => {
                   const on = selectedMonths.has(m);
@@ -80,7 +82,9 @@ export function TransactionFilterModal({
                         on && { borderColor: theme.accent, backgroundColor: theme.accentTint },
                       ]}
                     >
-                      <Text style={[styles.monthChipText, { color: on ? theme.onTint : colorTheme.ink }]}>{monthLabel(m, false)}</Text>
+                      <Text style={[styles.monthChipText, { color: on ? theme.onTint : colorTheme.ink }]}>
+                        {formatMonthLabel(m, false)}
+                      </Text>
                     </Pressable>
                   );
                 })}
@@ -88,7 +92,7 @@ export function TransactionFilterModal({
             </>
           )}
 
-          <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Category</Text>
+          <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '分类' : 'Category'}</Text>
           <View style={styles.grid}>
             {categories.map((c) => (
               <View key={c.id} style={styles.gridCell}>
@@ -97,13 +101,13 @@ export function TransactionFilterModal({
             ))}
           </View>
 
-          <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Date range</Text>
+          <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '日期范围' : 'Date range'}</Text>
           <View style={styles.dateRow}>
             <View style={{ flex: 1 }}>
               <TextInput
                 value={dateFrom}
                 onChangeText={onChangeDateFrom}
-                placeholder="From · YYYY-MM-DD"
+                placeholder={isZh ? '起始 · YYYY-MM-DD' : 'From · YYYY-MM-DD'}
                 placeholderTextColor={colorTheme.ink3}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -117,7 +121,7 @@ export function TransactionFilterModal({
               <TextInput
                 value={dateTo}
                 onChangeText={onChangeDateTo}
-                placeholder="To · YYYY-MM-DD"
+                placeholder={isZh ? '截止 · YYYY-MM-DD' : 'To · YYYY-MM-DD'}
                 placeholderTextColor={colorTheme.ink3}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -128,15 +132,15 @@ export function TransactionFilterModal({
               />
             </View>
           </View>
-          {(fromInvalid || toInvalid) && <Text style={styles.dateHint}>Use the YYYY-MM-DD format.</Text>}
+          {(fromInvalid || toInvalid) && <Text style={styles.dateHint}>{isZh ? '请输入正确的 YYYY-MM-DD 格式。' : 'Use the YYYY-MM-DD format.'}</Text>}
         </ScrollView>
 
         <View style={styles.footer}>
           <Pressable onPress={onClear} hitSlop={8} disabled={activeCount === 0} style={{ opacity: activeCount === 0 ? 0.4 : 1 }}>
-            <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>Clear all</Text>
+            <Text style={[styles.clearText, { color: colorTheme.ink2 }]}>{isZh ? '清空筛选' : 'Clear all'}</Text>
           </Pressable>
           <Pressable onPress={onClose} style={[styles.doneBtn, { backgroundColor: theme.accentInk }]}>
-            <Text style={styles.doneText}>Show results</Text>
+            <Text style={styles.doneText}>{isZh ? '显示结果' : 'Show results'}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>

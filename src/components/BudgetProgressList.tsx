@@ -4,6 +4,7 @@ import { categoryStatus } from '../lib/budget';
 import { fmt } from '../lib/format';
 import type { Category } from '../lib/types';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { uiFont } from '../theme';
 import { Card, CatBadge } from './ui';
 import { Icon } from './Icon';
@@ -30,6 +31,7 @@ export function BudgetProgressList({
   onPressCategory?: (id: string) => void;
 }) {
   const colorTheme = useThemeColors();
+  const { tCat, isZh } = useLanguage();
   // Highest spender first, so the category actually pulling the budget off track is the one
   // you see without scrolling, rather than whatever order allocations happened to be set in.
   const budgetedIds = useMemo(
@@ -62,14 +64,14 @@ export function BudgetProgressList({
             <CatBadge category={cat} size={36} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <View style={styles.rowBetween}>
-                <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
+                <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
                 <Text style={[styles.catNums, { color: colorTheme.ink2 }]}>RM {fmt(spent)} / {fmt(alloc)}</Text>
               </View>
               <View style={[styles.barTrack, { backgroundColor: colorTheme.line }]}>
                 <View style={{ width: `${Math.min(100, alloc > 0 ? (spent / alloc) * 100 : 100)}%`, height: '100%', borderRadius: 999, backgroundColor: STATUS_COLOR[st] }} />
               </View>
               <Text style={[styles.remaining, { color: remaining < 0 ? STATUS_COLOR.over : colorTheme.ink3 }]}>
-                {remaining < 0 ? `RM ${fmt(-remaining)} over` : `RM ${fmt(remaining)} left`}
+                {remaining < 0 ? (isZh ? `超出 RM ${fmt(-remaining)}` : `RM ${fmt(-remaining)} over`) : (isZh ? `剩余 RM ${fmt(remaining)}` : `RM ${fmt(remaining)} left`)}
               </Text>
             </View>
           </Pressable>
@@ -79,8 +81,8 @@ export function BudgetProgressList({
         <View style={[styles.catRow, budgetedIds.length > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
           <View style={[styles.unbudgetedIcon, { backgroundColor: colorTheme.surface2 }]}><Icon name="dots" size={18} color={colorTheme.ink3} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.catLabel, { color: colorTheme.ink }]}>Unbudgeted</Text>
-            <Text style={[styles.remaining, { color: colorTheme.ink2 }]}>RM {fmt(unbudgetedSpent)} spent outside your budget</Text>
+            <Text style={[styles.catLabel, { color: colorTheme.ink }]}>{isZh ? '未列入预算' : 'Unbudgeted'}</Text>
+            <Text style={[styles.remaining, { color: colorTheme.ink2 }]}>{isZh ? `预算外支出 RM ${fmt(unbudgetedSpent)}` : `RM ${fmt(unbudgetedSpent)} spent outside your budget`}</Text>
           </View>
         </View>
       )}

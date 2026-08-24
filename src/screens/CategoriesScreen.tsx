@@ -11,6 +11,7 @@ import type { TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { radius, shadowToggle, uiFont } from '../theme';
 
 export const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'utensils', 'car', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
@@ -26,6 +27,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, isZh } = useLanguage();
   const { categories, addCategory, deleteCategory, updateCategoryIcon } = useAppData();
 
   const [kind, setKind] = useState<TxnType>('expense');
@@ -98,23 +100,31 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   };
 
   const confirmDelete = (id: string, label: string) => {
-    confirmAction('Delete category?', `Remove “${label}”? Transactions move to another category and its learning is cleared.`, 'Delete', async () => {
-      try {
-        await deleteCategory(id);
-      } catch (e) {
-        if (e instanceof NoFallbackCategoryError) {
-          notify('Add another category first', `“${label}” is your only ${e.kind} category, so there's nowhere to move its transactions. Add another ${e.kind} category, then delete this one.`);
-          return;
+    confirmAction(
+      isZh ? '删除分类？' : 'Delete category?',
+      isZh ? `确定要删除“${label}”吗？其所属交易将转移至其他分类。` : `Remove “${label}”? Transactions move to another category and its learning is cleared.`,
+      isZh ? '删除' : 'Delete',
+      async () => {
+        try {
+          await deleteCategory(id);
+        } catch (e) {
+          if (e instanceof NoFallbackCategoryError) {
+            notify(
+              isZh ? '请先添加其他分类' : 'Add another category first',
+              isZh ? `“${label}”是您唯一的${e.kind === 'income' ? '收入' : '支出'}分类。请先添加新分类后再删除。` : `“${label}” is your only ${e.kind} category, so there's nowhere to move its transactions. Add another ${e.kind} category, then delete this one.`
+            );
+            return;
+          }
+          throw e;
         }
-        throw e;
       }
-    });
+    );
   };
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Categories" onBack={onBack} />
+        <TopBar title={t('categoriesTitle')} onBack={onBack} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
         {/* kind toggle */}
@@ -123,28 +133,32 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
             const on = kind === k;
             return (
               <Pressable key={k} onPress={() => setKind(k)} style={[styles.toggleBtn, on && [styles.toggleBtnOn, { backgroundColor: colorTheme.surface }]]}>
-                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>{k === 'expense' ? 'Expense' : 'Income'}</Text>
+                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>
+                  {k === 'expense' ? (isZh ? '支出' : 'Expense') : (isZh ? '收入' : 'Income')}
+                </Text>
               </Pressable>
             );
           })}
         </View>
 
         {/* existing */}
-        <Eyebrow style={{ marginBottom: 10 }}>Your {kind} categories</Eyebrow>
+        <Eyebrow style={{ marginBottom: 10 }}>
+          {isZh ? `您的${kind === 'expense' ? '支出' : '收入'}分类` : `Your ${kind} categories`}
+        </Eyebrow>
         <Card style={{ overflow: 'hidden' }}>
           {list.map((c, i) => (
             <View key={c.id}>
               <View style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
-                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Change ${c.label}'s picture`}>
+                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Change ${tCat(c)}'s picture`}>
                   <CatBadge category={c} size={38} />
                 </Pressable>
                 <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-                  {c.label}
+                  {tCat(c)}
                 </Text>
                 <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={8} style={styles.editBtn}>
                   <Icon name="pencil" size={16} color={colorTheme.ink2} />
                 </Pressable>
-                <Pressable onPress={() => confirmDelete(c.id, c.label)} hitSlop={8} style={styles.delBtn}>
+                <Pressable onPress={() => confirmDelete(c.id, tCat(c))} hitSlop={8} style={styles.delBtn}>
                   <Icon name="trash" size={17} color="#b3261e" />
                 </Pressable>
               </View>
@@ -174,15 +188,15 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                       ) : (
                         <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
                       )}
-                      <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>Gallery</Text>
+                      <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>{isZh ? '相册' : 'Gallery'}</Text>
                     </Pressable>
                   </View>
                   <View style={styles.editActions}>
                     <Pressable onPress={() => setEditingId(null)} style={styles.editActionBtn} disabled={editBusy}>
-                      <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>Cancel</Text>
+                      <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>{t('cancel')}</Text>
                     </Pressable>
                     <Pressable onPress={saveEditedIcon} style={styles.editActionBtn} disabled={editBusy}>
-                      <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? 'Saving…' : 'Save'}</Text>
+                      <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -192,14 +206,16 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
         </Card>
 
         {/* add new */}
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>Add a {kind} category</Eyebrow>
+        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>
+          {isZh ? `添加${kind === 'expense' ? '支出' : '收入'}分类` : `Add a ${kind} category`}
+        </Eyebrow>
         <Card style={{ padding: 16, gap: 16 }}>
           <View style={styles.previewRow}>
             <CatBadge category={{ id: 'new', label: name, icon, hue, kind, isDefault: false }} size={44} />
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder={kind === 'income' ? 'e.g. Freelance' : 'Category name'}
+              placeholder={isZh ? (kind === 'income' ? '例如：兼职副业' : '分类名称') : (kind === 'income' ? 'e.g. Freelance' : 'Category name')}
               placeholderTextColor={colorTheme.ink3}
               style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
               maxLength={22}
@@ -207,7 +223,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
           </View>
 
           <View style={{ gap: 9 }}>
-            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>Icon</Text>
+            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{isZh ? '图标' : 'Icon'}</Text>
             <View style={styles.choiceWrap}>
               {iconChoices.map((ic) => {
                 const on = ic === icon;
@@ -231,13 +247,13 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                 ) : (
                   <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
                 )}
-                <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>Gallery</Text>
+                <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>{isZh ? '相册' : 'Gallery'}</Text>
               </Pressable>
             </View>
           </View>
 
           <View style={{ gap: 9 }}>
-            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>Color</Text>
+            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{isZh ? '颜色' : 'Color'}</Text>
             <View style={styles.choiceWrap}>
               {HUE_CHOICES.map((h) => {
                 const on = h === hue;
@@ -252,7 +268,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
 
           <PrimaryButton onPress={submit} disabled={!canAdd} height={50}>
             <Icon name="plus" size={18} color="#fff" stroke={2.2} />
-            <BtnLabel>Add {kind} category</BtnLabel>
+            <BtnLabel>{isZh ? `添加${kind === 'expense' ? '支出' : '收入'}分类` : `Add ${kind} category`}</BtnLabel>
           </PrimaryButton>
         </Card>
       </ScrollView>

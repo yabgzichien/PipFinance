@@ -163,13 +163,40 @@ export function netWorthSeries(
 ): NetWorthPoint[] {
   const byAccount: Record<string, BalanceEntry[]> = {};
   for (const e of entries) (byAccount[e.accountId] ??= []).push(e);
-  return monthKeys.map((mk) => {
+  // Sort each account's history ONCE. Calling `accountValueAsOf` per month re-filtered and
+  // re-sorted the same rows for every month in the series, so the screen got quadratically
+  // slower the longer someone had used the app — the users it should be fastest for.
+  for (const id of Object.keys(byAccount)) byAccount[id] = chronological(byAccount[id]);
+
+  // Walk the months oldest → newest with a cursor per account, carrying the last reading
+  // forward. Each entry is visited once across the whole series instead of once per month.
+  // The output keeps the caller's original `monthKeys` order, which is why this indexes
+  // rather than sorting the keys themselves.
+  const order = monthKeys.map((_, i) => i).sort((a, b) => monthKeys[a].localeCompare(monthKeys[b]));
+  const cursor: Record<string, number> = {};
+  const latest: Record<string, number> = {};
+  const out: NetWorthPoint[] = new Array(monthKeys.length);
+
+  for (const i of order) {
+    const mk = monthKeys[i];
     const upper = `${mk}-31`; // string upper bound for the month (safe for YYYY-MM-DD compare)
     const native: Record<string, number> = {};
-    for (const a of accounts) native[a.id] = accountValueAsOf(byAccount[a.id] ?? [], upper);
+    for (const a of accounts) {
+      const list = byAccount[a.id];
+      if (list) {
+        let c = cursor[a.id] ?? 0;
+        while (c < list.length && list[c].asOf <= upper) {
+          latest[a.id] = list[c].value;
+          c++;
+        }
+        cursor[a.id] = c;
+      }
+      native[a.id] = latest[a.id] ?? 0;
+    }
     const { valueById } = toMyrValues(accounts, native, rates);
-    return { monthKey: mk, ...netWorth(accounts, valueById) };
-  });
+    out[i] = { monthKey: mk, ...netWorth(accounts, valueById) };
+  }
+  return out;
 }
 
 /** Every 'YYYY-MM' key from the earliest balance entry through the current month, inclusive

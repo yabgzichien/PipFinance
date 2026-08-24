@@ -131,6 +131,77 @@ export function computeSplit(input: SplitInput): SplitResult {
   };
 }
 
+/** The per-person portions behind a saved `shares` split, as `computeSplit` would take them. */
+export interface RecoveredShares {
+  selfWeight: number;
+  weights: Record<string, number>;
+}
+
+/** Nobody portions a bill 500 ways; past this, the amounts are exact figures, not portions. */
+const MAX_RECOVERED_WEIGHT = 500;
+
+/**
+ * Recover the per-person portions behind an already-saved `shares` split.
+ *
+ * A `SplitDraft` (and the `splits` table under it) persists only `{personId, owed}` — there
+ * is nowhere for the weights themselves to live. So re-opening a saved split had no portions
+ * to restore and fell back to one each, which silently re-cut the bill equally the moment the
+ * sheet appeared: a RM120 dinner saved as 30/60/30 redisplayed as 40/40/40, and saving from
+ * there wrote those wrong figures to the receivable.
+ *
+ * The amounts are proportional to the weights, so the ratios are recoverable: divide through
+ * by the smallest share and round. What makes that safe rather than a guess is the check at
+ * the end — the candidate is only returned if re-running `computeSplit` reproduces the saved
+ * amounts to the cent. Anything else (an `exact` split, a manually adjusted one, a ratio too
+ * fine to survive cent-rounding) returns null, and the caller shows the saved amounts as
+ * exact figures instead of inventing portions that would change them.
+ */
+export function sharesFromSplit(
+  gross: number,
+  ownShare: number,
+  shares: { personId: string; owed: number }[]
+): RecoveredShares | null {
+  if (shares.length === 0) return null;
+
+  const ownCents = toCents(ownShare);
+  const owedCents = shares.map((s) => toCents(s.owed));
+  // A participant owing nothing has no ratio to read, and a weight of 0 is not something the
+  // sheet can express anyway (the stepper floors at 1).
+  if (owedCents.some((c) => c <= 0)) return null;
+
+  const includeSelf = ownCents > 0;
+  const unit = Math.min(...owedCents, includeSelf ? ownCents : Infinity);
+  if (unit <= 0) return null;
+
+  const weights = owedCents.map((c) => Math.round(c / unit));
+  const selfBase = includeSelf ? Math.round(ownCents / unit) : 0;
+  if (weights.some((w) => w < 1 || w > MAX_RECOVERED_WEIGHT)) return null;
+  if (selfBase > MAX_RECOVERED_WEIGHT) return null;
+
+  // The payer absorbs every rounding residue (invariant 2 at the top of this file), so their
+  // share can read a shade high or low against a clean ratio; the neighbours cover that.
+  const candidates = includeSelf ? [selfBase, selfBase - 1, selfBase + 1] : [0];
+  for (const selfWeight of candidates) {
+    if (includeSelf && selfWeight < 1) continue;
+    const replay = computeSplit({
+      gross,
+      method: 'shares',
+      includeSelf,
+      selfWeight,
+      participants: shares.map((s, i) => ({ personId: s.personId, weight: weights[i] })),
+    });
+    if (toCents(replay.ownShare) !== ownCents) continue;
+    if (replay.shares.some((s, i) => toCents(s.owed) !== owedCents[i])) continue;
+    return {
+      // With the payer off the bill the weight is unused; report 1 so the sheet's stepper has
+      // a legal value to sit on if the user puts themselves back on.
+      selfWeight: includeSelf ? selfWeight : 1,
+      weights: Object.fromEntries(shares.map((s, i) => [s.personId, weights[i]])),
+    };
+  }
+  return null;
+}
+
 /**
  * Why this split cannot be saved, as a sentence the user can act on, or null when it is fine.
  *

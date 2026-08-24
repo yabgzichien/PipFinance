@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccent } from '../state/accent';
 import { colors, platformShadow, uiFont } from '../theme';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 
 export type NavTab = 'home' | 'activity' | 'networth' | 'settings';
 
@@ -29,13 +30,6 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
   ),
 };
 
-const TABS: { key: NavTab; label: string }[] = [
-  { key: 'home', label: 'Home' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'networth', label: 'Net Worth' },
-  { key: 'settings', label: 'Settings' },
-];
-
 /** Persistent bottom tab bar for the tracker app. `badges` shows a count over a tab's icon.
  *
  *  `onAdd` mounts the raised centre button that opens the add-a-transaction flow. It lives here
@@ -56,6 +50,14 @@ export function BottomNav({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
+
+  const tabs: { key: NavTab; label: string }[] = [
+    { key: 'home', label: t('tabHome') },
+    { key: 'activity', label: t('tabActivity') },
+    { key: 'networth', label: t('tabNetWorth') },
+    { key: 'settings', label: t('tabSettings') },
+  ];
 
   const renderTab = ({ key, label }: { key: NavTab; label: string }) => {
     const on = key === active;
@@ -91,7 +93,7 @@ export function BottomNav({
 
   return (
     <View style={[styles.bar, { backgroundColor: colorTheme.surface, borderTopColor: colorTheme.line, paddingBottom: Math.max(insets.bottom, 10) + 8 }]}>
-      {TABS.slice(0, 2).map(renderTab)}
+      {tabs.slice(0, 2).map(renderTab)}
       {onAdd && (
         <View style={styles.addSlot}>
           <Pressable
@@ -103,17 +105,17 @@ export function BottomNav({
               pressed && { transform: [{ scale: 0.94 }] },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Add a transaction"
+            accessibilityLabel={t('tabAdd')}
           >
             <Svg width={26} height={26} viewBox="0 0 24 24">
               <Line x1={12} y1={5} x2={12} y2={19} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
               <Line x1={5} y1={12} x2={19} y2={12} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
             </Svg>
           </Pressable>
-          <Text style={[styles.label, styles.addLabel, { color: theme.accent }]}>Add</Text>
+          <Text style={[styles.label, styles.addLabel, { color: theme.accent }]}>{t('tabAdd')}</Text>
         </View>
       )}
-      {TABS.slice(2).map(renderTab)}
+      {tabs.slice(2).map(renderTab)}
     </View>
   );
 }

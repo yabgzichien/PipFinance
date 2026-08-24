@@ -17,6 +17,7 @@ import { EXPENSE_ICONS, INCOME_ICONS, isCustomIcon } from './CategoriesScreen';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { platformShadow, spacing, type as typeScale } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
@@ -73,6 +74,7 @@ export function CategoryDetailScreen({
   const { width: winWidth } = useWindowDimensions();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatMonthLabel, formatShortDate, isZh } = useLanguage();
   const { transactions, categories, catById, updateCategoryIcon, updateCategoryLabel } = useAppData();
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [activeId, setActiveId] = useState(categoryId);
@@ -144,7 +146,7 @@ export function CategoryDetailScreen({
   const showCompare = prevItems.length > 0;
 
   const openEditMeta = () => {
-    setDraftName(cat.label);
+    setDraftName(tCat(cat));
     setDraftIcon(cat.icon);
     setEditingMeta(true);
   };
@@ -176,7 +178,7 @@ export function CategoryDetailScreen({
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar
-          title={cat.label}
+          title={tCat(cat)}
           onBack={onBack}
           right={<IconButton name="pencil" onPress={openEditMeta} size={17} accessibilityLabel="Edit category" />}
         />
@@ -200,7 +202,7 @@ export function CategoryDetailScreen({
               onPress={() => selectCategory(c.id)}
               style={styles.catSlot}
               accessibilityRole="button"
-              accessibilityLabel={c.label}
+              accessibilityLabel={tCat(c)}
               accessibilityState={{ selected: on }}
             >
               <View
@@ -219,7 +221,9 @@ export function CategoryDetailScreen({
         })}
       </ScrollView>
       <Caption color={colorTheme.ink2} style={styles.railCaption}>
-        {siblingIndex + 1} of {siblings.length} {cat.kind} categories
+        {isZh
+          ? `${cat.kind === 'income' ? '收入' : '支出'}分类 ${siblingIndex + 1} / ${siblings.length}`
+          : `${siblingIndex + 1} of ${siblings.length} ${cat.kind} categories`}
       </Caption>
 
       {/* Month rail: same filled-pill treatment as RecapScreen's month strip. */}
@@ -246,11 +250,11 @@ export function CategoryDetailScreen({
                 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={monthLabel(mk)}
+              accessibilityLabel={formatMonthLabel(mk, false)}
               accessibilityState={{ selected: on }}
             >
               <Label weight={on ? 700 : 500} color={on ? '#fff' : colorTheme.ink2}>
-                {monthLabel(mk, false)}
+                {formatMonthLabel(mk, false)}
               </Label>
             </Pressable>
           );
@@ -270,7 +274,7 @@ export function CategoryDetailScreen({
                 <TextInput
                   value={draftName}
                   onChangeText={setDraftName}
-                  placeholder="Category name"
+                  placeholder={isZh ? '分类名称' : 'Category name'}
                   placeholderTextColor={colorTheme.ink3}
                   style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink, fontSize: typeScale.body }]}
                   maxLength={22}
@@ -304,16 +308,16 @@ export function CategoryDetailScreen({
                   ) : (
                     <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
                   )}
-                  <Caption weight={700} color={theme.accent}>Gallery</Caption>
+                  <Caption weight={700} color={theme.accent}>{isZh ? '相册' : 'Gallery'}</Caption>
                 </Pressable>
               </View>
 
               <View style={styles.editActions}>
                 <Pressable onPress={() => setEditingMeta(false)} style={styles.editActionBtn} disabled={savingMeta}>
-                  <Label weight={700} color={colorTheme.ink2}>Cancel</Label>
+                  <Label weight={700} color={colorTheme.ink2}>{t('cancel')}</Label>
                 </Pressable>
                 <Pressable onPress={saveMeta} style={styles.editActionBtn} disabled={savingMeta || !draftName.trim()}>
-                  <Label weight={700} color={theme.accent}>{savingMeta ? 'Saving…' : 'Save'}</Label>
+                  <Label weight={700} color={theme.accent}>{savingMeta ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Label>
                 </Pressable>
               </View>
             </Card>
@@ -327,11 +331,13 @@ export function CategoryDetailScreen({
               <View style={{ flex: 1 }}>
                 <Amount value={total} size={typeScale.display} weight={700} />
                 <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
-                  {items.length} transaction{items.length === 1 ? '' : 's'} in {monthLabel(monthKey)}
+                  {isZh
+                    ? `${formatMonthLabel(monthKey, true)} 共 ${items.length} 笔交易`
+                    : `${items.length} transaction${items.length === 1 ? '' : 's'} in ${monthLabel(monthKey)}`}
                 </Caption>
                 {showCompare && (
                   <Caption color={colorTheme.ink3} style={{ marginTop: spacing.xs }}>
-                    Last month · RM {fmt(prevTotal)}
+                    {isZh ? `上月 · RM ${fmt(prevTotal)}` : `Last month · RM ${fmt(prevTotal)}`}
                   </Caption>
                 )}
               </View>
@@ -341,9 +347,11 @@ export function CategoryDetailScreen({
           {items.length === 0 ? (
             <Card style={styles.emptyCard}>
               <Pip size={72} expr="curious" float />
-              <Title style={{ marginTop: spacing.md }}>Nothing here yet</Title>
+              <Title style={{ marginTop: spacing.md }}>{isZh ? '暂无交易记录' : 'Nothing here yet'}</Title>
               <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
-                No {cat.label} transactions logged in {monthLabel(monthKey)}.
+                {isZh
+                  ? `${formatMonthLabel(monthKey, true)} 暂无 ${tCat(cat)} 相关的收支明细。`
+                  : `No ${cat.label} transactions logged in ${monthLabel(monthKey)}.`}
               </Body>
             </Card>
           ) : (
@@ -360,10 +368,10 @@ export function CategoryDetailScreen({
                   >
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Body weight={700} numberOfLines={1}>
-                        {transfer ? 'Transfer' : description || cat.label}
+                        {transfer ? (isZh ? '转账' : 'Transfer') : description || tCat(cat)}
                       </Body>
                       <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }} numberOfLines={1}>
-                        {shortDate(t.date ?? t.createdAt)}
+                        {formatShortDate(t.date ?? t.createdAt)}
                       </Caption>
                     </View>
                     <Amount value={t.nativeAmount ?? t.amount} currency={t.currency} size={15} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />

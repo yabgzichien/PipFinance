@@ -13,6 +13,7 @@ import type { Category, TxnType } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { shadowToggle, uiFont } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
@@ -21,6 +22,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatMonthLabel, isZh } = useLanguage();
   const { transactions, catById } = useAppData();
   const [kind, setKind] = useState<TxnType>('expense');
   const [mode, setMode] = useState<ValueMode>('amount');
@@ -56,10 +58,18 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions, kind]);
 
+  const screenTitle = kind === 'expense'
+    ? (isZh ? '支出去向' : 'Where it goes')
+    : (isZh ? '收入来源' : 'Where it comes from');
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={kind === 'expense' ? 'Where it goes' : 'Where it comes from'} onBack={onBack} right={<ValueToggle mode={mode} onChange={setMode} />} />
+        <TopBar
+          title={screenTitle}
+          onBack={onBack}
+          right={<ValueToggle mode={mode} onChange={setMode} />}
+        />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
@@ -69,7 +79,9 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
             const on = kind === k;
             return (
               <Pressable key={k} onPress={() => setKind(k)} style={[styles.toggleBtn, on && [styles.toggleBtnOn, { backgroundColor: colorTheme.surface }]]}>
-                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>{k === 'expense' ? 'Spending' : 'Income'}</Text>
+                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>
+                  {k === 'expense' ? (isZh ? '支出' : 'Spending') : (isZh ? '收入' : 'Income')}
+                </Text>
               </Pressable>
             );
           })}
@@ -77,20 +89,28 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
 
         {breakdown.length === 0 ? (
           <Card style={{ padding: 26, alignItems: 'center' }}>
-            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>Nothing this month</Text>
-            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>No {kind === 'expense' ? 'spending' : 'income'} recorded for {monthName()}.</Text>
+            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
+              {isZh ? '本月暂无记录' : 'Nothing this month'}
+            </Text>
+            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+              {isZh ? `本月尚无${kind === 'expense' ? '支出' : '收入'}记录。` : `No ${kind === 'expense' ? 'spending' : 'income'} recorded for ${monthName()}.`}
+            </Text>
           </Card>
         ) : (
           <>
             <View style={styles.pieWrap}>
               <PieChart data={pieData} size={210} thickness={34} />
               <View style={[styles.pieCenter, { pointerEvents: 'none' }]}>
-                <Text style={[styles.pieEyebrow, { color: colorTheme.ink2 }]}>{monthName()}</Text>
+                <Text style={[styles.pieEyebrow, { color: colorTheme.ink2 }]}>
+                  {isZh ? `${new Date().getMonth() + 1}月` : monthName()}
+                </Text>
                 <Amount value={total} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
               </View>
             </View>
 
-            <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>All categories · tap to view</Eyebrow>
+            <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>
+              {isZh ? '所有分类 · 点击查看' : 'All categories · tap to view'}
+            </Eyebrow>
             <Card style={{ overflow: 'hidden' }}>
               {breakdown.map((b, i) => {
                 const cat = catById[b.catId] ?? fallback;
@@ -109,13 +129,15 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                   >
                     <CatBadge category={cat} size={38} />
                     <Text style={[styles.label, { color: colorTheme.ink }]} numberOfLines={1}>
-                      {cat.label}
+                      {tCat(cat)}
                     </Text>
                     <View style={{ alignItems: 'flex-end', marginRight: 4 }}>
                       <Text style={[styles.primary, { color: colorTheme.ink }]}>{primary}</Text>
                       <Text style={[styles.secondary, { color: colorTheme.ink2 }]}>{secondary}</Text>
                       {showComparisons && b.catId in comparisonByCat && (
-                        <Text style={[styles.compare, { color: colorTheme.ink3 }]}>Last month RM {fmt(comparisonByCat[b.catId])}</Text>
+                        <Text style={[styles.compare, { color: colorTheme.ink3 }]}>
+                          {isZh ? `上月 RM ${fmt(comparisonByCat[b.catId])}` : `Last month RM ${fmt(comparisonByCat[b.catId])}`}
+                        </Text>
                       )}
                     </View>
                     <Icon name="chevronRight" size={15} color={colorTheme.ink3} />

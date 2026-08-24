@@ -426,7 +426,29 @@ export async function resetAllData(): Promise<void> {
   });
 }
 
-/** Generate a short, collision-resistant id for rows. */
+/** Wraps well before base-36 overflows four characters, so ids stay a fixed shape. */
+let idSequence = 0;
+
+/**
+ * Generate a short, collision-resistant id for rows.
+ *
+ * Two parts do the work beyond the timestamp. The process-local sequence rules out any
+ * collision between ids minted in the same millisecond by the same run, which is exactly the
+ * shape `addTransactions` produces: one `genId()` per row inside a single
+ * `withTransactionAsync`, so a large statement import mints hundreds of ids in a tight loop.
+ * That matters more than the odds suggest, because a duplicate here is a PRIMARY KEY
+ * violation that rolls back the WHOLE transaction — the entire import fails, not one row.
+ *
+ * The random suffix then covers what a per-process counter cannot: a second run of the app
+ * against the same database whose sequence has restarted at zero. Eight base-36 characters
+ * (~2.8e12 values) rather than the four (~1.68M) this used to have, which a 10,000-row loop
+ * inside one millisecond collides on essentially every time.
+ */
 export function genId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  idSequence = (idSequence + 1) % 1_679_616; // 36^4
+  return (
+    Date.now().toString(36) +
+    idSequence.toString(36).padStart(4, '0') +
+    Math.random().toString(36).slice(2, 10).padEnd(8, '0')
+  );
 }

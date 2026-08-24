@@ -193,6 +193,36 @@ export async function updateHoldingCost(id: string, cost: number | null): Promis
   await db.runAsync('UPDATE accounts SET cost = ? WHERE id = ?', cost, id);
 }
 
+/**
+ * Move a holding's quantity BY `delta`, reading the current value in SQL.
+ *
+ * The absolute-value setters above are right for an edit sheet, where the user typed the
+ * figure they want. They are wrong for an accumulating movement like a DCA tick, which used
+ * to read the holding out of React state, add to it, and write the result back: the store
+ * never reloaded `accounts` afterwards, so ticking two due months in a row without leaving
+ * the screen had both writes start from the same pre-tick value and the second silently
+ * erased the first month's contribution. Doing the addition in the UPDATE removes the
+ * read-modify-write entirely, so a stale in-memory copy cannot corrupt the stored figure.
+ *
+ * Clamped at zero for the same reason `refreshPrices` can leave `unitsAdded` behind: an
+ * untick against a holding whose units were never added would otherwise drive the quantity
+ * negative, and net worth would report a negative investment balance.
+ */
+export async function adjustHoldingQuantity(id: string, delta: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE accounts SET quantity = max(0, round(coalesce(quantity, 0) + ?, 8)) WHERE id = ?',
+    delta,
+    id
+  );
+}
+
+/** Move a holding's cost basis BY `delta`, clamped at zero. See `adjustHoldingQuantity`. */
+export async function adjustHoldingCost(id: string, delta: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE accounts SET cost = max(0, round(coalesce(cost, 0) + ?, 2)) WHERE id = ?', delta, id);
+}
+
 export async function getPriceCache(): Promise<PriceQuote[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<PriceRow>('SELECT * FROM price_cache');

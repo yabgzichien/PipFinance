@@ -193,6 +193,23 @@ export async function listOccurrences(): Promise<CommitmentOccurrence[]> {
 }
 
 /**
+ * The occurrences (if any) that these transactions are the ledger side of.
+ *
+ * Read from SQLite rather than filtered out of the store's `commitmentOccurrences` array, so
+ * a transaction deletion cannot miss an occurrence just because React state had not caught up.
+ */
+export async function listOccurrencesByTxnIds(txnIds: string[]): Promise<CommitmentOccurrence[]> {
+  if (txnIds.length === 0) return [];
+  const db = await getDb();
+  const placeholders = txnIds.map(() => '?').join(',');
+  const rows = await db.getAllAsync<OccurrenceRow>(
+    `SELECT * FROM commitment_occurrences WHERE txn_id IN (${placeholders})`,
+    ...txnIds
+  );
+  return rows.map(toOccurrence);
+}
+
+/**
  * Materialise occurrences for every non-archived commitment from the current month through
  * `OCCURRENCE_HORIZON_MONTHS` ahead. `INSERT OR IGNORE` against the (commitment_id, due_date)
  * unique index makes this idempotent — safe to call on every foreground/refresh without

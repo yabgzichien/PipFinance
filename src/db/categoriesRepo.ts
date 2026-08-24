@@ -127,6 +127,11 @@ export async function deleteCategory(id: string): Promise<void> {
   }
   await db.withTransactionAsync(async () => {
     await db.runAsync('UPDATE transactions SET category_id = ? WHERE category_id = ?', fallback.id, id);
+    // Recurring bills carry a category too, and they outlive the transactions they created.
+    // Left pointing at the deleted id, the next tick would write a transaction categorised
+    // as something that no longer exists — invisible to every category breakdown and to
+    // every budget envelope, month after month.
+    await db.runAsync('UPDATE commitments SET category_id = ? WHERE category_id = ?', fallback.id, id);
     await db.runAsync('DELETE FROM merchant_memory WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM budget_allocation WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM categories WHERE id = ?', id);

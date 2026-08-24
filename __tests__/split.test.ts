@@ -11,6 +11,7 @@ import {
   outstanding,
   receivableMyr,
   SELF,
+  sharesFromSplit,
   suggestSettlement,
   toCents,
   validateSplit,
@@ -500,3 +501,74 @@ describe('foreign currency splits', () => {
   });
 });
 
+
+describe('sharesFromSplit', () => {
+  // Regression for re-opening a saved split: `SplitDraft` persists only {personId, owed},
+  // so the sheet has to recover the per-person weights from the amounts or it re-splits the
+  // bill equally the instant it opens.
+  it('recovers the weights of a bill where one person took a double share', () => {
+    const saved = computeSplit(
+      input({ gross: 120, method: 'shares', participants: [{ personId: 'a', weight: 2 }, { personId: 'b', weight: 1 }] })
+    );
+    expect(saved.ownShare).toBe(30);
+    expect(saved.shares).toEqual([{ personId: 'a', owed: 60 }, { personId: 'b', owed: 30 }]);
+
+    const recovered = sharesFromSplit(120, saved.ownShare, saved.shares);
+    expect(recovered).toEqual({ selfWeight: 1, weights: { a: 2, b: 1 } });
+  });
+
+  it('round-trips: re-splitting with the recovered weights reproduces the saved amounts', () => {
+    const saved = computeSplit(
+      input({ gross: 120, method: 'shares', participants: [{ personId: 'a', weight: 2 }, { personId: 'b', weight: 1 }] })
+    );
+    const recovered = sharesFromSplit(120, saved.ownShare, saved.shares);
+    const again = computeSplit(
+      input({
+        gross: 120,
+        method: 'shares',
+        selfWeight: recovered?.selfWeight,
+        participants: saved.shares.map((s) => ({ personId: s.personId, weight: recovered?.weights[s.personId] })),
+      })
+    );
+    expect(again).toEqual(saved);
+  });
+
+  it('recovers a payer who took a double share themselves', () => {
+    const saved = computeSplit(
+      input({ gross: 100, method: 'shares', selfWeight: 2, participants: [{ personId: 'a' }, { personId: 'b' }] })
+    );
+    expect(sharesFromSplit(100, saved.ownShare, saved.shares)).toEqual({ selfWeight: 2, weights: { a: 1, b: 1 } });
+  });
+
+  it('recovers an equal split even though the payer absorbs the rounding residue', () => {
+    const saved = computeSplit(input({ gross: 100, method: 'shares', participants: [{ personId: 'a' }, { personId: 'b' }] }));
+    expect(saved.ownShare).toBe(33.34); // the extra cent lands on the payer
+    expect(sharesFromSplit(100, saved.ownShare, saved.shares)).toEqual({ selfWeight: 1, weights: { a: 1, b: 1 } });
+  });
+
+  it('recovers a bill the payer was not part of', () => {
+    const saved = computeSplit(
+      input({
+        gross: 120,
+        method: 'shares',
+        includeSelf: false,
+        participants: [{ personId: 'a', weight: 2 }, { personId: 'b', weight: 1 }],
+      })
+    );
+    expect(saved.ownShare).toBe(0);
+    expect(sharesFromSplit(120, saved.ownShare, saved.shares)).toEqual({ selfWeight: 1, weights: { a: 2, b: 1 } });
+  });
+
+  it('refuses amounts no whole-number weighting can produce, rather than guessing', () => {
+    // An 'exact' split: RM55 / RM55 / RM10 is not any 1:1:n portioning of RM120.
+    expect(sharesFromSplit(120, 10, [{ personId: 'a', owed: 55 }, { personId: 'b', owed: 55 }])).toBeNull();
+  });
+
+  it('refuses a participant owing nothing, which carries no ratio at all', () => {
+    expect(sharesFromSplit(100, 100, [{ personId: 'a', owed: 0 }])).toBeNull();
+  });
+
+  it('refuses an empty share list', () => {
+    expect(sharesFromSplit(100, 100, [])).toBeNull();
+  });
+});
