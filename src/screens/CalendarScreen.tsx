@@ -3,7 +3,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line, Path } from 'react-native-svg';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { monthLabel } from '../lib/dates';
 import type { Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -452,7 +452,7 @@ function DayTransactionList({
                   { color: t.type === 'income' ? theme.accentInk : t.type === 'transfer' ? colorTheme.ink2 : colorTheme.red },
                 ]}
               >
-                {t.type === 'income' ? '+' : t.type === 'transfer' ? '→' : '−'} RM {fmt(t.amount)}
+                {t.type === 'income' ? '+' : t.type === 'transfer' ? '→' : '−'} {fmtMoney(t.nativeAmount ?? t.amount, t.currency)}
               </Text>
             </View>
           ))}
