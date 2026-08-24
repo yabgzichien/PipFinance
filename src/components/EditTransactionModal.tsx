@@ -320,12 +320,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             multiline
           />
 
-          {/* Splits are MYR-only until Task 11 adds splits.currency/fx_rate: the receivable and
-              write-off pipeline treats every share as MYR, so starting a new split on a foreign
-              row would silently overstate "Owed to me" and misprice a write-off. An already-split
-              row is still shown (nothing new gets written by just viewing/settling it); only
-              starting a fresh split on a not-yet-split foreign row is blocked. */}
-          {type === 'expense' && (!!split || txn.currency === BASE_CURRENCY) && (
+          {type === 'expense' && (
             <Pressable
               onPress={() => setSplitting(true)}
               style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
@@ -385,6 +380,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
         // (the same `nativeAmount ?? amount` rule as the amount field above); an already-split
         // row keeps its stored gross, which was raised in that same currency at creation time.
         gross={split ? split.gross : (txn.nativeAmount ?? txn.amount)}
+        currency={txn.currency}
         merchant={txn.merchantRaw}
         initial={splitDraft}
         onClose={() => setSplitting(false)}

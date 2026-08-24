@@ -178,6 +178,10 @@ export interface Split {
   ownShare: number;
   method: SplitMethod;
   createdAt: string;
+  /** The currency this split is denominated in, copied from the parent transaction. */
+  currency: string;
+  /** MYR per 1 native unit, frozen when the parent transaction was written. Null for MYR splits. */
+  fxRate?: number | null;
 }
 
 /** One person's portion of a split. `paid` accumulates across partial repayments. */

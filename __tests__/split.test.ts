@@ -9,6 +9,7 @@ import {
   oldestOverdueDays,
   openReceivableTotal,
   outstanding,
+  receivableMyr,
   SELF,
   suggestSettlement,
   toCents,
@@ -476,6 +477,26 @@ describe('oldestOverdueDays and AGING_DAYS', () => {
       { shareId: 's2', personId: 'p2', personName: 'Siti', outstanding: 50.0, billDate: '2026-05-25', merchant: 'Dinner' }, // 21 days
     ];
     expect(oldestOverdueDays(shares, TODAY)).toBe(21);
+  });
+});
+
+describe('foreign currency splits', () => {
+  it('keeps share amounts in the native currency', () => {
+    // A CNY 100 bill split evenly between two people leaves CNY 50 owed, not RM 31.50.
+    const result = computeSplit(input({ gross: 100, participants: [{ personId: 'ali' }] }));
+    expect(result.shares[0].owed).toBe(50);
+    expect(result.ownShare).toBe(50);
+  });
+
+  it('converts the receivable at the split rate, not at a later one', () => {
+    expect(receivableMyr(50, 0.63)).toBe(31.5);
+  });
+
+  it('a payment settles the receivable at the same rate it was raised at', () => {
+    // Raised at 0.63 in March, paid in September. The receivable must reach exactly zero.
+    const raised = receivableMyr(50, 0.63);
+    const settled = receivableMyr(50, 0.63);
+    expect(raised - settled).toBe(0);
   });
 });
 

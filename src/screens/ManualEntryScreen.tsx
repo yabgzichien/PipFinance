@@ -145,15 +145,8 @@ export function ManualEntryScreen({
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
-  // Same treatment for currency: a split can only have been created while this screen was on
-  // MYR (the split row below is hidden otherwise), so it's equally stale, in the same sense,
-  // once the user switches to a foreign currency. This is deliberately a derived check, not a
-  // `setSplit(null)` on currency change: `split` state itself is never touched, so switching
-  // back to MYR without ever having re-typed the amount makes the split reappear intact, the
-  // same self-healing behaviour the gross-mismatch case already has. Splits stay MYR-only
-  // until Task 11 adds splits.currency/fx_rate.
   const activeSplit =
-    split && currency === BASE_CURRENCY && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
+    split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
 
   const save = async () => {
     if (!canSave || !cat || !validDate || rate == null) return;
@@ -233,11 +226,7 @@ export function ManualEntryScreen({
           <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
         )}
 
-        {/* Splits are MYR-only until Task 11 adds splits.currency/fx_rate: the receivable and
-            write-off pipeline (openReceivableTotal, writeOffShare) treats every share as MYR,
-            so a foreign-currency split would silently overstate "Owed to me" and misprice a
-            write-off. Hidden entirely here rather than allowed and mislabeled. */}
-        {type === 'expense' && currency === BASE_CURRENCY && (
+        {type === 'expense' && (
           <Pressable
             onPress={() => setSplitting(true)}
             style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, amount <= 0 && styles.splitRowOff]}
@@ -342,6 +331,7 @@ export function ManualEntryScreen({
       <SplitSheet
         visible={splitting}
         gross={round2(amount)}
+        currency={currency}
         merchant={merchant.trim() || undefined}
         initial={activeSplit}
         onClose={() => setSplitting(false)}

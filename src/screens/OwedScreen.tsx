@@ -6,7 +6,7 @@ import { InfoButton } from '../components/InfoButton';
 import { Amount, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { RECEIVABLE_CLS } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { AGING_DAYS, groupOpenSharesByPerson, type OpenShare, type PersonDebt } from '../lib/split';
@@ -42,7 +42,7 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const confirmWriteOff = (share: OpenShare) => {
     confirmAction(
       'Write this off?',
-      `Give up on the RM ${fmt(share.outstanding)} ${share.personName} owes you for “${share.merchant}”? It becomes your own expense, dated today.`,
+      `Give up on the ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} ${share.personName} owes you for “${share.merchant}”? It becomes your own expense, dated today.`,
       'Write off',
       () => writeOffShare(share.shareId)
     );
@@ -138,7 +138,7 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                               {share.merchant}
                             </Text>
                             <Text style={[styles.shareSub, { color: colorTheme.ink2 }]}>
-                              {shortDate(share.billDate)} · RM {fmt(share.outstanding)} outstanding
+                              {shortDate(share.billDate)} · {fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding
                             </Text>
                           </View>
                           <Pressable onPress={() => setSettling(share)} style={[styles.settleBtn, { backgroundColor: theme.accent }]} hitSlop={4}>
@@ -230,7 +230,7 @@ function SettleSheet({
           <View style={{ flex: 1 }}>
             <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>{share.personName} paid you back</Text>
             <Text style={[styles.sheetSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
-              {share.merchant} · RM {fmt(share.outstanding)} outstanding
+              {share.merchant} · {fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding
             </Text>
           </View>
           <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
@@ -240,7 +240,7 @@ function SettleSheet({
 
         <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>How much came back</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{(share.currency ?? 'MYR') === 'MYR' ? 'RM' : share.currency}</Text>
           <TextInput
             value={amountText}
             onChangeText={setAmountText}
@@ -251,7 +251,7 @@ function SettleSheet({
         </View>
         {partial && (
           <Text style={[styles.partialNote, { color: colorTheme.amber }]}>
-            Partial payment. RM {fmt(share.outstanding - amount)} stays open.
+            Partial payment. {fmtMoney(share.outstanding - amount, share.currency ?? 'MYR')} stays open.
           </Text>
         )}
 
@@ -294,7 +294,7 @@ function SettleSheet({
         <View style={{ marginTop: 18 }}>
           <PrimaryButton onPress={() => onSettle(amount, acct)} height={52} disabled={amount <= 0}>
             <Icon name="check" size={18} color="#fff" stroke={2.4} />
-            <BtnLabel>{partial ? `Record RM ${fmt(amount)}` : 'Mark settled'}</BtnLabel>
+            <BtnLabel>{partial ? `Record ${fmtMoney(amount, share.currency ?? 'MYR')}` : 'Mark settled'}</BtnLabel>
           </PrimaryButton>
         </View>
       </KeyboardAvoidingView>

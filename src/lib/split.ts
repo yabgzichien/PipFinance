@@ -6,6 +6,7 @@
 //      reconciling against what actually left the account.
 //   2. The payer absorbs every rounding residue. RM100 across three people is
 //      33.33 / 33.33 / 33.34, with the extra cent on the person who fronted the money.
+import { round2 } from './currency';
 import { merchantKey } from './normalize';
 import type { ShareStatus, SplitMethod } from './types';
 
@@ -17,6 +18,11 @@ export function toCents(amount: number): number {
 /** Whole cents back to ringgit. */
 export function fromCents(cents: number): number {
   return Math.round(cents) / 100;
+}
+
+/** Convert a native debt amount to MYR at a frozen split FX rate. */
+export function receivableMyr(nativeAmount: number, fxRate: number): number {
+  return round2(nativeAmount * fxRate);
 }
 
 /**
@@ -371,6 +377,8 @@ export interface OpenShare {
   /** The day the bill was paid; a transfer that predates it cannot be settling it. */
   billDate: string | null;
   merchant: string;
+  currency?: string;
+  fxRate?: number | null;
 }
 
 /** An extracted inbound row that might be someone paying you back. */

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { computeSplit, validateSplit, type Participant } from '../lib/split';
 import type { SplitDraft, SplitMethod } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -29,6 +29,7 @@ const METHODS: { key: SplitMethod; label: string; hint: string }[] = [
 export function SplitSheet({
   visible,
   gross,
+  currency = 'MYR',
   merchant,
   initial,
   onClose,
@@ -38,6 +39,7 @@ export function SplitSheet({
   visible: boolean;
   /** The full amount that left the account. */
   gross: number;
+  currency?: string;
   merchant?: string;
   /** An existing split, when re-opening one to change it. */
   initial?: SplitDraft | null;
@@ -136,7 +138,7 @@ export function SplitSheet({
         <View style={styles.head}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.title, { color: colorTheme.ink }]}>Split RM {fmt(gross)}</Text>
+              <Text style={[styles.title, { color: colorTheme.ink }]}>Split {fmtMoney(gross, currency)}</Text>
               <InfoButton entry="split_bill" />
             </View>
             {!!merchant && (
@@ -218,7 +220,7 @@ export function SplitSheet({
                       style={[styles.exactInput, { color: colorTheme.ink, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
                     />
                   ) : (
-                    <Text style={[styles.owed, { color: colorTheme.ink }]}>{fmt(owedBy[id] ?? 0)}</Text>
+                    <Text style={[styles.owed, { color: colorTheme.ink }]}>{fmtMoney(owedBy[id] ?? 0, currency)}</Text>
                   )}
 
                   <Pressable onPress={() => toggle(id)} hitSlop={8} accessibilityLabel={`Remove ${nameById[id] ?? 'person'}`}>
@@ -255,12 +257,12 @@ export function SplitSheet({
           <View style={[styles.summary, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabel, { color: colorTheme.ink }]}>Your expense</Text>
-              <Text style={[styles.summaryValue, { color: colorTheme.ink }]}>RM {fmt(result.ownShare)}</Text>
+              <Text style={[styles.summaryValue, { color: colorTheme.ink }]}>{fmtMoney(result.ownShare, currency)}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={[styles.summaryLabelSoft, { color: colorTheme.ink2 }]}>Owed to you</Text>
               <Text style={[styles.summaryValueSoft, { color: theme.accent }]}>
-                RM {fmt(result.shares.reduce((s, x) => s + x.owed, 0))}
+                {fmtMoney(result.shares.reduce((s, x) => s + x.owed, 0), currency)}
               </Text>
             </View>
             <Text style={[styles.summaryNote, { color: colorTheme.ink3 }]}>

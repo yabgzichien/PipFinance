@@ -27,6 +27,8 @@ interface SplitRow {
   own_share: number;
   method: string;
   created_at: string;
+  currency: string;
+  fx_rate: number | null;
 }
 interface ShareRow {
   id: string;
@@ -60,6 +62,8 @@ function toSplit(r: SplitRow): Split {
     ownShare: r.own_share,
     method: r.method as SplitMethod,
     createdAt: r.created_at,
+    currency: r.currency ?? 'MYR',
+    fxRate: r.fx_rate ?? null,
   };
 }
 function toShare(r: ShareRow): SplitShare {
@@ -153,16 +157,24 @@ export async function createSplit(txnId: string, draft: SplitDraft): Promise<voi
   const db = await getDb();
   const now = new Date().toISOString();
   const splitId = genId();
+  const txnRow = await db.getFirstAsync<{ currency: string; fx_rate: number | null }>(
+    'SELECT currency, fx_rate FROM transactions WHERE id = ?',
+    txnId
+  );
+  const currency = txnRow?.currency ?? 'MYR';
+  const fxRate = txnRow?.fx_rate ?? null;
   await db.withTransactionAsync(async () => {
     await deleteSplitRows(db, [txnId]);
     await db.runAsync(
-      'INSERT INTO splits (id, txn_id, gross, own_share, method, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO splits (id, txn_id, gross, own_share, method, created_at, currency, fx_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       splitId,
       txnId,
       draft.gross,
       draft.ownShare,
       draft.method,
-      now
+      now,
+      currency,
+      fxRate
     );
     for (const share of draft.shares) {
       if (share.owed <= 0) continue; // nobody owes nothing; keep the table free of noise rows

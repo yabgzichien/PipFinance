@@ -49,7 +49,7 @@ import {
   renamePerson as dbRenamePerson,
   writeOffShare as dbWriteOffShare,
 } from '../db/splitRepo';
-import { openReceivableTotal, outstanding, type OpenShare } from '../lib/split';
+import { fromCents, openReceivableTotal, outstanding, receivableMyr, toCents, type OpenShare } from '../lib/split';
 import { refreshPrices as fetchPrices } from '../prices';
 import { budgetHash, currentMonthKey, monthKey, positiveAllocations } from '../lib/budget';
 import { computeCoverage, type Coverage } from '../lib/coverage';
@@ -181,8 +181,24 @@ export interface NewLearned {
  *
  * Returns whether anything moved, so the caller knows to refetch accounts and entries.
  */
-async function reconcileReceivable(shareRows: SplitShare[], accts: Account[]): Promise<boolean> {
-  const total = openReceivableTotal(shareRows);
+async function reconcileReceivable(
+  shareRows: SplitShare[],
+  accts: Account[],
+  splitRows: Split[] = []
+): Promise<boolean> {
+  const splitById = Object.fromEntries(splitRows.map((s) => [s.id, s]));
+  const total = fromCents(
+    shareRows.reduce((s, share) => {
+      if (share.status !== 'open') return s;
+      const split = splitById[share.splitId];
+      const nativeOutstanding = outstanding(share);
+      const myr =
+        split && split.currency !== BASE_CURRENCY && split.fxRate != null
+          ? receivableMyr(nativeOutstanding, split.fxRate)
+          : nativeOutstanding;
+      return s + toCents(myr);
+    }, 0)
+  );
   const existing = accts.find((a) => a.cls === RECEIVABLE_CLS && !a.archived);
 
   if (!existing) {
@@ -628,7 +644,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setSplits(splitRows);
     setShares(shareRows);
     setSplitPayments(paymentRows);
-    await reconcileReceivable(shareRows, accts);
+    await reconcileReceivable(shareRows, accts, splitRows);
     const [finalAccts, finalEntries] = await Promise.all([listAccounts(), listBalanceEntries()]);
     setAccounts(finalAccts);
     setBalanceEntries(finalEntries);
@@ -652,7 +668,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return shares
       .filter((s) => s.status === 'open')
       .map((s) => {
-        const txn = txnById[splitById[s.splitId]?.txnId ?? ''];
+        const split = splitById[s.splitId];
+        const txn = txnById[split?.txnId ?? ''];
         return {
           shareId: s.id,
           personId: s.personId,
@@ -660,6 +677,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           outstanding: outstanding(s),
           billDate: txn?.date ?? txn?.createdAt ?? null,
           merchant: txn?.merchantRaw ?? 'A shared bill',
+          currency: split?.currency ?? txn?.currency ?? BASE_CURRENCY,
+          fxRate: split?.fxRate ?? txn?.fxRate ?? null,
         };
       })
       .filter((s) => s.outstanding > 0);
@@ -899,12 +918,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const split = splits.find((s) => s.id === share.splitId);
       const origin = split ? transactions.find((t) => t.id === split.txnId) : undefined;
       const person = people.find((p) => p.id === share.personId);
+      const currency = split?.currency ?? origin?.currency ?? BASE_CURRENCY;
+      const fxRate = split?.fxRate ?? origin?.fxRate ?? null;
 
       const [created] = await addTransactions([
         {
           merchantRaw: origin?.merchantRaw ?? 'Written-off split',
           merchantKey: origin?.merchantKey ?? 'written-off split',
           amount,
+          currency,
+          fxRate,
           type: 'expense',
           date: todayKey(),
           categoryId: origin?.categoryId ?? DEFAULT_EXPENSE_ID,
@@ -1315,6 +1338,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       matchedMerchant: string | null,
       accountId: string | null
     ) => {
+      const share = shares.find((s) => s.id === shareId);
+      const split = share ? splits.find((sp) => sp.id === share.splitId) : undefined;
+      const myrAmount =
+        split && split.currency !== BASE_CURRENCY && split.fxRate != null
+          ? receivableMyr(amount, split.fxRate)
+          : amount;
+
       // Resolved BEFORE dbRecordPayment below: a missing rate on the destination account must
       // fail here, with nothing recorded, rather than marking the share settled with no
       // matching balance movement.
@@ -1322,7 +1352,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (accountId) {
         try {
           const rates = ratesFromCache(await listFxRates());
-          nativeAmount = nativeForAccount(amount, accountId, rates);
+          nativeAmount = nativeForAccount(myrAmount, accountId, rates);
         } catch (e) {
           notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
           return;
@@ -1335,7 +1365,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
       await refreshSplitState();
     },
-    [refreshSplitState, recordBalanceLink, nativeForAccount]
+    [shares, splits, refreshSplitState, recordBalanceLink, nativeForAccount]
   );
 
   /**

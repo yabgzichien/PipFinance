@@ -80,7 +80,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       ticker      TEXT,
       quantity    REAL,
       cost        REAL,
-      icon        TEXT
+      icon        TEXT,
+      currency    TEXT NOT NULL DEFAULT 'MYR'
     );
     CREATE TABLE IF NOT EXISTS balance_entries (
       id          TEXT PRIMARY KEY NOT NULL,
@@ -111,7 +112,9 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       gross       REAL NOT NULL,
       own_share   REAL NOT NULL,
       method      TEXT NOT NULL,
-      created_at  TEXT NOT NULL
+      created_at  TEXT NOT NULL,
+      currency    TEXT NOT NULL DEFAULT 'MYR',
+      fx_rate     REAL
     );
     CREATE TABLE IF NOT EXISTS split_shares (
       id                  TEXT PRIMARY KEY NOT NULL,
@@ -255,6 +258,21 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   // Migration: the currency an account is denominated in. Balances stay native.
   try {
     await db.execAsync("ALTER TABLE accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'MYR'");
+  } catch {
+    // column already present
+  }
+
+  // Migration: splits inherit their parent transaction's currency and frozen rate. The
+  // rate is copied rather than looked up because the receivable account is MYR: a payment
+  // settled months later must reduce it at the same rate it was raised at, or the balance
+  // never returns to zero.
+  try {
+    await db.execAsync("ALTER TABLE splits ADD COLUMN currency TEXT NOT NULL DEFAULT 'MYR'");
+  } catch {
+    // column already present
+  }
+  try {
+    await db.execAsync('ALTER TABLE splits ADD COLUMN fx_rate REAL');
   } catch {
     // column already present
   }
