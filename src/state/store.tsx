@@ -744,6 +744,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           source,
           remark: it.remark,
           receiptUri: receiptUris?.[i] ?? null,
+          // Forwarded as-is: undefined for every caller that doesn't set them (today, every
+          // caller but ManualEntryScreen), which addTransactions already treats as a plain MYR row.
+          currency: it.currency,
+          fxRate: it.fxRate,
         });
         draftFor.push(draft);
       }

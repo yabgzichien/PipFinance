@@ -3,6 +3,8 @@ import { Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, Scr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
+import { BASE_CURRENCY, round2 } from '../lib/currency';
+import { decimalsFor } from '../lib/currencies';
 import { todayISO } from '../lib/duplicates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
@@ -17,7 +19,7 @@ import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
 import { Icon } from './Icon';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { outstanding } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 
@@ -53,7 +55,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const openId = txn?.id;
   useEffect(() => {
     if (txn) {
-      setAmountText(txn.amount.toFixed(2));
+      // `nativeAmount` is what the user actually typed for a foreign row; `amount` is always
+      // the MYR column. Seeding from `amount` here would show a ringgit figure in a field
+      // that saves back as the row's own currency (e.g. yuan).
+      setAmountText((txn.nativeAmount ?? txn.amount).toFixed(decimalsFor(txn.currency)));
       setType(txn.type);
       setCat(txn.categoryId);
       setRemark(txn.remark ?? '');
@@ -107,6 +112,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
   if (!txn) return <Modal visible={false} transparent />;
 
+  // Currency is fixed once a row is written (spec §Non-goals: changing it after the fact is
+  // out of scope for v1), so this is read-only context, not a control.
+  const decimals = decimalsFor(txn.currency);
+  const currencyLabel = txn.currency === BASE_CURRENCY ? 'RM' : txn.currency;
+
   const switchType = (t: TxnType) => {
     if (t === type) return;
     setType(t);
@@ -122,16 +132,25 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
   const save = async () => {
     const n = parseFloat(amountText.replace(/[^0-9.]/g, ''));
+    // `txn.amount` is the MYR column; the field (and everything below) works in the row's own
+    // currency, which is `nativeAmount` for a foreign row.
+    const nativeCurrent = txn.nativeAmount ?? txn.amount;
     // A split row's amount is derived from the split, so it is not the user's to retype here:
     // letting it drift would leave `gross` and the shares reconciling against nothing.
     const amount = split
-      ? txn.amount
+      ? nativeCurrent
       : Number.isFinite(n) && n >= 0
-        ? Math.round(n * 100) / 100
-        : txn.amount;
+        ? round2(n)
+        : nativeCurrent;
     const categoryId = type === 'transfer' ? null : cat ?? (type === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID);
+    // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
+    // re-derives the MYR column itself from the row's own frozen rate.
     await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
-    if (linkId) await recordBalanceLink(linkId, amount, linkEffect, txn.date ?? todayISO());
+    // Accounts are MYR-denominated today, so a foreign row's balance-link adjustment needs the
+    // MYR-equivalent, converted at the row's own frozen rate (never today's), same principle
+    // as ManualEntryScreen's save.
+    const myrAmount = txn.fxRate != null ? round2(amount * txn.fxRate) : amount;
+    if (linkId) await recordBalanceLink(linkId, myrAmount, linkEffect, txn.date ?? todayISO());
     onClose();
   };
 
@@ -217,11 +236,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{split ? 'Your share' : 'Amount'}</Text>
           <View style={styles.amountRow}>
-            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>RM</Text>
+            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyLabel}</Text>
             <TextInput
               value={amountText}
-              onChangeText={setAmountText}
-              keyboardType="decimal-pad"
+              onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
+              keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
               selectTextOnFocus
               editable={!split}
               style={[
@@ -234,7 +253,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </View>
           {!!split && (
             <Text style={[styles.lockNote, { color: colorTheme.ink3 }]}>
-              RM {fmt(split.gross)} left your account. Change the split below to adjust this.
+              {fmtMoney(split.gross, txn.currency)} left your account. Change the split below to adjust this.
             </Text>
           )}
 
@@ -292,7 +311,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {split
                     ? stillOwed > 0
-                      ? `${splitNames} owe you RM ${fmt(stillOwed)}`
+                      ? `${splitNames} owe you ${fmtMoney(stillOwed, txn.currency)}`
                       : `${splitNames} settled up`
                     : 'Record only your share and track what you are owed'}
                 </Text>
@@ -333,7 +352,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           editor open on a stale figure would invite the user to save the old one back. */}
       <SplitSheet
         visible={splitting}
-        gross={split ? split.gross : txn.amount}
+        // Splitting for the first time must divide the row's own currency, not the MYR column
+        // (the same `nativeAmount ?? amount` rule as the amount field above); an already-split
+        // row keeps its stored gross, which was raised in that same currency at creation time.
+        gross={split ? split.gross : (txn.nativeAmount ?? txn.amount)}
         merchant={txn.merchantRaw}
         initial={splitDraft}
         onClose={() => setSplitting(false)}

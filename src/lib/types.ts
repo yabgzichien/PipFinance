@@ -18,6 +18,13 @@ export interface ExtractedTxn {
   /** A short user-written note, e.g. "lunch with client". Never extracted from the
    *  screenshot itself; the user adds it during review or manual entry. */
   remark?: string | null;
+  /** 3-letter currency code for `amount`. Absent (or 'MYR') means a plain MYR row; matches
+   *  `NewTxn.currency`'s own contract. When set to anything else, `amount` is the native
+   *  figure the user entered, and `fxRate` must be set too. */
+  currency?: string;
+  /** MYR per 1 unit of `currency`, frozen at entry time. Only meaningful when `currency` is
+   *  foreign; matches `NewTxn.fxRate`. */
+  fxRate?: number | null;
 }
 
 /** A category. `id` is a stable slug (also used as the memory value). `kind`

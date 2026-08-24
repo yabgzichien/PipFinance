@@ -3,13 +3,19 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { AddCategoryModal } from '../components/AddCategoryModal';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
+import { getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
-import { fmt } from '../lib/format';
+import { BASE_CURRENCY, isMultiCurrency, round2 } from '../lib/currency';
+import { decimalsFor } from '../lib/currencies';
+import { fmtMoney } from '../lib/format';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { SplitSheet } from '../components/SplitSheet';
 import type { Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -55,6 +61,34 @@ export function ManualEntryScreen({
   const [split, setSplit] = useState<SplitDraft | null>(initialSplit);
   const [splitting, setSplitting] = useState(false);
 
+  // Currencies active for this user, the sticky entry-currency default, and cached rates to
+  // convert against. Loaded once on mount; MYR-only until then, so nothing here changes the
+  // single-currency screen while the load is in flight.
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
+  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
+  const [rates, setRates] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    (async () => {
+      const [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
+      setActiveCurrencies(active);
+      setCurrency(entry);
+      setRates(ratesFromCache(fx));
+    })();
+  }, []);
+
+  // Sticks for next time, per the brief: picking a currency here is remembered as the new
+  // entry default, mirroring CurrencySettingsScreen's own entry-currency picker.
+  const changeCurrency = async (code: string) => {
+    setCurrency(code);
+    await setEntryCurrency(code);
+  };
+
+  const decimals = decimalsFor(currency);
+  // Null only means "no cached rate for an active currency", a case activation is supposed to
+  // prevent. Gates save rather than ever letting a foreign row through at parity.
+  const rate = currency === BASE_CURRENCY ? 1 : rateFor(rates, currency);
+
   // Every transaction is tied to an account. Default to a cash account (prefer an
   // existing one); the effect below seeds it and creates a "Cash" account if none exist.
   const defaultAcctId = useMemo(() => {
@@ -68,7 +102,7 @@ export function ManualEntryScreen({
   const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
-  const canSave = amount > 0 && !!cat && !!validDate && !!linkId;
+  const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null;
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -97,11 +131,15 @@ export function ManualEntryScreen({
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
-  const activeSplit = split && Math.abs(split.gross - Math.round(amount * 100) / 100) < 0.005 ? split : null;
+  const activeSplit = split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
 
   const save = async () => {
-    if (!canSave || !cat || !validDate) return;
-    const amt = Math.round(amount * 100) / 100;
+    if (!canSave || !cat || !validDate || rate == null) return;
+    // The figure the user typed, in `currency`: native for a foreign row, MYR for a plain one.
+    const amt = round2(amount);
+    // Accounts are MYR-denominated today (Task 9 territory), so the balance link always needs
+    // the MYR-equivalent even when the row itself is saved and displayed in a foreign currency.
+    const myrAmt = currency === BASE_CURRENCY ? amt : round2(amt * rate);
     const item: ExtractedTxn = {
       merchant: merchant.trim(),
       // Only the payer's own share is the expense; the rest becomes a receivable.
@@ -110,10 +148,12 @@ export function ManualEntryScreen({
       date: validDate,
       method: null,
       remark: remark.trim() || null,
+      currency,
+      fxRate: currency === BASE_CURRENCY ? null : rate,
     };
     // The balance moves by the full bill even when the row records only a share, because the
     // whole amount is what actually left the account.
-    if (linkId) await recordBalanceLink(linkId, amt, linkEffect, validDate);
+    if (linkId) await recordBalanceLink(linkId, myrAmt, linkEffect, validDate);
     onComplete(item, cat, activeSplit);
   };
 
@@ -145,16 +185,23 @@ export function ManualEntryScreen({
 
         <Eyebrow style={{ marginBottom: 8 }}>Amount</Eyebrow>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          {isMultiCurrency(activeCurrencies) ? (
+            <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
+          ) : (
+            <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          )}
           <TextInput
             value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
+            onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
+            keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
+            placeholder={decimals === 0 ? '0' : '0.00'}
             placeholderTextColor={colorTheme.ink3}
             style={[styles.amountInput, { color: colorTheme.ink }]}
           />
         </View>
+        {currency !== BASE_CURRENCY && rate != null && (
+          <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
+        )}
 
         {type === 'expense' && (
           <Pressable
@@ -167,13 +214,13 @@ export function ManualEntryScreen({
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                  {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
+                  {activeSplit ? `Your share: ${fmtMoney(activeSplit.ownShare, currency)}` : 'Split with friends'}
                 </Text>
                 <InfoButton entry="split_bill" />
               </View>
               <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {activeSplit
-                  ? `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`
+                  ? `${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)} owed back to you`
                   : amount > 0
                     ? 'Paid for the table? Record only your share'
                     : 'Enter the bill amount first'}
@@ -260,7 +307,7 @@ export function ManualEntryScreen({
 
       <SplitSheet
         visible={splitting}
-        gross={Math.round(amount * 100) / 100}
+        gross={round2(amount)}
         merchant={merchant.trim() || undefined}
         initial={activeSplit}
         onClose={() => setSplitting(false)}
@@ -300,6 +347,7 @@ const styles = StyleSheet.create({
   },
   dateHintBad: { color: '#c5402f' },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
+  fxHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: { flex: 1, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
