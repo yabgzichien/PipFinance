@@ -4,8 +4,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { Card, Eyebrow, TopBar } from '../components/ui';
+import { getActiveCurrencies } from '../db/currencyRepo';
 import { clearMemory } from '../db/memoryRepo';
 import { getProvider, llmErrorMessage } from '../llm';
+import { isMultiCurrency } from '../lib/currency';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
@@ -21,15 +23,17 @@ type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
 
 
-export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
 
   useEffect(() => {
     loadSettings().then(setSettings);
+    getActiveCurrencies().then(setActiveCurrencies);
   }, []);
 
   const learnedCount = Object.keys(memory).length;
@@ -231,6 +235,24 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>Categories</Text>
+            </View>
+            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+          </Pressable>
+        )}
+
+        {onOpenCurrencySettings && (
+          <Pressable
+            onPress={onOpenCurrencySettings}
+            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
+          >
+            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+              <Icon name="wallet" size={16} color={theme.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.providerName, { color: colorTheme.ink }]}>Currencies</Text>
+              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
+                {isMultiCurrency(activeCurrencies) ? activeCurrencies.join(', ') : 'MYR only'}
+              </Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>

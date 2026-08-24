@@ -24,6 +24,10 @@ describe('backTargetFor', () => {
     expect(backTargetFor('tax', origins)).toBe('settings');
   });
 
+  it('returns currencySettings to settings', () => {
+    expect(backTargetFor('currencySettings', origins)).toBe('settings');
+  });
+
   it('returns owed, calendar and export to wherever they were opened from', () => {
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'home' })).toBe('home');
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'transactions' })).toBe('transactions');

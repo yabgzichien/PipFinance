@@ -37,6 +37,7 @@ import { AdvancedImportScreen } from './src/screens/AdvancedImportScreen';
 import { ExportScreen } from './src/screens/ExportScreen';
 import { CommitmentsScreen } from './src/screens/CommitmentsScreen';
 import { TaxScreen } from './src/screens/TaxScreen';
+import { CurrencySettingsScreen } from './src/screens/CurrencySettingsScreen';
 import { GlossaryModal } from './src/components/InfoButton';
 import { AppAlertModal } from './src/components/AppAlertModal';
 import { AccentProvider, useAccent } from './src/state/accent';
@@ -332,6 +333,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onOpenCategories={() => setScreen('categories')}
           onOpenCommitments={() => setScreen('commitments')}
           onOpenTax={() => setScreen('tax')}
+          onOpenCurrencySettings={() => setScreen('currencySettings')}
           taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />
@@ -358,6 +360,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       {screen === 'owed' && <OwedScreen onBack={goBack} />}
       {screen === 'commitments' && <CommitmentsScreen onBack={goBack} />}
       {screen === 'tax' && <TaxScreen onBack={goBack} />}
+      {screen === 'currencySettings' && <CurrencySettingsScreen onBack={goBack} />}
       {screen === 'budget' && <BudgetScreen onBack={goBack} onOpenRecap={() => setScreen('recap')} />}
       {screen === 'categoryDetail' && categoryDetailId && (
         <CategoryDetailScreen categoryId={categoryDetailId} onBack={goBack} />
