@@ -1,9 +1,9 @@
 // src/lib/currency.ts
 // The single place a native amount becomes a MYR amount. Every write path goes
 // through deriveMyr so the stored invariant can only hold or throw, never drift.
-import { BASE_CURRENCY, currencyMeta } from './currencies';
+import { BASE_CURRENCY, currencyMeta, decimalsFor, type CurrencyMeta, SUPPORTED_CURRENCIES } from './currencies';
 
-export { BASE_CURRENCY };
+export { BASE_CURRENCY, currencyMeta, decimalsFor, type CurrencyMeta, SUPPORTED_CURRENCIES };
 
 /** Round to 2dp, killing float artifacts. Non-finite input reads as 0, matching `fmt`. */
 export function round2(n: number): number {

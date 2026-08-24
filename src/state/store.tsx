@@ -86,7 +86,7 @@ import {
   updateCommitment as dbUpdateCommitment,
   type NewCommitment,
 } from '../db/commitmentsRepo';
-import { findCommitmentMatch, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
+import { findCommitmentMatch, occurrenceMyr, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
 import { matchSourceCategory } from '../lib/import';
 import type { ParsedCommitment } from '../lib/advancedImport';
 import {
@@ -386,6 +386,7 @@ interface AppData {
     fromAccountId?: string | null;
     toAccountId?: string | null;
     startMonth?: string;
+    currency?: string;
   }) => Promise<void>;
   updateCommitmentEntry: (
     id: string,
@@ -1164,6 +1165,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       fromAccountId?: string | null;
       toAccountId?: string | null;
       startMonth?: string;
+      currency?: string;
     }): Promise<void> => {
       await dbAddCommitment({
         label: input.label,
@@ -1175,6 +1177,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         toAccountId: input.kind === 'investment' ? input.toAccountId ?? null : null,
         dueDay: input.dueDay,
         startMonth: input.startMonth ?? currentMonthKey(),
+        currency: input.currency,
       });
       await dbEnsureOccurrences(new Date());
       await refreshCommitmentState();
@@ -1404,9 +1407,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const paidAmount = opts?.amount ?? commitment.amount;
       const paidOn = opts?.paidOn ?? todayKey();
       const status = paidOn <= occurrence.dueDate ? 'paid' : 'late';
-      // `paidAmount` is always MYR (commitments have no currency of their own); every
-      // recordBalanceLink below needs it re-expressed in the target account's own currency.
       const rates = ratesFromCache(await listFxRates());
+      const fxRate =
+        occurrence.fxRate ??
+        (commitment.currency === BASE_CURRENCY ? null : rateFor(rates, commitment.currency));
+      const myrPaidAmount = fxRate != null ? occurrenceMyr(paidAmount, fxRate) : paidAmount;
+
       // The investment target, resolved once up front: both the currency check below and the
       // holding-vs-cost-only branch further down need to know which kind of account it is.
       const investTarget =
@@ -1422,10 +1428,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       let targetNative: number | null = null;
       try {
         if (commitment.fromAccountId) {
-          fromNative = nativeForAccount(paidAmount, commitment.fromAccountId, rates);
+          fromNative = nativeForAccount(myrPaidAmount, commitment.fromAccountId, rates);
         }
         if (investTarget && !isHolding(investTarget)) {
-          targetNative = nativeForAccount(paidAmount, investTarget.id, rates);
+          targetNative = nativeForAccount(myrPaidAmount, investTarget.id, rates);
         }
       } catch (e) {
         notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
@@ -1437,6 +1443,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           merchantRaw: commitment.label,
           merchantKey: commitment.merchantKey,
           amount: paidAmount,
+          currency: commitment.currency,
+          fxRate,
           type: wantType,
           date: paidOn,
           categoryId: commitment.kind === 'investment' ? null : commitment.categoryId,
@@ -1457,11 +1465,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           // A holding always moves cost basis; quantity only moves when a price is cached —
           // offline or a brand-new symbol resolves its units later, in `refreshPrices` above.
           if (quote) {
-            unitsAdded = Math.round((paidAmount / quote.priceMYR) * 1e8) / 1e8;
+            unitsAdded = Math.round((myrPaidAmount / quote.priceMYR) * 1e8) / 1e8;
             priceMYR = quote.priceMYR;
             await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) + unitsAdded);
           }
-          await dbUpdateHoldingCost(investTarget.id, (investTarget.cost ?? 0) + paidAmount);
+          await dbUpdateHoldingCost(investTarget.id, (investTarget.cost ?? 0) + myrPaidAmount);
         } else if (targetNative != null) {
           // Cost-only target (ASB, EPF, unit trusts, gold savings): no ticker to size units
           // against, so the account's balance IS the invested-amount tracker.
@@ -1479,7 +1487,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         priceMYR,
       });
       if (commitment.reliefCode) {
-        await tagCommitmentRelief(commitment.reliefCode, txn.id, paidOn, paidAmount);
+        await tagCommitmentRelief(commitment.reliefCode, txn.id, paidOn, myrPaidAmount);
       }
       setTransactions(await listTransactions());
       await refreshCommitmentState();
@@ -1506,6 +1514,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         const today = todayKey();
         // Same MYR-to-native conversion as payCommitment above, for the same reason.
         const rates = ratesFromCache(await listFxRates());
+        const fxRate =
+          occurrence.fxRate ??
+          (commitment.currency === BASE_CURRENCY ? null : rateFor(rates, commitment.currency));
+        const myrPaidAmount = fxRate != null ? occurrenceMyr(paidAmount, fxRate) : paidAmount;
         const investTarget =
           commitment.kind === 'investment' && commitment.toAccountId
             ? accounts.find((a) => a.id === commitment.toAccountId)
@@ -1517,10 +1529,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         let targetNative: number | null = null;
         try {
           if (commitment.fromAccountId) {
-            fromNative = nativeForAccount(paidAmount, commitment.fromAccountId, rates);
+            fromNative = nativeForAccount(myrPaidAmount, commitment.fromAccountId, rates);
           }
           if (investTarget && !isHolding(investTarget)) {
-            targetNative = nativeForAccount(paidAmount, investTarget.id, rates);
+            targetNative = nativeForAccount(myrPaidAmount, investTarget.id, rates);
           }
         } catch (e) {
           notify("Couldn't undo this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
@@ -1538,7 +1550,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             if (occurrence.unitsAdded != null) {
               await dbUpdateHoldingQuantity(investTarget.id, (investTarget.quantity ?? 0) - occurrence.unitsAdded);
             }
-            await dbUpdateHoldingCost(investTarget.id, Math.max(0, (investTarget.cost ?? 0) - paidAmount));
+            await dbUpdateHoldingCost(investTarget.id, Math.max(0, (investTarget.cost ?? 0) - myrPaidAmount));
           } else if (targetNative != null) {
             await recordBalanceLink(investTarget.id, targetNative, 'subtract', today);
           }

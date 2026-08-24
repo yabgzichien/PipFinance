@@ -1,5 +1,4 @@
-// __tests__/commitments.test.ts
-import { clampToMonth, occurrencesFor, findCommitmentMatch } from '../src/lib/commitments';
+import { clampToMonth, occurrencesFor, findCommitmentMatch, occurrenceMyr } from '../src/lib/commitments';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
 import type { Transaction } from '../src/lib/types';
 
@@ -8,7 +7,7 @@ function commitment(over: Partial<Commitment>): Commitment {
     id: 'c1', label: 'Maxis', merchantKey: 'maxis', kind: 'expense', amount: 89,
     categoryId: 'communications', fromAccountId: 'a1', toAccountId: null,
     dueDay: 5, startMonth: '2026-06', endMonth: null, archived: false,
-    createdAt: '2026-06-01T00:00:00.000Z', reliefCode: null, ...over,
+    createdAt: '2026-06-01T00:00:00.000Z', reliefCode: null, currency: 'MYR', ...over,
   };
 }
 
@@ -93,5 +92,19 @@ describe('findCommitmentMatch', () => {
   it('skips a candidate already excluded (already linked elsewhere)', () => {
     const t = txn({ id: 'txn-1' });
     expect(findCommitmentMatch([t], c, '2026-06-05', new Set(['txn-1']))).toBeNull();
+  });
+});
+
+describe('foreign currency commitments', () => {
+  it('freezes each occurrence at the rate current when it was generated', () => {
+    const march = occurrenceMyr(2000, 0.63);
+    const april = occurrenceMyr(2000, 0.65);
+    expect(march).toBe(1260);
+    expect(april).toBe(1300);
+    expect(march).not.toBe(april);
+  });
+
+  it('leaves the occurrences of a MYR commitment unconverted', () => {
+    expect(occurrenceMyr(2000, 1)).toBe(2000);
   });
 });

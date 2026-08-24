@@ -1,7 +1,9 @@
-// src/db/commitmentsRepo.ts
 import { genId, getDb } from './db';
+import { listFxRates } from './fxRepo';
 import { currentMonthKey } from '../lib/budget';
 import { occurrencesFor, type Commitment, type CommitmentKind, type CommitmentOccurrence, type OccurrenceStatus } from '../lib/commitments';
+import { BASE_CURRENCY } from '../lib/currency';
+import { rateFor, ratesFromCache } from '../lib/fx';
 
 // --- Row shapes (raw SQLite columns) ---------------------------------------
 interface CommitmentRow {
@@ -19,6 +21,7 @@ interface CommitmentRow {
   archived: number;
   created_at: string;
   relief_code: string | null;
+  currency: string;
 }
 
 interface OccurrenceRow {
@@ -35,6 +38,7 @@ interface OccurrenceRow {
   units_added: number | null;
   price_myr: number | null;
   created_at: string;
+  fx_rate: number | null;
 }
 
 function toCommitment(r: CommitmentRow): Commitment {
@@ -53,6 +57,7 @@ function toCommitment(r: CommitmentRow): Commitment {
     archived: !!r.archived,
     createdAt: r.created_at,
     reliefCode: r.relief_code,
+    currency: r.currency ?? BASE_CURRENCY,
   };
 }
 
@@ -71,6 +76,7 @@ function toOccurrence(r: OccurrenceRow): CommitmentOccurrence {
     unitsAdded: r.units_added,
     priceMYR: r.price_myr,
     createdAt: r.created_at,
+    fxRate: r.fx_rate ?? null,
   };
 }
 
@@ -88,6 +94,7 @@ export interface NewCommitment {
   startMonth: string;
   endMonth?: string | null;
   reliefCode?: string | null;
+  currency?: string;
 }
 
 export async function listCommitments(): Promise<Commitment[]> {
@@ -100,10 +107,11 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
   const db = await getDb();
   const id = genId();
   const createdAt = new Date().toISOString();
+  const currency = input.currency ?? BASE_CURRENCY;
   await db.runAsync(
     `INSERT INTO commitments
-       (id, label, merchant_key, kind, amount, category_id, from_account_id, to_account_id, due_day, start_month, end_month, archived, created_at, relief_code)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+       (id, label, merchant_key, kind, amount, category_id, from_account_id, to_account_id, due_day, start_month, end_month, archived, created_at, relief_code, currency)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     id,
     input.label,
     input.merchantKey,
@@ -116,7 +124,8 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
     input.startMonth,
     input.endMonth ?? null,
     createdAt,
-    input.reliefCode ?? null
+    input.reliefCode ?? null,
+    currency
   );
   return {
     id,
@@ -133,6 +142,7 @@ export async function addCommitment(input: NewCommitment): Promise<Commitment> {
     archived: false,
     createdAt,
     reliefCode: input.reliefCode ?? null,
+    currency,
   };
 }
 
@@ -192,22 +202,26 @@ export async function ensureOccurrences(now: Date = new Date()): Promise<void> {
   const db = await getDb();
   const commitments = await listCommitments();
   const fromMonth = currentMonthKey(now);
+  const rates = ratesFromCache(await listFxRates());
   await db.withTransactionAsync(async () => {
     for (const c of commitments) {
       if (c.archived) continue;
+      const currency = c.currency ?? BASE_CURRENCY;
+      const fxRate = currency === BASE_CURRENCY ? null : rateFor(rates, currency);
       for (const occ of occurrencesFor(c, fromMonth)) {
         const id = genId();
         const createdAt = new Date().toISOString();
         await db.runAsync(
           `INSERT OR IGNORE INTO commitment_occurrences
-             (id, commitment_id, due_date, month, amount, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'scheduled', ?)`,
+             (id, commitment_id, due_date, month, amount, status, created_at, fx_rate)
+           VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?)`,
           id,
           occ.commitmentId,
           occ.dueDate,
           occ.month,
           occ.amount,
-          createdAt
+          createdAt,
+          fxRate
         );
       }
     }
@@ -223,15 +237,15 @@ export async function ensureOccurrences(now: Date = new Date()): Promise<void> {
  */
 export async function insertOccurrence(
   commitmentId: string,
-  occ: { dueDate: string; amount: number; status: OccurrenceStatus; paidOn: string | null; paidAmount: number | null }
+  occ: { dueDate: string; amount: number; status: OccurrenceStatus; paidOn: string | null; paidAmount: number | null; fxRate?: number | null }
 ): Promise<void> {
   const db = await getDb();
   const id = genId();
   const createdAt = new Date().toISOString();
   await db.runAsync(
     `INSERT OR IGNORE INTO commitment_occurrences
-       (id, commitment_id, due_date, month, amount, status, paid_on, paid_amount, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, commitment_id, due_date, month, amount, status, paid_on, paid_amount, created_at, fx_rate)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     commitmentId,
     occ.dueDate,
@@ -240,7 +254,8 @@ export async function insertOccurrence(
     occ.status,
     occ.paidOn,
     occ.paidAmount,
-    createdAt
+    createdAt,
+    occ.fxRate ?? null
   );
 }
 

@@ -16,6 +16,7 @@ function occ(status: OccurrenceStatus, month = '2026-06'): CommitmentOccurrence 
     unitsAdded: null,
     priceMYR: null,
     createdAt: '2026-06-01T00:00:00.000Z',
+    fxRate: null,
   };
 }
 

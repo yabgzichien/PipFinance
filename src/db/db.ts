@@ -149,7 +149,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       start_month     TEXT NOT NULL,
       end_month       TEXT,
       archived        INTEGER NOT NULL DEFAULT 0,
-      created_at      TEXT NOT NULL
+      created_at      TEXT NOT NULL,
+      currency        TEXT NOT NULL DEFAULT 'MYR'
     );
     CREATE TABLE IF NOT EXISTS commitment_occurrences (
       id            TEXT PRIMARY KEY NOT NULL,
@@ -164,7 +165,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       txn_created   INTEGER NOT NULL DEFAULT 0,
       units_added   REAL,
       price_myr     REAL,
-      created_at    TEXT NOT NULL
+      created_at    TEXT NOT NULL,
+      fx_rate       REAL
     );
     CREATE TABLE IF NOT EXISTS relief_tags (
       id                 TEXT PRIMARY KEY NOT NULL,
@@ -273,6 +275,20 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   }
   try {
     await db.execAsync('ALTER TABLE splits ADD COLUMN fx_rate REAL');
+  } catch {
+    // column already present
+  }
+
+  // Migration: a commitment can be denominated in a foreign currency (CNY rent, say).
+  // Each occurrence freezes its OWN rate when generated, so the RM cost genuinely varies
+  // month to month, which is what actually happens.
+  try {
+    await db.execAsync("ALTER TABLE commitments ADD COLUMN currency TEXT NOT NULL DEFAULT 'MYR'");
+  } catch {
+    // column already present
+  }
+  try {
+    await db.execAsync('ALTER TABLE commitment_occurrences ADD COLUMN fx_rate REAL');
   } catch {
     // column already present
   }

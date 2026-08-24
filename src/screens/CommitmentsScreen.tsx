@@ -3,15 +3,20 @@ import React, { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { Amount, BtnLabel, BubbleText, Card, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { getActiveCurrencies } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { DEFAULT_EXPENSE_ID } from '../data/categories';
 import { currentMonthKey } from '../lib/budget';
 import { computeCommitmentRecord } from '../lib/commitmentRecord';
-import type { Commitment, CommitmentKind, CommitmentOccurrence } from '../lib/commitments';
+import { occurrenceMyr, type Commitment, type CommitmentKind, type CommitmentOccurrence } from '../lib/commitments';
+import { BASE_CURRENCY, decimalsFor, isMultiCurrency } from '../lib/currency';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { monthLabel, shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { RECEIVABLE_CLS } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
@@ -55,6 +60,17 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
     previewCommitmentMatch,
   } = useAppData();
 
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
+  const [rates, setRates] = useState<Record<string, number>>({});
+
+  React.useEffect(() => {
+    (async () => {
+      const [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
+      setActiveCurrencies(active);
+      setRates(ratesFromCache(fx));
+    })();
+  }, []);
+
   const today = useMemo(() => todayISO(), []);
   const [viewMonth, setViewMonth] = useState(() => currentMonthKey());
   const [editing, setEditing] = useState<Commitment | 'new' | null>(null);
@@ -79,7 +95,17 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
     [commitmentOccurrences, viewMonth, overdueIds]
   );
 
-  const monthTotal = thisMonth.reduce((s, o) => s + o.amount, 0) + overdue.reduce((s, o) => s + o.amount, 0);
+  const monthTotal =
+    thisMonth.reduce((s, o) => {
+      const c = commitmentById.get(o.commitmentId);
+      const fx = o.fxRate ?? (c && c.currency !== BASE_CURRENCY ? rateFor(rates, c.currency) : 1) ?? 1;
+      return s + occurrenceMyr(o.amount, fx);
+    }, 0) +
+    overdue.reduce((s, o) => {
+      const c = commitmentById.get(o.commitmentId);
+      const fx = o.fxRate ?? (c && c.currency !== BASE_CURRENCY ? rateFor(rates, c.currency) : 1) ?? 1;
+      return s + occurrenceMyr(o.amount, fx);
+    }, 0);
   const unpaidCount = thisMonth.filter((o) => o.status === 'scheduled').length + overdue.length;
 
   const record = useMemo(() => computeCommitmentRecord(commitmentOccurrences), [commitmentOccurrences]);
@@ -248,6 +274,8 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
       <CommitmentEditorModal
         target={editing}
         accounts={accounts}
+        activeCurrencies={activeCurrencies}
+        rates={rates}
         visible={editing !== null}
         onClose={() => setEditing(null)}
       />
@@ -305,7 +333,9 @@ function OccurrenceRow({
         </Text>
       </Pressable>
 
-      <Amount value={occurrence.paidAmount ?? occurrence.amount} size={15} weight={700} color={colorTheme.ink} />
+      <Text style={[styles.occurrenceAmount, { color: colorTheme.ink }]}>
+        {fmtMoney(occurrence.paidAmount ?? occurrence.amount, commitment?.currency ?? BASE_CURRENCY)}
+      </Text>
       <Pressable onPress={onOpenActions} hitSlop={8} accessibilityLabel="More">
         <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
       </Pressable>
@@ -393,11 +423,15 @@ function ActionRow({
 function CommitmentEditorModal({
   target,
   accounts,
+  activeCurrencies,
+  rates,
   visible,
   onClose,
 }: {
   target: Commitment | 'new' | null;
   accounts: { id: string; name: string; kind: string; cls: string; archived: boolean; symbol?: string | null; ticker?: string | null; quantity?: number | null; cost?: number | null; sub?: string | null; icon?: string | null }[];
+  activeCurrencies: string[];
+  rates: Record<string, number>;
   visible: boolean;
   onClose: () => void;
 }) {
@@ -411,6 +445,7 @@ function CommitmentEditorModal({
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<CommitmentKind>('expense');
   const [amountText, setAmountText] = useState('');
+  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
   const [dueDayText, setDueDayText] = useState('1');
   const [categoryId, setCategoryId] = useState<string>(DEFAULT_EXPENSE_ID);
   const [fromAccountId, setFromAccountId] = useState<string | null>(null);
@@ -422,6 +457,7 @@ function CommitmentEditorModal({
       setLabel('');
       setKind('expense');
       setAmountText('');
+      setCurrency(BASE_CURRENCY);
       setDueDayText('1');
       setCategoryId(DEFAULT_EXPENSE_ID);
       setFromAccountId(accounts.find((a) => !a.archived && a.kind === 'asset' && a.cls !== RECEIVABLE_CLS)?.id ?? null);
@@ -429,7 +465,9 @@ function CommitmentEditorModal({
     } else if (editingExisting) {
       setLabel(editingExisting.label);
       setKind(editingExisting.kind);
-      setAmountText(editingExisting.amount.toFixed(2));
+      setCurrency(editingExisting.currency ?? BASE_CURRENCY);
+      const dec = decimalsFor(editingExisting.currency ?? BASE_CURRENCY);
+      setAmountText(dec === 0 ? String(Math.round(editingExisting.amount)) : editingExisting.amount.toFixed(dec));
       setDueDayText(String(editingExisting.dueDay));
       setCategoryId(editingExisting.categoryId ?? DEFAULT_EXPENSE_ID);
       setFromAccountId(editingExisting.fromAccountId);
@@ -468,6 +506,7 @@ function CommitmentEditorModal({
         categoryId,
         fromAccountId,
         toAccountId,
+        currency,
       });
     }
     onClose();
@@ -527,16 +566,23 @@ function CommitmentEditorModal({
           <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
             <View style={{ flex: 1 }}>
               <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Amount</Text>
-              <View style={styles.amountRow}>
-                <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>RM</Text>
+              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                {isMultiCurrency(activeCurrencies) && !editingExisting ? (
+                  <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
+                ) : (
+                  <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currency === BASE_CURRENCY ? 'RM' : currency}</Text>
+                )}
                 <TextInput
                   value={amountText}
-                  onChangeText={setAmountText}
-                  keyboardType="decimal-pad"
+                  onChangeText={(t) => setAmountText(decimalsFor(currency) === 0 ? t.replace(/[^0-9]/g, '') : t)}
+                  keyboardType={decimalsFor(currency) === 0 ? 'number-pad' : 'decimal-pad'}
                   selectTextOnFocus
-                  style={[styles.amountInput, { color: colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+                  style={[styles.amountInput, { color: colorTheme.ink }]}
                 />
               </View>
+              {currency !== BASE_CURRENCY && rateFor(rates, currency) != null && (
+                <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * (rateFor(rates, currency) ?? 1), BASE_CURRENCY)}</Text>
+              )}
             </View>
             <View style={{ width: 100 }}>
               <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Due day</Text>
@@ -617,6 +663,7 @@ const styles = StyleSheet.create({
   check: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { fontFamily: uiFont(700), fontSize: 14.5 },
   rowSub: { fontFamily: uiFont(600), fontSize: 12, marginTop: 2 },
+  occurrenceAmount: { fontFamily: numFont(700), fontSize: 15 },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
   sheet: {
@@ -639,9 +686,10 @@ const styles = StyleSheet.create({
 
   fieldLabel: { fontFamily: uiFont(600), fontSize: 12.5, marginBottom: 8 },
   textInput: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 13, fontFamily: uiFont(600), fontSize: 15 },
-  amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 4 },
   rmPrefix: { fontFamily: numFont(600), fontSize: 16 },
-  amountInput: { flex: 1, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 13, fontFamily: numFont(700), fontSize: 18 },
+  amountInput: { flex: 1, paddingVertical: 9, fontFamily: numFont(700), fontSize: 18 },
+  fxHint: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 4, marginLeft: 2 },
 
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, borderWidth: 1 },
   toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999 },

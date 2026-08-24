@@ -246,10 +246,11 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
     id: 'c1', label: 'S&P 500 DCA', merchantKey: 'stockbroker-dca', kind: 'investment', amount: 200,
     categoryId: null, fromAccountId: 'a1', toAccountId: 'a2', dueDay: 15, startMonth: '2026-05',
     endMonth: null, archived: false, createdAt: '2026-05-01T00:00:00.000Z', reliefCode: null,
+    currency: 'MYR',
   };
   const occurrences: CommitmentOccurrence[] = [
-    { id: 'o1', commitmentId: 'c1', dueDate: '2026-05-15', month: '2026-05', amount: 200, paidAmount: 200, paidOn: '2026-05-14', status: 'paid', txnId: null, txnCreated: true, unitsAdded: 1.5, priceMYR: 400, createdAt: '2026-05-01T00:00:00.000Z' },
-    { id: 'o2', commitmentId: 'c1', dueDate: '2026-06-15', month: '2026-06', amount: 200, paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false, unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z' },
+    { id: 'o1', commitmentId: 'c1', dueDate: '2026-05-15', month: '2026-05', amount: 200, paidAmount: 200, paidOn: '2026-05-14', status: 'paid', txnId: null, txnCreated: true, unitsAdded: 1.5, priceMYR: 400, createdAt: '2026-05-01T00:00:00.000Z', fxRate: null },
+    { id: 'o2', commitmentId: 'c1', dueDate: '2026-06-15', month: '2026-06', amount: 200, paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false, unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z', fxRate: null },
   ];
 
   it('keeps a transfer out of the `transactions` array and puts it in `transfers` instead', () => {
