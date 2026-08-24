@@ -87,6 +87,14 @@ export function ManualEntryScreen({
   // entry default, mirroring CurrencySettingsScreen's own entry-currency picker.
   const changeCurrency = async (code: string) => {
     setCurrency(code);
+    // A split can only have been created while this screen was on MYR (the split row is
+    // hidden otherwise, see below), so moving to a foreign currency makes any existing split
+    // stale in the same way a gross mismatch does: raised under one currency, no longer valid
+    // once the transaction is saved under another. Splits stay MYR-only until Task 11 adds
+    // splits.currency/fx_rate. Dropping it here closes the gap the gross-mismatch check alone
+    // doesn't cover: a split created before the currency switch, never re-typed, whose gross
+    // still numerically matches the amount field and so would otherwise sail through save().
+    if (code !== BASE_CURRENCY) setSplit(null);
     await setEntryCurrency(code);
   };
 
