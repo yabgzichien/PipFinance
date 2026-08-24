@@ -87,14 +87,6 @@ export function ManualEntryScreen({
   // entry default, mirroring CurrencySettingsScreen's own entry-currency picker.
   const changeCurrency = async (code: string) => {
     setCurrency(code);
-    // A split can only have been created while this screen was on MYR (the split row is
-    // hidden otherwise, see below), so moving to a foreign currency makes any existing split
-    // stale in the same way a gross mismatch does: raised under one currency, no longer valid
-    // once the transaction is saved under another. Splits stay MYR-only until Task 11 adds
-    // splits.currency/fx_rate. Dropping it here closes the gap the gross-mismatch check alone
-    // doesn't cover: a split created before the currency switch, never re-typed, whose gross
-    // still numerically matches the amount field and so would otherwise sail through save().
-    if (code !== BASE_CURRENCY) setSplit(null);
     await setEntryCurrency(code);
   };
 
@@ -145,7 +137,15 @@ export function ManualEntryScreen({
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
-  const activeSplit = split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
+  // Same treatment for currency: a split can only have been created while this screen was on
+  // MYR (the split row below is hidden otherwise), so it's equally stale, in the same sense,
+  // once the user switches to a foreign currency. This is deliberately a derived check, not a
+  // `setSplit(null)` on currency change: `split` state itself is never touched, so switching
+  // back to MYR without ever having re-typed the amount makes the split reappear intact, the
+  // same self-healing behaviour the gross-mismatch case already has. Splits stay MYR-only
+  // until Task 11 adds splits.currency/fx_rate.
+  const activeSplit =
+    split && currency === BASE_CURRENCY && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
 
   const save = async () => {
     if (!canSave || !cat || !validDate || rate == null) return;
