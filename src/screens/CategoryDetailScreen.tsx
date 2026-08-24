@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
@@ -11,13 +11,13 @@ import * as haptics from '../lib/haptics';
 import { txnMonthKey } from '../lib/budget';
 import { catColorsForHue } from '../lib/catColors';
 import { monthLabel, shortDate } from '../lib/dates';
-import { fmt, fmtMoney } from '../lib/format';
+import { fmt } from '../lib/format';
 import type { Category, Transaction } from '../lib/types';
 import { EXPENSE_ICONS, INCOME_ICONS, isCustomIcon } from './CategoriesScreen';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { numFont, platformShadow, spacing, type as typeScale } from '../theme';
+import { platformShadow, spacing, type as typeScale } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
@@ -366,9 +366,7 @@ export function CategoryDetailScreen({
                         {shortDate(t.date ?? t.createdAt)}
                       </Caption>
                     </View>
-                    <Text style={{ fontFamily: numFont(600), fontSize: 15, color: income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink }}>
-                      {fmtMoney(t.nativeAmount ?? t.amount, t.currency)}
-                    </Text>
+                    <Amount value={t.nativeAmount ?? t.amount} currency={t.currency} size={15} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
                     <Icon name="pencil" size={15} color={colorTheme.ink3} />
                   </Pressable>
                 );

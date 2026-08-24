@@ -7,14 +7,14 @@ import { TransactionFilterModal } from '../components/TransactionFilterModal';
 import { Amount, Card, CatBadge, Eyebrow, IconButton, TopBar } from '../components/ui';
 import { txnMonthKey } from '../lib/budget';
 import { isValidIsoDate, monthLabel, shortDate } from '../lib/dates';
-import { fmt, fmtMoney } from '../lib/format';
+import { fmt } from '../lib/format';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { numFont, radius, uiFont } from '../theme';
+import { radius, uiFont } from '../theme';
 
 /** The date used to sort/bucket a transaction: its own date, else when it was logged. */
 function txnDateOnly(t: Transaction): string {
@@ -330,9 +330,7 @@ export function AllTransactionsScreen({
                             </View>
                           )}
                         </View>
-                        <Text style={{ fontFamily: numFont(600), fontSize: 15, color: income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink }}>
-                          {fmtMoney(t.nativeAmount ?? t.amount, t.currency)}
-                        </Text>
+                        <Amount value={t.nativeAmount ?? t.amount} currency={t.currency} size={15} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
                         {!selectMode && <Icon name="pencil" size={15} color={colorTheme.ink3} />}
                       </Pressable>
                     );

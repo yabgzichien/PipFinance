@@ -4,7 +4,7 @@ import { decimalsFor } from './currencies';
  * Format a number with thousands separators at a given number of decimal places.
  * Implemented manually rather than via Intl to avoid locale-data gaps in Hermes.
  */
-function fmtDecimals(n: number, decimals: number): string {
+export function fmtDecimals(n: number, decimals: number): string {
   const value = Number.isFinite(n) ? n : 0;
   const negative = value < 0;
   const fixed = Math.abs(value).toFixed(decimals);

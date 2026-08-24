@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { catColorsForHue } from '../lib/catColors';
-import { fmt } from '../lib/format';
+import { decimalsFor } from '../lib/currencies';
+import { fmtDecimals } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -72,21 +73,28 @@ export function Amount({
   weight = 700,
   color,
   cur = true,
+  currency = 'MYR',
 }: {
   value: number;
   size?: number;
   weight?: number;
   color?: string;
   cur?: boolean;
+  /** 3-letter currency code the prefix and decimal places are drawn from. Defaults to 'MYR'
+   *  so every existing call site (which never passed this) keeps rendering "RM X.XX" exactly
+   *  as before. Matches `fmtMoney`'s own prefix rule: MYR shows "RM", anything else shows the
+   *  code itself, since symbols are ambiguous (the yen sign covers both JPY and CNY). */
+  currency?: string;
 }) {
   const colorTheme = useThemeColors();
   color = color ?? colorTheme.ink;
+  const prefix = currency === 'MYR' ? 'RM' : currency;
   return (
     <Text style={{ fontFamily: numFont(weight), fontSize: size, color }}>
       {cur && (
-        <Text style={{ fontFamily: numFont(600), fontSize: size * 0.66, color, opacity: 0.55 }}>RM </Text>
+        <Text style={{ fontFamily: numFont(600), fontSize: size * 0.66, color, opacity: 0.55 }}>{prefix} </Text>
       )}
-      {fmt(value)}
+      {fmtDecimals(value, decimalsFor(currency))}
     </Text>
   );
 }
