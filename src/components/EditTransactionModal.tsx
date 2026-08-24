@@ -296,7 +296,12 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             multiline
           />
 
-          {type === 'expense' && (
+          {/* Splits are MYR-only until Task 11 adds splits.currency/fx_rate: the receivable and
+              write-off pipeline treats every share as MYR, so starting a new split on a foreign
+              row would silently overstate "Owed to me" and misprice a write-off. An already-split
+              row is still shown (nothing new gets written by just viewing/settling it); only
+              starting a fresh split on a not-yet-split foreign row is blocked. */}
+          {type === 'expense' && (!!split || txn.currency === BASE_CURRENCY) && (
             <Pressable
               onPress={() => setSplitting(true)}
               style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}

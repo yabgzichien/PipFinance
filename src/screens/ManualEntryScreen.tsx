@@ -72,9 +72,15 @@ export function ManualEntryScreen({
     (async () => {
       const [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
       setActiveCurrencies(active);
-      setCurrency(entry);
+      // A receipt/scan-prefilled amount is always MYR today (scan/import currency detection
+      // is Task 10's job), regardless of what currency the user last entered manually. Applying
+      // the sticky entry-currency default here would silently retag a ringgit receipt as
+      // whatever foreign currency happens to be sticky. Stay on the BASE_CURRENCY the state
+      // already started at; only pick up the sticky default for a blank, unprefilled entry.
+      if (initialAmount == null) setCurrency(entry);
       setRates(ratesFromCache(fx));
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Sticks for next time, per the brief: picking a currency here is remembered as the new
@@ -203,7 +209,11 @@ export function ManualEntryScreen({
           <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
         )}
 
-        {type === 'expense' && (
+        {/* Splits are MYR-only until Task 11 adds splits.currency/fx_rate: the receivable and
+            write-off pipeline (openReceivableTotal, writeOffShare) treats every share as MYR,
+            so a foreign-currency split would silently overstate "Owed to me" and misprice a
+            write-off. Hidden entirely here rather than allowed and mislabeled. */}
+        {type === 'expense' && currency === BASE_CURRENCY && (
           <Pressable
             onPress={() => setSplitting(true)}
             style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, amount <= 0 && styles.splitRowOff]}
