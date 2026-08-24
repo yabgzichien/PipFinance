@@ -82,3 +82,25 @@ describe('parseExtraction  robustness', () => {
     expect(rows[1].date).toBeNull();
   });
 });
+
+describe('currency extraction', () => {
+  it('defaults to MYR when the model returns no currency', () => {
+    const parsed = parseExtraction(JSON.stringify([{ merchant: 'Kedai', amount: 12.5, date: '2026-08-01' }]));
+    expect(parsed[0].currency).toBe('MYR');
+  });
+
+  it('reads a supported currency code from the model', () => {
+    const parsed = parseExtraction(JSON.stringify([{ merchant: 'Haidilao', amount: 128, date: '2026-08-01', currency: 'CNY' }]));
+    expect(parsed[0].currency).toBe('CNY');
+  });
+
+  it('uppercases a lowercase code', () => {
+    const parsed = parseExtraction(JSON.stringify([{ merchant: 'X', amount: 1, date: '2026-08-01', currency: 'cny' }]));
+    expect(parsed[0].currency).toBe('CNY');
+  });
+
+  it('falls back to MYR for an unsupported code rather than failing the extraction', () => {
+    const parsed = parseExtraction(JSON.stringify([{ merchant: 'X', amount: 1, date: '2026-08-01', currency: 'ZZZ' }]));
+    expect(parsed[0].currency).toBe('MYR');
+  });
+});

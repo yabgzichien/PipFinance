@@ -33,7 +33,7 @@ describe('matchRelief', () => {
 
   it('matches a line item by keyword and tags only that item amount', () => {
     const receipt: ScannedReceipt = {
-      merchant: 'Big Store', subtotal: 380, serviceCharge: null, tax: null, total: 380, discount: null,
+      merchant: 'Big Store', currency: 'MYR', subtotal: 380, serviceCharge: null, tax: null, total: 380, discount: null,
       items: [
         { label: 'Groceries', amount: 260, quantity: 1 },
         { label: 'Laptop stand', amount: 120, quantity: 1 },
@@ -45,7 +45,7 @@ describe('matchRelief', () => {
 
   it('falls back to merchant memory when no line item matches', () => {
     const receipt: ScannedReceipt = {
-      merchant: 'Popular Bookstore', subtotal: 120, serviceCharge: null, tax: null, total: 120, discount: null,
+      merchant: 'Popular Bookstore', currency: 'MYR', subtotal: 120, serviceCharge: null, tax: null, total: 120, discount: null,
       items: [{ label: 'Stationery set', amount: 120, quantity: 1 }],
     };
     const result = matchRelief(txn({}), receipt, memory, RELIEF_SCHEDULE_2025);

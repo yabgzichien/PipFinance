@@ -1,14 +1,17 @@
 // src/screens/ImportReviewScreen.tsx
 import React, { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
 import { B, BtnLabel, BubbleText, Card, CatBadge, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { activateCurrency, getActiveCurrencies } from '../db/currencyRepo';
+import { BASE_CURRENCY } from '../lib/currency';
 import { shortDate } from '../lib/dates';
 import { findDuplicate, todayISO } from '../lib/duplicates';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { assignImported, detectSourceVocabulary, pendingLabel, resolvePending, PENDING_CAT } from '../lib/import';
+import { notify } from '../lib/platformAlert';
 import { DROP, type Category, type ExtractedTxn, type TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -75,6 +78,38 @@ export function ImportReviewScreen({
     });
   });
   const [editing, setEditing] = useState<number | null>(null);
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
+  const [activatingCode, setActivatingCode] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    getActiveCurrencies().then(setActiveCurrencies);
+  }, []);
+
+  const unactivatedCurrencies = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      if (r.item.currency && r.item.currency !== BASE_CURRENCY && !activeCurrencies.includes(r.item.currency)) {
+        set.add(r.item.currency);
+      }
+    }
+    return Array.from(set);
+  }, [rows, activeCurrencies]);
+
+  const onActivateCurrency = async (code: string) => {
+    if (activatingCode) return;
+    setActivatingCode(code);
+    try {
+      const ok = await activateCurrency(code);
+      if (!ok) {
+        notify(`Couldn't fetch the ${code} rate.`, "Try again when you're online.");
+        return;
+      }
+      const nextActive = await getActiveCurrencies();
+      setActiveCurrencies(nextActive);
+    } finally {
+      setActivatingCode(null);
+    }
+  };
 
   // Stand-in categories for labels that do not exist yet, so the preview and
   // the row editor can show them before anything is written to the database.
@@ -205,6 +240,46 @@ export function ImportReviewScreen({
           </Card>
         )}
 
+        {unactivatedCurrencies.map((code) => (
+          <Card
+            key={code}
+            style={{
+              padding: 14,
+              marginTop: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.merchant, { color: colorTheme.ink }]}>
+                Detected {code} transactions
+              </Text>
+              <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
+                Add {code} to convert and track expenses in this currency.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => onActivateCurrency(code)}
+              disabled={activatingCode === code}
+              style={[
+                styles.addCurrencyBtn,
+                { backgroundColor: theme.accent },
+                activatingCode === code && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${code}`}
+            >
+              {activatingCode === code ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.addCurrencyBtnText}>Add {code}</Text>
+              )}
+            </Pressable>
+          </Card>
+        ))}
+
         <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{included} of {rows.length} selected</Eyebrow>
 
         <Card style={{ overflow: 'hidden' }}>
@@ -232,7 +307,7 @@ export function ImportReviewScreen({
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={[styles.amount, { color: income ? theme.accent : colorTheme.ink }]}>
-                      {income ? '+' : ''}RM {fmt(r.item.amount)}
+                      {income ? '+' : ''}{fmtMoney(r.item.amount, r.item.currency)}
                     </Text>
                     <Icon name="pencil" size={13} color={colorTheme.ink3} />
                   </View>
@@ -432,4 +507,16 @@ const styles = StyleSheet.create({
   addChipText: { fontFamily: uiFont(700), fontSize: 13.5 },
   moreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
   moreText: { fontFamily: uiFont(600), fontSize: 13.5 },
+  addCurrencyBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addCurrencyBtnText: {
+    color: '#ffffff',
+    fontFamily: uiFont(700),
+    fontSize: 13,
+  },
 });

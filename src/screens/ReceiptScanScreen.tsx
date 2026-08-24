@@ -11,8 +11,10 @@ import { AddPersonModal } from '../components/AddPersonModal';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { activateCurrency, getActiveCurrencies } from '../db/currencyRepo';
+import { BASE_CURRENCY } from '../lib/currency';
 import { scanDocument } from '../lib/documentScanner';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { llmErrorMessage } from '../llm';
 import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
@@ -28,6 +30,8 @@ import type { PickedImage } from './AttachScreen';
 
 export interface ReceiptSplitResult {
   merchant: string | null;
+  /** Currency code for the receipt, e.g. 'MYR' or 'CNY'. */
+  currency: string;
   /** What the card was actually charged, which the split reconciles to exactly. */
   charged: number;
   /** null when nobody was added — the receipt was the user's alone, so the whole charge is
@@ -57,6 +61,7 @@ export interface ReceiptDraftState {
  *  capture) means the user can still type the total by hand and save, photo included. */
 const EMPTY_SCAN: ScannedReceipt = {
   merchant: null,
+  currency: BASE_CURRENCY,
   items: [],
   subtotal: null,
   serviceCharge: null,
@@ -116,6 +121,12 @@ export function ReceiptScanScreen({
   const [addPersonOpen, setAddPersonOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState(false);
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
+  const [activatingCode, setActivatingCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    getActiveCurrencies().then(setActiveCurrencies);
+  }, []);
 
   // The payer is always at the table, and always last, so every rounding residue lands on them.
   const participants = useMemo(() => [...picked, SELF], [picked]);
@@ -291,6 +302,7 @@ export function ReceiptScanScreen({
     }
     onDone({
       merchant: receipt?.merchant ?? null,
+      currency: receipt?.currency ?? BASE_CURRENCY,
       charged,
       photoUri,
       draft: splitting
@@ -461,6 +473,59 @@ export function ReceiptScanScreen({
           <Text style={[styles.empty, { color: colorTheme.ink3 }]}>Paid for it alone? Leave this empty and just check the total.</Text>
         )}
 
+        {receipt && receipt.currency !== BASE_CURRENCY && !activeCurrencies.includes(receipt.currency) && (
+          <Card
+            style={{
+              padding: 14,
+              marginTop: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.itemLabel, { color: colorTheme.ink }]}>
+                Detected {receipt.currency} receipt
+              </Text>
+              <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
+                Add {receipt.currency} to convert and track this receipt.
+              </Text>
+            </View>
+            <Pressable
+              onPress={async () => {
+                if (activatingCode) return;
+                setActivatingCode(receipt.currency);
+                try {
+                  const ok = await activateCurrency(receipt.currency);
+                  if (!ok) {
+                    notify(`Couldn't fetch the ${receipt.currency} rate.`, "Try again when you're online.");
+                    return;
+                  }
+                  const nextActive = await getActiveCurrencies();
+                  setActiveCurrencies(nextActive);
+                } finally {
+                  setActivatingCode(null);
+                }
+              }}
+              disabled={activatingCode === receipt.currency}
+              style={[
+                styles.addCurrencyBtn,
+                { backgroundColor: theme.accent },
+                activatingCode === receipt.currency && { opacity: 0.7 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Add ${receipt.currency}`}
+            >
+              {activatingCode === receipt.currency ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.addCurrencyBtnText}>Add {receipt.currency}</Text>
+              )}
+            </Pressable>
+          </Card>
+        )}
+
         {lines.length > 0 && (
             <>
               <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>
@@ -469,13 +534,14 @@ export function ReceiptScanScreen({
               <Card style={{ overflow: 'hidden' }}>
                 {lines.map((line, i) => {
                   const everyone = line.assignedTo.length === participants.length;
+                  const receiptCurrency = receipt?.currency ?? BASE_CURRENCY;
                   return (
                     <View key={line.id} style={[styles.itemRow, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
                       <View style={styles.itemHead}>
                         <Text style={[styles.itemLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                           {line.label}
                         </Text>
-                        <Text style={[styles.itemAmount, { color: colorTheme.ink }]}>{fmt(line.amount)}</Text>
+                        <Text style={[styles.itemAmount, { color: colorTheme.ink }]}>{fmtMoney(line.amount, receiptCurrency)}</Text>
                       </View>
                       {splitting && (
                       <View style={styles.avatarRow}>
@@ -551,7 +617,9 @@ export function ReceiptScanScreen({
         {/* Always shown: the charge is the whole point of the scan, split or not. */}
         <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>What your card was charged</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>
+            {(receipt?.currency ?? BASE_CURRENCY) === 'MYR' ? 'RM' : (receipt?.currency ?? BASE_CURRENCY)}
+          </Text>
           <TextInput
             value={chargedText}
             onChangeText={setChargedText}
@@ -565,7 +633,7 @@ export function ReceiptScanScreen({
           <>
             {Math.abs(result.difference) >= 0.01 && (
               <Text style={[styles.diffNote, { color: colorTheme.ink2 }]}>
-                The receipt adds up to RM {fmt(result.computedTotal)}, so RM {fmt(Math.abs(result.difference))}{' '}
+                The receipt adds up to {fmtMoney(result.computedTotal, receipt?.currency ?? BASE_CURRENCY)}, so {fmtMoney(Math.abs(result.difference), receipt?.currency ?? BASE_CURRENCY)}{' '}
                 {result.difference > 0 ? 'more was charged' : 'less was charged'}. That is shared across the
                 table so the split matches your bank exactly.
               </Text>
@@ -578,7 +646,7 @@ export function ReceiptScanScreen({
                     {id === SELF ? 'You (your expense)' : nameById[id] ?? 'Someone'}
                   </Text>
                   <Text style={[styles.summaryValue, { color: theme.accent }, id === SELF && [styles.summaryValueSelf, { color: colorTheme.ink }]]}>
-                    RM {fmt(owedByPerson[id] ?? 0)}
+                    {fmtMoney(owedByPerson[id] ?? 0, receipt?.currency ?? BASE_CURRENCY)}
                   </Text>
                 </View>
               ))}
@@ -893,5 +961,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 12,
     borderTopWidth: 1,
+  },
+  meta: { fontFamily: uiFont(500), fontSize: 12 },
+  addCurrencyBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addCurrencyBtnText: {
+    color: '#ffffff',
+    fontFamily: uiFont(700),
+    fontSize: 13,
   },
 });

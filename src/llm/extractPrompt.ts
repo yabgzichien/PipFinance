@@ -15,6 +15,7 @@ Return a JSON object exactly in this shape:
     {
       "merchant": "string  the payee / description / narration as shown",
       "amount": number  positive value, no currency symbol,
+      "currency": "3-letter ISO code read from the symbol or text shown, e.g. \"MYR\", \"CNY\", \"SGD\"  use \"MYR\" if none is shown",
       "direction": "out" for money leaving the account (spending), "in" for money received,
       "date": "YYYY-MM-DD if derivable, otherwise null",
       "category": "the category/label from the source if the document has one, otherwise null",
@@ -70,12 +71,13 @@ export const SNAPSHOT_USER_PROMPT = `Identify what this screenshot shows and ret
   "kind": "balance" | "holdings" | "unknown",
   "provider": "the bank, e-wallet, or platform name shown (e.g. \\"Touch 'n Go eWallet\\", \\"Maybank\\", \\"Binance\\"), read from a logo, header, or app branding  null if you can't tell",
   "accountKind": "asset" | "liability" | null  only for kind \\"balance\\": \\"asset\\" for a deposit/wallet/savings balance, \\"liability\\" for an outstanding loan/credit-card/BNPL amount; null otherwise,
-  "amount": number | null  only for kind \\"balance\\": the main balance or outstanding amount, with currency symbols and thousands separators removed (e.g. "RM 1,234.50" -> 1234.50),
+  "amount": number | null  only for kind \\"balance\\": the main balance or outstanding amount, with currency symbols and thousands separators removed (e.g. "RM 1,234.50" -> 1234.50, "¥128.00" -> 128.00),
+  "currency": "3-letter ISO code read from the symbol or text shown, e.g. \\"MYR\\", \\"CNY\\", \\"SGD\\"  use \\"MYR\\" if none is shown, only for kind \\"balance\\"",
   "holdings": [{ "ticker": "uppercase coin symbol", "quantity": number }]  only for kind \\"holdings\\"
 }
 
 Rules:
-- kind "balance" = a bank account, e-wallet, savings/current account, or loan/credit statement showing one main MYR amount.
+- kind "balance" = a bank account, e-wallet, savings/current account, or loan/credit statement showing one main balance amount.
 - kind "holdings" = a crypto wallet or exchange showing coin balances.
 - kind "unknown" = neither is clearly shown.
 - For "balance": use the primary account balance or outstanding loan amount  NOT available credit, rewards points, or interest. Omit holdings (empty array). If you cannot read a clear amount, set amount to null but still report kind "balance" if it's clearly that kind of screenshot.
@@ -91,6 +93,7 @@ export const RECEIPT_USER_PROMPT = `Read every ordered item on this receipt so t
 Return a JSON object exactly in this shape:
 {
   "merchant": "the shop or restaurant name printed on the receipt, or null",
+  "currency": "3-letter ISO code read from the symbol or text shown, e.g. \"MYR\", \"CNY\", \"SGD\"  use \"MYR\" if none is shown",
   "items": [
     {
       "label": "the item name as printed",
@@ -125,7 +128,7 @@ export const BALANCE_SYSTEM_PROMPT =
   'return ONLY JSON. Never add prose, explanations, or markdown fences.';
 
 export const BALANCE_USER_PROMPT = `Return the main balance or amount shown in this screenshot as JSON:
-{ "amount": number }
+{ "amount": number, "currency": "3-letter ISO code read from the symbol or text shown, e.g. \\"MYR\\", \\"CNY\\", \\"SGD\\"  use \\"MYR\\" if none is shown" }
 
 Rules:
 - Use the primary account balance or the outstanding loan amount  NOT available credit, rewards points, or interest.

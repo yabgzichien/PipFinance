@@ -31,6 +31,7 @@ export function ManualEntryScreen({
   startSplitting = false,
   initialMerchant = null,
   initialAmount = null,
+  initialCurrency = null,
   initialSplit = null,
 }: {
   categories: Category[];
@@ -44,6 +45,7 @@ export function ManualEntryScreen({
    *  per-person split the itemiser produced. */
   initialMerchant?: string | null;
   initialAmount?: number | null;
+  initialCurrency?: string | null;
   initialSplit?: SplitDraft | null;
 }) {
   const insets = useSafeAreaInsets();
@@ -65,19 +67,18 @@ export function ManualEntryScreen({
   // convert against. Loaded once on mount; MYR-only until then, so nothing here changes the
   // single-currency screen while the load is in flight.
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
-  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
+  const [currency, setCurrency] = useState<string>(initialCurrency ?? BASE_CURRENCY);
   const [rates, setRates] = useState<Record<string, number>>({});
 
   useEffect(() => {
     (async () => {
       const [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
       setActiveCurrencies(active);
-      // A receipt/scan-prefilled amount is always MYR today (scan/import currency detection
-      // is Task 10's job), regardless of what currency the user last entered manually. Applying
-      // the sticky entry-currency default here would silently retag a ringgit receipt as
-      // whatever foreign currency happens to be sticky. Stay on the BASE_CURRENCY the state
-      // already started at; only pick up the sticky default for a blank, unprefilled entry.
-      if (initialAmount == null) setCurrency(entry);
+      if (initialCurrency) {
+        setCurrency(initialCurrency);
+      } else if (initialAmount == null) {
+        setCurrency(entry);
+      }
       setRates(ratesFromCache(fx));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

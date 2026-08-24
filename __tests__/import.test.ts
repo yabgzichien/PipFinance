@@ -18,7 +18,7 @@ function cat(over: Partial<Category>): Category {
 }
 
 function item(over: Partial<ExtractedTxn>): ExtractedTxn {
-  return { merchant: 'Starbucks', amount: 12, type: 'expense', date: '2026-05-01', method: null, ...over };
+  return { merchant: 'Starbucks', amount: 12, type: 'expense', date: '2026-05-01', method: null, currency: 'MYR', ...over };
 }
 
 describe('docKindFromMime', () => {

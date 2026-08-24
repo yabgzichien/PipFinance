@@ -85,6 +85,17 @@ export function isMultiCurrency(active: string[]): boolean {
 }
 
 /**
+ * Normalise a currency code coming out of an LLM extraction. Anything unrecognised falls
+ * back to the base currency: a bad code should never fail an otherwise good extraction,
+ * and MYR is the correct guess for this app's users by a wide margin.
+ */
+export function normalizeCurrency(raw: unknown): string {
+  if (typeof raw !== 'string') return BASE_CURRENCY;
+  const code = raw.trim().toUpperCase();
+  return currencyMeta(code) ? code : BASE_CURRENCY;
+}
+
+/**
  * Re-derive a row after the user edits its amount.
  *
  * The number coming out of an edit field is the NATIVE amount, because that is what the

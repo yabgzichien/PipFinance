@@ -1,10 +1,20 @@
 // src/lib/parseSnapshot.ts
 // Defensive parser for the unified "scan a screenshot" reply: a screenshot is
 // either a balance (bank/e-wallet/loan) or a crypto holdings screen. Pure & tested.
+import { normalizeCurrency } from './currency';
 import { coerceHoldingsRows, type ScannedHolding } from './prices';
 
 export type ScannedSnapshot =
-  | { kind: 'balance'; provider: string | null; accountKind: 'asset' | 'liability' | null; amount: number | null }
+  | {
+      kind: 'balance';
+      provider: string | null;
+      accountKind: 'asset' | 'liability' | null;
+      amount: number | null;
+      /** 3-letter code `amount` is denominated in, normalised so it is never a bad/unrecognised
+       *  code. Holdings are coin quantities, never a fiat amount, so this only exists on the
+       *  'balance' branch  the only one that carries a monetary figure. */
+      currency: string;
+    }
   | { kind: 'holdings'; provider: string | null; holdings: ScannedHolding[] }
   | { kind: 'unknown' };
 
@@ -48,6 +58,7 @@ export function parseSnapshot(content: string): ScannedSnapshot {
       provider: coerceProvider(o.provider),
       accountKind: coerceAccountKind(o.accountKind),
       amount: coerceAmount(o.amount),
+      currency: normalizeCurrency(o.currency),
     };
   }
   if (o.kind === 'holdings') {

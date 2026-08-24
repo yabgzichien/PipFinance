@@ -332,6 +332,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
         startSplitting={phase === 'split'}
         initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : null}
         initialAmount={phase === 'split' ? receiptResult?.charged ?? null : null}
+        initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : null}
         initialSplit={phase === 'split' ? receiptResult?.draft ?? null : null}
       />
     );

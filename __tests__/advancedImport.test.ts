@@ -90,6 +90,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Groceries',
       account: 'Maybank',
+      currency: 'MYR',
     });
 
     // Second txn: Income with no merchant, categoryHint "Salary"
@@ -101,6 +102,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Salary',
       account: 'Maybank',
+      currency: 'MYR',
     });
 
     // Accounts
@@ -138,6 +140,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Food & Groceries',
       account: 'Credit Card',
+      currency: 'MYR',
     });
   });
 
@@ -172,6 +175,24 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.commitments).toEqual([]);
     expect(result.accounts[0].quantity).toBeNull();
     expect(result.accounts[0].cost).toBeNull();
+  });
+
+  it('carries a foreign account currency through instead of discarding it', () => {
+    const result = parseJSON(JSON.stringify({
+      accounts: [{ name: 'Bank of China', type: 'Cash', balance: 5000, currency: 'cny' }],
+    }));
+    expect(result.accounts[0].currency).toBe('CNY');
+  });
+
+  it('falls back to MYR for a missing or unsupported account currency', () => {
+    const result = parseJSON(JSON.stringify({
+      accounts: [
+        { name: 'No currency stated', type: 'Cash', balance: 100 },
+        { name: 'Bogus code', type: 'Cash', balance: 100, currency: 'ZZZ' },
+      ],
+    }));
+    expect(result.accounts[0].currency).toBe('MYR');
+    expect(result.accounts[1].currency).toBe('MYR');
   });
 
   it('parses a quantity/cost pair on an account row (version 2)', () => {

@@ -2,6 +2,7 @@
 // Defensive parser for the "read this paper receipt" reply. Pure and tested: the model is
 // asked for printed AMOUNTS (which is what a receipt actually shows), and the surcharge
 // percentages the split sheet edits are derived back out of them here.
+import { BASE_CURRENCY, normalizeCurrency } from './currency';
 import { DEFAULT_SURCHARGES, type DiscountTiming, type Surcharges } from './split';
 
 export interface ScannedItem {
@@ -20,6 +21,10 @@ export interface ScannedDiscount {
 
 export interface ScannedReceipt {
   merchant: string | null;
+  /** 3-letter code every amount on this receipt is denominated in, normalised so it is
+   *  never a bad/unrecognised code. One receipt has one currency, so this lives at the
+   *  receipt level rather than per item. */
+  currency: string;
   items: ScannedItem[];
   subtotal: number | null;
   serviceCharge: number | null;
@@ -71,6 +76,7 @@ function coerceDiscount(raw: unknown): ScannedDiscount | null {
 
 const EMPTY: ScannedReceipt = {
   merchant: null,
+  currency: BASE_CURRENCY,
   items: [],
   subtotal: null,
   serviceCharge: null,
@@ -103,6 +109,7 @@ export function parseReceipt(content: string): ScannedReceipt {
 
   return {
     merchant: typeof o.merchant === 'string' && o.merchant.trim() ? o.merchant.trim() : null,
+    currency: normalizeCurrency(o.currency),
     items,
     subtotal: coerceAmount(o.subtotal),
     serviceCharge: coerceAmount(o.serviceCharge),

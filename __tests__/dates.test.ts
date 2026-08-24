@@ -8,6 +8,7 @@ function txn(over: Partial<ExtractedTxn>): ExtractedTxn {
     type: 'expense',
     date: '2026-05-12',
     method: null,
+    currency: 'MYR',
     ...over,
   };
 }

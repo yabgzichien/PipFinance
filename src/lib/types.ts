@@ -18,10 +18,13 @@ export interface ExtractedTxn {
   /** A short user-written note, e.g. "lunch with client". Never extracted from the
    *  screenshot itself; the user adds it during review or manual entry. */
   remark?: string | null;
-  /** 3-letter currency code for `amount`. Absent (or 'MYR') means a plain MYR row; matches
-   *  `NewTxn.currency`'s own contract. When set to anything else, `amount` is the native
-   *  figure the user entered, and `fxRate` must be set too. */
-  currency?: string;
+  /** 3-letter currency code for `amount`, normalised by `normalizeCurrency` so this is never
+   *  a bad/unrecognised code  'MYR' means a plain MYR row, matching `NewTxn.currency`'s own
+   *  contract. When set to anything else, `amount` is the native figure as scanned/typed, and
+   *  `fxRate` must also be set before this can save (see `deriveMyr`): a detected foreign
+   *  currency with no cached rate yet is exactly the case the currency-activation UI exists
+   *  to close, not a reason to let this field silently drift back to MYR. */
+  currency: string;
   /** MYR per 1 unit of `currency`, frozen at entry time. Only meaningful when `currency` is
    *  foreign; matches `NewTxn.fxRate`. */
   fxRate?: number | null;
