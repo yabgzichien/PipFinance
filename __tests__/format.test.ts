@@ -1,4 +1,4 @@
-import { fmt, fmtCompact, readTimeLabel } from '../src/lib/format';
+import { fmt, fmtCompact, fmtMoney, readTimeLabel } from '../src/lib/format';
 
 describe('fmtCompact', () => {
   it('matches fmt exactly under the 100K threshold', () => {
@@ -50,5 +50,39 @@ describe('readTimeLabel', () => {
 
   it('shows the true elapsed time for a long extraction, uncapped', () => {
     expect(readTimeLabel(22_000)).toBe('Read in 22 seconds');
+  });
+});
+
+describe('fmtMoney', () => {
+  it('uses the RM convention for ringgit rather than the code', () => {
+    expect(fmtMoney(128, 'MYR')).toBe('RM 128.00');
+    expect(fmtMoney(1234.5, 'MYR')).toBe('RM 1,234.50');
+  });
+
+  it('uses the 3-letter code for everything else, never a symbol', () => {
+    expect(fmtMoney(128, 'CNY')).toBe('CNY 128.00');
+    expect(fmtMoney(1234.5, 'USD')).toBe('USD 1,234.50');
+  });
+
+  it('drops decimals for zero-subunit currencies', () => {
+    expect(fmtMoney(1200, 'JPY')).toBe('JPY 1,200');
+    expect(fmtMoney(45000, 'KRW')).toBe('KRW 45,000');
+  });
+
+  it('rounds rather than truncates a zero-decimal currency', () => {
+    expect(fmtMoney(1200.6, 'JPY')).toBe('JPY 1,201');
+  });
+
+  it('keeps the negative sign in front of the number, after the code', () => {
+    expect(fmtMoney(-128, 'CNY')).toBe('CNY -128.00');
+    expect(fmtMoney(-128, 'MYR')).toBe('RM -128.00');
+  });
+
+  it('agrees with fmt for MYR amounts, so existing RM labels stay consistent', () => {
+    expect(fmtMoney(1234.5, 'MYR')).toBe(`RM ${fmt(1234.5)}`);
+  });
+
+  it('falls back to 0 for non-finite input, same as fmt', () => {
+    expect(fmtMoney(NaN, 'MYR')).toBe('RM 0.00');
   });
 });

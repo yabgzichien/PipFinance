@@ -1,15 +1,24 @@
+import { decimalsFor } from './currencies';
+
 /**
- * Format a number as a 2-decimal amount with thousands separators,
- * e.g. 2000 -> "2,000.00". Implemented manually rather than via Intl to
- * avoid locale-data gaps in the Hermes engine.
+ * Format a number with thousands separators at a given number of decimal places.
+ * Implemented manually rather than via Intl to avoid locale-data gaps in Hermes.
  */
-export function fmt(n: number): string {
+function fmtDecimals(n: number, decimals: number): string {
   const value = Number.isFinite(n) ? n : 0;
   const negative = value < 0;
-  const fixed = Math.abs(value).toFixed(2);
+  const fixed = Math.abs(value).toFixed(decimals);
   const [intPart, decPart] = fixed.split('.');
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return (negative ? '-' : '') + grouped + '.' + decPart;
+  return (negative ? '-' : '') + grouped + (decPart ? '.' + decPart : '');
+}
+
+/**
+ * Format a number as a 2-decimal amount with thousands separators,
+ * e.g. 2000 -> "2,000.00".
+ */
+export function fmt(n: number): string {
+  return fmtDecimals(n, 2);
 }
 
 function trimTrailingZeros(s: string): string {
@@ -38,6 +47,16 @@ export function fmtCompact(n: number): string {
   const asK = abs / 1_000;
   if (Number(asK.toFixed(1)) >= 1000) return `${sign}${trimTrailingZeros(asM.toFixed(1))}M`;
   return `${sign}${trimTrailingZeros(asK.toFixed(1))}K`;
+}
+
+/**
+ * Format an amount with its currency prefix. MYR keeps the local "RM" convention;
+ * everything else uses the 3-letter code, because symbols are ambiguous (the yen sign
+ * covers both JPY and CNY) and Hermes has patchy symbol font coverage.
+ */
+export function fmtMoney(amount: number, currency: string): string {
+  const prefix = currency === 'MYR' ? 'RM' : currency;
+  return `${prefix} ${fmtDecimals(amount, decimalsFor(currency))}`;
 }
 
 /**
