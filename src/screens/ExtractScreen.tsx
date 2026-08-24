@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { Icon } from '../components/Icon';
@@ -60,6 +60,7 @@ export function ExtractScreen({
   // loop, so it isn't gated on reduced motion the way the scanline below is.
   const [readingSecs, setReadingSecs] = useState(0);
   const reducedMotion = useReducedMotion();
+  const [viewingPhoto, setViewingPhoto] = useState(false);
 
   // Seed the required account once accounts are known, creating a "Cash" one if none exist.
   useEffect(() => {
@@ -188,15 +189,15 @@ export function ExtractScreen({
           )}
         </View>
 
-        {/* picked image preview with scanline */}
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
+        {/* picked image preview with scanline, tappable to view full-screen */}
+        <Pressable onPress={() => setViewingPhoto(true)} style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Card style={[styles.preview, { backgroundColor: colorTheme.surface2 }]}>
             <Image source={{ uri: image.uri }} style={[styles.previewImg, { backgroundColor: colorTheme.surface2 }]} resizeMode="contain" />
             {phase === 'scanning' && (
               <Animated.View style={[styles.scanline, { borderTopColor: theme.accent }, { transform: [{ translateY }] }]} />
             )}
           </Card>
-        </View>
+        </Pressable>
 
         {phase === 'result' && items.length > 0 && (
           <View style={{ paddingHorizontal: 18, paddingTop: 20 }}>
@@ -253,6 +254,15 @@ export function ExtractScreen({
           </PrimaryButton>
         )}
       </View>
+
+      <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
+          <Image source={{ uri: image.uri }} style={styles.viewerImage} resizeMode="contain" />
+          <Pressable onPress={() => setViewingPhoto(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+            <Icon name="x" size={22} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -261,6 +271,9 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   preview: { overflow: 'hidden', padding: 0 },
   previewImg: { width: '100%', height: PREVIEW_H },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
+  viewerClose: { position: 'absolute', right: 18, padding: 8 },
   scanline: {
     position: 'absolute',
     left: 0,

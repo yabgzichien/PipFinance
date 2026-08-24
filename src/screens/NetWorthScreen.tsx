@@ -697,8 +697,10 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
       <Pressable style={styles.backdrop} onPress={close} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
+      <View style={[styles.sheetCard, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>New account</Text>
@@ -835,6 +837,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
             </PrimaryButton>
           </View>
         </ScrollView>
+      </View>
       </KeyboardAvoidingView>
 
       <TickerSearchModal
@@ -1025,8 +1028,10 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
+      <View style={[styles.sheetCard, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]} numberOfLines={1}>{account.name}</Text>
@@ -1170,6 +1175,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
             <Text style={styles.deleteText}>Delete account</Text>
           </Pressable>
         </ScrollView>
+      </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1276,6 +1282,15 @@ const styles = StyleSheet.create({
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
   sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
+  // Same visual sheet as `sheet`, but positioned by flexbox rather than `position: absolute`. Needed
+  // wherever the sheet holds a focusable TextInput: on Android, KeyboardAvoidingView's `height` behavior
+  // measures this view's own onLayout frame to compute the post-keyboard height, and an absolutely
+  // positioned view with only `bottom: 0` (no `top`/explicit height) reports an unstable frame, so the
+  // resize never applies and the keyboard just covers the field. Giving the KeyboardAvoidingView `flex: 1`
+  // (full modal height, stable from first layout) and letting flexbox push the card to the bottom instead
+  // fixes it. This is the same structure already used by AddCategoryModal/AddPersonModal, which don't hit the bug.
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   sheetTitle: { flex: 1, fontFamily: uiFont(700), fontSize: 19, marginRight: 12 },

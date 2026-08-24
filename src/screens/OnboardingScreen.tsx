@@ -92,11 +92,13 @@ export function OnboardingScreen() {
         {step === 'intro' && <PipIntroStep onNext={() => advance('import')} />}
         {step === 'import' && (
           <ImportStep
+            hasImported={hasImported}
             onStartImport={() => advance('advanced_import')}
             onSkip={() => {
               setHasImported(false);
               advance('budget');
             }}
+            onContinue={() => advance('notifications')}
           />
         )}
         {step === 'advanced_import' && (

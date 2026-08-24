@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { Amount, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
@@ -83,7 +84,10 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
             )}
 
             <Card style={styles.totalCard}>
-              <Eyebrow>Still owed to you</Eyebrow>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Eyebrow>Still owed to you</Eyebrow>
+                <InfoButton entry="split_bill" />
+              </View>
               <Amount value={total} size={30} weight={700} color={theme.accent} />
               <Text style={[styles.totalSub, { color: colorTheme.ink2 }]}>
                 Sitting in Net Worth as an asset, not as spending you never did.

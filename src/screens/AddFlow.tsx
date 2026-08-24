@@ -280,6 +280,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
       <ReceiptScanScreen
         initialImage={image ?? undefined}
         cachedReceipt={cachedReceipt}
+        initialDraft={receiptResult?.resumeState ?? null}
         onScanned={setCachedReceipt}
         onBack={backToKind}
         onManualInstead={() => {

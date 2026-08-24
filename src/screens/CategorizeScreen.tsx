@@ -3,6 +3,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { SplitSheet } from '../components/SplitSheet';
 import { Amount, B, BtnLabel, BubbleText, Card, CategoryChip, PipSays, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
 import { applyDateEdit, fullDateWithWeekday, ISO_DATE_RE, isValidIsoDate, shortDate } from '../lib/dates';
@@ -318,9 +319,12 @@ export function CategorizeScreen({
             >
               <Icon name="gift" size={17} color={theme.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                  {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
+                    {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
+                  </Text>
+                  <InfoButton entry="split_bill" />
+                </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {activeSplit
                     ? `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`

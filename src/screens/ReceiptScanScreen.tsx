@@ -5,10 +5,11 @@
 // reconciles to, because that is what left the account.
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddPersonModal } from '../components/AddPersonModal';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { scanDocument } from '../lib/documentScanner';
 import { fmt } from '../lib/format';
@@ -17,7 +18,7 @@ import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
 import { saveReceiptImage } from '../lib/receiptStorage';
 import { scanReceiptImage } from '../lib/scanReceipt';
-import { computeItemized, SELF, type ReceiptLine, type Surcharges } from '../lib/split';
+import { computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
@@ -34,13 +35,42 @@ export interface ReceiptSplitResult {
   draft: SplitDraft | null;
   /** The saved receipt photo's permanent URI, or null if the user left "keep this photo" off. */
   photoUri: string | null;
+  /** This screen's own editable state at the moment "Use this receipt/split" was tapped. Handed
+   *  back in as `initialDraft` if the user backs out of the next screen, so a remount (the kind
+   *  question and "Check your receipt" are separate phases that unmount this one) restores what
+   *  was typed and assigned instead of re-deriving from the original scan. */
+  resumeState: ReceiptDraftState;
 }
+
+/** Everything on the assign screen the user can edit, snapshotted so a remount can resume from it
+ *  instead of the raw LLM read. */
+export interface ReceiptDraftState {
+  keepPhoto: boolean;
+  lines: ReceiptLine[];
+  surcharges: Surcharges;
+  chargedText: string;
+  picked: string[];
+}
+
+/** A receipt read that came back with nothing usable: a network/auth/parse failure, not just an
+ *  unreadable photo. Falling through to the assign screen with this (rather than bouncing back to
+ *  capture) means the user can still type the total by hand and save, photo included. */
+const EMPTY_SCAN: ScannedReceipt = {
+  merchant: null,
+  items: [],
+  subtotal: null,
+  serviceCharge: null,
+  tax: null,
+  total: null,
+  discount: null,
+};
 
 type Phase = 'capture' | 'reading' | 'assign';
 
 export function ReceiptScanScreen({
   initialImage,
   cachedReceipt,
+  initialDraft,
   onScanned,
   onBack,
   onDone,
@@ -54,6 +84,10 @@ export function ReceiptScanScreen({
    *  question and returned. Lets the screen skip straight to 'assign' instead of paying for
    *  another LLM round-trip (and the "reading" loading beat) to re-read a receipt already read. */
   cachedReceipt?: ScannedReceipt | null;
+  /** The edits made last time this screen was on 'assign', handed back in when the user backed
+   *  out of "Check your receipt" (a separate phase that unmounts this screen). Without this, a
+   *  remount would re-derive everything from `cachedReceipt` and silently drop what was typed. */
+  initialDraft?: ReceiptDraftState | null;
   /** Fired once a fresh read succeeds, so the caller can remember it for next time. */
   onScanned?: (receipt: ScannedReceipt) => void;
   onBack: () => void;
@@ -69,14 +103,19 @@ export function ReceiptScanScreen({
   const [phase, setPhase] = useState<Phase>(cachedReceipt ? 'assign' : initialImage ? 'reading' : 'capture');
   const [error, setError] = useState('');
   const [pickedImage, setPickedImage] = useState<PickedImage | null>(initialImage ?? null);
-  const [keepPhoto, setKeepPhoto] = useState(false);
+  // Defaults on: most people want the photo kept for later reference, and this is the far more
+  // common choice, so opting out should be the deliberate action, not opting in.
+  const [keepPhoto, setKeepPhoto] = useState(initialDraft?.keepPhoto ?? true);
   const [receipt, setReceipt] = useState<ScannedReceipt | null>(null);
-  const [lines, setLines] = useState<ReceiptLine[]>([]);
-  const [surcharges, setSurcharges] = useState<Surcharges>({ serviceChargePct: 0, taxPct: 0 });
-  const [chargedText, setChargedText] = useState('');
-  const [picked, setPicked] = useState<string[]>([]);
+  const [lines, setLines] = useState<ReceiptLine[]>(initialDraft?.lines ?? []);
+  const [surcharges, setSurcharges] = useState<Surcharges>(
+    initialDraft?.surcharges ?? { serviceChargePct: 0, taxPct: 0, discount: null }
+  );
+  const [chargedText, setChargedText] = useState(initialDraft?.chargedText ?? '');
+  const [picked, setPicked] = useState<string[]>(initialDraft?.picked ?? []);
   const [addPersonOpen, setAddPersonOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [viewingPhoto, setViewingPhoto] = useState(false);
 
   // The payer is always at the table, and always last, so every rounding residue lands on them.
   const participants = useMemo(() => [...picked, SELF], [picked]);
@@ -84,6 +123,8 @@ export function ReceiptScanScreen({
   const unpicked = useMemo(() => people.filter((p) => !picked.includes(p.id)), [people, picked]);
 
   const charged = Math.max(0, Math.round((parseFloat(chargedText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100);
+  // The base the voucher's RM/% toggle converts against.
+  const itemsSubtotal = useMemo(() => lines.reduce((s, l) => s + Math.max(0, l.amount), 0), [lines]);
   const result = useMemo(
     () => computeItemized(lines, surcharges, charged, participants),
     [lines, surcharges, charged, participants]
@@ -129,18 +170,28 @@ export function ReceiptScanScreen({
       onScanned?.(scanned);
       setPhase('assign');
     } catch (e) {
+      // A read failure (network, auth, or a reply nothing usable could be parsed from) still
+      // leaves a real photo the user took. Falling through to 'assign' with a blank receipt lets
+      // them type the total by hand and save it, instead of dead-ending at 'capture' with only
+      // "try again" or the photo-less manual-split escape hatch. Reporting it as a scan (even an
+      // empty one) marks it as read, the same as a success, so backing out and back in resumes
+      // what was typed instead of re-running the same failing read and losing it.
       setError(llmErrorMessage(e));
-      setPhase('capture');
+      applyScan(EMPTY_SCAN);
+      onScanned?.(EMPTY_SCAN);
+      setPhase('assign');
     }
   };
 
   // Mount-once: the add hub already has the image, so reading starts without a second capture.
-  // A failed read falls through to 'capture' above, which is why that screen survives. A cache
-  // hit (the user backed out and came right back) skips the read entirely — no spinner, no
-  // "reading it line by line" beat for a receipt already read.
+  // A cache hit (the user backed out and came right back) skips the read entirely: no spinner,
+  // no "reading it line by line" beat for a receipt already read. When an `initialDraft` also
+  // came back, the edits it carries take priority over re-deriving fields from the raw scan; the
+  // scan is only consulted here for the merchant name in the title.
   useEffect(() => {
     if (cachedReceipt) {
-      applyScan(cachedReceipt);
+      if (initialDraft) setReceipt(cachedReceipt);
+      else applyScan(cachedReceipt);
       return;
     }
     if (initialImage) read(initialImage);
@@ -250,6 +301,7 @@ export function ReceiptScanScreen({
             shares: result.shares.filter((s) => s.owed > 0),
           }
         : null,
+      resumeState: { keepPhoto, lines, surcharges, chargedText, picked },
     });
   };
 
@@ -316,6 +368,13 @@ export function ReceiptScanScreen({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {error !== '' && (
+          <Card style={[styles.errorCard, { backgroundColor: colorTheme.redTint, borderColor: colorTheme.redSoft }]}>
+            <Icon name="alert" size={17} color="#b3261e" />
+            <Text style={styles.errorText}>{error}</Text>
+          </Card>
+        )}
+
         <PipSays expr={lines.length === 0 ? 'curious' : 'happy'}>
           <BubbleText>
             {lines.length === 0 ? (
@@ -328,6 +387,23 @@ export function ReceiptScanScreen({
             )}
           </BubbleText>
         </PipSays>
+
+        {/* The photo the camera/gallery just handed over, still in memory regardless of whether
+            "keep this photo" ends up on: reviewing what was scanned shouldn't depend on whether
+            it will be kept afterward. */}
+        {pickedImage && (
+          <Pressable
+            onPress={() => setViewingPhoto(true)}
+            style={[styles.keepRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+          >
+            <Image source={{ uri: pickedImage.uri }} style={[styles.receiptThumb, { borderColor: colorTheme.line }]} />
+            <View style={styles.keepInfo}>
+              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>Receipt photo</Text>
+              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>Tap to view the full photo</Text>
+            </View>
+            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+          </Pressable>
+        )}
 
         {/* Hidden on web rather than disabled: expo-file-system's persistent storage has no web
             support, so a toggle that silently keeps nothing is worse than one not offered. */}
@@ -350,7 +426,10 @@ export function ReceiptScanScreen({
           </View>
         )}
 
-        <Text style={[styles.label, { color: colorTheme.ink2 }]}>Who was at the table (optional)</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <Text style={[styles.label, { marginBottom: 0, color: colorTheme.ink2 }]}>Who was at the table (optional)</Text>
+          <InfoButton entry="split_bill" />
+        </View>
         <View style={styles.chipWrap}>
           {unpicked.map((p) => (
             <Pressable key={p.id} onPress={() => setPicked((prev) => [...prev, p.id])} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
@@ -459,6 +538,12 @@ export function ReceiptScanScreen({
                 onChange={(v) => setSurcharges((s) => ({ ...s, taxPct: v }))}
                 note="Applied after the service charge, the way the receipt does it"
               />
+              <View style={[styles.divider, { borderTopColor: colorTheme.line2 }]} />
+              <DiscountRow
+                discount={surcharges.discount ?? null}
+                onChange={(d) => setSurcharges((s) => ({ ...s, discount: d }))}
+                subtotal={itemsSubtotal}
+              />
             </Card>
           </>
         )}
@@ -517,6 +602,15 @@ export function ReceiptScanScreen({
       </View>
 
       <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
+
+      <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
+          {pickedImage && <Image source={{ uri: pickedImage.uri }} style={styles.viewerImage} resizeMode="contain" />}
+          <Pressable onPress={() => setViewingPhoto(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+            <Icon name="x" size={22} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -571,6 +665,86 @@ function PctRow({
           <Icon name="x" size={15} color={colorTheme.ink3} />
         </Pressable>
       )}
+    </View>
+  );
+}
+
+/** A voucher or discount: RM or %, and whether it comes off before or after the surcharges
+ *  above  both editable in case the auto-detected receipt got either one wrong. */
+function DiscountRow({
+  discount,
+  onChange,
+  subtotal,
+}: {
+  discount: Discount | null;
+  onChange: (d: Discount | null) => void;
+  subtotal: number;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const [text, setText] = useState(discount ? String(discount.value) : '');
+  // Keep the field in step when the scan prefills a value the user has not touched.
+  React.useEffect(() => setText(discount ? String(discount.value) : ''), [discount?.value, discount?.unit]);
+
+  if (!discount) {
+    return (
+      <View style={styles.pctRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>Voucher / discount</Text>
+          <Text style={[styles.pctNote, { color: colorTheme.ink2 }]}>Subtracted from the bill</Text>
+        </View>
+        <Pressable
+          onPress={() => onChange({ unit: 'amount', value: 0, timing: 'before' })}
+          style={[styles.pctAdd, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+          hitSlop={4}
+        >
+          <Text style={[styles.pctAddText, { color: theme.onTint }]}>Add</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const toggleUnit = () => {
+    if (discount.unit === 'amount') {
+      const pct = subtotal > 0 ? Math.round((discount.value / subtotal) * 1000) / 10 : 0;
+      onChange({ ...discount, unit: 'pct', value: pct });
+    } else {
+      const amount = Math.round(((subtotal * discount.value) / 100) * 100) / 100;
+      onChange({ ...discount, unit: 'amount', value: amount });
+    }
+  };
+
+  const toggleTiming = () => onChange({ ...discount, timing: discount.timing === 'before' ? 'after' : 'before' });
+
+  return (
+    <View style={styles.pctRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>Voucher / discount</Text>
+        <Pressable onPress={toggleTiming} hitSlop={4}>
+          <Text style={[styles.pctNote, { color: theme.accent }]}>
+            {discount.timing === 'before' ? 'Applied before service charge & tax' : 'Applied to the final total'}
+          </Text>
+        </Pressable>
+      </View>
+      <View style={[styles.pctField, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+        <TextInput
+          value={text}
+          onChangeText={(v) => {
+            setText(v);
+            const n = parseFloat(v.replace(/[^0-9.]/g, ''));
+            onChange({ ...discount, value: Number.isFinite(n) && n >= 0 ? n : 0 });
+          }}
+          keyboardType="decimal-pad"
+          style={[styles.pctInput, { color: colorTheme.ink }]}
+          selectTextOnFocus
+        />
+        <Pressable onPress={toggleUnit} hitSlop={6} accessibilityLabel="Switch between RM and percent">
+          <Text style={[styles.pctSign, { color: theme.accent }]}>{discount.unit === 'pct' ? '%' : 'RM'}</Text>
+        </Pressable>
+      </View>
+      <Pressable onPress={() => onChange(null)} hitSlop={8} accessibilityLabel="Remove voucher or discount">
+        <Icon name="x" size={15} color={colorTheme.ink3} />
+      </Pressable>
     </View>
   );
 }
@@ -635,6 +809,10 @@ const styles = StyleSheet.create({
   keepInfo: { flex: 1 },
   keepTitle: { fontFamily: uiFont(700), fontSize: 14 },
   keepSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
+  receiptThumb: { width: 44, height: 44, borderRadius: 10, borderWidth: 1 },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
+  viewerClose: { position: 'absolute', right: 18, padding: 8 },
 
   label: { fontFamily: uiFont(600), fontSize: 12.5, marginTop: 18, marginBottom: 9 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },

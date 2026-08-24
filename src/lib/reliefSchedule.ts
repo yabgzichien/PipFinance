@@ -1,8 +1,14 @@
 // src/lib/reliefSchedule.ts
-// The curated v1 subset of LHDN relief lines (docs/superpowers/specs/
-// 2026-08-23-tax-relief-tagging-design.md §2): what a working adult's receipts and
-// commitments actually touch, not the full ~20-line schedule. Ships as code, versioned by
-// year of assessment: a new YA is a new exported const, never a mutation of an old one.
+// The full LHDN individual relief schedule (minus the handful of lines LHDN verifies
+// automatically with no receipt: the base RM9,000 individual relief, EPF, and SOCSO have
+// nothing for a receipt-evidence app to track). Ships as code, versioned by year of
+// assessment: a new YA is a new exported const, never a mutation of an old one.
+//
+// Cap figures for YA 2025 confirmed against hasil.gov.my/en/individu/pelepasan-cukai/
+// directly (2026-08-24) plus a cross-check against RinggitPlus's own YA2025 relief guide.
+// Lines carrying a `note` are the ones where the *cap* is solid but a real-world nuance
+// (a sub-cap, an eligibility condition, a price-banded tier) didn't fit this schema's plain
+// number and is worth surfacing to the user rather than silently simplifying away.
 
 export interface ReliefLine {
   code: string;
@@ -19,6 +25,9 @@ export interface ReliefLine {
   matchKeywords: string[];
   /** Whether this line can be assigned to a `Commitment` in the Tax screen. */
   commitmentEligible: boolean;
+  /** A real-world nuance this schema's plain cap/requiresCert fields can't fully capture
+   *  (an eligibility condition, a sub-cap, a price-banded tier). Shown on the line's card. */
+  note?: string;
 }
 
 export interface ReliefSchedule {
@@ -60,6 +69,11 @@ export const RELIEF_SCHEDULE_2025: ReliefSchedule = {
       matchKeywords: ['medical checkup', 'health screening', 'mental health', 'covid test'], commitmentEligible: false, requiresCert: null,
     },
     {
+      code: 'medical.intellectual-disability', parent: 'medical', label: 'Intellectual disability diagnosis (child)', formField: 'G8', cap: 6000,
+      matchKeywords: ['assessment', 'early intervention', 'rehabilitation'], commitmentEligible: false, requiresCert: null,
+      note: 'Assessment/rehab for a child under 18 with a learning disability. Needs a certified practitioner’s report, not just a receipt.',
+    },
+    {
       code: 'insurance.education-medical', label: 'Education / medical insurance premium', formField: 'G4', cap: 4000,
       matchKeywords: ['insurance', 'takaful'], commitmentEligible: true, requiresCert: null,
     },
@@ -70,6 +84,53 @@ export const RELIEF_SCHEDULE_2025: ReliefSchedule = {
     {
       code: 'childcare', label: 'Child care centre / kindergarten', formField: 'G12', cap: 3000,
       matchKeywords: ['childcare', 'kindergarten', 'daycare', 'nursery'], commitmentEligible: true, requiresCert: null,
+    },
+    {
+      code: 'disabled.individual', label: 'Disabled individual', formField: 'Item 4', cap: 7000,
+      matchKeywords: [], commitmentEligible: false, requiresCert: null,
+      note: 'Requires an OKU (disability) card, not a receipt — this line just tracks the claim, nothing to scan.',
+    },
+    {
+      code: 'disabled.spouse', label: 'Disabled spouse', formField: 'Item 15', cap: 6000,
+      matchKeywords: [], commitmentEligible: false, requiresCert: null,
+      note: 'Requires an OKU (disability) card, not a receipt.',
+    },
+    {
+      code: 'disabled.child', label: 'Disabled child', formField: 'Item 16c', cap: 8000,
+      matchKeywords: [], commitmentEligible: false, requiresCert: null,
+      note: 'A further RM8,000 on top of this applies for a child 18+ pursuing a recognised diploma or higher — not modelled separately here, check hasil.gov.my.',
+    },
+    {
+      code: 'parents-grandparents', label: 'Parents & grandparents care (aggregate)', formField: 'Item 2', cap: 8000,
+      matchKeywords: ['nursing home', 'elderly care', 'carer'], commitmentEligible: false, requiresCert: 'MMC',
+    },
+    {
+      code: 'parents-grandparents.checkup', parent: 'parents-grandparents', label: 'Complete medical examination', formField: 'Item 2', cap: 1000,
+      matchKeywords: ['medical checkup', 'health screening'], commitmentEligible: false, requiresCert: null,
+    },
+    {
+      code: 'housing.loan-interest', label: 'First home loan interest', formField: 'Item 3', cap: 7000,
+      matchKeywords: [], commitmentEligible: true, requiresCert: null,
+      note: 'RM7,000/year for a home up to RM500,000, RM5,000/year for RM500,001–750,000; needs an SPA dated 2025–2027. Confirm your own tier applies.',
+    },
+    {
+      code: 'insurance.life-epf', label: 'Life insurance premium', formField: 'Item 17', cap: 3000,
+      matchKeywords: ['life insurance', 'life takaful'], commitmentEligible: true, requiresCert: null,
+      note: 'Shares a combined RM7,000 cap with mandatory EPF contributions (up to RM4,000), which LHDN already knows from payroll — only the RM3,000 life-insurance portion needs tracking here.',
+    },
+    {
+      code: 'education-fees-self', label: 'Further education fees (self)', formField: 'Item 5', cap: 7000,
+      matchKeywords: ['tuition fee', 'university fee', 'degree', 'diploma programme'], commitmentEligible: false, requiresCert: null,
+      note: 'A RM2,000 sub-cap inside this RM7,000 applies to general self-enhancement courses — not modelled separately here to avoid overlap with Lifestyle’s own course-fee keywords.',
+    },
+    {
+      code: 'deferred-annuity-prs', label: 'Deferred annuity / PRS', formField: 'Item 18', cap: 3000,
+      matchKeywords: ['prs', 'private retirement scheme', 'deferred annuity'], commitmentEligible: true, requiresCert: null,
+    },
+    {
+      code: 'breastfeeding-equipment', label: 'Breastfeeding equipment', formField: 'Item 11', cap: 1000,
+      matchKeywords: ['breast pump', 'breastfeeding'], commitmentEligible: false, requiresCert: null,
+      note: 'Claimable only once every 2 years of assessment.',
     },
   ],
 };

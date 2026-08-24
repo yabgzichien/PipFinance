@@ -13,6 +13,7 @@ import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 import { AccountLinkField } from './AccountLinkField';
 import { AddCategoryModal } from './AddCategoryModal';
+import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
 import { Icon } from './Icon';
@@ -284,7 +285,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             >
               <Icon name="gift" size={18} color={theme.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{split ? 'Split with friends' : 'Split with friends'}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{split ? 'Split with friends' : 'Split with friends'}</Text>
+                  <InfoButton entry="split_bill" />
+                </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {split
                     ? stillOwed > 0

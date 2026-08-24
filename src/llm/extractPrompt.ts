@@ -101,17 +101,22 @@ Return a JSON object exactly in this shape:
   "subtotal": number or null  the items subtotal BEFORE service charge and tax,
   "serviceCharge": number or null  the service charge amount (often 10%),
   "tax": number or null  the service tax / SST / GST amount (often 6%),
-  "total": number or null  the final amount payable
+  "total": number or null  the final amount payable,
+  "discount": { "amount": number, "timing": "before" | "after" } or null  a voucher or
+    discount line, if the receipt printed one
 }
 
 Rules:
 - One object per ordered line. If a row shows "2 x Teh Ais 3.00 6.00", the amount is the
   LINE TOTAL (6.00) and quantity is 2.
-- Do NOT include service charge, tax, subtotal, total, rounding, change, or payment lines in
-  "items"  they have their own fields.
+- Do NOT include service charge, tax, subtotal, total, discount, rounding, change, or payment
+  lines in "items"  they have their own fields.
 - Amounts are plain positive numbers: strip currency symbols and thousands separators
   ("RM 12,340.50" becomes 12340.50).
-- A discount or voucher row may be negative; keep its sign.
+- For "discount", report the positive amount actually taken off (not negative), and set
+  "timing" to "before" if the discount line is printed above the service charge/tax lines
+  (it reduced what they were calculated on), or "after" if it is printed below them, near the
+  total. If the receipt shows no discount or voucher line, use null.
 - If a field is not printed or you cannot read it, use null. Never guess a number.
 - Output JSON only.`;
 

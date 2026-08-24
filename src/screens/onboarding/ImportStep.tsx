@@ -16,11 +16,15 @@ import { stagger } from '../../theme/motion';
 const PIP_SIZE = 88;
 
 export function ImportStep({
+  hasImported,
   onStartImport,
   onSkip,
+  onContinue,
 }: {
+  hasImported: boolean;
   onStartImport: () => void;
   onSkip: () => void;
+  onContinue: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -35,6 +39,11 @@ export function ImportStep({
     onSkip();
   };
 
+  const handleContinue = () => {
+    haptics.tap();
+    onContinue();
+  };
+
   return (
     <ScrollView
       contentContainerStyle={{
@@ -47,16 +56,18 @@ export function ImportStep({
     >
       <View style={styles.hero}>
         <FadeIn offset={14}>
-          <Pip size={PIP_SIZE} expr="curious" float />
+          <Pip size={PIP_SIZE} expr={hasImported ? 'happy' : 'curious'} float />
         </FadeIn>
         <FadeIn delay={stagger}>
           <Title style={{ marginTop: spacing.base, textAlign: 'center' }}>
-            Switching from another tracker?
+            {hasImported ? 'Your data is imported' : 'Switching from another tracker?'}
           </Title>
         </FadeIn>
         <FadeIn delay={stagger * 2}>
           <Body color={colorTheme.ink2} style={styles.subtitle}>
-            If you have data from an old money manager, bank statements, or spreadsheets, Pip can bring it all over with AI.
+            {hasImported
+              ? "You're all set. Continue to finish setting up Pip, or bring in another file first."
+              : 'If you have data from an old money manager, bank statements, or spreadsheets, Pip can bring it all over with AI.'}
           </Body>
         </FadeIn>
       </View>
@@ -104,20 +115,41 @@ export function ImportStep({
       </FadeIn>
 
       <FadeIn delay={stagger * 4} style={styles.footer}>
-        <PrimaryButton onPress={handleStartImport}>
-          <Icon name="sparkles" size={18} color="#fff" />
-          <BtnLabel>Import from old money manager</BtnLabel>
-        </PrimaryButton>
-        <Pressable
-          onPress={handleSkip}
-          style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="I don't have anything to import, start fresh"
-        >
-          <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
-            I don't have anything to import
-          </Text>
-        </Pressable>
+        {hasImported ? (
+          <>
+            <PrimaryButton onPress={handleContinue}>
+              <BtnLabel>Continue</BtnLabel>
+              <Icon name="arrowRight" size={18} color="#fff" />
+            </PrimaryButton>
+            <Pressable
+              onPress={handleStartImport}
+              style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Import something else instead"
+            >
+              <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
+                Import something else instead
+              </Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <PrimaryButton onPress={handleStartImport}>
+              <Icon name="sparkles" size={18} color="#fff" />
+              <BtnLabel>Import from old money manager</BtnLabel>
+            </PrimaryButton>
+            <Pressable
+              onPress={handleSkip}
+              style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
+              accessibilityRole="button"
+              accessibilityLabel="I don't have anything to import, start fresh"
+            >
+              <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
+                I don't have anything to import
+              </Text>
+            </Pressable>
+          </>
+        )}
       </FadeIn>
     </ScrollView>
   );

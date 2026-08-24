@@ -17,7 +17,7 @@ export const EXPENSE_CATEGORIES: SeedCategory[] = [
   { id: 'travelling', label: 'Travelling', icon: 'fuel', hue: 248, kind: 'expense' },
   { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense' },
   { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense' },
-  { id: 'car-instalment', label: 'Car Instalment', icon: 'car', hue: 355, kind: 'expense' },
+  { id: 'phone-bill', label: 'Phone Bill', icon: 'signal', hue: 355, kind: 'expense' },
 ];
 
 /**
@@ -84,7 +84,8 @@ export const CATEGORY_ID_REMAP: Record<string, string> = {
   education: 'other',
   household: 'other',
   recreation: 'entertainment',
-  'debt-service': 'car-instalment',
+  'debt-service': 'other',
+  'car-instalment': 'other',
   // income
   income: 'employment-income',
   bonus: 'employment-income',

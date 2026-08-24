@@ -44,6 +44,31 @@ describe('parseReceipt', () => {
     expect(r.items[0].amount).toBe(-5);
   });
 
+  it('reads a discount printed before the surcharges', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 10 }], discount: { amount: 2, timing: 'before' } }));
+    expect(r.discount).toEqual({ amount: 2, timing: 'before' });
+  });
+
+  it('reads a discount printed after the surcharges', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 10 }], discount: { amount: 2, timing: 'after' } }));
+    expect(r.discount).toEqual({ amount: 2, timing: 'after' });
+  });
+
+  it('defaults an unreadable discount timing to before', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 10 }], discount: { amount: 2, timing: 'sideways' } }));
+    expect(r.discount).toEqual({ amount: 2, timing: 'before' });
+  });
+
+  it('has no discount when the receipt printed none', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 10 }] }));
+    expect(r.discount).toBeNull();
+  });
+
+  it('drops a discount with no readable amount', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 10 }], discount: { timing: 'before' } }));
+    expect(r.discount).toBeNull();
+  });
+
   it('drops a row with no readable price but keeps the rest', () => {
     const r = parseReceipt(
       JSON.stringify({ items: [{ label: 'Readable', amount: 9 }, { label: 'Smudged', amount: null }] })
@@ -77,12 +102,12 @@ describe('derivedSurcharges', () => {
   it('backs the usual 10% and 6% out of the printed amounts', () => {
     // Tax is read against subtotal + service (18.50 + 1.85 = 20.35), which is how the
     // receipt computed it. Reading it against the subtotal alone would give 6.6%.
-    expect(derivedSurcharges(parseReceipt(FULL))).toEqual({ serviceChargePct: 10, taxPct: 6 });
+    expect(derivedSurcharges(parseReceipt(FULL))).toEqual({ serviceChargePct: 10, taxPct: 6, discount: null });
   });
 
   it('stays at zero when the receipt printed no surcharges', () => {
     const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 20 }], total: 20 }));
-    expect(derivedSurcharges(r)).toEqual({ serviceChargePct: 0, taxPct: 0 });
+    expect(derivedSurcharges(r)).toEqual({ serviceChargePct: 0, taxPct: 0, discount: null });
   });
 
   it('reports an unusual rate rather than snapping it to a convention', () => {
@@ -91,6 +116,18 @@ describe('derivedSurcharges', () => {
   });
 
   it('survives a receipt with no items at all', () => {
-    expect(derivedSurcharges(parseReceipt('{}'))).toEqual({ serviceChargePct: 0, taxPct: 0 });
+    expect(derivedSurcharges(parseReceipt('{}'))).toEqual({ serviceChargePct: 0, taxPct: 0, discount: null });
+  });
+
+  it('carries a printed discount through as a flat amount', () => {
+    const r = parseReceipt(
+      JSON.stringify({ items: [{ label: 'A', amount: 100 }], discount: { amount: 8, timing: 'before' } })
+    );
+    expect(derivedSurcharges(r).discount).toEqual({ unit: 'amount', value: 8, timing: 'before' });
+  });
+
+  it('has no discount when the receipt printed none', () => {
+    const r = parseReceipt(JSON.stringify({ items: [{ label: 'A', amount: 100 }] }));
+    expect(derivedSurcharges(r).discount).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
@@ -164,9 +165,12 @@ export function ManualEntryScreen({
           >
             <Icon name="gift" size={17} color={amount > 0 ? theme.accent : colorTheme.ink3} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
+                  {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
+                </Text>
+                <InfoButton entry="split_bill" />
+              </View>
               <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {activeSplit
                   ? `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`

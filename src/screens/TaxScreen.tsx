@@ -121,98 +121,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           RM {fmt(totalClaimed)} claimed so far for YA {ya}
         </Caption>
 
-        {tags === null && (
-          <View style={{ paddingTop: 60, alignItems: 'center' }}>
-            <ActivityIndicator color={theme.accent} />
-          </View>
-        )}
-
-        {tags !== null && tags.length === 0 && (
-          <View style={{ paddingTop: 50, alignItems: 'center', paddingHorizontal: 20 }}>
-            <Body weight={700} color={colorTheme.ink} style={{ textAlign: 'center' }}>
-              Nothing tagged yet
-            </Body>
-            <Caption color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: 6 }}>
-              Scan a receipt or map a bill to get started. Pip tags relief-eligible spending
-              automatically as you go.
-            </Caption>
-          </View>
-        )}
-
-        {requestable.length > 0 && (
-          <View style={{ marginTop: tags && tags.length > 0 ? 16 : 0 }}>
-            <Eyebrow style={{ marginBottom: 8 }}>Requestable this month</Eyebrow>
-            {requestable.map(({ tag, txn, line }) => {
-              const daysLeft = daysUntilMonthEnd(txn.date!);
-              return (
-                <Pressable key={tag.id} onPress={() => setEditingTagId(tag.id)} style={[styles.requestableRow, { borderColor: colorTheme.line2 }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
-                      {txn.merchantRaw || line.label}
-                    </Text>
-                    <Caption color={colorTheme.ink2}>{line.label}</Caption>
-                  </View>
-                  <Caption color={theme.accent}>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</Caption>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-
-        {tags !== null && topLevelLines.map((line) => {
-          const u = usageByCode[line.code];
-          if (!u) return null;
-          const children = childrenByParent[line.code] ?? [];
-          const pct = u.cap > 0 ? Math.min(100, (u.capUsed / u.cap) * 100) : 0;
-          return (
-            <Card key={line.code} style={{ padding: 16, marginTop: 12 }}>
-              <View style={styles.lineHead}>
-                <Body weight={700} color={colorTheme.ink}>{line.label}</Body>
-                <Caption color={colorTheme.ink2}>{line.formField}</Caption>
-              </View>
-              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>
-                RM {fmt(u.capUsed)} / RM {fmt(u.cap)}
-              </Caption>
-              <ProgressTrack pct={pct} />
-              {children.length === 0 &&
-                (tags ?? []).filter((t) => t.code === line.code).map((t) => {
-                  const txn = transactions.find((x) => x.id === t.txnId);
-                  if (!txn) return null;
-                  return (
-                    <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
-                      <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
-                      <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
-                    </Pressable>
-                  );
-                })}
-              {children.map((child) => {
-                const cu = usageByCode[child.code];
-                if (!cu) return null;
-                const childTags = (tags ?? []).filter((t) => t.code === child.code);
-                return (
-                  <View key={child.code} style={styles.childBlock}>
-                    <View style={styles.childRow}>
-                      <Caption color={colorTheme.ink2}>{child.label}</Caption>
-                      <Caption color={colorTheme.ink2}>RM {fmt(cu.capUsed)} / RM {fmt(cu.cap)}</Caption>
-                    </View>
-                    {childTags.map((t) => {
-                      const txn = transactions.find((x) => x.id === t.txnId);
-                      if (!txn) return null;
-                      return (
-                        <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
-                          <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
-                          <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                );
-              })}
-            </Card>
-          );
-        })}
-
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+        <View style={styles.topActionsRow}>
           <Pressable onPress={() => setMappingCommitments(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
             <Icon name="clock" size={16} color={theme.accent} />
             <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Map a commitment</Text>
@@ -220,6 +129,30 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           <Pressable onPress={() => setAddingManually(true)} style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0 }]}>
             <Icon name="search" size={16} color={theme.accent} />
             <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>Add manually</Text>
+          </Pressable>
+          <Pressable
+            disabled={exporting || !schedule || !tags || tags.length === 0}
+            onPress={async () => {
+              if (!schedule || !tags) return;
+              setExporting(true);
+              try {
+                try {
+                  const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
+                  const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
+                  if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
+                } catch {
+                  notify('Export failed', 'Something went wrong building the audit pack.');
+                }
+              } finally {
+                setExporting(false);
+              }
+            }}
+            style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0, opacity: exporting || !tags?.length ? 0.5 : 1 }]}
+          >
+            <Icon name="download" size={16} color={theme.accent} />
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
+              {exporting ? 'Building...' : 'Export audit pack'}
+            </Text>
           </Pressable>
         </View>
 
@@ -274,30 +207,107 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           </Card>
         )}
 
-        <Pressable
-          disabled={exporting || !schedule || !tags || tags.length === 0}
-          onPress={async () => {
-            if (!schedule || !tags) return;
-            setExporting(true);
-            try {
-              try {
-                const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
-                const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
-                if (!result.success) notify('Export failed', result.error ?? 'Could not build the audit pack.');
-              } catch {
-                notify('Export failed', 'Something went wrong building the audit pack.');
-              }
-            } finally {
-              setExporting(false);
-            }
-          }}
-          style={[styles.exportButton, { backgroundColor: theme.accent, opacity: exporting || !tags?.length ? 0.5 : 1 }]}
-        >
-          <Icon name="download" size={16} color={colors.onAccent} />
-          <Text style={{ color: colors.onAccent, fontFamily: uiFont(700), fontSize: 14 }}>
-            {exporting ? 'Building...' : 'Export audit pack'}
-          </Text>
-        </Pressable>
+        {tags === null && (
+          <View style={{ paddingTop: 60, alignItems: 'center' }}>
+            <ActivityIndicator color={theme.accent} />
+          </View>
+        )}
+
+        {tags !== null && tags.length === 0 && (
+          <View style={{ paddingTop: 50, alignItems: 'center', paddingHorizontal: 20 }}>
+            <Body weight={700} color={colorTheme.ink} style={{ textAlign: 'center' }}>
+              Nothing tagged yet
+            </Body>
+            <Caption color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: 6 }}>
+              Scan a receipt or map a bill to get started. Pip tags relief-eligible spending
+              automatically as you go.
+            </Caption>
+          </View>
+        )}
+
+        {requestable.length > 0 && (
+          <View style={{ marginTop: tags && tags.length > 0 ? 16 : 0 }}>
+            <Eyebrow style={{ marginBottom: 8 }}>Requestable this month</Eyebrow>
+            {requestable.map(({ tag, txn, line }) => {
+              const daysLeft = daysUntilMonthEnd(txn.date!);
+              return (
+                <Pressable key={tag.id} onPress={() => setEditingTagId(tag.id)} style={[styles.requestableRow, { borderColor: colorTheme.line2 }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13.5 }} numberOfLines={1}>
+                      {txn.merchantRaw || line.label}
+                    </Text>
+                    <Caption color={colorTheme.ink2}>{line.label}</Caption>
+                  </View>
+                  <Caption color={theme.accent}>{daysLeft} day{daysLeft === 1 ? '' : 's'} left</Caption>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {tags !== null && topLevelLines.map((line) => {
+          const u = usageByCode[line.code];
+          if (!u) return null;
+          const children = childrenByParent[line.code] ?? [];
+          const pct = u.cap > 0 ? Math.min(100, (u.capUsed / u.cap) * 100) : 0;
+          return (
+            <Card key={line.code} style={{ padding: 16, marginTop: 12 }}>
+              <View style={styles.lineHead}>
+                <Body weight={700} color={colorTheme.ink}>{line.label}</Body>
+                <Caption color={colorTheme.ink2}>{line.formField}</Caption>
+              </View>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>
+                RM {fmt(u.capUsed)} / RM {fmt(u.cap)}
+              </Caption>
+              <ProgressTrack pct={pct} />
+              {!!line.note && (
+                <Caption color={colorTheme.ink3} style={{ marginTop: 6, fontSize: 11.5 }}>
+                  {line.note}
+                </Caption>
+              )}
+              {children.length === 0 &&
+                (tags ?? []).filter((t) => t.code === line.code).map((t) => {
+                  const txn = transactions.find((x) => x.id === t.txnId);
+                  if (!txn) return null;
+                  return (
+                    <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
+                      <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
+                      <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                    </Pressable>
+                  );
+                })}
+              {children.map((child) => {
+                const cu = usageByCode[child.code];
+                if (!cu) return null;
+                const childTags = (tags ?? []).filter((t) => t.code === child.code);
+                return (
+                  <View key={child.code} style={styles.childBlock}>
+                    <View style={styles.childRow}>
+                      <Caption color={colorTheme.ink2}>{child.label}</Caption>
+                      <Caption color={colorTheme.ink2}>RM {fmt(cu.capUsed)} / RM {fmt(cu.cap)}</Caption>
+                    </View>
+                    {!!child.note && (
+                      <Caption color={colorTheme.ink3} style={{ paddingLeft: 12, fontSize: 11, marginTop: 2 }}>
+                        {child.note}
+                      </Caption>
+                    )}
+                    {childTags.map((t) => {
+                      const txn = transactions.find((x) => x.id === t.txnId);
+                      if (!txn) return null;
+                      return (
+                        <Pressable key={t.id} onPress={() => setEditingTagId(t.id)} style={styles.tagRow}>
+                          <Caption color={colorTheme.ink}>{txn.merchantRaw || 'Transaction'}</Caption>
+                          <Caption color={colorTheme.ink2}>RM {fmt(t.amount)}</Caption>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </Card>
+          );
+        })}
+
       </ScrollView>
 
       {schedule && (
@@ -332,10 +342,10 @@ const styles = StyleSheet.create({
   childRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, marginTop: 8 },
   childBlock: { marginTop: 8 },
   tagRow: { flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 12, paddingVertical: 4 },
+  topActionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10, marginTop: 14, alignSelf: 'flex-start' },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12, paddingVertical: 9 },
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5, paddingVertical: 2 },
   manualRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9, borderTopWidth: 1, borderTopColor: 'transparent' },
   requestableRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.sm, padding: 12, marginTop: 8, gap: 10 },
-  exportButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, paddingVertical: 14, marginTop: 22 },
 });

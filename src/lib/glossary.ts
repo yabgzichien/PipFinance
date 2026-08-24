@@ -55,4 +55,17 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     short: 'Merchants Pip remembers the category for, so future scans fill it in on their own.',
     body: 'Every time you categorize a transaction, Pip notes which category you picked for that merchant. Next time the same merchant turns up in a scan or import, it is pre-filled with that category instead of asking again. Resetting clears everything Pip has learned, so every merchant goes back to needing a category picked by hand.',
   },
+  card_direction: {
+    term: 'Pays down / Adds to',
+    short: 'Whether this transaction lowers or raises what you owe on this card or loan.',
+    body: 'Most spending on a card adds to what you owe, so pick "Adds to". If this entry is actually a payment toward the balance, like clearing a bill, pick "Pays down" instead. Pip picks a starting guess for you based on expense or income, so you only need to change it when the guess is wrong.',
+  },
+  split_bill: {
+    term: 'Split bill',
+    short: 'Divide a shared bill so only your share counts as spending.',
+    body:
+      '1. Choose Equal, Shares, or Exact amounts, and add who was there.\n\n' +
+      '2. Keep "I was on this bill too" checked unless you paid entirely for others.\n\n' +
+      '3. Only your share counts as spending. The rest is tracked under "Owed to you" until settled.',
+  },
 };

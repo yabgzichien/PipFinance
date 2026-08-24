@@ -5,15 +5,23 @@ import { CLASS_BY_ID, type LinkEffect } from '../lib/networth';
 import type { Account } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useGlossary } from '../state/glossary';
 import { radius, uiFont } from '../theme';
 import { AddAccountModal } from './AddAccountModal';
 import { Icon, type IconName } from './Icon';
+import { InfoButton } from './InfoButton';
 
 /**
  * Control to tie a transaction to an asset/liability account. The account is
  * chosen from a dropdown; when one is picked, an effect toggle (adds to /
- * reduces) appears. Presentational — the parent owns selectedId + effect and
- * decides the default effect on select.
+ * reduces) appears for liability accounts only. Presentational — the parent
+ * owns selectedId + effect and decides the default effect on select.
+ *
+ * For asset accounts the direction is never ambiguous (an expense can only
+ * ever draw the account down), so the toggle stays hidden and the caller's
+ * `defaultLinkEffect` derivation is trusted as-is. Liability accounts are
+ * genuinely ambiguous (an expense could be a new charge or a repayment), so
+ * the toggle — and its glossary explainer — stays visible there.
  *
  * Omit `effect`/`onEffect` (e.g. a scanned batch, where each row's direction is
  * derived per-transaction) to render the dropdown alone with no effect toggle.
@@ -71,19 +79,25 @@ export function AccountLinkField({
         <Icon name="chevronDown" size={18} color={colorTheme.ink3} />
       </Pressable>
 
-      {sel && effect && onEffect && (
-        <View style={[styles.effectRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-          {(['subtract', 'add'] as LinkEffect[]).map((e) => {
-            const on = effect === e;
-            return (
-              <Pressable key={e} onPress={() => onEffect(e)} style={[styles.effectBtn, on && { backgroundColor: theme.accentInk }]}>
-                <Text style={[styles.effectText, { color: colorTheme.ink2 }, on && styles.effectTextOn]}>
-                  {e === 'subtract' ? `Reduces ${sel.name}` : `Adds to ${sel.name}`}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+      {sel && effect && onEffect && sel.kind === 'liability' && (
+        <>
+          <View style={styles.effectLabelRow}>
+            <Text style={[styles.effectLabel, { color: colorTheme.ink3 }]}>Direction</Text>
+            <InfoButton entry="card_direction" />
+          </View>
+          <View style={[styles.effectRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+            {(['subtract', 'add'] as LinkEffect[]).map((e) => {
+              const on = effect === e;
+              return (
+                <Pressable key={e} onPress={() => onEffect(e)} style={[styles.effectBtn, on && { backgroundColor: theme.accentInk }]}>
+                  <Text style={[styles.effectText, { color: colorTheme.ink2 }, on && styles.effectTextOn]}>
+                    {e === 'subtract' ? `Pays down ${sel.name}` : `Adds to ${sel.name}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
       )}
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -167,7 +181,9 @@ const styles = StyleSheet.create({
   },
   triggerText: { flex: 1, fontFamily: uiFont(600), fontSize: 16 },
   triggerPlaceholder: {},
-  effectRow: { flexDirection: 'row', borderRadius: 999, padding: 3, marginTop: 10, borderWidth: 1 },
+  effectLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
+  effectLabel: { fontFamily: uiFont(600), fontSize: 11.5, textTransform: 'uppercase', letterSpacing: 0.4 },
+  effectRow: { flexDirection: 'row', borderRadius: 999, padding: 3, marginTop: 6, borderWidth: 1 },
   effectBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 999 },
   effectText: { fontFamily: uiFont(600), fontSize: 12.5 },
   effectTextOn: { color: '#fff' },

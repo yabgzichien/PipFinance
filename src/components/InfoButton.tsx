@@ -1,10 +1,11 @@
 import React from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { GLOSSARY } from '../lib/glossary';
 import { useGlossary } from '../state/glossary';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { colors, radius, uiFont } from '../theme';
+import { Pip } from './Pip';
 
 /** Small circular "i" badge that opens the glossary modal for `entry`. Place inline next to a
  *  label/eyebrow (row + gap), same role as LenderConsole's InfoButton (app/shared.tsx). */
@@ -41,6 +42,7 @@ export function GlossaryModal() {
       <View style={[styles.center, { pointerEvents: 'box-none' }]}>
         <View style={[styles.card, { backgroundColor: colorTheme.surface }]}>
           <View style={styles.head}>
+            <Pip size={40} expr="curious" />
             <View style={{ flex: 1 }}>
               <Text style={[styles.eyebrow, { color: colorTheme.ink3 }]}>Glossary</Text>
               <Text style={[styles.title, { color: colorTheme.ink }]}>{entry.term}</Text>
@@ -49,8 +51,10 @@ export function GlossaryModal() {
               <Text style={[styles.closeText, { color: colorTheme.ink2 }]}>✕</Text>
             </Pressable>
           </View>
-          <Text style={[styles.short, { color: theme.accentInk }]}>{entry.short}</Text>
-          <Text style={[styles.body, { color: colorTheme.ink2 }]}>{entry.body}</Text>
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
+            <Text style={[styles.short, { color: theme.accentInk }]}>{entry.short}</Text>
+            <Text style={[styles.body, { color: colorTheme.ink2 }]}>{entry.body}</Text>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -78,8 +82,12 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 380,
+    maxHeight: '85%',
     borderRadius: radius.md,
     padding: 20,
+  },
+  scroll: {
+    maxHeight: 420,
   },
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
   eyebrow: {

@@ -10,6 +10,7 @@ import { useAppData } from '../state/store';
 import { colors, numFont, radius, shadowToggle, uiFont } from '../theme';
 import { AddPersonModal } from './AddPersonModal';
 import { Icon } from './Icon';
+import { InfoButton } from './InfoButton';
 import { BtnLabel, PrimaryButton } from './ui';
 
 const METHODS: { key: SplitMethod; label: string; hint: string }[] = [
@@ -134,7 +135,10 @@ export function SplitSheet({
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: colorTheme.ink }]}>Split RM {fmt(gross)}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[styles.title, { color: colorTheme.ink }]}>Split RM {fmt(gross)}</Text>
+              <InfoButton entry="split_bill" />
+            </View>
             {!!merchant && (
               <Text style={[styles.subtitle, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {merchant}

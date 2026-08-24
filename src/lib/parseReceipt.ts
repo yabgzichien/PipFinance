@@ -2,13 +2,20 @@
 // Defensive parser for the "read this paper receipt" reply. Pure and tested: the model is
 // asked for printed AMOUNTS (which is what a receipt actually shows), and the surcharge
 // percentages the split sheet edits are derived back out of them here.
-import { DEFAULT_SURCHARGES, type Surcharges } from './split';
+import { DEFAULT_SURCHARGES, type DiscountTiming, type Surcharges } from './split';
 
 export interface ScannedItem {
   label: string;
   /** The line total, quantity already multiplied in. */
   amount: number;
   quantity: number | null;
+}
+
+/** A voucher or discount the receipt printed, read as the amount actually taken off. */
+export interface ScannedDiscount {
+  amount: number;
+  /** Where on the receipt it applied: before or after service charge and tax. */
+  timing: DiscountTiming;
 }
 
 export interface ScannedReceipt {
@@ -18,6 +25,7 @@ export interface ScannedReceipt {
   serviceCharge: number | null;
   tax: number | null;
   total: number | null;
+  discount: ScannedDiscount | null;
 }
 
 function stripFences(s: string): string {
@@ -50,6 +58,17 @@ function coerceQuantity(raw: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+/** A discount only counts if it has a readable amount; an unreadable timing defaults to 'before'
+ *  since that is the far more common placement, and a guess there beats dropping the discount. */
+function coerceDiscount(raw: unknown): ScannedDiscount | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const amount = coerceAmount(r.amount);
+  if (amount === null || amount <= 0) return null;
+  const timing: DiscountTiming = r.timing === 'after' ? 'after' : 'before';
+  return { amount, timing };
+}
+
 const EMPTY: ScannedReceipt = {
   merchant: null,
   items: [],
@@ -57,6 +76,7 @@ const EMPTY: ScannedReceipt = {
   serviceCharge: null,
   tax: null,
   total: null,
+  discount: null,
 };
 
 export function parseReceipt(content: string): ScannedReceipt {
@@ -88,6 +108,7 @@ export function parseReceipt(content: string): ScannedReceipt {
     serviceCharge: coerceAmount(o.serviceCharge),
     tax: coerceAmount(o.tax),
     total: coerceAmount(o.total),
+    discount: coerceDiscount(o.discount),
   };
 }
 
@@ -110,15 +131,19 @@ export function receiptSubtotal(receipt: ScannedReceipt): number {
  * the usual 10% and 6% come back as "10" and "6" instead of "9.97".
  */
 export function derivedSurcharges(receipt: ScannedReceipt): Surcharges {
+  const discount: Surcharges['discount'] = receipt.discount
+    ? { unit: 'amount', value: receipt.discount.amount, timing: receipt.discount.timing }
+    : null;
+
   const subtotal = receiptSubtotal(receipt);
-  if (subtotal <= 0) return { serviceChargePct: 0, taxPct: 0 };
+  if (subtotal <= 0) return { serviceChargePct: 0, taxPct: 0, discount };
 
   const service = receipt.serviceCharge ?? 0;
   const tax = receipt.tax ?? 0;
   const serviceChargePct = service > 0 ? snap((service / subtotal) * 100) : 0;
   const taxBase = subtotal + service;
   const taxPct = tax > 0 && taxBase > 0 ? snap((tax / taxBase) * 100) : 0;
-  return { serviceChargePct, taxPct };
+  return { serviceChargePct, taxPct, discount };
 }
 
 /** Round to one decimal, then to a whole number when that is within 0.15 of it. */

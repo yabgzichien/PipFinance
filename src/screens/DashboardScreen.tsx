@@ -879,8 +879,8 @@ function CashFlowView({
     heroColor = heroNegative ? colorTheme.red : STATUS_COLOR.ok;
     heroText = heroNegative ? `(${heroAmount})` : heroAmount;
   } else if (panel === 'spent') {
-    heroColor = heroNegative ? colorTheme.red : STATUS_COLOR.ok;
-    heroText = `${heroNegative ? '−' : '+'}${heroAmount}`;
+    heroColor = colorTheme.red;
+    heroText = heroAmount;
   } else if (heroNegative) {
     heroColor = colorTheme.red;
     heroText = `−${heroAmount}`;

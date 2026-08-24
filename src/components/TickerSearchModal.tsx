@@ -61,42 +61,45 @@ export function TickerSearchModal({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.avoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.head}>
-          <Text style={[styles.title, { color: colorTheme.ink }]}>{title}</Text>
-          <Pressable onPress={onClose} hitSlop={8}><Icon name="x" size={20} color={colorTheme.ink2} /></Pressable>
+        <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.head}>
+            <Text style={[styles.title, { color: colorTheme.ink }]}>{title}</Text>
+            <Pressable onPress={onClose} hitSlop={8}><Icon name="x" size={20} color={colorTheme.ink2} /></Pressable>
+          </View>
+          <View style={[styles.searchRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <Icon name="search" size={17} color={colorTheme.ink3} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={placeholder}
+              placeholderTextColor={colorTheme.ink3}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              autoFocus
+              style={[styles.searchInput, { color: colorTheme.ink }]}
+            />
+            {busy && <ActivityIndicator size="small" color={theme.accent} />}
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
+            {results.map((c) => (
+              <Pressable key={c.id} onPress={() => onPick(c)} style={[styles.row, { borderTopColor: colorTheme.line2 }]}>
+                <View style={[styles.tickerBox, { backgroundColor: theme.accentTint }]}><Text style={[styles.tickerText, { color: theme.accent }]}>{c.ticker.slice(0, 4)}</Text></View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{c.name}</Text>
+                  <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{c.ticker}</Text>
+                </View>
+                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+              </Pressable>
+            ))}
+            {!busy && query.trim().length >= 2 && results.length === 0 && (
+              <Text style={[styles.empty, { color: colorTheme.ink2 }]}>No matches for “{query.trim()}”.</Text>
+            )}
+          </ScrollView>
         </View>
-        <View style={[styles.searchRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <Icon name="search" size={17} color={colorTheme.ink3} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder={placeholder}
-            placeholderTextColor={colorTheme.ink3}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            autoFocus
-            style={[styles.searchInput, { color: colorTheme.ink }]}
-          />
-          {busy && <ActivityIndicator size="small" color={theme.accent} />}
-        </View>
-        <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
-          {results.map((c) => (
-            <Pressable key={c.id} onPress={() => onPick(c)} style={[styles.row, { borderTopColor: colorTheme.line2 }]}>
-              <View style={[styles.tickerBox, { backgroundColor: theme.accentTint }]}><Text style={[styles.tickerText, { color: theme.accent }]}>{c.ticker.slice(0, 4)}</Text></View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{c.name}</Text>
-                <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{c.ticker}</Text>
-              </View>
-              <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-            </Pressable>
-          ))}
-          {!busy && query.trim().length >= 2 && results.length === 0 && (
-            <Text style={[styles.empty, { color: colorTheme.ink2 }]}>No matches for “{query.trim()}”.</Text>
-          )}
-        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -104,7 +107,11 @@ export function TickerSearchModal({
 
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
+  // `flex: 1` gives KeyboardAvoidingView a stable full-screen frame to measure on Android, so its
+  // `height` behavior can correctly shrink around the keyboard; flexbox then pins the card to the
+  // bottom. See the matching comment on NetWorthScreen's `sheetAvoider` for the full root cause.
+  avoider: { flex: 1, justifyContent: 'flex-end' },
+  sheet: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   title: { flex: 1, fontFamily: uiFont(700), fontSize: 18 },
