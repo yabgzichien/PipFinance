@@ -57,3 +57,20 @@ export async function deactivateCurrency(code: string): Promise<void> {
   await setActiveCurrencies(active.filter((c) => c !== code));
   if ((await getMeta(ENTRY_KEY)) === code) await setEntryCurrency(BASE_CURRENCY);
 }
+
+/**
+ * Refresh every active currency's cached rate. Best-effort and non-blocking: a failed
+ * fetch leaves the previous cached rate in place, which is why entry never needs the
+ * network. Piggybacks the existing price refresh trigger.
+ */
+export async function refreshFxRates(): Promise<void> {
+  const active = await getActiveCurrencies();
+  await Promise.all(
+    active
+      .filter((code) => code !== BASE_CURRENCY)
+      .map(async (code) => {
+        const rate = await fetchRateMYR(code);
+        if (rate != null) await saveFxRate(code, rate);
+      })
+  );
+}

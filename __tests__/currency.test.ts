@@ -148,3 +148,25 @@ describe('rederiveOnEdit', () => {
     expect(() => rederiveOnEdit(130, 'CNY', null)).toThrow(/rate/i);
   });
 });
+
+describe('MYR-only invisibility', () => {
+  it('an all-MYR ledger derives amounts identical to the raw entered values', () => {
+    const entered = [12.5, 128, 1234.56, 0.99, 60];
+    for (const amount of entered) {
+      const d = deriveMyr(amount, 'MYR', null);
+      expect(d.amount).toBe(round2(amount));
+      expect(d.nativeAmount).toBeNull();
+      expect(d.fxRate).toBeNull();
+    }
+  });
+
+  it('an all-MYR total is unchanged by the conversion path', () => {
+    const entered = [12.5, 128, 1234.56];
+    const sum = entered.reduce((t, a) => t + deriveMyr(a, 'MYR', null).amount, 0);
+    expect(round2(sum)).toBe(1375.06);
+  });
+
+  it('keeps the feature hidden with no active currencies configured', () => {
+    expect(isMultiCurrency(parseActiveCurrencies(null))).toBe(false);
+  });
+});

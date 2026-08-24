@@ -13,7 +13,7 @@ import { ScanBalanceButton } from '../components/ScanBalanceButton';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../components/ui';
-import { getActiveCurrencies } from '../db/currencyRepo';
+import { getActiveCurrencies, refreshFxRates } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
 import { BASE_CURRENCY, isMultiCurrency } from '../lib/currency';
@@ -96,10 +96,13 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   const hasHoldings = useMemo(() => accounts.some(isHolding), [accounts]);
 
   const doRefresh = async () => {
-    if (!hasHoldings) return;
     setRefreshing(true);
     try {
-      await refreshPrices();
+      if (hasHoldings) await refreshPrices();
+      else await refreshFxRates().catch(() => {});
+      const fx = await listFxRates();
+      setRates(ratesFromCache(fx));
+      setFxAsOf(Object.fromEntries(fx.map((r) => [r.code, r.asOf])));
     } finally {
       setRefreshing(false);
     }
@@ -112,7 +115,7 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   }, [hasHoldings]);
 
   useEffect(() => {
-    listFxRates().then((fx) => {
+    refreshFxRates().catch(() => {}).then(listFxRates).then((fx) => {
       setRates(ratesFromCache(fx));
       setFxAsOf(Object.fromEntries(fx.map((r) => [r.code, r.asOf])));
     });

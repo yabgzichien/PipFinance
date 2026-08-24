@@ -136,6 +136,7 @@ import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../l
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
 import { listFxRates } from '../db/fxRepo';
+import { refreshFxRates } from '../db/currencyRepo';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { notify } from '../lib/platformAlert';
@@ -1102,6 +1103,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   // Fetch live prices for all holdings, cache them, and snapshot today's value
   // for each holding so the net-worth history keeps building.
   const refreshPrices = useCallback(async () => {
+    await refreshFxRates().catch(() => {});
     const accts = await listAccounts();
     const quotes = await fetchPrices(accts);
     if (quotes.length === 0) return;
