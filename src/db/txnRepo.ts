@@ -14,6 +14,8 @@ interface TxnRow {
   source: string;
   remark: string | null;
   receipt_uri: string | null;
+  native_amount: number | null;
+  fx_rate: number | null;
 }
 
 function toTxn(r: TxnRow): Transaction {
@@ -30,6 +32,8 @@ function toTxn(r: TxnRow): Transaction {
     source: (r.source as TxnSource) ?? 'manual',
     remark: r.remark,
     receiptUri: r.receipt_uri,
+    nativeAmount: r.native_amount ?? null,
+    fxRate: r.fx_rate ?? null,
   };
 }
 

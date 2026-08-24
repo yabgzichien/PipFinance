@@ -50,6 +50,11 @@ export interface Transaction {
   /** Local file URI of a saved receipt photo, kept only when the user opted in while
    *  scanning. Optional for the same reason as `remark`; null for every other source. */
   receiptUri?: string | null;
+  /** The amount as the user entered it, in `currency`. Null for a plain MYR row, which is
+   *  why no backfill is needed on upgrade. `amount` is ALWAYS the MYR value. */
+  nativeAmount?: number | null;
+  /** MYR per 1 unit of `currency`, frozen when the row was written. Null for MYR rows. */
+  fxRate?: number | null;
 }
 
 export type ReliefOrigin = 'auto' | 'commitment' | 'manual';
@@ -97,6 +102,9 @@ export interface Account {
   quantity: number | null; // units held
   cost: number | null; // total invested amount in MYR (cost basis), for profit
   icon?: string | null; // custom gallery image URI or null
+  /** The currency this account is denominated in. Balances are stored native and
+   *  converted at read time against a live cached rate. Defaults to 'MYR'. */
+  currency: string;
 }
 
 /** A cached market price in MYR for a holding symbol. */

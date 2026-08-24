@@ -14,7 +14,7 @@ import type { Account, BalanceEntry } from '../src/lib/types';
 function acct(over: Partial<Account>): Account {
   return {
     id: 'a1', name: 'Acct', kind: 'asset', cls: 'cash', archived: false, createdAt: '2026-01-01T00:00:00.000Z',
-    sub: null, symbol: null, ticker: null, quantity: null, cost: null, ...over,
+    sub: null, symbol: null, ticker: null, quantity: null, cost: null, currency: 'MYR', ...over,
   };
 }
 function entry(over: Partial<BalanceEntry>): BalanceEntry {

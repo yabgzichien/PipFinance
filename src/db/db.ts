@@ -95,6 +95,11 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       change24    REAL,
       as_of       TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS fx_cache (
+      code        TEXT PRIMARY KEY NOT NULL,
+      rate_myr    REAL NOT NULL,
+      as_of       TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS people (
       id          TEXT PRIMARY KEY NOT NULL,
       name        TEXT NOT NULL,
@@ -236,6 +241,24 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     // column already present
   }
 
+  // Migration: multi-currency. `amount` stays canonical MYR on every row; these two
+  // columns carry the figure the user actually entered and the rate frozen at entry.
+  // Null on both means "a plain MYR row", so existing rows need no backfill.
+  for (const col of ['native_amount REAL', 'fx_rate REAL']) {
+    try {
+      await db.execAsync(`ALTER TABLE transactions ADD COLUMN ${col}`);
+    } catch {
+      // column already present
+    }
+  }
+
+  // Migration: the currency an account is denominated in. Balances stay native.
+  try {
+    await db.execAsync("ALTER TABLE accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'MYR'");
+  } catch {
+    // column already present
+  }
+
   await migrateCategoryIds(db);
   await ensureSeedCategories(db);
   return db;
@@ -351,6 +374,7 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM balance_entries;
       DELETE FROM accounts;
       DELETE FROM price_cache;
+      DELETE FROM fx_cache;
       DELETE FROM categories;
       DELETE FROM split_payments;
       DELETE FROM split_shares;
@@ -362,6 +386,8 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM relief_memory;
       DELETE FROM deleted_default_categories;
     `);
+    // Without this, "Reset all data" leaves the app still in CNY entry mode.
+    await db.runAsync("DELETE FROM app_meta WHERE key IN ('active_currencies', 'entry_currency')");
     await seedCategories(db);
   });
 }

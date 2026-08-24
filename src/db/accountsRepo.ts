@@ -15,6 +15,7 @@ interface AccountRow {
   quantity: number | null;
   cost: number | null;
   icon: string | null;
+  currency: string;
 }
 interface EntryRow {
   id: string;
@@ -44,6 +45,7 @@ function toAccount(r: AccountRow): Account {
     quantity: r.quantity ?? null,
     cost: r.cost ?? null,
     icon: r.icon ?? null,
+    currency: r.currency ?? 'MYR',
   };
 }
 function toEntry(r: EntryRow): BalanceEntry {
@@ -93,7 +95,7 @@ export async function addAccount(
       now
     );
   });
-  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null };
+  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null, currency: 'MYR' };
 }
 
 export async function updateAccount(id: string, fields: { name: string; cls: string; icon?: string | null }): Promise<void> {
@@ -173,7 +175,7 @@ export async function addHolding(
       icon ?? null
     );
   });
-  return { id, name, kind: 'asset', cls: 'investments', archived: false, createdAt: now, sub, symbol, ticker, quantity, cost, icon: icon ?? null };
+  return { id, name, kind: 'asset', cls: 'investments', archived: false, createdAt: now, sub, symbol, ticker, quantity, cost, icon: icon ?? null, currency: 'MYR' };
 }
 
 /** Update a holding's quantity (e.g. after buying/selling more). */
