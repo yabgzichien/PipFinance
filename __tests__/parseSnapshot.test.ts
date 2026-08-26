@@ -3,7 +3,7 @@ import { parseSnapshot } from '../src/lib/parseSnapshot';
 describe('parseSnapshot', () => {
   it('reads a balance snapshot with provider, accountKind, and amount', () => {
     const r = parseSnapshot('{"kind":"balance","provider":"Touch \'n Go eWallet","accountKind":"asset","amount":65.78}');
-    expect(r).toEqual({ kind: 'balance', provider: "Touch 'n Go eWallet", accountKind: 'asset', amount: 65.78 });
+    expect(r).toEqual({ kind: 'balance', provider: "Touch 'n Go eWallet", accountKind: 'asset', amount: 65.78, currency: 'MYR' });
   });
 
   it('coerces a formatted string amount', () => {
@@ -15,6 +15,12 @@ describe('parseSnapshot', () => {
     expect(parseSnapshot('{"kind":"balance","provider":null,"accountKind":null,"amount":-5}')).toMatchObject({ amount: null });
     expect(parseSnapshot('{"kind":"balance","provider":null,"accountKind":null,"amount":"abc"}')).toMatchObject({ amount: null });
     expect(parseSnapshot('{"kind":"balance","provider":null,"accountKind":null,"amount":null}')).toMatchObject({ amount: null });
+  });
+
+  it('reads a supported currency code and falls back to MYR for a bad one', () => {
+    expect(parseSnapshot('{"kind":"balance","amount":128,"currency":"cny"}')).toMatchObject({ currency: 'CNY' });
+    expect(parseSnapshot('{"kind":"balance","amount":128,"currency":"ZZZ"}')).toMatchObject({ currency: 'MYR' });
+    expect(parseSnapshot('{"kind":"balance","amount":128}')).toMatchObject({ currency: 'MYR' });
   });
 
   it('defaults accountKind to null when missing or invalid', () => {
@@ -53,7 +59,7 @@ describe('parseSnapshot', () => {
 
   it('tolerates code fences', () => {
     const r = parseSnapshot('```json\n{"kind":"balance","provider":"Boost","accountKind":"asset","amount":12}\n```');
-    expect(r).toEqual({ kind: 'balance', provider: 'Boost', accountKind: 'asset', amount: 12 });
+    expect(r).toEqual({ kind: 'balance', provider: 'Boost', accountKind: 'asset', amount: 12, currency: 'MYR' });
   });
 
   it('normalizes a blank/non-string provider to null', () => {

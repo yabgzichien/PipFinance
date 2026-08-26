@@ -3,17 +3,25 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { AddCategoryModal } from '../components/AddCategoryModal';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
+import { getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
-import { fmt } from '../lib/format';
+import { BASE_CURRENCY, deriveNative, isMultiCurrency, round2 } from '../lib/currency';
+import { decimalsFor } from '../lib/currencies';
+import { fmtMoney } from '../lib/format';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { SplitSheet } from '../components/SplitSheet';
 import type { Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 
 export function ManualEntryScreen({
@@ -24,6 +32,7 @@ export function ManualEntryScreen({
   startSplitting = false,
   initialMerchant = null,
   initialAmount = null,
+  initialCurrency = null,
   initialSplit = null,
 }: {
   categories: Category[];
@@ -37,21 +46,57 @@ export function ManualEntryScreen({
    *  per-person split the itemiser produced. */
   initialMerchant?: string | null;
   initialAmount?: number | null;
+  initialCurrency?: string | null;
   initialSplit?: SplitDraft | null;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, formatFullDate, isZh } = useLanguage();
   const { accounts, recordBalanceLink, ensureDefaultAccount } = useAppData();
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
   const [amountText, setAmountText] = useState(initialAmount ? initialAmount.toFixed(2) : '');
   const [dateText, setDateText] = useState(todayISO());
+  const [dateFocused, setDateFocused] = useState(false);
   const [type, setType] = useState<TxnType>('expense');
   const [cat, setCat] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
   const [adding, setAdding] = useState(false);
   const [split, setSplit] = useState<SplitDraft | null>(initialSplit);
   const [splitting, setSplitting] = useState(false);
+
+  // Currencies active for this user, the sticky entry-currency default, and cached rates to
+  // convert against. Loaded once on mount; MYR-only until then, so nothing here changes the
+  // single-currency screen while the load is in flight.
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
+  const [currency, setCurrency] = useState<string>(initialCurrency ?? BASE_CURRENCY);
+  const [rates, setRates] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    (async () => {
+      const [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
+      setActiveCurrencies(active);
+      if (initialCurrency) {
+        setCurrency(initialCurrency);
+      } else if (initialAmount == null) {
+        setCurrency(entry);
+      }
+      setRates(ratesFromCache(fx));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sticks for next time, per the brief: picking a currency here is remembered as the new
+  // entry default, mirroring CurrencySettingsScreen's own entry-currency picker.
+  const changeCurrency = async (code: string) => {
+    setCurrency(code);
+    await setEntryCurrency(code);
+  };
+
+  const decimals = decimalsFor(currency);
+  // Null only means "no cached rate for an active currency", a case activation is supposed to
+  // prevent. Gates save rather than ever letting a foreign row through at parity.
+  const rate = currency === BASE_CURRENCY ? 1 : rateFor(rates, currency);
 
   // Every transaction is tied to an account. Default to a cash account (prefer an
   // existing one); the effect below seeds it and creates a "Cash" account if none exist.
@@ -66,7 +111,14 @@ export function ManualEntryScreen({
   const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
-  const canSave = amount > 0 && !!cat && !!validDate && !!linkId;
+  // The linked account's balance is native to ITS OWN currency (Task 9), which may differ
+  // from the row's own currency. No conversion (and so no rate) is needed when the row's
+  // currency already matches the account's, or the account is MYR; otherwise the account's
+  // own rate must be cached, or `deriveNative` would throw at save time.
+  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
+  const linkConvertible =
+    !linkAccount || linkAccount.currency === currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
+  const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null && linkConvertible;
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -95,11 +147,16 @@ export function ManualEntryScreen({
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
-  const activeSplit = split && Math.abs(split.gross - Math.round(amount * 100) / 100) < 0.005 ? split : null;
+  const activeSplit =
+    split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
 
   const save = async () => {
-    if (!canSave || !cat || !validDate) return;
-    const amt = Math.round(amount * 100) / 100;
+    if (!canSave || !cat || !validDate || rate == null) return;
+    // The figure the user typed, in `currency`: native for a foreign row, MYR for a plain one.
+    const amt = round2(amount);
+    // The row's own MYR-equivalent (used both for the saved row's bookkeeping and, below, as
+    // the starting point for converting into the linked account's currency).
+    const myrAmt = currency === BASE_CURRENCY ? amt : round2(amt * rate);
     const item: ExtractedTxn = {
       merchant: merchant.trim(),
       // Only the payer's own share is the expense; the rest becomes a receivable.
@@ -108,17 +165,27 @@ export function ManualEntryScreen({
       date: validDate,
       method: null,
       remark: remark.trim() || null,
+      currency,
+      fxRate: currency === BASE_CURRENCY ? null : rate,
     };
     // The balance moves by the full bill even when the row records only a share, because the
-    // whole amount is what actually left the account.
-    if (linkId) await recordBalanceLink(linkId, amt, linkEffect, validDate);
+    // whole amount is what actually left the account. Accounts are natively denominated
+    // (Task 9): when the row's own currency already matches the linked account's, the row's
+    // native amount is used unconverted rather than round-tripped through MYR (which could
+    // drift a cent from double rounding); otherwise the MYR-equivalent is converted into the
+    // account's own currency at the account's own rate (the inverse of `deriveMyr`).
+    if (linkId && linkAccount) {
+      const linkAmt =
+        linkAccount.currency === currency ? amt : deriveNative(myrAmt, linkAccount.currency, rateFor(rates, linkAccount.currency));
+      await recordBalanceLink(linkId, linkAmt, linkEffect, validDate);
+    }
     onComplete(item, cat, activeSplit);
   };
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={title ?? (startSplitting ? 'Split a bill' : 'Add manually')} onBack={onBack} />
+        <TopBar title={title ?? (startSplitting ? (isZh ? '分摊账单' : 'Split a bill') : (isZh ? '手动记账' : 'Add manually'))} onBack={onBack} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
@@ -126,36 +193,42 @@ export function ManualEntryScreen({
         <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
           {(['expense', 'income'] as TxnType[]).map((k) => {
             const on = type === k;
+            const activeColor = k === 'expense' ? colorTheme.red : theme.accent;
+            const activeBg = k === 'expense' ? colorTheme.redTint : theme.accentTint;
+            const activeBorder = k === 'expense' ? colorTheme.redSoft : theme.accentSoft;
             return (
-              <Pressable key={k} onPress={() => switchType(k)} style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}>
-                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: colorTheme.ink }]}>{k === 'expense' ? 'Expense' : 'Income'}</Text>
+              <Pressable
+                key={k}
+                onPress={() => switchType(k)}
+                style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: activeBg, borderColor: activeBorder }]}
+              >
+                <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: activeColor }]}>
+                  {k === 'expense' ? t('expense') : t('income')}
+                </Text>
               </Pressable>
             );
           })}
         </View>
 
-        <Eyebrow style={{ marginBottom: 8 }}>{type === 'income' ? 'Source (optional)' : 'Merchant (optional)'}</Eyebrow>
-        <TextInput
-          value={merchant}
-          onChangeText={setMerchant}
-          placeholder={type === 'income' ? 'e.g. Salary' : 'e.g. Jaya Grocer'}
-          placeholderTextColor={colorTheme.ink3}
-          style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-          autoFocus={!initialMerchant}
-        />
-
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Amount</Eyebrow>
+        <Eyebrow style={{ marginBottom: 8 }}>{t('amount')}</Eyebrow>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          {isMultiCurrency(activeCurrencies) ? (
+            <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
+          ) : (
+            <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          )}
           <TextInput
             value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
+            onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
+            keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
+            placeholder={decimals === 0 ? '0' : '0.00'}
             placeholderTextColor={colorTheme.ink3}
             style={[styles.amountInput, { color: colorTheme.ink }]}
           />
         </View>
+        {currency !== BASE_CURRENCY && rate != null && (
+          <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
+        )}
 
         {type === 'expense' && (
           <Pressable
@@ -166,15 +239,18 @@ export function ManualEntryScreen({
           >
             <Icon name="gift" size={17} color={amount > 0 ? theme.accent : colorTheme.ink3} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
+                  {activeSplit ? (isZh ? `自付部分：${fmtMoney(activeSplit.ownShare, currency)}` : `Your share: ${fmtMoney(activeSplit.ownShare, currency)}`) : (isZh ? '分摊账单' : 'Split with friends')}
+                </Text>
+                <InfoButton entry="split_bill" />
+              </View>
               <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {activeSplit
-                  ? `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`
+                  ? (isZh ? `待收回 ${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)}` : `${fmtMoney(activeSplit.gross - activeSplit.ownShare, currency)} owed back to you`)
                   : amount > 0
-                    ? 'Paid for the table? Record only your share'
-                    : 'Enter the bill amount first'}
+                    ? (isZh ? '全桌买单？只记录您的自付部分' : 'Paid for the table? Record only your share')
+                    : (isZh ? '请先输入账单总额' : 'Enter the bill amount first')}
               </Text>
             </View>
             <Icon name="chevronRight" size={17} color={colorTheme.ink3} />
@@ -185,20 +261,37 @@ export function ManualEntryScreen({
           <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} required />
         </View>
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Date</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
         <TextInput
-          value={dateText}
+          value={dateFocused ? dateText : validDate ? formatFullDate(validDate) : dateText}
           onChangeText={setDateText}
+          onFocus={() => setDateFocused(true)}
+          onBlur={() => setDateFocused(false)}
+          onSubmitEditing={() => setDateFocused(false)}
+          selectTextOnFocus
           placeholder="YYYY-MM-DD"
           placeholderTextColor={colorTheme.ink3}
           keyboardType="numbers-and-punctuation"
           style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
         />
-        <Text style={[styles.dateHint, { color: colorTheme.ink2 }, !validDate && styles.dateHintBad]}>
-          {validDate ? fullDate(validDate) : 'Enter a valid date (YYYY-MM-DD)'}
-        </Text>
+        {!validDate && (
+          <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
+            {isZh ? '请输入有效日期 (YYYY-MM-DD)' : 'Enter a valid date (YYYY-MM-DD)'}
+          </Text>
+        )}
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>Category</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>
+          {type === 'income' ? (isZh ? '收入来源（选填）' : 'Source (optional)') : (isZh ? '商家名称（选填）' : 'Merchant (optional)')}
+        </Eyebrow>
+        <TextInput
+          value={merchant}
+          onChangeText={setMerchant}
+          placeholder={type === 'income' ? (isZh ? '例如：工资' : 'e.g. Salary') : (isZh ? '例如：Jaya Grocer' : 'e.g. Jaya Grocer')}
+          placeholderTextColor={colorTheme.ink3}
+          style={[styles.textInputSm, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+        />
+
+        <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{t('category')}</Eyebrow>
         <View style={styles.grid}>
           {grid.map((c) => (
             <View key={c.id} style={styles.gridCell}>
@@ -208,16 +301,16 @@ export function ManualEntryScreen({
           <View style={styles.gridCell}>
             <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
               <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.addChipText, { color: theme.accent }]}>New category</Text>
+              <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
             </Pressable>
           </View>
         </View>
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>Remark (optional)</Eyebrow>
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Eyebrow>
         <TextInput
           value={remark}
           onChangeText={setRemark}
-          placeholder="e.g. Lunch with a supplier"
+          placeholder={isZh ? '例如：和同事吃午餐' : 'e.g. Lunch with a supplier'}
           placeholderTextColor={colorTheme.ink3}
           style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
           multiline
@@ -227,7 +320,9 @@ export function ManualEntryScreen({
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
         <PrimaryButton onPress={save} disabled={!canSave}>
           <Icon name="check" size={19} color="#fff" stroke={2.4} />
-          <BtnLabel>Add {type === 'income' ? 'income' : 'expense'}</BtnLabel>
+          <BtnLabel>
+            {type === 'income' ? (isZh ? '添加收入' : 'Add income') : (isZh ? '添加支出' : 'Add expense')}
+          </BtnLabel>
         </PrimaryButton>
       </View>
 
@@ -243,7 +338,8 @@ export function ManualEntryScreen({
 
       <SplitSheet
         visible={splitting}
-        gross={Math.round(amount * 100) / 100}
+        gross={round2(amount)}
+        currency={currency}
         merchant={merchant.trim() || undefined}
         initial={activeSplit}
         onClose={() => setSplitting(false)}
@@ -260,7 +356,7 @@ export function ManualEntryScreen({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, marginBottom: 18, borderWidth: 1 },
-  toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999 },
+  toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: 'transparent' },
   toggleBtnOn: { ...shadowToggle },
   toggleText: { fontFamily: uiFont(600), fontSize: 14 },
   toggleTextOn: {},
@@ -273,8 +369,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   dateHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
+  textInputSm: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontFamily: uiFont(600),
+    fontSize: 14,
+  },
   dateHintBad: { color: '#c5402f' },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
+  fxHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: { flex: 1, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },

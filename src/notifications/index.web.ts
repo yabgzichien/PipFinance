@@ -7,9 +7,9 @@
 // closed, which is the only moment a reminder is worth anything. Settings hides the whole
 // section on web instead of offering a control that quietly does nothing.
 
-import type { ReminderPlanEntry } from '../lib/reminders';
+import type { ReminderKind, ReminderPlanEntry } from '../lib/reminders';
 
-export type ReminderKind = 'log' | 'owed' | 'commitment';
+export type { ReminderKind };
 
 export interface ReminderPlan {
   log: ReminderPlanEntry[];

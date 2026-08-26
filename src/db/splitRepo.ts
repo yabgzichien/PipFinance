@@ -27,6 +27,8 @@ interface SplitRow {
   own_share: number;
   method: string;
   created_at: string;
+  currency: string;
+  fx_rate: number | null;
 }
 interface ShareRow {
   id: string;
@@ -60,6 +62,8 @@ function toSplit(r: SplitRow): Split {
     ownShare: r.own_share,
     method: r.method as SplitMethod,
     createdAt: r.created_at,
+    currency: r.currency ?? 'MYR',
+    fxRate: r.fx_rate ?? null,
   };
 }
 function toShare(r: ShareRow): SplitShare {
@@ -153,16 +157,24 @@ export async function createSplit(txnId: string, draft: SplitDraft): Promise<voi
   const db = await getDb();
   const now = new Date().toISOString();
   const splitId = genId();
+  const txnRow = await db.getFirstAsync<{ currency: string; fx_rate: number | null }>(
+    'SELECT currency, fx_rate FROM transactions WHERE id = ?',
+    txnId
+  );
+  const currency = txnRow?.currency ?? 'MYR';
+  const fxRate = txnRow?.fx_rate ?? null;
   await db.withTransactionAsync(async () => {
     await deleteSplitRows(db, [txnId]);
     await db.runAsync(
-      'INSERT INTO splits (id, txn_id, gross, own_share, method, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO splits (id, txn_id, gross, own_share, method, created_at, currency, fx_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       splitId,
       txnId,
       draft.gross,
       draft.ownShare,
       draft.method,
-      now
+      now,
+      currency,
+      fxRate
     );
     for (const share of draft.shares) {
       if (share.owed <= 0) continue; // nobody owes nothing; keep the table free of noise rows
@@ -227,15 +239,20 @@ export async function recordPayment(
   evidence: PaymentEvidence,
   matchedMerchant: string | null,
   accountId: string | null
-): Promise<{ paid: number; status: ShareStatus } | null> {
+): Promise<{ paid: number; status: ShareStatus; applied: number } | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<ShareRow>('SELECT * FROM split_shares WHERE id = ? LIMIT 1', shareId);
   if (!row) return null;
 
   const share = toShare(row);
   const next = applyPayment(share, amount);
+  // Reported back, not just used internally. `applyPayment` caps at what is still
+  // outstanding, so this can be less than `amount` — or zero, when a double-tap on "Mark
+  // settled" arrives after the share is already square. A caller crediting the raw `amount`
+  // instead would add the money to the destination account twice with only one payment row
+  // behind it, leaving the cash balance and net worth overstated and nothing to explain it.
   const applied = Math.round((next.paid - share.paid) * 100) / 100;
-  if (applied <= 0) return next;
+  if (applied <= 0) return { ...next, applied: 0 };
 
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
@@ -253,7 +270,7 @@ export async function recordPayment(
     );
     await db.runAsync('UPDATE split_shares SET paid = ?, status = ? WHERE id = ?', next.paid, next.status, shareId);
   });
-  return next;
+  return { ...next, applied };
 }
 
 /**

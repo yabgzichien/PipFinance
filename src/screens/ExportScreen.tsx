@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 import { Icon, type IconName } from '../components/Icon';
 import { Amount, Card, Eyebrow, IconButton, TopBar } from '../components/ui';
 import {
@@ -20,6 +21,7 @@ import {
   type ReportPeriodType,
 } from '../lib/bookkeeping';
 import {
+  csvToHtmlTable,
   generateAdvancedImportJSON,
   generateCSV,
   generateExcelWorkbook,
@@ -32,6 +34,7 @@ import { notify } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { colors, numFont, platformShadow, radius, uiFont } from '../theme';
 
 interface FormatOption {
@@ -44,59 +47,11 @@ interface FormatOption {
   mimeType: string;
 }
 
-const FORMAT_OPTIONS: FormatOption[] = [
-  {
-    id: 'pdf',
-    title: 'PDF Financial Statement',
-    sub: 'Traditional 2-column Balance Sheet, Income Statement & itemized ledger.',
-    badge: 'Formal P&L',
-    icon: 'receipt',
-    fileExt: 'pdf.html',
-    mimeType: 'text/html',
-  },
-  {
-    id: 'xlsx',
-    title: 'Excel Workbook (.xlsx)',
-    sub: '4 Sheets: Income Statement, Balance Sheet, Ledger, and Monthly Trends.',
-    badge: '4 Sheets',
-    icon: 'table',
-    fileExt: 'xlsx',
-    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  },
-  {
-    id: 'html',
-    title: 'Interactive HTML Analytics',
-    sub: 'Visual report with SVG cash flow, category donut, and net worth charts.',
-    badge: 'With Charts',
-    icon: 'trending',
-    fileExt: 'html',
-    mimeType: 'text/html',
-  },
-  {
-    id: 'csv',
-    title: 'CSV Data Sheet',
-    sub: 'Universal structured tabular accounting export for any spreadsheet.',
-    badge: 'Universal',
-    icon: 'file',
-    fileExt: 'csv',
-    mimeType: 'text/csv',
-  },
-  {
-    id: 'json',
-    title: 'Advanced Import JSON',
-    sub: 'Same schema Advanced Import reads — copy or download, then re-import anytime.',
-    badge: 'Re-importable',
-    icon: 'code',
-    fileExt: 'json',
-    mimeType: 'application/json',
-  },
-];
-
-const PERIOD_TABS: { type: ReportPeriodType; label: string }[] = [
-  { type: 'monthly', label: 'Monthly' },
-  { type: 'yearly', label: 'Yearly' },
-  { type: 'all-time', label: 'All Time' },
-  { type: 'custom', label: 'Custom' },
+const PERIOD_TABS: { type: ReportPeriodType; labelEn: string; labelZh: string }[] = [
+  { type: 'monthly', labelEn: 'Monthly', labelZh: '按月份' },
+  { type: 'yearly', labelEn: 'Yearly', labelZh: '按年份' },
+  { type: 'all-time', labelEn: 'All Time', labelZh: '全部时间' },
+  { type: 'custom', labelEn: 'Custom Range', labelZh: '自定义区间' },
 ];
 
 export function ExportScreen({
@@ -109,11 +64,60 @@ export function ExportScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const themeColors = useThemeColors();
-  const { transactions, categories, accounts, balanceEntries, kyc, commitments, commitmentOccurrences } = useAppData();
+  const { t, formatMonthLabel, isZh } = useLanguage();
+  const { transactions, categories, accounts, balanceEntries, commitments, commitmentOccurrences } = useAppData();
   const commitmentExtra = useMemo(
     () => ({ commitments, occurrences: commitmentOccurrences }),
     [commitments, commitmentOccurrences]
   );
+
+  const formatOptions: FormatOption[] = [
+    {
+      id: 'pdf',
+      title: isZh ? 'PDF 财务对账单' : 'PDF Financial Statement',
+      sub: isZh ? '标准双栏资产负债表、收支损益表与明细账目。' : 'Traditional 2-column Balance Sheet, Income Statement & itemized ledger.',
+      badge: isZh ? '正式损益表' : 'Formal P&L',
+      icon: 'receipt',
+      fileExt: 'pdf.html',
+      mimeType: 'text/html',
+    },
+    {
+      id: 'xlsx',
+      title: isZh ? 'Excel 工作簿 (.xlsx)' : 'Excel Workbook (.xlsx)',
+      sub: isZh ? '包含 4 个工作表：利润表、资产负债表、流水明细与月度趋势。' : '4 Sheets: Income Statement, Balance Sheet, Ledger, and Monthly Trends.',
+      badge: isZh ? '4个工作表' : '4 Sheets',
+      icon: 'table',
+      fileExt: 'xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    },
+    {
+      id: 'html',
+      title: isZh ? '交互式 HTML 图表分析' : 'Interactive HTML Analytics',
+      sub: isZh ? '包含 SVG 现金流趋势图、分类支出甜甜圈图与净资产曲线。' : 'Visual report with SVG cash flow, category donut, and net worth charts.',
+      badge: isZh ? '可视化图表' : 'With Charts',
+      icon: 'trending',
+      fileExt: 'html',
+      mimeType: 'text/html',
+    },
+    {
+      id: 'csv',
+      title: isZh ? 'CSV 表格数据' : 'CSV Data Sheet',
+      sub: isZh ? '通用标准结构化会计表格，适配各类电子表格软件。' : 'Universal structured tabular accounting export for any spreadsheet.',
+      badge: isZh ? '通用格式' : 'Universal',
+      icon: 'file',
+      fileExt: 'csv',
+      mimeType: 'text/csv',
+    },
+    {
+      id: 'json',
+      title: isZh ? '高级导入 JSON' : 'Advanced Import JSON',
+      sub: isZh ? '与高级导入完全兼容的完整数据结构，可随时导出与重新导入。' : 'Same schema Advanced Import reads — copy or download, then re-import anytime.',
+      badge: isZh ? '可重新导入' : 'Re-importable',
+      icon: 'code',
+      fileExt: 'json',
+      mimeType: 'application/json',
+    },
+  ];
 
   const now = useMemo(() => new Date(), []);
   const curY = now.getFullYear();
@@ -131,17 +135,17 @@ export function ExportScreen({
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewTitle, setPreviewTitle] = useState<string>('');
 
-  // Extract all distinct months present in transactions
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
     months.add(`${curY}-${curM}`);
     for (const t of transactions) {
-      if (t.date && t.date.length >= 7) months.add(t.date.slice(0, 7));
+      if (t.date && t.date.length >= 7) {
+        months.add(t.date.slice(0, 7));
+      }
     }
     return [...months].sort().reverse();
   }, [transactions, curY, curM]);
 
-  // Extract distinct years present in transactions
   const availableYears = useMemo(() => {
     const years = new Set<number>();
     years.add(curY);
@@ -154,16 +158,11 @@ export function ExportScreen({
     return [...years].sort().reverse();
   }, [transactions, curY]);
 
-  // Active Report Period & calculated report bundle
   const activePeriod = useMemo(() => {
     return buildReportPeriod(periodType, selectedMonth, selectedYear, customStart, customEnd, now);
   }, [periodType, selectedMonth, selectedYear, customStart, customEnd, now]);
 
-  const verifiedName = useMemo(() => {
-    return kyc && kyc.status === 'verified' && kyc.fullName && kyc.fullName.trim()
-      ? kyc.fullName.trim()
-      : 'Pip User';
-  }, [kyc]);
+  const verifiedName = 'Pip User';
 
   const reportData = useMemo(() => {
     return buildFinancialReportBundle(
@@ -176,7 +175,6 @@ export function ExportScreen({
     );
   }, [transactions, categories, accounts, balanceEntries, activePeriod, verifiedName]);
 
-  // Trigger export generation and download
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -205,7 +203,6 @@ export function ExportScreen({
         ext = 'json';
         mime = 'application/json';
       } else {
-        // PDF Printable HTML
         content = generatePrintablePDFHtml(reportData);
         ext = 'pdf.html';
         mime = 'text/html';
@@ -216,7 +213,6 @@ export function ExportScreen({
 
       if (res.success) {
         if (selectedFormat === 'pdf' && Platform.OS === 'web') {
-          // On Web, open print window directly for PDF format
           const win = window.open('', '_blank');
           if (win) {
             win.document.write(content as string);
@@ -225,19 +221,18 @@ export function ExportScreen({
             setTimeout(() => win.print(), 350);
           }
         } else {
-          notify('Export Successful', `Financial file ${fileName} has been generated and saved.`);
+          notify(isZh ? '导出成功' : 'Export Successful', isZh ? `财务文件 ${fileName} 已生成并保存。` : `Financial file ${fileName} has been generated and saved.`);
         }
       } else {
-        notify('Export Error', res.error || 'Unable to save export file.');
+        notify(isZh ? '导出错误' : 'Export Error', res.error || (isZh ? '无法保存导出文件。' : 'Unable to save export file.'));
       }
     } catch (err: any) {
-      notify('Export Failed', err?.message || 'An unexpected error occurred during export.');
+      notify(isZh ? '导出失败' : 'Export Failed', err?.message || (isZh ? '导出过程中发生意外错误。' : 'An unexpected error occurred during export.'));
     } finally {
       setExporting(false);
     }
   };
 
-  // Open in-app document preview
   const handlePreview = () => {
     if (selectedFormat === 'xlsx' || selectedFormat === 'csv') {
       const csvText = generateCSV(reportData);
@@ -252,10 +247,9 @@ export function ExportScreen({
     } else if (selectedFormat === 'json') {
       const jsonText = generateAdvancedImportJSON(reportData, commitmentExtra);
       setPreviewContent(jsonText);
-      setPreviewTitle(`Advanced Import JSON Preview (${activePeriod.label})`);
+      setPreviewTitle(`JSON Export Preview (${activePeriod.label})`);
       setPreviewVisible(true);
     } else {
-      // PDF
       const pdfHtml = generatePrintablePDFHtml(reportData);
       setPreviewContent(pdfHtml);
       setPreviewTitle(`PDF Statement Preview (${activePeriod.label})`);
@@ -263,16 +257,15 @@ export function ExportScreen({
     }
   };
 
-  // Copy the Advanced Import JSON straight to the clipboard.
   const [copyingJson, setCopyingJson] = useState(false);
   const handleCopyJSON = async () => {
     setCopyingJson(true);
     try {
       const json = generateAdvancedImportJSON(reportData, commitmentExtra);
       await Clipboard.setStringAsync(json);
-      notify('Copied', 'Advanced Import JSON copied to clipboard. Paste it into Advanced Import to re-import.');
+      notify(isZh ? '已复制' : 'Copied', isZh ? '高级导入 JSON 已复制至剪贴板。' : 'Advanced Import JSON copied to clipboard. Paste it into Advanced Import to re-import.');
     } catch (err: any) {
-      notify('Copy Failed', err?.message || 'Unable to copy JSON to clipboard.');
+      notify(isZh ? '复制失败' : 'Copy Failed', err?.message || (isZh ? '无法复制 JSON 至剪贴板。' : 'Unable to copy JSON to clipboard.'));
     } finally {
       setCopyingJson(false);
     }
@@ -285,12 +278,11 @@ export function ExportScreen({
   return (
     <View style={[styles.root, { backgroundColor: themeColors.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Financial Reports & Export" onBack={onBack} />
+        <TopBar title={isZh ? '财务报表与导出' : 'Financial Reports & Export'} onBack={onBack} />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 48 }}>
-        {/* TIMEFRAME SELECTOR */}
-        <Eyebrow style={{ marginBottom: 10 }}>1. Reporting Period</Eyebrow>
+        <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '1. 报表周期' : '1. Reporting Period'}</Eyebrow>
         <View style={[styles.periodTabs, { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 }]}>
           {PERIOD_TABS.map((tab) => {
             const active = periodType === tab.type;
@@ -307,23 +299,20 @@ export function ExportScreen({
                     active && styles.periodTabTextActive,
                   ]}
                 >
-                  {tab.label}
+                  {isZh ? tab.labelZh : tab.labelEn}
                 </Text>
               </Pressable>
             );
           })}
         </View>
 
-        {/* MONTH PICKER */}
         {periodType === 'monthly' && (
           <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>Select Month</Text>
+            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '选择月份' : 'Select Month'}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 {availableMonths.map((m) => {
-                  const [y, mm] = m.split('-');
-                  const dateObj = new Date(parseInt(y, 10), parseInt(mm, 10) - 1, 1);
-                  const label = dateObj.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+                  const label = formatMonthLabel(m, true);
                   const active = selectedMonth === m;
                   return (
                     <Pressable
@@ -353,10 +342,9 @@ export function ExportScreen({
           </Card>
         )}
 
-        {/* YEAR PICKER */}
         {periodType === 'yearly' && (
           <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>Select Year</Text>
+            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '选择年份' : 'Select Year'}</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               {availableYears.map((y) => {
                 const active = selectedYear === y;
@@ -378,7 +366,7 @@ export function ExportScreen({
                         active && { color: '#fff', fontWeight: '700' },
                       ]}
                     >
-                      Year {y}
+                      {isZh ? `${y}年` : `Year ${y}`}
                     </Text>
                   </Pressable>
                 );
@@ -387,13 +375,12 @@ export function ExportScreen({
           </Card>
         )}
 
-        {/* CUSTOM RANGE PICKER */}
         {periodType === 'custom' && (
           <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>Date Range (YYYY-MM-DD)</Text>
+            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '日期范围 (YYYY-MM-DD)' : 'Date Range (YYYY-MM-DD)'}</Text>
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.inputLabel, { color: themeColors.ink2 }]}>From Date</Text>
+                <Text style={[styles.inputLabel, { color: themeColors.ink2 }]}>{isZh ? '起始日期' : 'From Date'}</Text>
                 <TextInput
                   value={customStart}
                   onChangeText={setCustomStart}
@@ -423,32 +410,32 @@ export function ExportScreen({
         )}
 
         {/* LIVE PERIOD OVERVIEW CARD */}
-        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>2. Statement Summary</Eyebrow>
+        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>{isZh ? '2. 报表概览' : '2. Statement Summary'}</Eyebrow>
         <Card style={{ padding: 16 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.summaryTitle, { color: themeColors.ink }]}>{activePeriod.label}</Text>
             <View style={[styles.badgePill, { backgroundColor: theme.accentTint }]}>
               <Text style={[styles.badgeText, { color: theme.accent }]}>
-                {reportData.incomeStatement.transactionCount} txns
+                {isZh ? `${reportData.incomeStatement.transactionCount} 笔交易` : `${reportData.incomeStatement.transactionCount} txns`}
               </Text>
             </View>
           </View>
 
           <View style={styles.statGrid}>
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>Revenue</Text>
+              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '总收入' : 'Revenue'}</Text>
               <Amount value={isIncome} size={15} color="#15803d" />
             </View>
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>Expenses</Text>
+              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '总支出' : 'Expenses'}</Text>
               <Amount value={isExpense} size={15} color="#b3261e" />
             </View>
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>Net Surplus</Text>
+              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '净结余' : 'Net Surplus'}</Text>
               <Amount value={isNet} size={15} color={isNet >= 0 ? theme.accent : '#b3261e'} />
             </View>
             <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>Net Worth</Text>
+              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '期末净资产' : 'Net Worth'}</Text>
               <Amount value={reportData.balanceSheet.netWorth} size={15} />
             </View>
           </View>
@@ -457,18 +444,18 @@ export function ExportScreen({
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
-              Mean Monthly: <Text style={{ fontFamily: uiFont(700), color: themeColors.ink }}>RM {reportData.statistics.meanMonthlyIncome.toFixed(0)}</Text>
+              {isZh ? '月均收入：' : 'Mean Monthly: '}<Text style={{ fontFamily: uiFont(700), color: themeColors.ink }}>RM {reportData.statistics.meanMonthlyIncome.toFixed(0)}</Text>
             </Text>
             <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
-              Savings Rate: <Text style={{ fontFamily: uiFont(700), color: theme.accent }}>{reportData.incomeStatement.savingsRate}%</Text>
+              {isZh ? '储蓄率：' : 'Savings Rate: '}<Text style={{ fontFamily: uiFont(700), color: theme.accent }}>{reportData.incomeStatement.savingsRate}%</Text>
             </Text>
           </View>
         </Card>
 
         {/* FORMAT SELECTION */}
-        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>3. Select Export Format</Eyebrow>
+        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>{isZh ? '3. 选择导出格式' : '3. Select Export Format'}</Eyebrow>
         <View style={{ gap: 10 }}>
-          {FORMAT_OPTIONS.map((opt) => {
+          {formatOptions.map((opt) => {
             const selected = selectedFormat === opt.id;
             return (
               <Pressable
@@ -535,7 +522,9 @@ export function ExportScreen({
               <>
                 <Icon name="download" size={18} color="#fff" />
                 <Text style={styles.primaryBtnText}>
-                  {selectedFormat === 'pdf' && Platform.OS === 'web' ? 'Print / Export PDF' : 'Export & Download'}
+                  {selectedFormat === 'pdf' && Platform.OS === 'web'
+                    ? (isZh ? '打印 / 导出 PDF' : 'Print / Export PDF')
+                    : (isZh ? '导出并保存文件' : 'Export & Download')}
                 </Text>
               </>
             )}
@@ -553,7 +542,7 @@ export function ExportScreen({
             >
               <Icon name="copy" size={16} color={theme.accent} />
               <Text style={[styles.secondaryBtnText, { color: theme.accent }]}>
-                Copy JSON to Clipboard
+                {isZh ? '复制 JSON 至剪贴板' : 'Copy JSON to Clipboard'}
               </Text>
             </Pressable>
           )}
@@ -568,7 +557,7 @@ export function ExportScreen({
           >
             <Icon name="sparkles" size={16} color={theme.accent} />
             <Text style={[styles.secondaryBtnText, { color: theme.accent }]}>
-              Preview Report Content
+              {isZh ? '预览报表内容' : 'Preview Report Content'}
             </Text>
           </Pressable>
         </View>
@@ -613,28 +602,42 @@ export function ExportScreen({
             />
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
-            {selectedFormat === 'pdf' || selectedFormat === 'html' ? (
-              Platform.OS === 'web' ? (
-                // On Web, render in an interactive iframe
-                <View style={styles.webPreviewWrap}>
-                  <iframe
-                    srcDoc={previewContent}
-                    title="Report Preview"
-                    style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
-                  />
-                </View>
-              ) : (
-                <Card style={{ padding: 14 }}>
-                  <Text style={[styles.previewRawText, { color: themeColors.ink }]}>{previewContent}</Text>
-                </Card>
-              )
-            ) : (
+          {selectedFormat === 'json' ? (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
               <Card style={{ padding: 14 }}>
                 <Text style={[styles.previewRawText, { color: themeColors.ink }]}>{previewContent}</Text>
               </Card>
-            )}
-          </ScrollView>
+            </ScrollView>
+          ) : Platform.OS === 'web' ? (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
+              {/* On Web, render in an interactive iframe */}
+              <View style={styles.webPreviewWrap}>
+                <iframe
+                  srcDoc={
+                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
+                      ? csvToHtmlTable(previewContent)
+                      : previewContent
+                  }
+                  title="Report Preview"
+                  style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
+                />
+              </View>
+            </ScrollView>
+          ) : (
+            // On native, render the actual document/table instead of dumping raw markup/CSV text
+            <View style={[styles.webPreviewWrap, { flex: 1, margin: 16, marginTop: 0 }]}>
+              <WebView
+                source={{
+                  html:
+                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
+                      ? csvToHtmlTable(previewContent)
+                      : previewContent,
+                }}
+                style={{ flex: 1, backgroundColor: 'transparent' }}
+                originWhitelist={['*']}
+              />
+            </View>
+          )}
         </View>
       </Modal>
     </View>

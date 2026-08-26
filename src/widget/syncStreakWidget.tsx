@@ -1,7 +1,6 @@
 import React from 'react';
 import { Platform } from 'react-native';
 import { requestWidgetUpdate } from 'react-native-android-widget';
-import { computeCoverage } from '../lib/coverage';
 import { computeStreak, compute7DayDots, type StreakInput } from '../lib/streak';
 import type { Transaction } from '../lib/types';
 import { listTransactions } from '../db/txnRepo';
@@ -24,9 +23,8 @@ export async function getStreakWidgetData(providedTxns?: Transaction[]) {
   const now = new Date();
   const streak = computeStreak(txns, now);
   const dots = compute7DayDots(txns, now);
-  const coverage = computeCoverage(txns, now).daysCovered;
 
-  return { streak, dots, coverage };
+  return { streak, dots };
 }
 
 export async function syncStreakWidget(txns?: Transaction[]): Promise<void> {
@@ -40,7 +38,6 @@ export async function syncStreakWidget(txns?: Transaction[]): Promise<void> {
         <StreakWidget
           streak={data.streak}
           dots={data.dots}
-          coverage={data.coverage}
         />
       ),
     });

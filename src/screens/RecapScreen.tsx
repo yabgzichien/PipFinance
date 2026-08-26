@@ -1,20 +1,21 @@
-// src/screens/RecapScreen.tsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Icon } from '../components/Icon';
-import { MonthVsNormalCard } from '../components/CashflowStructure';
+import { Pip } from '../components/Pip';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
-import { computeIncomeFloor } from '../lib/incomeFloor';
-import { detectObligations } from '../lib/obligations';
-import { computeExpenseStructure } from '../lib/spendingProfile';
-import { monthLabel } from '../lib/dates';
 import { fmt } from '../lib/format';
-import { availableMonths, computeAdherence, monthlyIncomeStatement, spentByCategory } from '../lib/recap';
-import { getBenchmark } from '../lib/belanjawanku';
-import { benchmarkGaps, gapTrend } from '../lib/belanjawankuBudget';
+import {
+  availableMonths,
+  categoryComparisons,
+  computeAdherence,
+  hasComparisonData,
+  monthlyIncomeStatement,
+  prevMonthKey,
+  spentByCategory,
+} from '../lib/recap';
 import { netWorthSeries } from '../lib/networth';
 import type { Category } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -22,39 +23,45 @@ import type { AccentTheme } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import type { StructuralColors } from '../theme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { numFont, platformShadow, shadowCard, uiFont } from '../theme';
-
-/** The 'YYYY-MM' before the given one. */
-function prevMonthKey(mk: string): string {
-  const [y, m] = mk.split('-').map(Number);
-  const d = new Date(y, m - 2, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
 
 // ── Design tints (from the approved mockup) ───────────────────────────────────
+// warn/caution are fixed hexes rather than colorTheme.amber: amber is a shared structural
+// token used for unrelated warnings elsewhere, and the caution (yellow) tier added alongside
+// it needs enough hue separation from it to read as a distinct step, not colorTheme.amber's
+// job to carry — see src/components/BudgetProgressList.tsx STATUS_COLOR, which this mirrors
+// so the two screens showing the same categoryStatus render it the same way.
+const CAUTION_COLOR = '#ca8a04';
+const WARN_COLOR = '#ea580c';
 const TINT = {
   redSoft: '#fce8e6',
   redTint: '#fff0ef',
   amberSoft: '#fdf3dc',
   amberTint: '#fffcf4',
+  yellowSoft: '#fbf0c7',
+  yellowTint: '#fffdf0',
   ncfUp: '#42e893',
   ncfDown: '#ff8a7a',
 } as const;
 
 function statusColor(st: CategoryBudgetStatus, theme: AccentTheme, colorTheme: StructuralColors): string {
   if (st === 'ok') return theme.accent;
-  if (st === 'warn') return colorTheme.amber;
+  if (st === 'caution') return CAUTION_COLOR;
+  if (st === 'warn') return WARN_COLOR;
   return colorTheme.red;
 }
 function statusBg(st: CategoryBudgetStatus, theme: AccentTheme): string {
   if (st === 'ok') return theme.accentTint;
+  if (st === 'caution') return TINT.yellowTint;
   if (st === 'warn') return TINT.amberTint;
   return TINT.redTint;
 }
 function statusBorder(st: CategoryBudgetStatus, theme: AccentTheme): string {
   if (st === 'ok') return theme.accentSoft;
+  if (st === 'caution') return TINT.yellowSoft;
   if (st === 'warn') return TINT.amberSoft;
   return TINT.redSoft;
 }
@@ -90,38 +97,42 @@ function IncomeHero({
   net: number;
   networth: { net: number; delta: number } | null;
 }) {
+  const { formatMonthLabel, isZh } = useLanguage();
   const positive = net >= 0;
   return (
     <View
       style={[
         styles.heroShadowWrap,
         positive ? styles.heroShadowPos : styles.heroShadowNeg,
-        // Android elevation needs an opaque backgroundColor to shadow correctly  without
-        // one, release/Hermes builds render the shadow-casting surface as a plain gray/
-        // white plate instead of a blurred shadow (matches the card's darkest gradient
-        // stop so no seam shows once `hero` fully covers it).
         { backgroundColor: positive ? '#0e3d27' : '#4a0e19' },
       ]}
     >
       <View style={styles.hero}>
       <HeroGradient positive={positive} />
       <View style={styles.heroBlob} />
+      <View style={styles.heroPip}>
+        <Pip size={40} expr="proud" />
+      </View>
 
-      <Text style={styles.heroEyebrow}>Income Statement · {monthLabel(month)}</Text>
+      <Text style={styles.heroEyebrow}>
+        {isZh ? `收支总结 · ${formatMonthLabel(month, true)}` : `Income Statement · ${formatMonthLabel(month, true)}`}
+      </Text>
 
       {/* Income */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>Income</Text>
+        <Text style={styles.heroLineLabel}>{isZh ? '总收入' : 'Income'}</Text>
         <Text style={styles.heroVal}>RM {fmt(income)}</Text>
       </View>
       {/* Expenses */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>Expenses</Text>
+        <Text style={styles.heroLineLabel}>{isZh ? '总支出' : 'Expenses'}</Text>
         <Text style={[styles.heroVal, { color: 'rgba(255,255,255,0.72)' }]}>− RM {fmt(expenses)}</Text>
       </View>
       {/* Net cash flow */}
       <View style={[styles.heroLine, { paddingTop: 12 }]}>
-        <Text style={[styles.heroLineLabel, { color: 'rgba(255,255,255,0.60)', fontFamily: uiFont(700) }]}>Net Cash Flow</Text>
+        <Text style={[styles.heroLineLabel, { color: 'rgba(255,255,255,0.60)', fontFamily: uiFont(700) }]}>
+          {isZh ? '净现金流' : 'Net Cash Flow'}
+        </Text>
         <Text style={[styles.heroNcf, { color: positive ? TINT.ncfUp : TINT.ncfDown }]}>
           {positive ? '+' : '−'} RM {fmt(Math.abs(net))}
         </Text>
@@ -131,14 +142,14 @@ function IncomeHero({
       {networth && (
         <View style={styles.nwStrip}>
           <View>
-            <Text style={styles.nwLabel}>Month-End Net Worth</Text>
+            <Text style={styles.nwLabel}>{isZh ? '月末净资产' : 'Month-End Net Worth'}</Text>
             <Text style={styles.nwVal}>
               {networth.net < 0 ? '− ' : ''}RM {fmt(Math.abs(networth.net))}
             </Text>
           </View>
           <View style={styles.nwDivider} />
           <View>
-            <Text style={styles.nwLabel}>vs. last month</Text>
+            <Text style={styles.nwLabel}>{isZh ? '比上月' : 'vs. last month'}</Text>
             <View style={styles.nwDeltaRow}>
               <Svg width={11} height={11} viewBox="0 0 12 12" fill="none">
                 <Path
@@ -165,6 +176,7 @@ function IncomeHero({
 function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: number; alloc: number; isLast: boolean }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { tCat, isZh } = useLanguage();
   const st = categoryStatus(spent, alloc);
   const color = statusColor(st, theme, colorTheme);
   const ratio = alloc > 0 ? spent / alloc : spent > 0 ? 1.45 : 0;
@@ -178,7 +190,7 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
       <View style={styles.catTop}>
         <View style={styles.catIconLabel}>
           <CatBadge category={cat} size={30} rad={9} />
-          <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
+          <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
         </View>
         <View style={styles.catNums}>
           <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(spent)}</Text>
@@ -186,7 +198,7 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
         </View>
         <View style={[styles.badge, { backgroundColor: statusBg(st, theme), borderColor: statusBorder(st, theme) }]}>
           <Text style={[styles.badgeText, { color }]}>
-            {diff === 0 ? 'On target' : over ? `+${fmt(diff)}` : `−${fmt(diff)}`}
+            {diff === 0 ? (isZh ? '达标' : 'On target') : over ? `+${fmt(diff)}` : `−${fmt(diff)}`}
           </Text>
         </View>
       </View>
@@ -197,8 +209,8 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
       </View>
 
       <View style={styles.catFoot}>
-        <Text style={[styles.catPct, { color }]}>{pct}% of budget</Text>
-        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>budget RM {fmt(alloc)}</Text>
+        <Text style={[styles.catPct, { color }]}>{isZh ? `占预算 ${pct}%` : `${pct}% of budget`}</Text>
+        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>{isZh ? `预算 RM ${fmt(alloc)}` : `budget RM ${fmt(alloc)}`}</Text>
       </View>
     </View>
   );
@@ -234,7 +246,8 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { transactions, catById, snapshots, accounts, balanceEntries, householdProfile, guideCity } = useAppData();
+  const { t, tCat, formatMonthLabel, isZh } = useLanguage();
+  const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage } = useAppData();
 
   const snapshotMonths = useMemo(() => Object.keys(snapshots), [snapshots]);
   const months = useMemo(
@@ -252,32 +265,16 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const snapshot = snapshots[month];
   const allocations = snapshot?.allocations ?? {};
   const adherence = useMemo(() => computeAdherence(allocations, spentByCat), [allocations, spentByCat]);
-  const benchmark = useMemo(() => getBenchmark(householdProfile, guideCity), [householdProfile, guideCity]);
-  const monthGaps = useMemo(() => benchmarkGaps(benchmark, spentByCat), [benchmark, spentByCat]);
-  /** The same comparison a month earlier, so a standing gap can be reported as tracking. */
-  const prevMonthGaps = useMemo(
-    () => benchmarkGaps(benchmark, spentByCategory(transactions, prevMonthKey(month))),
-    [benchmark, transactions, month]
-  );
+  const merchantsKnown = Object.keys(memory).length;
+  const comparisons = useMemo(() => categoryComparisons(transactions, month), [transactions, month]);
+  const showComparisons = useMemo(() => hasComparisonData(transactions, month), [transactions, month]);
+
   const hasBudget = Object.keys(allocations).length > 0;
   const budgetedIds = useMemo(() => Object.keys(allocations), [allocations]);
   const unbudgetedSpent = useMemo(
     () => Object.entries(spentByCat).filter(([id]) => !budgetedIds.includes(id)).reduce((s, [, v]) => s + v, 0),
     [spentByCat, budgetedIds]
   );
-
-  // "Against your normal": the floor comes from ALL history (a single month cannot establish
-  // what is normal), while the spend split is scoped to the selected month. Obligations are
-  // likewise detected across the full ledger — one month can never prove something recurs —
-  // and then applied to the month, which is why computeExpenseStructure takes them as an arg.
-  const incomeFloor = useMemo(() => computeIncomeFloor(transactions), [transactions]);
-  const monthStructure = useMemo(() => {
-    const obligations = detectObligations(transactions).obligations;
-    return computeExpenseStructure(
-      transactions.filter((t) => txnMonthKey(t) === month),
-      obligations
-    );
-  }, [transactions, month]);
 
   // Month-end net worth for the selected month and the one before it.
   const networth = useMemo(() => {
@@ -291,42 +288,28 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
     const out: { type: InsightType; text: string }[] = [];
     out.push({
       type: adherence.overspends.length === 0 ? 'good' : 'caution',
-      text: `Stayed within budget in ${adherence.withinCount} of ${adherence.totalBudgeted} categories.`,
+      text: isZh
+        ? `在 ${adherence.totalBudgeted} 个分类中，有 ${adherence.withinCount} 个控制在预算内。`
+        : `Stayed within budget in ${adherence.withinCount} of ${adherence.totalBudgeted} categories.`,
     });
     if (adherence.overspends.length === 0) {
-      out.push({ type: 'good', text: 'Nothing went over target this month. 🎉' });
+      out.push({
+        type: 'good',
+        text: isZh ? '本月所有分类均未超出预算！🎉' : 'Nothing went over target this month. 🎉',
+      });
     } else {
       for (const o of adherence.overspends.slice(0, 3)) {
         const cat = catById[o.catId] ?? fallback;
         out.push({
           type: 'warn',
-          text: `${cat.label} over by RM ${fmt(o.over)}: RM ${fmt(o.spent)} of ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
+          text: isZh
+            ? `${tCat(cat)} 超出 RM ${fmt(o.over)}：支出 RM ${fmt(o.spent)} / 预算 RM ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}。`
+            : `${cat.label} over by RM ${fmt(o.over)}: RM ${fmt(o.spent)} of ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
         });
       }
     }
-    // One line against the national reference budget, so the recap measures the month against
-    // more than a target the borrower set for themselves. Flexible lines only: the guide's
-    // essential figures are minimums, so exceeding those is not a finding worth a warning.
-    const worst = monthGaps.find((g) => g.kind === 'flexible');
-    if (worst) {
-      // A gap that has been there for months is tracking, not news. Repeating the identical
-      // warning every month is how a real signal turns into something the reader skips, so the
-      // wording follows the trend and only the first month reads as a fresh finding.
-      const trend = gapTrend(worst, prevMonthGaps.find((g) => g.lineId === worst.lineId));
-      const headline = `${worst.label} ran RM ${fmt(worst.overBy)} above the national Belanjawanku guide for your household: RM ${fmt(worst.actualAmount)} against RM ${fmt(worst.guideAmount)}.`;
-      const TREND_SUFFIX: Record<typeof trend, string> = {
-        new: '',
-        unchanged: ' About the same as last month.',
-        improving: ' Closer than last month.',
-        worsening: ' Wider than last month.',
-      };
-      out.push({
-        type: trend === 'improving' ? 'caution' : 'warn',
-        text: headline + TREND_SUFFIX[trend],
-      });
-    }
     return out;
-  }, [adherence, catById, monthGaps, prevMonthGaps]);
+  }, [adherence, catById, isZh, tCat]);
 
   const stripRef = useRef<ScrollView>(null);
 
@@ -339,7 +322,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
             <Path d="M8.5 1.5L1.5 8.5l7 7" stroke={colorTheme.ink2} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>Monthly Recap</Text>
+        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('monthlyRecap')}</Text>
         <Pressable onPress={() => setPickerOpen(true)} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} accessibilityRole="button" accessibilityLabel="Select month">
           <Svg width={17} height={17} viewBox="0 0 18 18" fill="none" stroke={colorTheme.ink2} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
             <Rect x={3} y={4} width={12} height={11} rx={2} />
@@ -399,7 +382,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                 },
               ]}
             >
-              <Text style={[styles.monthChipText, { color: colorTheme.ink2 }, on && styles.monthChipTextOn]}>{monthLabel(mk, false)}</Text>
+              <Text style={[styles.monthChipText, { color: colorTheme.ink2 }, on && styles.monthChipTextOn]}>
+                {formatMonthLabel(mk, false)}
+              </Text>
             </Pressable>
           );
         })}
@@ -414,15 +399,36 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           networth={networth}
         />
 
-        {/* How this month sat against the borrower's own baseline. Independent of the budget,
-            so it renders whether or not one has been set. */}
-        <MonthVsNormalCard monthIncome={statement.income} floor={incomeFloor} structure={monthStructure} />
+        {showComparisons && (
+          <>
+            <View style={styles.sectionHead}>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '对比上月支出' : 'You vs. last month'}</Text>
+            </View>
+            <Card style={styles.listCard}>
+              {comparisons.slice(0, 5).map((c, i) => {
+                const cat = catById[c.catId] ?? fallback;
+                return (
+                  <View key={c.catId} style={[styles.compareRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line }]]}>
+                    <CatBadge category={cat} size={30} rad={9} />
+                    <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.compareNow, { color: colorTheme.ink }]}>RM {fmt(c.current)}</Text>
+                      <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>
+                        {isZh ? `上月 RM ${fmt(c.previous)}` : `Last month RM ${fmt(c.previous)}`}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
+          </>
+        )}
 
         {hasBudget ? (
           <>
             {/* Spending breakdown */}
             <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Spending</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出明细' : 'Spending'}</Text>
               <Text style={[styles.sectionSub, { color: colorTheme.ink2 }]}>RM {fmt(statement.expenses)}</Text>
             </View>
             <Card style={styles.listCard}>
@@ -441,7 +447,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     <View style={[styles.unbudgetedIcon, { backgroundColor: colorTheme.surface2 }]}>
                       <Icon name="dots" size={16} color={colorTheme.ink3} />
                     </View>
-                    <Text style={[styles.catLabel, { color: colorTheme.ink }]}>Unbudgeted</Text>
+                    <Text style={[styles.catLabel, { color: colorTheme.ink }]}>{isZh ? '未列入预算' : 'Unbudgeted'}</Text>
                   </View>
                   <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(unbudgetedSpent)}</Text>
                 </View>
@@ -451,9 +457,11 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
             {/* Where to improve */}
             <View style={styles.improveHead}>
               <View style={[styles.improveTab, { backgroundColor: theme.accent }]} />
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Where to improve</Text>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '改善建议' : 'Where to improve'}</Text>
               <View style={[styles.signalPill, { backgroundColor: theme.accentSoft }]}>
-                <Text style={[styles.signalText, { color: theme.onTint }]}>{insights.length} signals</Text>
+                <Text style={[styles.signalText, { color: theme.onTint }]}>
+                  {isZh ? `${insights.length} 条提醒` : `${insights.length} signals`}
+                </Text>
               </View>
             </View>
             <Card style={styles.listCard}>
@@ -464,7 +472,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           </>
         ) : (
           <View style={styles.emptyPad}>
-            <Text style={[styles.emptyText, { color: colorTheme.ink2 }]}>Category breakdown not available for this month.</Text>
+            <Text style={[styles.emptyText, { color: colorTheme.ink2 }]}>
+              {isZh ? '该月份暂无分类预算数据。' : 'Category breakdown not available for this month.'}
+            </Text>
           </View>
         )}
 
@@ -483,8 +493,12 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
               </Svg>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>Export {monthLabel(month)} Statement</Text>
-              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>Generate PDF, Excel (.xlsx), CSV, or HTML bookkeeping files.</Text>
+              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>
+                {isZh ? `导出 ${formatMonthLabel(month, true)} 财务报表` : `Export ${formatMonthLabel(month, true)} Statement`}
+              </Text>
+              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
+                {isZh ? '生成 PDF、Excel (.xlsx)、CSV 或 HTML 格式对账单。' : 'Generate PDF, Excel (.xlsx), CSV, or HTML bookkeeping files.'}
+              </Text>
             </View>
             <Svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke={colorTheme.ink3} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <Path d="M6 3l5 5-5 5" />
@@ -500,7 +514,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
         <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
           <Pressable style={[styles.modalSheet, { backgroundColor: colorTheme.surface, paddingBottom: insets.bottom + 16 }]} onPress={() => {}}>
             <View style={[styles.modalHandle, { backgroundColor: colorTheme.line }]} />
-            <Text style={[styles.modalTitle, { color: colorTheme.ink2 }]}>Select month</Text>
+            <Text style={[styles.modalTitle, { color: colorTheme.ink2 }]}>{isZh ? '选择月份' : 'Select month'}</Text>
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
               {months.map((mk) => {
                 const on = mk === month;
@@ -513,7 +527,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     }}
                     style={[styles.monthOption, on && { backgroundColor: theme.accentTint }]}
                   >
-                    <Text style={[styles.monthOptionText, { color: colorTheme.ink }, on && { color: theme.onTint, fontFamily: uiFont(700) }]}>{monthLabel(mk)}</Text>
+                    <Text style={[styles.monthOptionText, { color: colorTheme.ink }, on && { color: theme.onTint, fontFamily: uiFont(700) }]}>
+                      {formatMonthLabel(mk, true)}
+                    </Text>
                     {on && (
                       <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
                         <Path d="M3 8.5l3.2 3.2L13 5" stroke={theme.accent} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
@@ -558,6 +574,7 @@ const styles = StyleSheet.create({
   heroShadowPos: platformShadow('#0c2214', 0.28, 24, { width: 0, height: 14 }, 8),
   heroShadowNeg: platformShadow('#5a0a14', 0.32, 24, { width: 0, height: 14 }, 8),
   heroBlob: { position: 'absolute', top: -50, right: -40, width: 160, height: 160, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
+  heroPip: { position: 'absolute', top: 14, right: 16 },
   heroEyebrow: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1.1, color: 'rgba(255,255,255,0.50)', textTransform: 'uppercase', marginBottom: 16 },
   heroLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10 },
   heroLineBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.10)', paddingTop: 10 },
@@ -583,6 +600,19 @@ const styles = StyleSheet.create({
   signalText: { fontFamily: uiFont(700), fontSize: 11 },
 
   listCard: { marginHorizontal: 16, marginTop: 4, borderRadius: 20, overflow: 'hidden' },
+
+  // competence feedback
+  competenceCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  competenceStat: { flex: 1, alignItems: 'center' },
+  competenceVal: { fontFamily: numFont(700), fontSize: 19 },
+  competenceLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 2, textAlign: 'center' },
+  competenceDivider: { width: 1, height: 30 },
+
+  // month-over-month comparison
+  compareRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 11 },
+  compareLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5 },
+  compareNow: { fontFamily: numFont(700), fontSize: 13.5 },
+  comparePrev: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
 
   // category row
   catRow: { paddingHorizontal: 16, paddingVertical: 11 },

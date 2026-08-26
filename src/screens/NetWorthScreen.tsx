@@ -1,10 +1,11 @@
 // src/screens/NetWorthScreen.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { InstitutionBadge } from '../components/InstitutionBadge';
 import { InstitutionField } from '../components/InstitutionField';
 import { BalanceScanScreen } from './BalanceScanScreen';
@@ -12,8 +13,12 @@ import { ScanBalanceButton } from '../components/ScanBalanceButton';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../components/ui';
+import { getActiveCurrencies, refreshFxRates } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { BASE_CURRENCY, isMultiCurrency } from '../lib/currency';
+import { fmt, fmtMoney } from '../lib/format';
+import { isStale, ratesFromCache, staleLabel } from '../lib/fx';
 import { matchInstitution } from '../lib/institutions';
 import { confirmAction } from '../lib/platformAlert';
 import {
@@ -22,6 +27,7 @@ import {
   groupByClass,
   netWorth,
   netWorthSeries,
+  toMyrValues,
   type ClassGroup,
 } from '../lib/networth';
 import { groupHoldings, holdingProfit, isHolding, subFromType, toQuantityUnitPrice, typeFromSub, type HoldingGroup, type TickerResult } from '../lib/prices';
@@ -31,6 +37,7 @@ import type { Account, AccountKind, PriceQuote } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { numFont, platformShadow, radius, shadowCard, shadowToggle, uiFont } from '../theme';
 
 const RED2 = '#c5402f';
@@ -42,7 +49,27 @@ function timeOf(iso: string | null): string {
 
 const RED = '#c5402f';
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS_ZH = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
 const fmtPx = (n: number): string => (n >= 1000 ? fmt(n) : String(Math.round(n * 100) / 100));
+
+function formatClassLabel(cls: string, isZh: boolean, fallbackLabel: string): string {
+  if (!isZh) return fallbackLabel;
+  switch (cls) {
+    case 'cash': return '现金';
+    case 'bank': return '银行账户';
+    case 'investments': return '投资资产';
+    case 'credit': return '信用卡';
+    case 'loans': return '借贷债务';
+    default: return fallbackLabel;
+  }
+}
+
+/** The quiet "≈ RM x, rate 12 Aug" hint under a foreign account's native balance. */
+function fxSubtitle(currency: string, myrValue: number, fxAsOf: Record<string, string>): string {
+  const asOf = fxAsOf[currency];
+  const stale = asOf && isStale(asOf) ? `, ${staleLabel(asOf)}` : '';
+  return `≈ ${fmtMoney(myrValue, BASE_CURRENCY)}${stale}`;
+}
 
 /** Ticker badge style + label by holding sub-type (and Bursa vs US for stocks). */
 function badgeFor(sub: string, symbol: string): { bg: string; clr: string; lbl: string } {
@@ -61,10 +88,11 @@ function lastMonths(n: number): string[] {
   return out;
 }
 
-export function NetWorthScreen({ onBack }: { onBack: () => void }) {
+export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
   const { accounts, balanceEntries, accountValues, prices, pricesAsOf, refreshPrices } = useAppData();
   const [adding, setAdding] = useState(false);
   const [presetCoin, setPresetCoin] = useState<TickerResult | null>(null);
@@ -73,14 +101,23 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [profitMode, setProfitMode] = useState<ValueMode>('amount');
+  // Cached FX rates (code → MYR rate) and each rate's own cache timestamp (code → asOf), for
+  // converting native account balances into MYR and showing a staleness hint. Loaded once on
+  // mount; empty until then, so a MYR-only user's screen renders exactly as before this load
+  // resolves (`toMyrValues`/`netWorthSeries` both default a missing rate to "MYR only").
+  const [rates, setRates] = useState<Record<string, number>>({});
+  const [fxAsOf, setFxAsOf] = useState<Record<string, string>>({});
 
   const hasHoldings = useMemo(() => accounts.some(isHolding), [accounts]);
 
   const doRefresh = async () => {
-    if (!hasHoldings) return;
     setRefreshing(true);
     try {
-      await refreshPrices();
+      if (hasHoldings) await refreshPrices();
+      else await refreshFxRates().catch(() => {});
+      const fx = await listFxRates();
+      setRates(ratesFromCache(fx));
+      setFxAsOf(Object.fromEntries(fx.map((r) => [r.code, r.asOf])));
     } finally {
       setRefreshing(false);
     }
@@ -92,11 +129,24 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasHoldings]);
 
-  const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
-  const groups = useMemo(() => groupByClass(accounts, accountValues), [accounts, accountValues]);
+  useEffect(() => {
+    refreshFxRates().catch(() => {}).then(listFxRates).then((fx) => {
+      setRates(ratesFromCache(fx));
+      setFxAsOf(Object.fromEntries(fx.map((r) => [r.code, r.asOf])));
+    });
+  }, []);
+
+  // Native balances (accountValues) converted to MYR for every total/grouping; an account
+  // with no cached rate is excluded rather than counted at parity (see toMyrValues).
+  const { valueById: myrValues, unconvertible } = useMemo(
+    () => toMyrValues(accounts, accountValues, rates),
+    [accounts, accountValues, rates]
+  );
+  const nw = useMemo(() => netWorth(accounts, myrValues), [accounts, myrValues]);
+  const groups = useMemo(() => groupByClass(accounts, myrValues), [accounts, myrValues]);
   const series = useMemo(
-    () => netWorthSeries(accounts, balanceEntries, lastMonths(6)).map((p) => p.net),
-    [accounts, balanceEntries]
+    () => netWorthSeries(accounts, balanceEntries, lastMonths(6), rates).map((p) => p.net),
+    [accounts, balanceEntries, rates]
   );
   const editing = editingId ? accounts.find((a) => a.id === editingId) ?? null : null;
   const groupLots = useMemo(
@@ -105,7 +155,10 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
   );
 
   const empty = accounts.length === 0;
-  const monthShorts = useMemo(() => lastMonths(6).map((k) => MONTHS_SHORT[parseInt(k.slice(5, 7), 10) - 1]), []);
+  const monthShorts = useMemo(
+    () => lastMonths(6).map((k) => (isZh ? MONTHS_ZH : MONTHS_SHORT)[parseInt(k.slice(5, 7), 10) - 1]),
+    [isZh]
+  );
   const delta = series.length >= 2 ? nw.net - series[series.length - 2] : null;
   const prevMonth = monthShorts[monthShorts.length - 2] ?? '';
 
@@ -121,7 +174,7 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
         <Pressable onPress={onBack} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} hitSlop={6}>
           <Icon name="chevronLeft" size={18} color={colorTheme.ink2} />
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>Net Worth</Text>
+        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('netWorthTitle')}</Text>
         {/* invisible spacer keeps the title centered opposite the back button */}
         <View style={{ width: 36 }} />
       </View>
@@ -133,19 +186,23 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
           hasHoldings ? <RefreshControl refreshing={refreshing} onRefresh={doRefresh} tintColor={theme.accent} /> : undefined
         }
       >
-        <HeroCard nw={nw} series={series} months={monthShorts} delta={delta} prevMonth={prevMonth} mode={profitMode} setMode={setProfitMode} />
+        <HeroCard nw={nw} series={series} months={monthShorts} delta={delta} prevMonth={prevMonth} mode={profitMode} setMode={setProfitMode} onOpenHistory={onOpenHistory} />
         <ScanRow onScan={() => setScanning(true)} onAdd={() => { setPresetCoin(null); setAdding(true); }} />
 
         {empty && (
           <Card style={{ padding: 22, alignItems: 'center', margin: 16 }}>
             <Icon name="scale" size={40} color={theme.accent} />
-            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>Track what you own and owe</Text>
-            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>Add cash, investments, and loans to see your net worth grow over time.</Text>
+            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
+              {isZh ? '追踪您的资产与负债' : 'Track what you own and owe'}
+            </Text>
+            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+              {isZh ? '添加现金、投资和负债，随时查看您的净资产变化。' : 'Add cash, investments, and loans to see your net worth grow over time.'}
+            </Text>
           </Card>
         )}
 
         {/* Assets */}
-        {groups.assets.length > 0 && <GroupHeader label="Assets" total={nw.assets} color={theme.accent} />}
+        {groups.assets.length > 0 && <GroupHeader label={t('assets')} total={nw.assets} color={theme.accent} />}
         {groups.assets.map((g) => (
           <AssetClassCard
             key={g.cls}
@@ -158,19 +215,25 @@ export function NetWorthScreen({ onBack }: { onBack: () => void }) {
             onRefresh={doRefresh}
             onTapManual={setEditingId}
             onTapGroup={setGroupSymbol}
+            unconvertible={unconvertible}
+            fxAsOf={fxAsOf}
           />
         ))}
 
         {/* Liabilities */}
-        {groups.liabilities.length > 0 && <GroupHeader label="Liabilities" total={nw.liabilities} color={colorTheme.red} />}
+        {groups.liabilities.length > 0 && <GroupHeader label={t('liabilities')} total={nw.liabilities} color={colorTheme.red} />}
         {groups.liabilities.length > 0 && (
           <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
             {flattenLiabs(groups.liabilities).map((row, i, arr) => (
               <LiabilityRowD
                 key={row.account.id}
                 name={row.account.name}
-                cls={row.clsLabel}
-                value={row.value}
+                cls={formatClassLabel(row.account.cls, isZh, row.clsLabel)}
+                nativeValue={accountValues[row.account.id] ?? 0}
+                myrValue={row.value}
+                currency={row.account.currency}
+                unconvertible={unconvertible.includes(row.account.id)}
+                fxAsOf={fxAsOf}
                 customIcon={row.account.icon}
                 isLast={i === arr.length - 1}
                 onPress={() => setEditingId(row.account.id)}
@@ -203,6 +266,7 @@ function HeroCard({
   prevMonth,
   mode,
   setMode,
+  onOpenHistory,
 }: {
   nw: { net: number; assets: number; liabilities: number };
   series: number[];
@@ -211,8 +275,10 @@ function HeroCard({
   prevMonth: string;
   mode: ValueMode;
   setMode: (m: ValueMode) => void;
+  onOpenHistory: () => void;
 }) {
   const theme = useAccent();
+  const { isZh } = useLanguage();
   const deltaUp = (delta ?? 0) >= 0;
   const prevNet = series.length >= 2 ? series[series.length - 2] : 0;
   const pct = prevNet !== 0 ? (delta ?? 0) / Math.abs(prevNet) * 100 : 0;
@@ -223,7 +289,7 @@ function HeroCard({
     : `RM ${fmt(Math.abs(delta ?? 0))}`;
 
   return (
-    <View style={styles.hero}>
+    <Pressable onPress={onOpenHistory} style={styles.hero} accessibilityRole="button" accessibilityLabel="View net worth history">
       {/* gradient fill */}
       <Svg style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
         <Defs>
@@ -238,7 +304,7 @@ function HeroCard({
       <View style={[styles.heroCircle, { pointerEvents: 'none' }]} />
 
       <View style={styles.heroHead}>
-        <Text style={styles.heroLabel}>Net Worth · 6-month</Text>
+        <Text style={styles.heroLabel}>{isZh ? '净资产 · 6个月' : 'Net Worth · 6-month'}</Text>
         <View style={styles.heroToggle}>
           {(['amount', 'percent'] as ValueMode[]).map((m) => {
             const on = mode === m;
@@ -268,18 +334,18 @@ function HeroCard({
             />
           </Svg>
           <Text style={[styles.deltaText, { color: deltaColor }]}>
-            {deltaUp ? '+' : '−'}{deltaValText} vs {prevMonth}
+            {deltaUp ? '+' : '−'}{deltaValText} {isZh ? `比 ${prevMonth}` : `vs ${prevMonth}`}
           </Text>
         </View>
       )}
 
       <View style={styles.heroTiles}>
         <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>Total assets</Text>
+          <Text style={styles.heroTileLabel}>{isZh ? '总资产' : 'Total assets'}</Text>
           <Text style={[styles.heroTileVal, { color: '#42e893' }]}>RM {fmt(nw.assets)}</Text>
         </View>
         <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>Total liabilities</Text>
+          <Text style={styles.heroTileLabel}>{isZh ? '总负债' : 'Total liabilities'}</Text>
           <Text style={[styles.heroTileVal, { color: '#ff8a80' }]}>RM {fmt(nw.liabilities)}</Text>
         </View>
       </View>
@@ -294,7 +360,7 @@ function HeroCard({
           </View>
         </>
       )}
-    </View>
+    </Pressable>
   );
 }
 
@@ -312,9 +378,9 @@ function HeroSparkline({ values }: { values: number[] }) {
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
       <Defs>
-        <LinearGradient id="nwSpk" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="rgba(255,255,255,0.30)" />
-          <Stop offset="1" stopColor="rgba(255,255,255,0)" />
+        <LinearGradient id="nwSpk" x1="0" y1="0" x2="0.7" y2="1">
+          <Stop offset="0" stopColor="#ffffff" stopOpacity={0.3} />
+          <Stop offset="1" stopColor="#ffffff" stopOpacity={0} />
         </LinearGradient>
       </Defs>
       <Path d={area} fill="url(#nwSpk)" />
@@ -328,6 +394,7 @@ function HeroSparkline({ values }: { values: number[] }) {
 function ScanRow({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   return (
     <View style={styles.scanRow}>
       <Pressable
@@ -338,8 +405,8 @@ function ScanRow({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
           <Icon name="scan" size={16} color="#fff" />
         </View>
         <View>
-          <Text style={styles.scanTitle}>Scan Balance</Text>
-          <Text style={styles.scanSub}>AI reads your bank screenshot</Text>
+          <Text style={styles.scanTitle}>{t('scanBalance')}</Text>
+          <Text style={styles.scanSub}>{t('scanBalanceSub')}</Text>
         </View>
       </Pressable>
       <Pressable onPress={onAdd} style={[styles.addBtn, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
@@ -373,15 +440,18 @@ function ClassChip({ label, sub }: { label: string; sub: string }) {
 function PriceStamp({ asOf, refreshing, onRefresh }: { asOf: string | null; refreshing: boolean; onRefresh: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={[styles.priceStamp, { borderBottomColor: colorTheme.line, backgroundColor: colorTheme.surface2 }]}>
       <View style={styles.liveDot} />
-      <Text style={[styles.priceStampText, { color: colorTheme.ink2 }]}>Prices as of {timeOf(asOf) || ''} today</Text>
+      <Text style={[styles.priceStampText, { color: colorTheme.ink2 }]}>
+        {isZh ? `今日行情截至 ${timeOf(asOf) || ''}` : `Prices as of ${timeOf(asOf) || ''} today`}
+      </Text>
       <Pressable onPress={onRefresh} style={[styles.refreshBtn, { backgroundColor: theme.accentTint }]} hitSlop={6}>
         {refreshing ? (
           <ActivityIndicator size="small" color={theme.accent} />
         ) : (
-          <Text style={[styles.refreshText, { color: theme.accent }]}>↻ Refresh</Text>
+          <Text style={[styles.refreshText, { color: theme.accent }]}>{isZh ? '↻ 刷新' : '↻ Refresh'}</Text>
         )}
       </Pressable>
     </View>
@@ -399,6 +469,8 @@ function AssetClassCard({
   onRefresh,
   onTapManual,
   onTapGroup,
+  unconvertible,
+  fxAsOf,
 }: {
   g: ClassGroup;
   accountValues: Record<string, number>;
@@ -409,16 +481,20 @@ function AssetClassCard({
   onRefresh: () => void;
   onTapManual: (id: string) => void;
   onTapGroup: (symbol: string) => void;
+  unconvertible: string[];
+  fxAsOf: Record<string, string>;
 }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const holdings = g.accounts.filter((x) => isHolding(x.account)).map((x) => x.account);
   const manual = g.accounts.filter((x) => !isHolding(x.account));
   const hGroups = groupHoldings(holdings, accountValues);
   const hasH = hGroups.length > 0;
   const icon = (CLASS_BY_ID[g.cls]?.icon ?? 'wallet') as IconName;
+  const localizedLabel = formatClassLabel(g.cls, isZh, g.label);
   return (
     <>
-      <ClassChip label={hasH ? `${g.label} · Live prices` : g.label} sub={`RM ${fmt(g.total)}`} />
+      <ClassChip label={hasH ? `${localizedLabel} · ${isZh ? '实时行情' : 'Live prices'}` : localizedLabel} sub={`RM ${fmt(g.total)}`} />
       <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
         {hasH && <PriceStamp asOf={pricesAsOf} refreshing={refreshing} onRefresh={onRefresh} />}
         {hGroups.map((grp, i) => {
@@ -429,14 +505,51 @@ function AssetClassCard({
           );
         })}
         {manual.map(({ account, value }, i) => (
-          <ManualRowD key={account.id} icon={icon} customIcon={account.icon} name={account.name} sub={g.label} value={value} isLast={i === manual.length - 1} onPress={() => onTapManual(account.id)} />
+          <ManualRowD
+            key={account.id}
+            icon={icon}
+            customIcon={account.icon}
+            name={account.name}
+            sub={localizedLabel}
+            nativeValue={accountValues[account.id] ?? 0}
+            myrValue={value}
+            currency={account.currency}
+            unconvertible={unconvertible.includes(account.id)}
+            fxAsOf={fxAsOf}
+            isLast={i === manual.length - 1}
+            onPress={() => onTapManual(account.id)}
+          />
         ))}
       </View>
     </>
   );
 }
 
-function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { icon: IconName; name: string; sub: string; value: number; isLast: boolean; onPress: () => void; customIcon?: string | null }) {
+function ManualRowD({
+  icon,
+  name,
+  sub,
+  nativeValue,
+  myrValue,
+  currency,
+  unconvertible,
+  fxAsOf,
+  isLast,
+  onPress,
+  customIcon,
+}: {
+  icon: IconName;
+  name: string;
+  sub: string;
+  nativeValue: number;
+  myrValue: number;
+  currency: string;
+  unconvertible: boolean;
+  fxAsOf: Record<string, string>;
+  isLast: boolean;
+  onPress: () => void;
+  customIcon?: string | null;
+}) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const inst = matchInstitution(name);
@@ -447,6 +560,7 @@ function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { i
     customIcon.startsWith('http') ||
     customIcon.startsWith('/')
   );
+  const foreign = currency !== BASE_CURRENCY;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
       {inst ? (
@@ -464,7 +578,14 @@ function ManualRowD({ icon, name, sub, value, isLast, onPress, customIcon }: { i
         <Text style={[styles.rowName, { color: colorTheme.ink }]} numberOfLines={1}>{name}</Text>
         <Text style={[styles.rowSub, { color: colorTheme.ink2 }]} numberOfLines={1}>{sub}</Text>
       </View>
-      <Text style={[styles.rowVal, { color: colorTheme.ink }]}>RM {fmt(value)}</Text>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.rowVal, { color: colorTheme.ink }]}>{fmtMoney(nativeValue, currency)}</Text>
+        {foreign && (
+          <Text style={[styles.rowFx, { color: colorTheme.ink3 }]} numberOfLines={1}>
+            {unconvertible ? 'rate unavailable' : fxSubtitle(currency, myrValue, fxAsOf)}
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -525,7 +646,29 @@ function HoldingRowD({
   );
 }
 
-function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name: string; cls: string; value: number; isLast: boolean; onPress: () => void; customIcon?: string | null }) {
+function LiabilityRowD({
+  name,
+  cls,
+  nativeValue,
+  myrValue,
+  currency,
+  unconvertible,
+  fxAsOf,
+  isLast,
+  onPress,
+  customIcon,
+}: {
+  name: string;
+  cls: string;
+  nativeValue: number;
+  myrValue: number;
+  currency: string;
+  unconvertible: boolean;
+  fxAsOf: Record<string, string>;
+  isLast: boolean;
+  onPress: () => void;
+  customIcon?: string | null;
+}) {
   const colorTheme = useThemeColors();
   const inst = matchInstitution(name);
   const isCustomImage = customIcon && (
@@ -535,6 +678,7 @@ function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name
     customIcon.startsWith('http') ||
     customIcon.startsWith('/')
   );
+  const foreign = currency !== BASE_CURRENCY;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
       {inst ? (
@@ -554,7 +698,14 @@ function LiabilityRowD({ name, cls, value, isLast, onPress, customIcon }: { name
           <Text style={[styles.liabChip, { color: colorTheme.red }]}>{cls}</Text>
         </View>
       </View>
-      <Text style={[styles.rowVal, { color: colorTheme.red }]}>-RM {fmt(value)}</Text>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={[styles.rowVal, { color: colorTheme.red }]}>-{fmtMoney(nativeValue, currency)}</Text>
+        {foreign && (
+          <Text style={[styles.rowFx, { color: colorTheme.ink3 }]} numberOfLines={1}>
+            {unconvertible ? 'rate unavailable' : fxSubtitle(currency, myrValue, fxAsOf)}
+          </Text>
+        )}
+      </View>
     </Pressable>
   );
 }
@@ -622,15 +773,19 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   const [costText, setCostText] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [customIcon, setCustomIcon] = useState<string | null>(null);
+  // A manually-created account's own currency (holdings stay MYR-only, priced via quotesMYR).
+  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
+  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
 
   const reset = () => {
     setKind('asset'); setCls('cash'); setName(''); setValueText('');
     setHoldingMode(false); setCoin(null); setQtyText(''); setCostText('');
-    setCustomIcon(null);
+    setCustomIcon(null); setCurrency(BASE_CURRENCY);
   };
   const close = () => { reset(); onClose(); };
 
-  // On open, either preset to a specific ticker ("add another lot") or start fresh.
+  // On open, either preset to a specific ticker ("add another lot") or start fresh. Also
+  // (re)loads the active-currency list each time the sheet opens, mirroring ManualEntryScreen.
   useEffect(() => {
     if (!visible) return;
     if (preset) {
@@ -639,6 +794,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
     } else {
       reset();
     }
+    getActiveCurrencies().then(setActiveCurrencies);
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const switchKind = (k: AccountKind) => {
@@ -685,7 +841,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
       const cost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
       await addHolding(name.trim() || coin.name, sub, coin.id, ticker, Math.round(quantity * 1e8) / 1e8, cost, customIcon);
     } else {
-      await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon);
+      await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon, currency);
     }
     close();
   };
@@ -693,7 +849,12 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.backdrop} onPress={close} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
+      >
+      <View style={[styles.sheetCard, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>New account</Text>
@@ -777,7 +938,11 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                {isMultiCurrency(activeCurrencies) ? (
+                  <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
+                ) : (
+                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                )}
                 <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
             </>
@@ -831,6 +996,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
           </View>
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
 
       <TickerSearchModal
         visible={searchOpen}
@@ -1018,7 +1184,12 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
+      >
+      <View style={[styles.sheetCard, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.sheetHead}>
           <Text style={[styles.sheetTitle, { color: colorTheme.ink }]} numberOfLines={1}>{account.name}</Text>
@@ -1070,7 +1241,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{account.currency === BASE_CURRENCY ? 'RM' : account.currency}</Text>
                 <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" selectTextOnFocus style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
               <Text style={[styles.hint, { color: colorTheme.ink2 }]}>Saving a new value records it as of today.</Text>
@@ -1104,7 +1275,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
                 {history.map((e, i) => (
                   <View key={e.id} style={[styles.histRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
                     <Text style={[styles.histDate, { color: colorTheme.ink2 }]}>{shortDate(e.asOf)}</Text>
-                    <Text style={[styles.histVal, { color: colorTheme.ink }]}>RM {fmt(e.value)}</Text>
+                    <Text style={[styles.histVal, { color: colorTheme.ink }]}>{fmtMoney(e.value, account.currency)}</Text>
                   </View>
                 ))}
               </Card>
@@ -1163,6 +1334,7 @@ function AccountSheet({ account, onClose }: { account: Account | null; onClose: 
           </Pressable>
         </ScrollView>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -1231,6 +1403,7 @@ const styles = StyleSheet.create({
   rowSub: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
   rowVal: { fontFamily: numFont(700), fontSize: 14 },
   rowProfit: { fontFamily: numFont(700), fontSize: 11.5, marginTop: 1 },
+  rowFx: { fontFamily: uiFont(500), fontSize: 10.5, marginTop: 1, maxWidth: 120 },
   badge: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   badgeTick: { fontFamily: numFont(700), fontSize: 11, lineHeight: 13 },
   badgeLbl: { fontFamily: uiFont(500), fontSize: 11, opacity: 0.75, lineHeight: 9 },
@@ -1268,6 +1441,15 @@ const styles = StyleSheet.create({
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
   sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
+  // Same visual sheet as `sheet`, but positioned by flexbox rather than `position: absolute`. Needed
+  // wherever the sheet holds a focusable TextInput: on Android, KeyboardAvoidingView's `height` behavior
+  // measures this view's own onLayout frame to compute the post-keyboard height, and an absolutely
+  // positioned view with only `bottom: 0` (no `top`/explicit height) reports an unstable frame, so the
+  // resize never applies and the keyboard just covers the field. Giving the KeyboardAvoidingView `flex: 1`
+  // (full modal height, stable from first layout) and letting flexbox push the card to the bottom instead
+  // fixes it. This is the same structure already used by AddCategoryModal/AddPersonModal, which don't hit the bug.
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   sheetTitle: { flex: 1, fontFamily: uiFont(700), fontSize: 19, marginRight: 12 },

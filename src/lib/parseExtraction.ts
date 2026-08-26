@@ -1,3 +1,4 @@
+import { normalizeCurrency } from './currency';
 import type { ExtractedTxn, TxnType } from './types';
 
 /**
@@ -92,8 +93,9 @@ function parseRow(row: unknown): ExtractedTxn | null {
   const method = typeof r.method === 'string' && r.method.trim() ? r.method.trim() : null;
   const categoryHint =
     typeof r.category === 'string' && r.category.trim() ? r.category.trim() : null;
+  const currency = normalizeCurrency(r.currency);
 
-  return { merchant, amount, type, date, method, categoryHint };
+  return { merchant, amount, type, date, method, categoryHint, currency };
 }
 
 function coerceAmount(value: unknown): number | null {

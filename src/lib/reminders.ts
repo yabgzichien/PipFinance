@@ -14,8 +14,20 @@
 
 import { AGING_DAYS, type PersonDebt } from './split';
 import { fmt } from './format';
+import { notificationTitle, type NotificationClass } from './voice';
 
+export type { NotificationClass } from './voice';
 export type ReminderCadence = 'off' | 'daily' | 'weekly';
+
+/** The three kinds of reminder this app schedules. Lives here rather than in
+ *  src/notifications/index.ts so the pure planners below can tag their own output. */
+export type ReminderKind = 'log' | 'owed' | 'commitment';
+
+/** Routine (log) is low-urgency and skippable; save (owed, commitment) has real stakes. Never
+ *  mixed on one notification (ui-engagement-plan.md Step 7, item 2). */
+export function reminderClass(kind: ReminderKind): NotificationClass {
+  return kind === 'log' ? 'routine' : 'save';
+}
 
 /** Every accepted cadence, in the order the Settings pills render them. */
 export const REMINDER_CADENCES: ReminderCadence[] = ['off', 'daily', 'weekly'];
@@ -32,14 +44,46 @@ export const PLAN_HORIZON = 7;
 /** How often to chase an unpaid friend once their debt has aged past `AGING_DAYS`. */
 const OWED_CADENCE_DAYS = 7;
 
-export const LOG_REMINDER_TITLE = 'Anything to log?';
-export const OWED_REMINDER_TITLE = 'Still waiting on someone';
+/** Minimum distinct logged transactions before the behaviour-inferred fire hour is trusted over
+ *  the REMINDER_HOUR fallback, since a couple of entries on one evening is not a routine yet. */
+export const MIN_HISTORY_FOR_INFERRED_HOUR = 5;
 
 /** One scheduled reminder: when it fires and the copy baked in at scheduling time. */
 export interface ReminderPlanEntry {
   at: Date;
   title: string;
   body: string;
+  kind: ReminderKind;
+}
+
+/**
+ * The user's habitual logging hour, taken as the mode of the hours their transactions were created at
+ * minus 30 minutes, so the nudge lands before the window rather than inside it. Falls back to
+ * `fallback` (REMINDER_HOUR by default) until `MIN_HISTORY_FOR_INFERRED_HOUR` samples exist.
+ *
+ * Ties break toward the earlier hour so the result is deterministic rather than dependent on
+ * `Map` iteration order.
+ */
+export function inferredFireHour(
+  loggedHours: number[],
+  fallback: number = REMINDER_HOUR
+): { hour: number; minute: number } {
+  if (loggedHours.length < MIN_HISTORY_FOR_INFERRED_HOUR) return { hour: fallback, minute: 0 };
+
+  const counts = new Map<number, number>();
+  for (const h of loggedHours) counts.set(h, (counts.get(h) ?? 0) + 1);
+
+  let modeHour = loggedHours[0];
+  let modeCount = -1;
+  for (const [hour, count] of counts) {
+    if (count > modeCount || (count === modeCount && hour < modeHour)) {
+      modeHour = hour;
+      modeCount = count;
+    }
+  }
+
+  const minutesFromMidnight = (((modeHour * 60 - 30) % 1440) + 1440) % 1440;
+  return { hour: Math.floor(minutesFromMidnight / 60), minute: minutesFromMidnight % 60 };
 }
 
 /** Days between nudges, or null when the reminder is switched off. */
@@ -105,12 +149,16 @@ export interface LogReminderInput {
   /**
    * Day number of the last transaction the user logged, or null if they never have.
    *
-   * Comes from `lastActiveDay` in lib/streak.ts, which counts in UTC days. For a row carrying
-   * a `date` the two agree exactly, since a bare YYYY-MM-DD parses as UTC midnight of that
-   * same calendar day. They can differ by one only for an undated row falling back to
-   * `createdAt` that was written in the small hours, which at worst nudges a day early.
+   * Comes from `lastActiveDay` in lib/streak.ts, which counts in LOCAL days on the same
+   * footing as `localDayNumber` below, so for a row carrying a `date` the two agree exactly.
+   * They can differ by one only for an undated row falling back to `createdAt` that was
+   * written in the small hours, which at worst nudges a day early.
    */
   lastLoggedDay: number | null;
+  /** Fire hour/minute, already resolved by the caller: the behaviour-inferred window (see
+   *  `inferredFireHour`), a Settings override, or left unset for the REMINDER_HOUR fallback. */
+  fireHour?: number;
+  fireMinute?: number;
 }
 
 /**
@@ -126,9 +174,12 @@ export function planLogReminders(input: LogReminderInput, now: Date): ReminderPl
   const step = cadenceDays(input.cadence);
   if (step === null) return [];
 
+  const hour = input.fireHour ?? REMINDER_HOUR;
+  const minute = input.fireMinute ?? 0;
+
   const today = localDayNumber(now);
   const anchor = input.lastLoggedDay ?? today;
-  const first = firstFutureDay(anchor + step, step, REMINDER_HOUR, 0, now);
+  const first = firstFutureDay(anchor + step, step, hour, minute, now);
 
   const out: ReminderPlanEntry[] = [];
   for (let i = 0; i < PLAN_HORIZON; i++) {
@@ -137,9 +188,10 @@ export function planLogReminders(input: LogReminderInput, now: Date): ReminderPl
     // stands now, so the last one in the ladder is not a week out of date when it arrives.
     const daysSince = input.lastLoggedDay === null ? null : day - input.lastLoggedDay;
     out.push({
-      at: atLocalTime(day, REMINDER_HOUR, 0),
-      title: LOG_REMINDER_TITLE,
+      at: atLocalTime(day, hour, minute),
+      title: notificationTitle('routine', day),
       body: logReminderBody(daysSince),
+      kind: 'log',
     });
   }
   return out;
@@ -176,15 +228,25 @@ export function planOwedReminders(input: OwedReminderInput, now: Date): Reminder
     const day = first + i * OWED_CADENCE_DAYS;
     out.push({
       at: atLocalTime(day, REMINDER_HOUR, OWED_REMINDER_MINUTE),
-      title: OWED_REMINDER_TITLE,
+      title: notificationTitle('save', day),
       // Ages advance with each rung for the same reason the log ladder's do.
       body: owedReminderBody(input.debts, day - localDayNumber(now)),
+      kind: 'owed',
     });
   }
   return out;
 }
 
-/** The log nudge's copy. `daysSince` is null when nothing has ever been logged. */
+/** Pip rehearsing the same joke twice in a row wears out faster than dropping it, so tiers 3
+ *  and 4 rotate the escalated line against this self-aware one, keyed off parity of the gap so
+ *  the choice is deterministic rather than random. */
+function logReminderSelfAware(daysSince: number): string {
+  return `${daysSince} days since your last log. Pip's been rehearsing this notification and even it thinks it's a bit much at this point.`;
+}
+
+/** The log nudge's copy. `daysSince` is null when nothing has ever been logged. Escalates in
+ *  four tiers as the gap widens, mild to done, rotating the top two tiers against a self-aware
+ *  fallback rather than always performing the bit. */
 export function logReminderBody(daysSince: number | null): string {
   if (daysSince === null) {
     return 'You have not logged anything yet. Add your first transaction and I will start keeping track.';
@@ -192,7 +254,20 @@ export function logReminderBody(daysSince: number | null): string {
   if (daysSince <= 1) {
     return 'Nothing logged since yesterday. A minute now keeps your record honest.';
   }
-  return `It has been ${daysSince} days since you logged anything. Your coverage is slipping.`;
+  if (daysSince <= 4) {
+    return `It's been ${daysSince} days. Your coverage is slipping.`;
+  }
+  if (daysSince <= 9) {
+    return `${daysSince} days since you touched this app. Bestie your own money is ghosting you and you're the one doing it.`;
+  }
+  if (daysSince <= 20) {
+    return daysSince % 2 === 0
+      ? `${daysSince} days. This isn't tracking anymore, this is a missing persons case.`
+      : logReminderSelfAware(daysSince);
+  }
+  return daysSince % 2 === 0
+    ? `${daysSince} days. Pip has stopped expecting anything from you. This is acceptance now, not anger.`
+    : logReminderSelfAware(daysSince);
 }
 
 // --- Recurring commitments (bills + DCA investments) ------------------------------------
@@ -275,7 +350,8 @@ export function planCommitmentReminders(input: CommitmentReminderInput, now: Dat
     out.push({
       at,
       title: COMMITMENT_DIGEST_TITLE,
-      body: `${rows.length} bill${rows.length === 1 ? '' : 's'} due this month · RM ${fmt(total)}`,
+      body: commitmentDigestBody(rows, earliestDueDay, today, total),
+      kind: 'commitment',
     });
   }
 
@@ -288,22 +364,108 @@ export function planCommitmentReminders(input: CommitmentReminderInput, now: Dat
     out.push({
       at,
       title: COMMITMENT_OVERDUE_TITLE,
-      body: `${o.label} was due ${shortDaysAgo(dayNumberOf(o.dueDate), today)} · RM ${fmt(o.amount)}`,
+      body: overdueBillBody(o.label, o.amount, dayNumberOf(o.dueDate), today),
+      kind: 'commitment',
     });
   }
 
   return out;
 }
 
-function shortDaysAgo(dueDay: number, today: number): string {
-  const days = Math.max(0, today - dueDay);
-  if (days === 0) return 'today';
-  if (days === 1) return 'yesterday';
-  return `${days} days ago`;
+/** Hard ceiling on how many reminders, of any kind combined, may land on one calendar day. */
+export const DAILY_REMINDER_CAP = 2;
+
+/**
+ * Enforces the hard daily cap across every planner's output combined (ui-engagement-plan.md
+ * Step 7, item 3): mixing an unlimited routine ladder with save-class nudges is what burns a
+ * notification channel, so this runs once over the merged queue rather than trusting each
+ * planner to behave.
+ *
+ * On a day where more than `max` entries would land, `save`-class entries are kept over
+ * `routine` ones (a habit nudge is skippable; a bill or an ageing debt is not), and ties within
+ * the same class keep the earliest-firing entries.
+ */
+export function capDailyReminders(entries: ReminderPlanEntry[], max = DAILY_REMINDER_CAP): ReminderPlanEntry[] {
+  const byDay = new Map<number, ReminderPlanEntry[]>();
+  for (const e of entries) {
+    const day = localDayNumber(e.at);
+    const list = byDay.get(day);
+    if (list) list.push(e);
+    else byDay.set(day, [e]);
+  }
+
+  const out: ReminderPlanEntry[] = [];
+  for (const list of byDay.values()) {
+    const ranked = [...list].sort((a, b) => {
+      const classRank = (e: ReminderPlanEntry) => (reminderClass(e.kind) === 'save' ? 0 : 1);
+      const byClass = classRank(a) - classRank(b);
+      return byClass !== 0 ? byClass : a.at.getTime() - b.at.getTime();
+    });
+    out.push(...ranked.slice(0, max));
+  }
+  return out;
+}
+
+/** How many days ahead of `today` the earliest bill in the month is due, floored at zero. */
+function daysUntil(earliestDueDay: number, today: number): number {
+  return Math.max(0, earliestDueDay - today);
 }
 
 /**
- * The owed nudge's copy, naming the biggest debt and counting the rest.
+ * The monthly digest's copy, tiered by how soon the nearest bill is due rather than just the
+ * count, so a month with three bills all three weeks out still reads as calm.
+ *
+ * Tier 3 also fires when several bills are clustered close together, even if the nearest one
+ * is a few days out, since the crunch is the total landing at once rather than any single date.
+ */
+function commitmentDigestBody(rows: CommitmentReminderRow[], earliestDueDay: number, today: number, total: number): string {
+  const count = rows.length;
+  const label = `${count} bill${count === 1 ? '' : 's'}`;
+  const amount = `RM ${fmt(total)}`;
+  const until = daysUntil(earliestDueDay, today);
+
+  const dueDays = rows.map((r) => dayNumberOf(r.dueDate));
+  const clustered = count >= 3 && Math.max(...dueDays) - Math.min(...dueDays) <= 3;
+
+  if (until <= 1 || clustered) {
+    return `${label}, ${amount} total, and it's giving 'broke by Friday' energy. Might want to look at this one.`;
+  }
+  if (until <= 3) {
+    return `${label} this month, ${amount} total, and one's due in ${until} days. Adulting arc loading.`;
+  }
+  return `${label} due this month, ${amount} total. Just so you're not blindsided later.`;
+}
+
+/**
+ * The overdue nudge's copy, tiered by how many days late the bill is. Tier 3 drops the joke:
+ * an overdue bill can mean the money genuinely was not there, not just procrastination, and
+ * that is not something to be cute about.
+ */
+function overdueBillBody(label: string, amount: number, dueDay: number, today: number): string {
+  const days = Math.max(0, today - dueDay);
+  const amt = `RM ${fmt(amount)}`;
+
+  if (days <= 2) {
+    const ago = days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+    return `${label} was due ${ago}, ${amt}. Pip already knew you'd let this slide.`;
+  }
+  if (days <= 7) {
+    return `${label}, ${amt}, ${days} days late. Giving 'I'll deal with it tomorrow' energy. It is tomorrow.`;
+  }
+  return `${label} is ${days} days overdue, ${amt}. No jokes on this one, just letting you know.`;
+}
+
+/** The "someone else is waiting too" tail, common to every tier below — only the lead line's
+ *  tone escalates with age, the count-of-others phrasing stays flat. */
+function owedOthersSuffix(rest: number): string {
+  if (rest === 0) return '';
+  if (rest === 1) return ' One other is waiting too.';
+  return ` ${rest} others are waiting too.`;
+}
+
+/**
+ * The owed nudge's copy, naming the biggest debt and counting the rest. Escalates in four
+ * tiers as the debt ages, mild to done, the last of which drops the joke entirely.
  *
  * `daysAhead` shifts every age forward to what it will be on the evening this fires, so a
  * reminder scheduled three weeks out does not arrive quoting today's number.
@@ -313,9 +475,21 @@ export function owedReminderBody(debts: PersonDebt[], daysAhead = 0): string {
 
   const [top] = debts;
   const days = top.oldestDays + daysAhead;
-  const lead = `${top.name} has owed you RM ${fmt(top.total)} for ${days} days.`;
+  const amount = fmt(top.total);
+  const rest = debts.length - 1;
 
-  if (debts.length === 1) return `${lead} Worth a nudge.`;
-  if (debts.length === 2) return `${lead} One other is waiting too.`;
-  return `${lead} ${debts.length - 1} others are waiting too.`;
+  if (days <= 7) {
+    const lead = `${top.name} has owed you RM ${amount} for ${days} days.`;
+    return rest === 0 ? `${lead} Worth a nudge.` : `${lead}${owedOthersSuffix(rest)}`;
+  }
+  if (days <= 20) {
+    const lead = `${top.name} still owes you RM ${amount}. ${days} days of you being way too chill about this.`;
+    return `${lead}${owedOthersSuffix(rest)}`;
+  }
+  if (days <= 45) {
+    const lead = `${top.name} owes you RM ${amount}. ${days} days. At this point it's not a debt, it's a situationship.`;
+    return `${lead}${owedOthersSuffix(rest)}`;
+  }
+  const lead = `${top.name} has owed you RM ${amount} for ${days} days. Pip isn't even going to make a joke about this one. That's how bad it's gotten.`;
+  return `${lead}${owedOthersSuffix(rest)}`;
 }

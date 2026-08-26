@@ -126,6 +126,12 @@ export function monthName(now: Date = new Date()): string {
   return MONTHS[now.getMonth()];
 }
 
+/** Days remaining in the current calendar month, today counted as remaining (1..31). */
+export function daysLeftInMonth(now: Date = new Date()): number {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return lastDay - now.getDate() + 1;
+}
+
 /** A 'YYYY-MM' key as a readable label, e.g. "June 2026" (full=false → "Jun '26"). */
 export function monthLabel(monthKey: string, full = true): string {
   const m = monthKey.match(/^(\d{4})-(\d{2})$/);

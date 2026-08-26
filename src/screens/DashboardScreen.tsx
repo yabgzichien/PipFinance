@@ -1,35 +1,38 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { BudgetProgressList } from '../components/BudgetProgressList';
-import { CoinMascot } from '../components/CoinMascot';
+import Svg, { Circle, Path } from 'react-native-svg';
+import { BudgetProgressList, STATUS_COLOR } from '../components/BudgetProgressList';
 import { FadeIn } from '../components/Motion';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
+import { PieChart } from '../components/PieChart';
 import { Pip } from '../components/Pip';
-import { ScoreBandBar } from '../components/ScoreBandBar';
-import { Amount, BtnLabel, Card, Eyebrow, PrimaryButton } from '../components/ui';
-import { TourAnchor } from '../components/TourAnchor';
+import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
-import { currentMonthKey, txnMonthKey } from '../lib/budget';
-import { greeting, longDate, monthName } from '../lib/dates';
-import { fmt } from '../lib/format';
-import { netWorth } from '../lib/networth';
-import { computeStreak, compute7DayDots } from '../lib/streak';
-import { computeIncomeBaseline } from '../lib/incomeBaseline';
+import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
+import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
+import { fmt, fmtCompact } from '../lib/format';
+import { netWorth, netWorthSeries } from '../lib/networth';
+import { lastActiveDay, localDayNumber } from '../lib/streak';
 import { AGING_DAYS, daysBetween } from '../lib/split';
-import { BORROWER_TOUR_STEPS, clampTourStep } from '../lib/tourSteps';
+import * as haptics from '../lib/haptics';
 import type { Category } from '../lib/types';
-import { useAppData } from '../state/store';
-import { useLenderSyncPoll } from '../state/useLenderSyncPoll';
-import { useCreditProfile } from '../state/useCreditProfile';
+import { useAppData, type HeroPanel } from '../state/store';
 import { useNow } from '../state/useNow';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { colors, numFont, platformShadow, shadowCard, shadowToggle, uiFont } from '../theme';
+import { useLanguage } from '../i18n';
+import { shadowCard, spacing } from '../theme';
+import { duration as motionDuration } from '../theme/motion';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+
+/** Days of inactivity before the header mascot goes `sleepy` (docs/ui-engagement-plan.md
+ *  Step 3). Matches the streak's own grace window (1 day) plus a few more so this fires only
+ *  once a lapse is real, not on the day a streak would still forgive. */
+const SLEEPY_LAPSED_DAYS = 4;
 
 const dayKey = (d: Date) => {
   const y = d.getFullYear();
@@ -38,46 +41,71 @@ const dayKey = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+function lastMonths(n: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
 export function DashboardScreen({
   onScan,
   onOpenAll,
   onOpenBreakdown,
   onOpenBudget = () => {},
+  onOpenCategory = () => {},
   onOpenRecap = () => {},
   onOpenNetWorth = () => {},
-  onOpenCredit = () => {},
-  onOpenPassport = () => {},
-  onOpenCoach = () => {},
   onOpenOwed = () => {},
   onOpenCommitments = () => {},
+  onOpenCalendar = () => {},
 }: {
   onScan: () => void;
   onOpenAll: () => void;
   onOpenBreakdown: () => void;
   onOpenBudget?: () => void;
+  /** Tapping a category row on the budget card (not "Manage"). */
+  onOpenCategory?: (id: string) => void;
   onOpenRecap?: () => void;
   onOpenNetWorth?: () => void;
-  onOpenCredit?: () => void;
-  onOpenPassport?: () => void;
-  onOpenCoach?: () => void;
   onOpenOwed?: () => void;
   onOpenCommitments?: () => void;
+  /** Opens the activity calendar (CalendarScreen), defaulted to the current month, so the
+   *  streak card's tap target has somewhere real to go. */
+  onOpenCalendar?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, tCat, formatGreeting, formatLongDate, isZh } = useLanguage();
   const now = useNow();
-  const { transactions, catById, allocations, hasBudget, coverage, accounts, accountValues, openShares, commitmentOccurrences, tourActive, tourStepIndex, startTour } = useAppData();
+  const {
+    transactions,
+    catById,
+    allocations,
+    hasBudget,
+    accounts,
+    accountValues,
+    balanceEntries,
+    openShares,
+    commitmentOccurrences,
+    streak,
+    streakWeek,
+    streakTodayIndex,
+    streakFreezeAvailable,
+    streakGraduated,
+    streakStartLabel,
+    streakPaused,
+    streakCelebrationToken,
+  } = useAppData();
   const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
-  const { score, dataConfidence } = useCreditProfile();
-  const activeTourAnchor = tourActive ? BORROWER_TOUR_STEPS[clampTourStep(tourStepIndex, BORROWER_TOUR_STEPS.length)].anchorId ?? null : null;
-
-  // Keep in sync with every lender console while Home is open (approval-notify, 2026-07-19;
-  // kept live + broadened to reset-sync, 2026-07-20): auto-books a newly-approved referred
-  // application (bumping the unseen badge on the Loan tab) and clears any loan a lender's
-  // console reset has orphaned  both without the borrower needing to navigate away and back.
-  // Best-effort; an unreachable console degrades silently.
-  useLenderSyncPoll();
+  const netWorthTrend = useMemo(
+    () => netWorthSeries(accounts, balanceEntries, lastMonths(6)).map((p) => p.net),
+    [accounts, balanceEntries]
+  );
 
   const monthTxns = useMemo(() => {
     const cur = currentMonthKey();
@@ -90,6 +118,8 @@ export function DashboardScreen({
     [monthTxns]
   );
   const net = received - spent;
+  const hasAnyIncome = useMemo(() => transactions.some((t) => t.type === 'income'), [transactions]);
+  const budgetLeft = useMemo(() => allocatedTotal(allocations) - spent, [allocations, spent]);
 
   const spentByCat = useMemo(() => {
     const m: Record<string, number> = {};
@@ -109,7 +139,7 @@ export function DashboardScreen({
   }, [monthExpenses]);
 
   // A debt this old has stopped being a favour and started being a thing you have to chase, so
-  // the card switches from a neutral total to naming who is sitting on it.
+  // the "needs you" row switches from a neutral total to naming who is sitting on it.
   const owed = useMemo(() => {
     const today = dayKey(new Date());
     let oldestDays = 0;
@@ -144,34 +174,88 @@ export function DashboardScreen({
     };
   }, [commitmentOccurrences]);
 
-  const empty = transactions.length === 0;
-  const streak = useMemo(() => computeStreak(transactions), [transactions]);
-  const incomeBaseline = useMemo(() => computeIncomeBaseline(transactions), [transactions]);
+  // One slot, priority-ordered, so at most one thing is ever asking for attention at a time:
+  // an overdue commitment outranks an aged debt outranks a due-but-not-overdue commitment
+  // outranks an open (not yet aged) debt.
+  const needsYou = useMemo(() => {
+    if (commitmentsDue.overdue) {
+      return {
+        icon: 'clock' as IconName,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        sub: 'Something is overdue. Tap to catch up.',
+        onPress: onOpenCommitments,
+      };
+    }
+    if (owed.overdue) {
+      return {
+        icon: 'gift' as IconName,
+        title: `RM ${fmt(owed.total)} owed to you`,
+        sub: `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`,
+        onPress: onOpenOwed,
+      };
+    }
+    if (commitmentsDue.count > 0) {
+      return {
+        icon: 'clock' as IconName,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        sub: 'Due this month. Tap to tick off.',
+        onPress: onOpenCommitments,
+      };
+    }
+    if (owed.total > 0) {
+      return {
+        icon: 'gift' as IconName,
+        title: `RM ${fmt(owed.total)} owed to you`,
+        sub: `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`,
+        onPress: onOpenOwed,
+      };
+    }
+    return null;
+  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed]);
 
-  // Last-7-day activity tracker for the streak card.
-  const dots = useMemo(() => compute7DayDots(transactions), [transactions]);
+  const empty = transactions.length === 0;
+
+  // A returning user who has gone quiet, not a first-run empty state  the header mascot goes
+  // sleepy rather than judging the gap (docs/ui-engagement-plan.md §1: reward looking, never
+  // the state of the finances; a lapse in *logging* is fair game, a lapse in *spending* is not).
+  const sleepy = useMemo(() => {
+    if (empty) return false;
+    const last = lastActiveDay(transactions, now);
+    if (last === null) return false;
+    // Local day number, the same framing `lastActiveDay` returns; mixing in a UTC one would
+    // read as a day of silence every night between local midnight and the UTC rollover.
+    const today = localDayNumber(now);
+    return today - last >= SLEEPY_LAPSED_DAYS;
+  }, [empty, transactions, now]);
+
+  // A save just extended the streak (docs/ui-engagement-plan.md Step 4/§2.1): a one-shot fire
+  // burst over the streak card, plus the haptic payoff. Compares against the token's *last seen*
+  // value rather than treating it as a boolean, so a second continuation while the burst from the
+  // first is still playing is still noticed (the effect just restarts the timer).
+  const [celebrating, setCelebrating] = useState(false);
+  const seenCelebrationToken = useRef(streakCelebrationToken);
+  useEffect(() => {
+    if (streakCelebrationToken === seenCelebrationToken.current) return;
+    seenCelebrationToken.current = streakCelebrationToken;
+    setCelebrating(true);
+    haptics.payoff();
+  }, [streakCelebrationToken]);
 
   return (
     <FadeIn style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       {/* Bottom padding clears the bottom nav's raised Add button, which overhangs the bar. */}
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 40 /* spacing-audit-ignore: tab-bar clearance, not rhythm */ }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.date, { color: colorTheme.ink2 }]}>{longDate(now)}</Text>
-            <Text style={[styles.greeting, { color: colorTheme.ink }]}>{greeting(now)}</Text>
+            <Caption color={colorTheme.ink2} style={{ marginBottom: spacing.xs }}>{formatLongDate(now)}</Caption>
+            <Title>{formatGreeting(now)}</Title>
           </View>
           <View style={styles.headerActions}>
             <HeaderIcon name="trending" onPress={onOpenRecap} />
-            <Pressable
-              style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}
-              onPress={() => void startTour({ fresh: true })}
-              accessibilityRole="button"
-              accessibilityLabel="Restart the guided tour"
-              hitSlop={8}
-            >
-              <CoinMascot size={40} float />
-            </Pressable>
+            <View style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}>
+              {sleepy ? <Pip size={52} expr="sleepy" /> : <Pip size={58} expr="idle" float />}
+            </View>
           </View>
         </View>
 
@@ -179,130 +263,76 @@ export function DashboardScreen({
           <EmptyState />
         ) : (
           <>
-            {/* 1  Streak */}
-            <TourAnchor id="coverage-chip" activeId={activeTourAnchor}>
-              <StreakCard streak={streak} dots={dots} coverage={coverage.daysCovered} onPress={onOpenCoach} />
-            </TourAnchor>
+            {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
+                checks, before the money. Tapping it opens the full activity calendar. */}
+            <View style={styles.streakWrap}>
+              <StreakCard
+                streak={streak}
+                week={streakWeek}
+                todayIndex={streakTodayIndex}
+                freezeAvailable={streakFreezeAvailable}
+                graduated={streakGraduated}
+                startLabel={streakStartLabel}
+                paused={streakPaused}
+                onPress={onOpenCalendar}
+              />
+              {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
+            </View>
 
-            {/* 2  Net worth / Cash flow (toggle) */}
+            {/* 2 — Money: a segmented Cash flow / Net worth card, same as before. The Cash flow
+                side's headline number is adaptive rather than fixed (see CashFlowView) so a
+                first-run or pre-payday user is never greeted by a red negative. */}
             <SummaryCard
               net={net}
               received={received}
               spent={spent}
+              budgetLeft={budgetLeft}
+              hasAnyIncome={hasAnyIncome}
+              hasBudget={hasBudget}
               breakdown={breakdown}
               catById={catById}
               onSeeAll={onOpenBreakdown}
               netWorthValue={nw.net}
               assets={nw.assets}
               liabilities={nw.liabilities}
+              netWorthTrend={netWorthTrend}
               onOpenNetWorth={onOpenNetWorth}
             />
 
-            {/* Money friends still owe from split bills. Sits next to the balance sheet because
-                that is what it is: an asset, not spending that never happened. */}
-            {owed.total > 0 && (
+            {/* 3 — Needs you: at most one row. Today up to three independent cards could all
+                render at once (owed / commitments / safe income); this picks the single most
+                urgent thing instead of stacking all of them. */}
+            {needsYou && (
               <Pressable
-                onPress={onOpenOwed}
-                style={({ pressed }) => [styles.owedRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
+                onPress={needsYou.onPress}
+                style={({ pressed }) => [styles.needsRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
                 accessibilityRole="button"
               >
-                <Icon name="gift" size={17} color={theme.accent} />
+                <Icon name={needsYou.icon} size={17} color={theme.accent} />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>RM {fmt(owed.total)} owed to you</Text>
-                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                    {owed.overdue
-                      ? `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`
-                      : `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`}
-                  </Text>
+                  <Label>{needsYou.title}</Label>
+                  <Caption color={colorTheme.ink2} style={{ marginTop: 4 }}>{needsYou.sub}</Caption>
                 </View>
                 <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
               </Pressable>
             )}
 
-            {/* Recurring bills and DCA investments still unpaid this month or overdue. */}
-            {commitmentsDue.count > 0 && (
-              <Pressable
-                onPress={onOpenCommitments}
-                style={({ pressed }) => [styles.owedRow, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft, opacity: pressed ? 0.9 : 1 }]}
-                accessibilityRole="button"
-              >
-                <Icon name="clock" size={17} color={theme.accent} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>
-                    {commitmentsDue.count} {commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM {fmt(commitmentsDue.total)}
-                  </Text>
-                  <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
-                    {commitmentsDue.overdue ? 'Something is overdue. Tap to catch up.' : 'Due this month. Tap to tick off.'}
-                  </Text>
-                </View>
-                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-              </Pressable>
-            )}
-
-            {/* Safe monthly income — only for borrowers whose earnings actually swing, since a
-                steady salary needs no separate planning figure. */}
-            {incomeBaseline.irregular && (
-              <Pressable
-                onPress={onOpenBudget}
-                style={({ pressed }) => [
-                  styles.safeIncome,
-                  { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2, opacity: pressed ? 0.9 : 1 },
-                ]}
-                accessibilityRole="button"
-              >
-                <Icon name="shield" size={17} color={theme.accent} />
-                <View style={{ flex: 1 }}>
-                  <View style={styles.safeIncomeTitleRow}>
-                    <Text style={[styles.safeIncomeTitle, { color: colorTheme.ink }]}>
-                      Safe monthly income RM {fmt(incomeBaseline.baseline)}
-                    </Text>
-                    <InfoButton entry="safe_income" />
-                  </View>
-                  <Text style={[styles.safeIncomeSub, { color: colorTheme.ink2 }]}>
-                    Your months range RM {fmt(incomeBaseline.low)} to RM {fmt(incomeBaseline.high)}. Plan
-                    against the floor, not the average.
-                  </Text>
-                </View>
-                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-              </Pressable>
-            )}
-
-            {/* 3  Compact credit card */}
-            <TourAnchor id="credit-hero-card" activeId={activeTourAnchor}>
-              <CreditCompactCard
-                score={score.score}
-                band={score.band}
-                confidence={dataConfidence.confidence}
-                onPress={onOpenCredit}
-              />
-            </TourAnchor>
-
-            {/* Quick actions */}
-            <QuickActions
-              onOpenCredit={onOpenCredit}
-              onOpenBudget={onOpenBudget}
-              onOpenNetWorth={onOpenNetWorth}
-              onOpenPassport={onOpenPassport}
-            />
-
-            {/* No capture CTA in the feed: it now lives as the raised "Add" button in the bottom
-                nav, which is on screen from every tab. An inline copy meant the core action sat
-                four cards down the scroll AND was labelled "Scan a receipt" while opening a menu
-                of five different things. */}
-
-            {/* This month budget (kept) */}
-            <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+            {/* This month budget */}
+            <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
               {hasBudget ? (
                 <>
                   <View style={styles.sectionHead}>
-                    <Eyebrow>This month · {monthName()}</Eyebrow>
+                    <Eyebrow>{isZh ? `本月预算 · ${monthName()}` : `Budget This Month · ${monthName()}`}</Eyebrow>
                     <Pressable onPress={onOpenBudget} hitSlop={8}>
-                      <Text style={[styles.seeAll, { color: theme.accent }]}>Manage</Text>
+                      <Label weight={700} color={theme.accent}>{t('manage')}</Label>
                     </Pressable>
                   </View>
-                  <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
-                    <BudgetProgressList allocations={allocations} spentByCat={spentByCat} catById={catById} />
-                  </Pressable>
+                  <BudgetProgressList
+                    allocations={allocations}
+                    spentByCat={spentByCat}
+                    catById={catById}
+                    onPressCategory={onOpenCategory}
+                  />
                 </>
               ) : (
                 <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
@@ -311,27 +341,26 @@ export function DashboardScreen({
                       <Icon name="wallet" size={22} color={theme.accent} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.ctaTitle, { color: colorTheme.ink }]}>Set a monthly budget</Text>
-                      <Text style={[styles.ctaSub, { color: colorTheme.ink2 }]}>Plan income and allocate spend per category.</Text>
+                      <Body weight={700}>{isZh ? '设置月度预算' : 'Set a monthly budget'}</Body>
+                      <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+                        {isZh ? '规划预计收入并设置各分类限额。' : 'Plan income and allocate spend per category.'}
+                      </Label>
                     </View>
                     <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
                   </Card>
                 </Pressable>
               )}
             </View>
-
-            {/* Ask Pip strip */}
-            <AskPipStrip onPress={onOpenCredit} />
           </>
         )}
 
         {/* Empty state: nothing to explore yet, so the one thing to do gets a full-width CTA on
             top of the bottom-nav button. */}
         {empty && (
-          <View style={{ paddingHorizontal: 16, marginTop: 14 }}>
+          <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
             <PrimaryButton onPress={onScan} height={54}>
               <Icon name="plus" size={21} color="#fff" stroke={2.4} />
-              <BtnLabel>Add your first transaction</BtnLabel>
+              <BtnLabel>{isZh ? '添加您的第一笔交易' : 'Add your first transaction'}</BtnLabel>
               <Icon name="sparkles" size={16} color="#fff" />
             </PrimaryButton>
           </View>
@@ -354,203 +383,549 @@ function HeaderIcon({ name, onPress }: { name: IconName; onPress: () => void }) 
   );
 }
 
-/* ── Streak card ── */
-function StreakCard({ streak, dots, coverage, onPress }: { streak: number; dots: boolean[]; coverage: number; onPress?: () => void }) {
+/* ── Streak card (docs/ui-engagement-plan.md Step 4) ──
+   Monday-first 7-dot strip: which days this week already have a logged transaction. The flame +
+   streak number are the accomplishment signal; the dots are the weekly, always-winnable loop
+   underneath it (§2.6 of that document) closing and resetting each Monday, same as the freeze
+   and graduation logic that governs the number itself. Tapping the card opens the full activity
+   calendar (CalendarScreen) so "which days did I actually log" has a real answer, not just a
+   week's worth of dots. */
+function StreakCard({
+  streak,
+  week,
+  todayIndex,
+  freezeAvailable,
+  graduated,
+  startLabel,
+  paused,
+  onPress,
+}: {
+  streak: number;
+  week: boolean[];
+  todayIndex: number;
+  freezeAvailable: boolean;
+  graduated: boolean;
+  startLabel: string | null;
+  paused: boolean;
+  onPress?: () => void;
+}) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  // Subtle flame flicker  driven entirely on the native thread (no per-frame JS).
-  const flicker = useRef(new Animated.Value(0)).current;
+  const { t, isZh } = useLanguage();
+  // Flame flicker — three layers (outer body, mid tongue, hot core) animate on independent
+  // loops so the flame reads as an organic flicker rather than one rigid shape bobbing up and
+  // down. All native-driver transforms (rotate/scale/translate), no per-frame JS.
+  const flickerOuter = useRef(new Animated.Value(0)).current;
+  const flickerMid = useRef(new Animated.Value(0)).current;
+  const flickerCore = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
-    const loop = Animated.loop(
+    if (reducedMotion) {
+      flickerOuter.setValue(0);
+      flickerMid.setValue(0);
+      flickerCore.setValue(0);
+      return;
+    }
+    const loopOuter = Animated.loop(
       Animated.sequence([
-        Animated.timing(flicker, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(flicker, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerOuter, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerOuter, { toValue: 0, duration: 1300, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
       ])
     );
-    loop.start();
-    return () => loop.stop();
-  }, [flicker]);
-  const flameStyle = {
-    opacity: flicker.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }),
+    const loopMid = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flickerMid, { toValue: 1, duration: 820, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerMid, { toValue: 0, duration: 940, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    const loopCore = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flickerCore, { toValue: 1, duration: 560, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(flickerCore, { toValue: 0, duration: 640, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ])
+    );
+    loopOuter.start();
+    loopMid.start();
+    loopCore.start();
+    return () => {
+      loopOuter.stop();
+      loopMid.stop();
+      loopCore.stop();
+    };
+  }, [flickerOuter, flickerMid, flickerCore, reducedMotion]);
+  const outerFlameStyle = {
+    opacity: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
     transform: [
-      { translateY: flicker.interpolate({ inputRange: [0, 1], outputRange: [0, -1.2] }) },
-      { scaleX: flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] }) },
-      { scaleY: flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.09] }) },
+      { translateY: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) },
+      { translateX: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] }) },
+      { rotate: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: ['-1.5deg', '1.5deg'] }) },
+      { scaleY: flickerOuter.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] }) },
     ],
   };
+  const midFlameStyle = {
+    transform: [
+      { translateY: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [0, -1.6] }) },
+      { translateX: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [0, -0.6] }) },
+      { rotate: flickerMid.interpolate({ inputRange: [0, 1], outputRange: ['2deg', '-2deg'] }) },
+      { scaleX: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [1, 0.94] }) },
+      { scaleY: flickerMid.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }) },
+    ],
+  };
+  const coreFlameStyle = {
+    transform: [
+      { translateY: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [0, -2] }) },
+      { translateX: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [0, 0.7] }) },
+      { scale: flickerCore.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) },
+    ],
+  };
+
   const card = (
     <Card style={styles.streakCard}>
+      {freezeAvailable && (
+        <View style={[styles.streakShield, { backgroundColor: colorTheme.surface }]} accessibilityLabel={isZh ? '本月记账保护卡已生效' : 'A streak freeze is banked for this month'}>
+          <Icon name="shield" size={11} color={theme.accent} />
+        </View>
+      )}
       <View style={styles.streakLeft}>
         <View style={styles.flameTile}>
-          <Animated.View style={flameStyle}>
-            <Svg width={18} height={21} viewBox="0 0 18 22" fill="none">
-              <Path d="M9 1C9 1 14.5 6.5 14.5 11.5C14.5 15 12 17.5 9 17.5C6 17.5 3.5 15 3.5 11.5C3.5 8.5 5.5 6.5 5.5 6.5C5.5 6.5 6 9.5 9 9.5C9 9.5 7.5 7.5 9 4C9.5 5.5 11.5 7.5 11.5 9.5C13 8 12.5 5.5 11 3.5C14 5.5 15.5 8.5 15.5 11.5C15.5 16.5 12.5 20.5 9 21.5C5.5 20.5 2.5 16.5 2.5 11.5C2.5 5.5 9 1 9 1Z" fill={colorTheme.amber} />
-              <Path d="M9 13.5C9 13.5 11 12 11 10.5C10.5 11.5 9 11.5 9 11.5C9 11.5 9.5 10 9 9C8.5 10 7 11.5 7 12.5C7 13.6 7.9 14.5 9 14.5C8.7 14 9 13.5 9 13.5Z" fill="#FAC438" />
-            </Svg>
-          </Animated.View>
+          <View style={{ width: 26, height: 32 }}>
+            {/* Outer body — gold silhouette with a tall centre peak, a deep valley to its left and
+                notched shoulders either side, so the flame keeps a jagged flat-icon edge at 26px. */}
+            <Animated.View style={[StyleSheet.absoluteFill, outerFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M49 12.5C53.5 22 57 32 58.6 39.6C61.1 33.2 65.4 28.9 70 26.8C73.2 33.8 79.6 47.2 80 64C80.4 82.2 62.9 99 41 99C19.1 99 1.6 82.2 2 64C2.2 56.2 4.1 51.4 7.6 46.8C9.1 39.9 17 26.7 25.2 20C26.7 27.2 30.7 36.2 36.6 42.6C40.1 46.2 43.1 42.2 44.6 35C45.7 29.6 47.2 20 49 12.5Z"
+                  fill="#faa81a"
+                />
+              </Svg>
+            </Animated.View>
+            {/* Mid tongue — inner orange flame plus the detached spark riding above the peak. */}
+            <Animated.View style={[StyleSheet.absoluteFill, midFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M34.5 42C38 47.5 41.5 51.5 43.5 55.5C45.5 51.5 48 48 51 45.5C55.5 52 58.5 60 58.5 67.5C58.5 78.5 50.7 88.5 41 88.5C31.3 88.5 23.5 78.5 23.5 67.5C23.5 58.5 28.5 48.5 34.5 42Z"
+                  fill="#f26a22"
+                />
+                <Path
+                  d="M38.6 1C41.7 6.2 43.2 11.2 42.2 15.2C41.1 19.7 36.6 21.1 33.6 17.7C31 14.7 31.6 8.4 38.6 1Z"
+                  fill="#f26a22"
+                />
+              </Svg>
+            </Animated.View>
+            {/* Hot core — the red droplet at the base of the inner flame. */}
+            <Animated.View style={[StyleSheet.absoluteFill, coreFlameStyle]}>
+              <Svg width={26} height={32} viewBox="0 0 82 100" fill="none">
+                <Path
+                  d="M42.5 61C46 67 49 72.5 49 77.5C49 82.5 46 86 42.5 86C39 86 36 82.5 36 77.5C36 72.5 39 67 42.5 61Z"
+                  fill="#e2402a"
+                />
+              </Svg>
+            </Animated.View>
+          </View>
         </View>
         <View>
-          <Text style={[styles.streakNum, { color: colorTheme.ink }]}>{streak}</Text>
-          <Text style={[styles.streakLabel, { color: colorTheme.ink2 }]}>day streak</Text>
+          {graduated && startLabel ? (
+            <>
+              <Label weight={700}>{startLabel}</Label>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? `连续 ${streak} 天` : `${streak}-day run`)}</Caption>
+            </>
+          ) : (
+            <>
+              <Title numeric>{streak}</Title>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? '天连续记账' : 'day streak')}</Caption>
+            </>
+          )}
         </View>
       </View>
       <View style={[styles.streakDivider, { backgroundColor: colorTheme.line }]} />
       <View style={{ flex: 1 }}>
         <View style={styles.dotsRow}>
-          {dots.map((done, i) => (
-            <View key={i} style={[styles.dot, done ? [styles.dotDone, { backgroundColor: theme.accent }] : [styles.dotTodo, { borderColor: colorTheme.ink3 }]]}>
-              {done && (
+          {week.map((done, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                done
+                  ? [styles.dotDone, { backgroundColor: theme.accent }]
+                  : i === todayIndex
+                    ? styles.dotToday
+                    : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
+              ]}
+            >
+              {done ? (
                 <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
                   <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
                 </Svg>
-              )}
+              ) : i === todayIndex ? (
+                <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
+              ) : null}
             </View>
           ))}
         </View>
-        <Text style={styles.streakBest}>
-          <Text style={{ color: colorTheme.ink2 }}>Covered </Text>
-          <Text style={[styles.streakBestNum, { color: colorTheme.ink2 }]}>{coverage}/90 days</Text>
-        </Text>
       </View>
     </Card>
   );
   if (!onPress) return card;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel="Open the coach's coverage lever">
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={isZh ? '打开记账日历' : 'Open your activity calendar'}>
       {card}
     </Pressable>
   );
 }
 
-/* ── Summary card: toggles between Net worth (default) and Cash flow ── */
-type SummaryView = 'networth' | 'cashflow';
+/** Today's dot hasn't been earned yet — spin a ring in place of the soft-fill circle so "today,
+ *  not logged yet" reads as pending rather than as a fourth, undocumented dot state. */
+function TodayDotSpinner({ color, trackColor }: { color: string; trackColor: string }) {
+  const spin = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (reducedMotion) {
+      spin.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 2600, easing: Easing.linear, useNativeDriver: true })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin, reducedMotion]);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View style={reducedMotion ? undefined : { transform: [{ rotate }] }}>
+      <Svg width={17} height={17} viewBox="0 0 17 17" fill="none">
+        <Circle cx={8.5} cy={8.5} r={7} stroke={trackColor} strokeWidth={2} />
+        <Path d="M8.5 1.5a7 7 0 0 1 6.06 3.5" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      </Svg>
+    </Animated.View>
+  );
+}
 
+const EMBER_COUNT = 5;
+
+/**
+ * One-shot fire burst over the streak card the moment a save extends the streak
+ * (docs/ui-engagement-plan.md §2.1: the animation is the app visibly *noticing* the moment,
+ * which is the largest documented lever in the research this app's engagement plan is built on).
+ * Pip pops to `happy` and a handful of embers rise past the flame and fade. No sound (not
+ * available yet  see haptics.payoff() at the call site for the felt half of the reward
+ * instead); this is the hook a real streak-continue chime would attach to once one exists.
+ *
+ * Mount-driven and self-contained: renders `null` immediately under reduced motion (a one-shot
+ * burst still respects that setting even though it isn't a loop), and calls `onDone` either way
+ * so the parent can unmount it after `motionDuration.celebrate` plus enough tail for the last
+ * ember to finish.
+ */
+function StreakCelebration({ onDone }: { onDone: () => void }) {
+  const colorTheme = useThemeColors();
+  const reducedMotion = useReducedMotion();
+  const pop = useRef(new Animated.Value(0)).current;
+  const embers = useRef(Array.from({ length: EMBER_COUNT }, () => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      onDone();
+      return;
+    }
+    Animated.spring(pop, { toValue: 1, friction: 5, tension: 140, useNativeDriver: true }).start();
+    const emberAnims = embers.map((e, i) =>
+      Animated.timing(e, {
+        toValue: 1,
+        duration: motionDuration.celebrate + i * 70,
+        delay: 90 + i * 45,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      })
+    );
+    Animated.parallel(emberAnims).start();
+    const tailMs = motionDuration.celebrate + EMBER_COUNT * 70 + 250;
+    const timer = setTimeout(onDone, tailMs);
+    return () => clearTimeout(timer);
+    // Intentionally mount-only: this component is remounted (via the `celebrating` boolean at
+    // the call site) for every new burst rather than re-triggered by a prop change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (reducedMotion) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.celebrationWrap}>
+      {embers.map((e, i) => {
+        const spread = (i - (EMBER_COUNT - 1) / 2) * 9;
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.ember,
+              { backgroundColor: i % 2 === 0 ? colorTheme.amber : '#FAC438' },
+              {
+                opacity: e.interpolate({ inputRange: [0, 0.12, 1], outputRange: [0, 1, 0] }),
+                transform: [
+                  { translateY: e.interpolate({ inputRange: [0, 1], outputRange: [0, -46 - i * 5] }) },
+                  { translateX: e.interpolate({ inputRange: [0, 1], outputRange: [0, spread] }) },
+                  { scale: e.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0.15] }) },
+                ],
+              },
+            ]}
+          />
+        );
+      })}
+      <Animated.View
+        style={{
+          opacity: pop,
+          transform: [
+            { scale: pop },
+            { translateY: pop.interpolate({ inputRange: [0, 1], outputRange: [8, -10] }) },
+          ],
+        }}
+      >
+        <Pip size={44} expr="happy" />
+      </Animated.View>
+    </View>
+  );
+}
+
+/**
+ * React Native Web's `pagingEnabled` sets `scroll-snap-type: x mandatory` on the scroller and
+ * `scroll-snap-align: start` on a wrapper it auto-generates around each direct child, but never
+ * `scroll-snap-stop`  so the browser is free to skip snap points under a fast swipe, and a
+ * normal trackpad flick sails from the first panel straight to the last, skipping the ones in
+ * between. `always` forces a stop at every panel regardless of swipe speed.
+ *
+ * That auto-generated wrapper isn't reachable through props (RNW creates it internally, one
+ * level above whatever we render), so this reaches it imperatively through the DOM once our own
+ * node mounts. Native has no such property and no such wrapper, so this is a no-op there.
+ */
+function pinWebScrollSnapStop(node: unknown) {
+  if (Platform.OS !== 'web' || !node) return;
+  const el = node as HTMLElement;
+  const wrapper = el.parentElement;
+  if (wrapper) wrapper.style.setProperty('scroll-snap-stop', 'always');
+}
+
+/** Which panels the hero carousel offers. `left` (budget remaining) only appears once a
+ *  budget exists — swiping to it before that would show a number with no meaning yet. */
+function heroPanels(hasBudget: boolean): HeroPanel[] {
+  return hasBudget ? ['cashflow', 'spent', 'left', 'networth'] : ['cashflow', 'spent', 'networth'];
+}
+
+/** Adaptive default panel when the user hasn't pinned one. No income on record yet:
+ *  spending is a fact, never a verdict, so lead with that. Income known but no budget:
+ *  net cash flow. A budget exists: what's left, which is what a user with a plan actually
+ *  wants to know first. */
+function adaptivePanel(hasAnyIncome: boolean, hasBudget: boolean): HeroPanel {
+  if (hasBudget) return 'left';
+  if (hasAnyIncome) return 'cashflow';
+  return 'spent';
+}
+
+/* ── Summary card: a swipeable hero carousel (Net cash flow / Total spent / Left to spend /
+   Net worth). ── */
 function SummaryCard({
   net,
   received,
   spent,
+  budgetLeft,
+  hasAnyIncome,
+  hasBudget,
   breakdown,
   catById,
   onSeeAll,
   netWorthValue,
   assets,
   liabilities,
+  netWorthTrend,
   onOpenNetWorth,
 }: {
   net: number;
   received: number;
   spent: number;
+  budgetLeft: number;
+  hasAnyIncome: boolean;
+  hasBudget: boolean;
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
   netWorthValue: number;
   assets: number;
   liabilities: number;
+  netWorthTrend: number[];
   onOpenNetWorth: () => void;
 }) {
-  const [view, setView] = useState<SummaryView>('cashflow');
+  const theme = useAccent();
   const colorTheme = useThemeColors();
+  const panels = useMemo(() => heroPanels(hasBudget), [hasBudget]);
+  const defaultPanel = useMemo(
+    () => adaptivePanel(hasAnyIncome, hasBudget),
+    [hasAnyIncome, hasBudget]
+  );
+
+  const [cardWidth, setCardWidth] = useState(0);
+  const [index, setIndex] = useState(Math.max(0, panels.indexOf(defaultPanel)));
+  const scrollRef = useRef<ScrollView>(null);
+  const measureRef = useRef<View>(null);
+  const didInitialScroll = useRef(false);
+
+  // `onLayout` alone (React Native Web's ResizeObserver-based implementation) can miss the
+  // first paint if the surface isn't yet compositing, so also measure directly on mount.
+  useEffect(() => {
+    measureRef.current?.measure((_x, _y, width) => {
+      if (width > 0) setCardWidth(width);
+    });
+  }, []);
+
+  // Jump to the default panel once the card has measured and on every default change
+  // (e.g. a budget just got created and `left` became available).
+  useEffect(() => {
+    if (!cardWidth) return;
+    const target = Math.max(0, panels.indexOf(defaultPanel));
+    scrollRef.current?.scrollTo({ x: target * cardWidth, animated: didInitialScroll.current });
+    setIndex(target);
+    didInitialScroll.current = true;
+  }, [cardWidth, defaultPanel, panels]);
+
+  const currentPanel = panels[index] ?? panels[0];
+
   return (
     <Card style={styles.cashCard}>
-      {/* segmented toggle */}
-      <View style={[styles.segTrack, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-        {(['cashflow', 'networth'] as SummaryView[]).map((v) => {
-          const on = view === v;
-          return (
-            <Pressable
-              key={v}
-              onPress={() => setView(v)}
-              style={[styles.segBtn, on && [styles.segBtnOn, { backgroundColor: colorTheme.surface }]]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: on }}
-            >
-              <Text style={[styles.segText, { color: colorTheme.ink2 }, on && [styles.segTextOn, { color: colorTheme.ink }]]}>{v === 'networth' ? 'Net worth' : 'Cash flow'}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      {view === 'networth' ? (
-        <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} onSeeAll={onOpenNetWorth} />
-      ) : (
-        <CashFlowView net={net} received={received} spent={spent} breakdown={breakdown} catById={catById} onSeeAll={onSeeAll} />
+      <View ref={measureRef} onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}>
+      {cardWidth > 0 && (
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(e) => {
+            const i = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+            setIndex(Math.min(panels.length - 1, Math.max(0, i)));
+          }}
+        >
+          {panels.map((panel) => (
+            <View key={panel} ref={pinWebScrollSnapStop} style={{ width: cardWidth }}>
+              {panel === 'networth' ? (
+                <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} trend={netWorthTrend} onSeeAll={onOpenNetWorth} />
+              ) : (
+                <CashFlowView
+                  panel={panel}
+                  net={net}
+                  received={received}
+                  spent={spent}
+                  budgetLeft={budgetLeft}
+                  breakdown={breakdown}
+                  catById={catById}
+                  onSeeAll={onSeeAll}
+                />
+              )}
+            </View>
+          ))}
+        </ScrollView>
       )}
+
+      {panels.length > 1 && (
+        <View style={styles.heroDotsRow}>
+          {panels.map((panel, i) => (
+            <View
+              key={panel}
+              style={[styles.heroDot, { backgroundColor: i === index ? theme.accent : colorTheme.line2 }]}
+            />
+          ))}
+        </View>
+      )}
+      </View>
     </Card>
   );
 }
 
 function CashFlowView({
+  panel,
   net,
   received,
   spent,
+  budgetLeft,
   breakdown,
   catById,
   onSeeAll,
 }: {
+  panel: Exclude<HeroPanel, 'networth'>;
   net: number;
   received: number;
   spent: number;
+  budgetLeft: number;
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const pos = net >= 0;
+  const { tCat, isZh } = useLanguage();
+
+  const pieData = useMemo(
+    () => breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid })),
+    [breakdown, catById]
+  );
+  const topCat = breakdown.length > 0 ? (catById[breakdown[0].catId] ?? fallback) : null;
+  const topPct = topCat && spent > 0 ? Math.round((breakdown[0].amt / spent) * 100) : 0;
+
+  const eyebrow = panel === 'spent' ? (isZh ? '本月支出' : 'Spent this month') : panel === 'cashflow' ? (isZh ? `净现金流 · ${monthName()}` : `Net cash flow · ${monthName()}`) : (isZh ? '剩余预算' : 'Left to spend');
+  const caption =
+    panel === 'spent'
+      ? (isZh ? '本月总支出' : 'Total expenses this month')
+      : panel === 'cashflow'
+        ? (isZh ? '收入 − 支出 · 本月' : 'Income − Expenses · this month')
+        : (isZh ? `${monthName()} 还剩 ${daysLeftInMonth()} 天` : `${daysLeftInMonth()} days left in ${monthName()}`);
+  const heroValue = panel === 'spent' ? spent : panel === 'cashflow' ? net : budgetLeft;
+  const heroNegative = heroValue < 0;
+  const heroAmount = `RM ${fmtCompact(Math.abs(heroValue))}`;
+
+  // Cash flow and spent both get a signed, colored treatment so either reads at a glance
+  // without reading the caption underneath: cash flow uses accounting parentheses, spent a
+  // leading sign, since it's the more literal "money in vs money out" figure. Left to spend
+  // keeps its plainer look (red only once over budget) — otherwise it'd read identically to
+  // one of the other two rather than standing apart from both.
+  let heroColor = colorTheme.ink;
+  let heroText = heroAmount;
+  if (panel === 'cashflow') {
+    heroColor = heroNegative ? colorTheme.red : STATUS_COLOR.ok;
+    heroText = heroNegative ? `(${heroAmount})` : heroAmount;
+  } else if (panel === 'spent') {
+    heroColor = colorTheme.red;
+    heroText = heroAmount;
+  } else if (heroNegative) {
+    heroColor = colorTheme.red;
+    heroText = `−${heroAmount}`;
+  }
+
   return (
     <>
       <View style={styles.cashTop}>
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
-            <Eyebrow>Net cash flow · {monthName()}</Eyebrow>
-            <InfoButton entry="net_cash_flow" />
+            <Eyebrow>{eyebrow}</Eyebrow>
+            <InfoButton entry={panel === 'cashflow' ? 'net_cash_flow' : panel === 'left' ? 'unallocated' : 'net_cash_flow'} />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 6 }}>
-            <Text style={[styles.cashSign, { color: pos ? theme.accent : colorTheme.red }]}>{pos ? '+' : '−'}</Text>
-            <Amount value={Math.abs(net)} size={30} weight={700} color={pos ? theme.accent : colorTheme.red} />
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
+            <Display numeric color={heroColor} adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.55}>{heroText}</Display>
           </View>
-          <Text style={[styles.cashSub, { color: colorTheme.ink2 }]}>Income − Expenses · this month</Text>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{caption}</Caption>
         </View>
-        <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.incomeAmt, { color: theme.onTint }]}>RM {fmt(received)}</Text>
-          <Text style={[styles.incomeLabel, { color: colorTheme.ink2 }]}>income</Text>
-        </View>
+        {panel === 'cashflow' && (
+          <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
+            <Label numeric color={theme.onTint}>{`RM ${fmt(received)}`}</Label>
+            <Caption color={colorTheme.ink2}>{isZh ? '收入' : 'income'}</Caption>
+          </View>
+        )}
       </View>
 
-      {breakdown.length > 0 && (
+      {breakdown.length > 0 && topCat && (
         <>
           <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
-          <View style={styles.sectionHead}>
-            <View style={styles.eyebrowRow}>
-              <Eyebrow>Where it goes</Eyebrow>
-              <InfoButton entry="where_it_goes" />
+          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+            <PieChart data={pieData} size={56} thickness={11} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Label weight={500} numberOfLines={1}>{`${tCat(topCat)} · ${topPct}%`}</Label>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>{isZh ? '本月最大支出' : 'Biggest this month'}</Caption>
             </View>
-            <Pressable onPress={onSeeAll} hitSlop={8}>
-              <Text style={[styles.seeAll, { color: theme.accent }]}>See all →</Text>
-            </Pressable>
-          </View>
-          {breakdown.slice(0, 3).map((b) => {
-            const cat = catById[b.catId] ?? fallback;
-            const col = catColorsForHue(cat.hue);
-            const pct = spent > 0 ? Math.round((b.amt / spent) * 100) : 0;
-            return (
-              <View key={b.catId} style={styles.spendRow}>
-                <View style={[styles.spendIcon, { backgroundColor: col.bg }]}>
-                  <Icon name={cat.icon as IconName} size={16} color={col.fg} stroke={1.9} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.spendLabelRow}>
-                    <Text style={[styles.spendLabel, { color: colorTheme.ink }]} numberOfLines={1}>{cat.label}</Text>
-                    <Text style={[styles.spendAmt, { color: colorTheme.ink }]}>RM {fmt(b.amt)}</Text>
-                  </View>
-                  <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
-                    <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: col.solid }} />
-                  </View>
-                </View>
-                <Text style={[styles.spendPct, { color: colorTheme.ink2 }]}>{pct}%</Text>
-              </View>
-            );
-          })}
+            <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+          </Pressable>
         </>
       )}
     </>
@@ -561,285 +936,165 @@ function NetWorthView({
   net,
   assets,
   liabilities,
+  trend,
   onSeeAll,
 }: {
   net: number;
   assets: number;
   liabilities: number;
+  trend: number[];
   onSeeAll: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
   const pos = net >= 0;
-  const maxV = Math.max(assets, liabilities, 1);
-  const rows: { label: string; amt: number; icon: IconName; color: string }[] = [
-    { label: 'Assets', amt: assets, icon: 'trending', color: theme.accent },
-    { label: 'Liabilities', amt: liabilities, icon: 'scale', color: colorTheme.red },
-  ];
+  const delta = trend.length >= 2 ? net - trend[trend.length - 2] : null;
+  const deltaUp = (delta ?? 0) >= 0;
+  const trendColor = delta === null ? colorTheme.ink3 : deltaUp ? theme.accent : colorTheme.red;
+
   return (
     <>
       <View style={styles.cashTop}>
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
-            <Eyebrow>Net worth</Eyebrow>
+            <Eyebrow>{t('netWorth')}</Eyebrow>
             <InfoButton entry="net_worth" />
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 6 }}>
-            {!pos && <Text style={[styles.cashSign, { color: colorTheme.red }]}>−</Text>}
-            <Amount value={Math.abs(net)} size={30} weight={700} color={pos ? colorTheme.ink : colorTheme.red} />
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
+            <Display
+              numeric
+              color={pos ? colorTheme.ink : colorTheme.red}
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              minimumFontScale={0.55}
+              style={styles.netWorthAmount}
+            >
+              {`${pos ? '' : '−'}RM ${fmtCompact(Math.abs(net))}`}
+            </Display>
           </View>
-          <Text style={[styles.cashSub, { color: colorTheme.ink2 }]}>Assets − Liabilities · today</Text>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{isZh ? '资产 − 负债 · 今日' : 'Assets − Liabilities · today'}</Caption>
         </View>
         <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.incomeAmt, { color: theme.onTint }]}>RM {fmt(assets)}</Text>
-          <Text style={[styles.incomeLabel, { color: colorTheme.ink2 }]}>assets</Text>
+          <Label numeric color={theme.onTint}>{`RM ${fmt(assets)}`}</Label>
+          <Caption color={colorTheme.ink2}>{t('assets')}</Caption>
         </View>
       </View>
 
-      <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
-      <View style={styles.sectionHead}>
-        <View style={styles.eyebrowRow}>
-          <Eyebrow>Balance sheet</Eyebrow>
-        </View>
-        <Pressable onPress={onSeeAll} hitSlop={8}>
-          <Text style={[styles.seeAll, { color: theme.accent }]}>See all →</Text>
-        </Pressable>
-      </View>
-      {rows.map((r) => {
-        const pct = Math.round((r.amt / maxV) * 100);
-        return (
-          <View key={r.label} style={styles.spendRow}>
-            <View style={[styles.spendIcon, { backgroundColor: r.color + '1f' }]}>
-              <Icon name={r.icon} size={16} color={r.color} stroke={1.9} />
+      {trend.length >= 2 && (
+        <>
+          <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
+          {/* A sparkline in the same slot the other panels use for their pie chart, so all
+              three panels read as one visual family: chart thumbnail + one-line takeaway. */}
+          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+            <NetWorthSparkline values={trend} color={trendColor} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Label weight={500} numberOfLines={1}>
+                {delta === null ? (isZh ? '近6个月趋势' : '6-month trend') : `${deltaUp ? '+' : '−'}RM ${fmt(Math.abs(delta))} ${isZh ? '较上月' : 'vs last month'}`}
+              </Label>
+              <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>{isZh ? '近6个月趋势' : '6-month trend'}</Caption>
             </View>
-            <View style={{ flex: 1 }}>
-              <View style={styles.spendLabelRow}>
-                <Text style={[styles.spendLabel, { color: colorTheme.ink }]} numberOfLines={1}>{r.label}</Text>
-                <Text style={[styles.spendAmt, { color: colorTheme.ink }]}>RM {fmt(r.amt)}</Text>
-              </View>
-              <View style={[styles.spendTrack, { backgroundColor: colorTheme.line }]}>
-                <View style={{ height: '100%', width: `${pct}%`, borderRadius: 4, backgroundColor: r.color }} />
-              </View>
-            </View>
-          </View>
-        );
-      })}
+            <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+          </Pressable>
+        </>
+      )}
     </>
   );
 }
 
-/* ── Compact credit card ── */
-function CreditCompactCard({
-  score,
-  band,
-  confidence,
-  onPress,
-}: {
-  score: number;
-  band: string;
-  confidence: number;
-  onPress: () => void;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
+function NetWorthSparkline({ values, color }: { values: number[]; color: string }) {
+  const W = 56;
+  const H = 56;
+  const pd = 6;
+  const mn = Math.min(...values);
+  const mx = Math.max(...values);
+  const rng = mx - mn || 1;
+  const pts = values.map((v, i) => [pd + (i / (values.length - 1)) * (W - pd * 2), pd + (1 - (v - mn) / rng) * (H - pd * 2)]);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.96 : 1 }]}>
-      <Card style={styles.creditCard}>
-        <View style={styles.creditTop}>
-          <Text style={[styles.creditEyebrow, { color: colorTheme.ink2 }]}>Credit Score</Text>
-          <View style={[styles.confChip, { backgroundColor: theme.accentTint }]}>
-            <View style={[styles.confDot, { backgroundColor: theme.accent }]} />
-            <Text style={[styles.confText, { color: theme.onTint }]}>{Math.round(confidence * 100)}% data confidence</Text>
-          </View>
-        </View>
-        <View style={styles.creditMain}>
-          <View style={styles.creditScoreCol}>
-            <Text style={[styles.creditScore, { color: colorTheme.ink }]}>{score}</Text>
-            <View style={[styles.bandPill, { backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.bandPillText, { color: theme.onTint }]}>{band}</Text>
-            </View>
-          </View>
-          <View style={[styles.creditVDivider, { backgroundColor: colorTheme.line }]} />
-          <View style={{ flex: 1 }}>
-            <ScoreBandBar band={band as any} />
-            <View style={styles.viewProfile}>
-              <Text style={[styles.viewProfileText, { color: theme.accent }]}>View credit profile</Text>
-              <Icon name="chevronRight" size={14} color={theme.accent} />
-            </View>
-          </View>
-        </View>
-      </Card>
-    </Pressable>
-  );
-}
-
-/* ── Quick actions ── */
-function QuickActions({
-  onOpenCredit,
-  onOpenBudget,
-  onOpenNetWorth,
-  onOpenPassport,
-}: {
-  onOpenCredit: () => void;
-  onOpenBudget: () => void;
-  onOpenNetWorth: () => void;
-  onOpenPassport: () => void;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const items: { label: string; icon: IconName; onPress: () => void }[] = [
-    { label: 'Credit', icon: 'scale', onPress: onOpenCredit },
-    { label: 'Budget', icon: 'wallet', onPress: onOpenBudget },
-    { label: 'Net Worth', icon: 'trending', onPress: onOpenNetWorth },
-    { label: 'Passport', icon: 'scan', onPress: onOpenPassport },
-  ];
-  return (
-    <Card style={styles.quickCard}>
-      {items.map((it) => (
-        <Pressable key={it.label} onPress={it.onPress} style={styles.quickItem}>
-          <View style={[styles.quickIcon, styles.quickIconIdle, { backgroundColor: theme.accentTint }]}>
-            <Icon name={it.icon} size={21} color={theme.accent} />
-          </View>
-          <Text style={[styles.quickLabel, { color: colorTheme.ink2, fontFamily: uiFont(500) }]}>{it.label}</Text>
-        </Pressable>
-      ))}
-    </Card>
-  );
-}
-
-/* ── Ask Pip strip ── */
-function AskPipStrip({ onPress }: { onPress: () => void }) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  return (
-    <View style={styles.askWrap}>
-      <View style={[styles.askStrip, { backgroundColor: theme.accentSoft }]}>
-        <CoinMascot size={44} float />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.askTitle, { color: theme.onTint }]}>Lift your score with Pip's tips.</Text>
-          <Text style={[styles.askSub, { color: colorTheme.ink2 }]}>Personalised, from your real data.</Text>
-        </View>
-        <Pressable
-          onPress={onPress}
-          style={[styles.askBtn, { backgroundColor: theme.accentInk, ...platformShadow(theme.accent, 0.32, 16, { width: 0, height: 8 }, 3) }]}
-        >
-          <Text style={styles.askBtnText}>Ask Pip</Text>
-        </Pressable>
-      </View>
-    </View>
+    <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+      <Path d={line} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+      <Circle cx={last[0]} cy={last[1]} r={3} fill={color} />
+    </Svg>
   );
 }
 
 function EmptyState() {
   const colorTheme = useThemeColors();
   return (
-    <Card style={{ marginHorizontal: 16, marginTop: 8, padding: 26, alignItems: 'center' }}>
-      <Pip size={88} expr="curious" float />
-      <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>No spending yet</Text>
-      <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-        Tap <Text style={{ fontFamily: uiFont(700) }}>Add</Text> to scan one receipt, or a whole statement at
-        once. I’ll read the lines and you file them.
-      </Text>
+    <Card style={{ marginHorizontal: spacing.base, marginTop: spacing.sm, padding: 24, alignItems: 'center' }}>
+      <Pip size={88} nerdy float propellerHat />
+      <Title style={{ marginTop: spacing.md }}>No spending yet</Title>
+      <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
+        Tap <Body weight={700}>Add</Body> to scan one receipt, or a whole statement at once. I’ll read the lines and you file them.
+      </Body>
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 },
-  date: { fontFamily: uiFont(500), fontSize: 11, marginBottom: 2 },
-  greeting: { fontFamily: uiFont(800), fontSize: 23 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.xs, paddingBottom: spacing.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerIcon: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
   pipBubble: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
 
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  seeAll: { fontFamily: uiFont(600), fontSize: 12.5 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
-  safeIncome: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 10, padding: 13, borderRadius: 16, borderWidth: 1 },
-  safeIncomeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  safeIncomeTitle: { fontFamily: uiFont(700), fontSize: 14 },
-  safeIncomeSub: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 2 },
-  /* owed to you */
-  owedRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 10, padding: 13, borderRadius: 16, borderWidth: 1 },
-  owedTitle: { fontFamily: uiFont(700), fontSize: 14 },
-  owedSub: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  /* needs-you: the single consolidated attention row */
+  needsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
+
   /* streak */
-  streakCard:{ marginHorizontal: 16, marginTop: 2, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  streakLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  streakCard: { marginHorizontal: spacing.base, marginTop: spacing.xs, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  streakLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
-  streakNum: { fontFamily: numFont(700), fontSize: 24, lineHeight: 26 },
-  streakLabel: { fontFamily: uiFont(500), fontSize: 11 },
   streakDivider: { width: 1, height: 38 },
-  dotsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  streakShield: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+    ...shadowCard,
+  },
+  dotsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
+  dotToday: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
-  streakBest: { fontFamily: uiFont(500), fontSize: 11, textAlign: 'right' },
-  streakBestNum: { fontFamily: numFont(600) },
 
-  /* summary toggle */
-  segTrack: { flexDirection: 'row', borderRadius: 999, padding: 3, marginBottom: 16, borderWidth: 1 },
-  segBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 999 },
-  segBtnOn: { ...shadowToggle },
-  segText: { fontFamily: uiFont(600), fontSize: 13 },
-  segTextOn: {},
+  /* streak celebration burst */
+  streakWrap: { position: 'relative' },
+  celebrationWrap: {
+    position: 'absolute',
+    top: -18,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    zIndex: 2,
+  },
+  ember: { position: 'absolute', bottom: 20, width: 7, height: 7, borderRadius: 4 },
+
+  /* summary hero carousel */
+  heroDotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
+  heroDot: { width: 6, height: 6, borderRadius: 3 },
 
   /* cash flow */
-  cashCard: { marginHorizontal: 16, marginTop: 10, padding: 16 },
-  cashTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  cashSign: { fontFamily: numFont(700), fontSize: 24, marginRight: 1 },
-  cashSub: { fontFamily: uiFont(500), fontSize: 11, marginTop: 4 },
-  incomeBadge: { borderRadius: 14, paddingHorizontal: 11, paddingVertical: 7, alignItems: 'center' },
-  incomeAmt: { fontFamily: numFont(700), fontSize: 13 },
-  incomeLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
-  cashDivider: { height: 1, marginVertical: 11 },
-  spendRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
-  spendIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  spendLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 },
-  spendLabel: { fontFamily: uiFont(500), fontSize: 12.5, flex: 1, marginRight: 8 },
-  spendAmt: { fontFamily: numFont(600), fontSize: 12.5 },
-  spendTrack: { height: 4, borderRadius: 4, overflow: 'hidden' },
-  spendPct: { fontFamily: numFont(500), fontSize: 11, width: 28, textAlign: 'right' },
-
-  /* compact credit */
-  creditCard: { marginHorizontal: 16, marginTop: 10, padding: 14, paddingHorizontal: 18 },
-  creditTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  creditEyebrow: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1, textTransform: 'uppercase' },
-  confChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingVertical: 3, paddingLeft: 7, paddingRight: 9 },
-  confDot: { width: 6, height: 6, borderRadius: 999 },
-  confText: { fontFamily: uiFont(600), fontSize: 11 },
-  creditMain: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  creditScoreCol: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-  creditScore: { fontFamily: numFont(700), fontSize: 46, lineHeight: 48 },
-  bandPill: { borderRadius: 20, paddingHorizontal: 11, paddingVertical: 3, marginBottom: 6 },
-  bandPillText: { fontFamily: uiFont(700), fontSize: 11.5 },
-  creditVDivider: { width: 1, height: 48 },
-  viewProfile: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
-  viewProfileText: { fontFamily: uiFont(600), fontSize: 11.5 },
-
-  /* quick actions */
-  quickCard: { marginHorizontal: 16, marginTop: 10, paddingVertical: 14, paddingHorizontal: 6, flexDirection: 'row', justifyContent: 'space-around' },
-  quickItem: { flex: 1, alignItems: 'center', gap: 7 },
-  quickIcon: { width: 50, height: 50, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  quickIconIdle: {},
-  quickLabel: { fontSize: 11, textAlign: 'center' },
-
-  /* ask pip */
-  askWrap: { paddingHorizontal: 16, marginTop: 10 },
-  askStrip: { borderRadius: 22, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  askTitle: { fontFamily: uiFont(700), fontSize: 13, marginBottom: 2 },
-  askSub: { fontFamily: uiFont(500), fontSize: 11 },
-  askBtn: { borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8 },
-  askBtnText: { fontFamily: uiFont(700), fontSize: 12, color: colors.onAccent },
+  cashCard: { marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.base },
+  cashTop: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  incomeBadge: { borderRadius: 14, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, alignItems: 'center' },
+  cashDivider: { height: 1, marginVertical: spacing.md },
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  netWorthAmount: { textDecorationLine: 'underline' },
 
   /* generic cta */
-  budgetCta: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16 },
+  budgetCta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.base },
   ctaIcon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  ctaTitle: { fontFamily: uiFont(700), fontSize: 15 },
-  ctaSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 1 },
-
-  emptyTitle: { fontFamily: uiFont(700), fontSize: 19, marginTop: 14 },
-  emptySub: { fontFamily: uiFont(500), fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 6 },
 });

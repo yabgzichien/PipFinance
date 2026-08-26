@@ -3,6 +3,7 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
+import { InfoButton } from '../components/InfoButton';
 import { SplitSheet } from '../components/SplitSheet';
 import { Amount, B, BtnLabel, BubbleText, Card, CategoryChip, PipSays, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
 import { applyDateEdit, fullDateWithWeekday, ISO_DATE_RE, isValidIsoDate, shortDate } from '../lib/dates';
@@ -15,6 +16,7 @@ import type { IconName } from '../components/Icon';
 import { useAccent, useAccentAlert } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { numFont, shadowToggle, uiFont } from '../theme';
 
 /**
@@ -53,6 +55,7 @@ export function CategorizeScreen({
 }) {
   const insets = useSafeAreaInsets();
   const { transactions, accounts, openShares } = useAppData();
+  const { t, tCat, isZh } = useLanguage();
   // The ledger as it stood when this batch opened. Deliberately frozen: `commitCategorized`
   // writes the batch on the last Finish tap, the store's `transactions` then updates while this
   // screen is still mounted, and every row suddenly matches ITSELF — which is what flashed the
@@ -251,7 +254,7 @@ export function CategorizeScreen({
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar
-          title="Categorize"
+          title={isZh ? '确认分类' : 'Categorize'}
           onBack={() => go(-1)}
           right={
             <Text style={[styles.counter, { color: colorTheme.ink2 }]}>
@@ -269,23 +272,43 @@ export function CategorizeScreen({
           <PipSays expr={showBanner ? 'curious' : isIncome ? 'happy' : suggestion ? 'idle' : 'curious'}>
             {showBanner ? (
               <BubbleText>
-                Hmm. <B>‘{item!.merchant}’</B> looks like a duplicate of one you logged on <B>{dupDay}</B>.
+                {isZh ? (
+                  <>注意：<B>‘{item!.merchant}’</B> 看起来与您在 <B>{dupDay}</B> 记录的一笔交易重复。</>
+                ) : (
+                  <>Hmm. <B>‘{item!.merchant}’</B> looks like a duplicate of one you logged on <B>{dupDay}</B>.</>
+                )}
               </BubbleText>
             ) : suggestion && suggestionCat && suggestionIsGuess ? (
               <BubbleText>
-                ‘{item!.merchant}’. I think this might be <B>{suggestionCat.label}</B>. Does that look right?
+                {isZh ? (
+                  <>‘{item!.merchant}’。我想这可能是 <B>{tCat(suggestionCat)}</B>。您看合适吗？</>
+                ) : (
+                  <>‘{item!.merchant}’. I think this might be <B>{suggestionCat.label}</B>. Does that look right?</>
+                )}
               </BubbleText>
             ) : suggestion && suggestionCat ? (
               <BubbleText>
-                ‘{item!.merchant}’. I’ve pre-filled <B>{suggestionCat.label}</B> from last time.
+                {isZh ? (
+                  <>‘{item!.merchant}’。根据上次记录已为您预选 <B>{tCat(suggestionCat)}</B>。</>
+                ) : (
+                  <>‘{item!.merchant}’. I’ve pre-filled <B>{suggestionCat.label}</B> from last time.</>
+                )}
               </BubbleText>
             ) : isIncome ? (
               <BubbleText>
-                ‘{item!.merchant}’. Money <B>received</B>. What kind of income?
+                {isZh ? (
+                  <>‘{item!.merchant}’。<B>入账</B>款项。这是属于哪类收入？</>
+                ) : (
+                  <>‘{item!.merchant}’. Money <B>received</B>. What kind of income?</>
+                )}
               </BubbleText>
             ) : (
               <BubbleText>
-                What was <B>‘{item!.merchant}’</B> for?
+                {isZh ? (
+                  <>‘<B>{item!.merchant}</B>’ 是用于什么消费？</>
+                ) : (
+                  <>What was <B>‘{item!.merchant}’</B> for?</>
+                )}
               </BubbleText>
             )}
           </PipSays>
@@ -318,13 +341,16 @@ export function CategorizeScreen({
             >
               <Icon name="gift" size={17} color={theme.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                  {activeSplit ? `Your share: RM ${fmt(activeSplit.ownShare)}` : 'Split with friends'}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
+                    {activeSplit ? (isZh ? `自付部分：RM ${fmt(activeSplit.ownShare)}` : `Your share: RM ${fmt(activeSplit.ownShare)}`) : (isZh ? '分摊账单' : 'Split with friends')}
+                  </Text>
+                  <InfoButton entry="split_bill" />
+                </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {activeSplit
-                    ? `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`
-                    : 'Paid for the table? Record only your share'}
+                    ? (isZh ? `待收回 RM ${fmt(activeSplit.gross - activeSplit.ownShare)}` : `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`)
+                    : (isZh ? '全桌买单？只记录您的自付部分' : 'Paid for the table? Record only your share')}
                 </Text>
               </View>
               <Icon name="chevronRight" size={17} color={colorTheme.ink3} />
@@ -335,20 +361,24 @@ export function CategorizeScreen({
             <View style={[styles.banner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
               <View style={styles.bannerHead}>
                 <Icon name="alert" size={18} color={theme.accentInk} stroke={2} />
-                <Text style={[styles.bannerTitle, { color: theme.onTint }]}>Possible duplicate</Text>
+                <Text style={[styles.bannerTitle, { color: theme.onTint }]}>{isZh ? '疑似重复记录' : 'Possible duplicate'}</Text>
               </View>
               <Text style={[styles.bannerText, { color: colorTheme.ink }]}>
-                You already logged <B>{item!.merchant}</B> for RM {fmt(item!.amount)} on {dupDay}. Record it again?
+                {isZh ? (
+                  <>您已在 {dupDay} 记录过 <B>{item!.merchant}</B>（RM {fmt(item!.amount)}）。确定再次记录？</>
+                ) : (
+                  <>You already logged <B>{item!.merchant}</B> for RM {fmt(item!.amount)} on {dupDay}. Record it again?</>
+                )}
               </Text>
               <View style={styles.bannerBtns}>
                 <View style={{ flex: 1 }}>
                   <PrimaryButton onPress={dropCurrent} height={48}>
                     <Icon name="trash" size={17} color="#fff" />
-                    <BtnLabel>Skip it</BtnLabel>
+                    <BtnLabel>{isZh ? '跳过' : 'Skip it'}</BtnLabel>
                   </PrimaryButton>
                 </View>
                 <Pressable onPress={addAnyway} style={styles.ghostBtn}>
-                  <Text style={[styles.ghostText, { color: theme.accentInk }]}>Add anyway</Text>
+                  <Text style={[styles.ghostText, { color: theme.accentInk }]}>{isZh ? '仍然添加' : 'Add anyway'}</Text>
                 </Pressable>
               </View>
             </View>
@@ -357,27 +387,28 @@ export function CategorizeScreen({
               <View style={styles.bannerHead}>
                 <Icon name="gift" size={18} color={theme.accentInk} stroke={2} />
                 <Text style={[styles.bannerTitle, { color: theme.onTint }]}>
-                  {settlementHit!.partial ? 'Part of a repayment?' : 'Paying you back?'}
+                  {settlementHit!.partial ? (isZh ? '部分还款？' : 'Part of a repayment?') : (isZh ? '还款给您？' : 'Paying you back?')}
                 </Text>
               </View>
               <Text style={[styles.bannerText, { color: colorTheme.ink }]}>
-                This looks like <B>{settlementHit!.share.personName}</B> settling{' '}
-                {settlementHit!.partial ? 'part of ' : ''}what they owe you for{' '}
-                <B>{settlementHit!.share.merchant}</B> (RM {fmt(settlementHit!.share.outstanding)} outstanding).
-                {'\n'}It clears the debt instead of counting as income.
+                {isZh ? (
+                  <>这看起来像是 <B>{settlementHit!.share.personName}</B> 偿还关于 <B>{settlementHit!.share.merchant}</B> 的账单（待收 RM {fmt(settlementHit!.share.outstanding)}）。{'\n'}这将抵消待收债务，不计入收入。</>
+                ) : (
+                  <>This looks like <B>{settlementHit!.share.personName}</B> settling {settlementHit!.partial ? 'part of ' : ''}what they owe you for <B>{settlementHit!.share.merchant}</B> (RM {fmt(settlementHit!.share.outstanding)} outstanding).{'\n'}It clears the debt instead of counting as income.</>
+                )}
               </Text>
               <View style={styles.bannerBtns}>
                 <View style={{ flex: 1 }}>
                   <PrimaryButton onPress={acceptSettlement} height={48}>
                     <Icon name="check" size={17} color="#fff" stroke={2.4} />
-                    <BtnLabel>Yes, they paid me back</BtnLabel>
+                    <BtnLabel>{isZh ? '是的，这是还款' : 'Yes, they paid me back'}</BtnLabel>
                   </PrimaryButton>
                 </View>
                 <Pressable
                   onPress={() => setNotRepayment((m) => ({ ...m, [originalIndex]: true }))}
                   style={styles.ghostBtn}
                 >
-                  <Text style={[styles.ghostText, { color: theme.accentInk }]}>No, it’s income</Text>
+                  <Text style={[styles.ghostText, { color: theme.accentInk }]}>{isZh ? '不，这是普通收入' : 'No, it’s income'}</Text>
                 </Pressable>
               </View>
             </View>
@@ -393,7 +424,7 @@ export function CategorizeScreen({
                       style={[styles.typeBtn, on && styles.typeBtnOn, on && { backgroundColor: colorTheme.surface }]}
                     >
                       <Text style={[styles.typeText, { color: colorTheme.ink2 }, on && styles.typeTextOn, on && { color: colorTheme.ink }]}>
-                        {k === 'expense' ? 'Expense' : 'Income'}
+                        {k === 'expense' ? t('expense') : t('income')}
                       </Text>
                     </Pressable>
                   );
@@ -416,7 +447,7 @@ export function CategorizeScreen({
                   style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}
                 >
                   <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-                  <Text style={[styles.addChipText, { color: theme.accent }]}>New category</Text>
+                  <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
                 </Pressable>
               </View>
               </View>
@@ -434,22 +465,22 @@ export function CategorizeScreen({
         >
           <Pressable onPress={dropCurrent} style={styles.dropLink} hitSlop={6}>
             <Icon name="x" size={14} color={colorTheme.ink3} />
-            <Text style={[styles.dropLinkText, { color: colorTheme.ink2 }]}>Don’t record this one</Text>
+            <Text style={[styles.dropLinkText, { color: colorTheme.ink2 }]}>{isZh ? '跳过此项，不记入' : 'Don’t record this one'}</Text>
           </Pressable>
           <PrimaryButton onPress={() => go(1)} disabled={!sel || sel === DROP}>
             {isLast ? (
               <>
-                <BtnLabel>Finish · {keptCount} saved</BtnLabel>
+                <BtnLabel>{isZh ? `完成 · 保存 ${keptCount} 项` : `Finish · ${keptCount} saved`}</BtnLabel>
                 <Icon name="check" size={19} color="#fff" stroke={2.4} />
               </>
             ) : confirming && suggestionCat ? (
               <>
-                <BtnLabel>Confirm {suggestionCat.label}</BtnLabel>
+                <BtnLabel>{isZh ? `确认 ${tCat(suggestionCat)}` : `Confirm ${suggestionCat.label}`}</BtnLabel>
                 <Icon name="arrowRight" size={19} color="#fff" />
               </>
             ) : (
               <>
-                <BtnLabel>Next</BtnLabel>
+                <BtnLabel>{t('next')}</BtnLabel>
                 <Icon name="arrowRight" size={19} color="#fff" />
               </>
             )}

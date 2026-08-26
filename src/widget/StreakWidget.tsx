@@ -4,13 +4,25 @@ import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 export interface StreakWidgetProps {
   streak: number;
   dots: boolean[];
-  coverage: number;
 }
 
-const FLAME_SVG = `
-<svg width="22" height="26" viewBox="0 0 18 22" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M9 1C9 1 14.5 6.5 14.5 11.5C14.5 15 12 17.5 9 17.5C6 17.5 3.5 15 3.5 11.5C3.5 8.5 5.5 6.5 5.5 6.5C5.5 6.5 6 9.5 9 9.5C9 9.5 7.5 7.5 9 4C9.5 5.5 11.5 7.5 11.5 9.5C13 8 12.5 5.5 11 3.5C14 5.5 15.5 8.5 15.5 11.5C15.5 16.5 12.5 20.5 9 21.5C5.5 20.5 2.5 16.5 2.5 11.5C2.5 5.5 9 1 9 1Z" fill="#9c6300" />
-  <path d="M9 13.5C9 13.5 11 12 11 10.5C10.5 11.5 9 11.5 9 11.5C9 11.5 9.5 10 9 9C8.5 10 7 11.5 7 12.5C7 13.6 7.9 14.5 9 14.5C8.7 14 9 13.5 9 13.5Z" fill="#FAC438" />
+const COIN_MASCOT_SVG = `
+<svg width="56" height="56" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20 16 C20 11,13 8,11 12.5 C9 17,15 19,20 16Z" fill="#1c7a4e" />
+  <path d="M36 16 C36 11,43 8,45 12.5 C47 17,41 19,36 16Z" fill="#2aab68" />
+  <line x1="28" y1="13.5" x2="28" y2="20" stroke="#185e3e" stroke-width="2.5" stroke-linecap="round" />
+  <ellipse cx="28.5" cy="46" rx="12" ry="2.3" fill="rgba(8,28,14,0.15)" />
+  <circle cx="28" cy="35.5" r="15.5" fill="#F5B42A" />
+  <circle cx="28" cy="35.5" r="12.5" fill="#FAC438" />
+  <circle cx="28" cy="35.5" r="12.5" fill="none" stroke="#D99E18" stroke-width="1.2" />
+  <ellipse cx="23.5" cy="34" rx="1.9" ry="2.2" fill="#7A4800" />
+  <ellipse cx="32.5" cy="34" rx="1.9" ry="2.2" fill="#7A4800" />
+  <circle cx="24.3" cy="33" r="0.75" fill="white" opacity="0.82" />
+  <circle cx="33.3" cy="33" r="0.75" fill="white" opacity="0.82" />
+  <path d="M23.5 38.5 Q28 42.2 32.5 38.5" stroke="#7A4800" stroke-width="1.9" stroke-linecap="round" fill="none" />
+  <ellipse cx="19.5" cy="37.5" rx="2.5" ry="1.6" fill="#F07828" opacity="0.3" />
+  <ellipse cx="36.5" cy="37.5" rx="2.5" ry="1.6" fill="#F07828" opacity="0.3" />
+  <ellipse cx="21" cy="29" rx="4" ry="2.3" fill="white" opacity="0.23" transform="rotate(-26 21 29)" />
 </svg>
 `.trim();
 
@@ -36,7 +48,7 @@ const REFRESH_SVG = `
 </svg>
 `.trim();
 
-export function StreakWidget({ streak, dots, coverage }: StreakWidgetProps) {
+export function StreakWidget({ streak, dots }: StreakWidgetProps) {
   // Ensure dots is always 7 items
   const safeDots = dots.length === 7 ? dots : [...Array(7)].map((_, i) => dots[i] ?? false);
 
@@ -55,7 +67,7 @@ export function StreakWidget({ streak, dots, coverage }: StreakWidgetProps) {
       clickAction="OPEN_URI"
       clickActionData={{ uri: 'pip://add' }}
     >
-      {/* Left side: Flame + Streak count */}
+      {/* Left side: Coin mascot + Streak count */}
       <FlexWidget
         style={{
           flexDirection: 'row',
@@ -65,19 +77,19 @@ export function StreakWidget({ streak, dots, coverage }: StreakWidgetProps) {
       >
         <FlexWidget
           style={{
-            width: 32,
-            height: 32,
+            width: 45,
+            height: 45,
             backgroundColor: '#faf7f2',
-            borderRadius: 10,
+            borderRadius: 14,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
           <SvgWidget
-            svg={FLAME_SVG}
+            svg={COIN_MASCOT_SVG}
             style={{
-              width: 18,
-              height: 22,
+              width: 40,
+              height: 40,
             }}
           />
         </FlexWidget>
@@ -117,77 +129,50 @@ export function StreakWidget({ streak, dots, coverage }: StreakWidgetProps) {
         }}
       />
 
-      {/* Right side: 7-day dots, refresh button & coverage */}
+      {/* Right side: 7-day dots + refresh button */}
       <FlexWidget
         style={{
           flex: 1,
-          flexDirection: 'column',
+          flexDirection: 'row',
+          alignItems: 'center',
           justifyContent: 'space-between',
-          height: 'match_parent',
-          paddingVertical: 2,
         }}
       >
-        {/* Top row: 7 dots + refresh button */}
         <FlexWidget
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'space-between',
+            flexGap: 3,
           }}
         >
-          <FlexWidget
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              flexGap: 3,
-            }}
-          >
-            {safeDots.map((done, idx) => (
-              <SvgWidget
-                key={idx}
-                svg={done ? ACTIVE_DOT_SVG : INACTIVE_DOT_SVG}
-                style={{
-                  width: 11,
-                  height: 11,
-                }}
-              />
-            ))}
-          </FlexWidget>
-
-          <FlexWidget
-            style={{
-              width: 20,
-              height: 20,
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 10,
-              backgroundColor: '#f6f8f6',
-            }}
-            clickAction="REFRESH_WIDGET"
-          >
+          {safeDots.map((done, idx) => (
             <SvgWidget
-              svg={REFRESH_SVG}
+              key={idx}
+              svg={done ? ACTIVE_DOT_SVG : INACTIVE_DOT_SVG}
               style={{
-                width: 12,
-                height: 12,
+                width: 11,
+                height: 11,
               }}
             />
-          </FlexWidget>
+          ))}
         </FlexWidget>
 
-        {/* Bottom row: Coverage text */}
         <FlexWidget
           style={{
-            flexDirection: 'row',
+            width: 20,
+            height: 20,
             alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 10,
+            backgroundColor: '#f6f8f6',
           }}
+          clickAction="REFRESH_WIDGET"
         >
-          <TextWidget
-            text={`Covered ${coverage}/90 days`}
+          <SvgWidget
+            svg={REFRESH_SVG}
             style={{
-              fontSize: 10,
-              fontWeight: '500',
-              color: '#5d6b63',
+              width: 12,
+              height: 12,
             }}
           />
         </FlexWidget>

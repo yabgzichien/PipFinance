@@ -30,8 +30,29 @@ describe('planCommitmentReminders', () => {
     const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(1, 8));
     expect(plan).toHaveLength(1);
     expect(plan[0].title).toBe('Bills this month');
-    expect(plan[0].body).toBe('2 bills due this month · RM 150.00');
+    expect(plan[0].body).toBe("2 bills due this month, RM 150.00 total. Just so you're not blindsided later.");
     expect(plan[0].at).toEqual(at(19, REMINDER_HOUR, 0));
+  });
+
+  it('escalates the digest once the nearest bill is due within 3 days', () => {
+    const occs = [row({ dueDate: '2026-06-04', amount: 100 })];
+    const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(1, 8));
+    const digest = plan.find((p) => p.title === 'Bills this month');
+    expect(digest!.body).toContain('Adulting arc loading');
+  });
+
+  it('escalates the digest to the top tier when the nearest bill is due within a day, or several are clustered', () => {
+    const dueTomorrow = [row({ dueDate: '2026-06-02', amount: 100 })];
+    const dueTomorrowPlan = planCommitmentReminders({ enabled: true, occurrences: dueTomorrow }, at(1, 8));
+    expect(dueTomorrowPlan[0].body).toContain('broke by Friday');
+
+    const clustered = [
+      row({ dueDate: '2026-06-20', amount: 30, label: 'Maxis' }),
+      row({ dueDate: '2026-06-21', amount: 30, label: 'Astro' }),
+      row({ dueDate: '2026-06-22', amount: 30, label: 'Spotify' }),
+    ];
+    const clusteredPlan = planCommitmentReminders({ enabled: true, occurrences: clustered }, at(1, 8));
+    expect(clusteredPlan[0].body).toContain('broke by Friday');
   });
 
   it('caps the digest at 3 months ahead', () => {
@@ -65,6 +86,20 @@ describe('planCommitmentReminders', () => {
     expect(overdue!.body).toContain('RM 89.00');
   });
 
+  it('sharpens the overdue tone in the 3-7 day range', () => {
+    const occs = [row({ dueDate: '2026-06-01', label: 'Maxis', amount: 89 })];
+    const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(5, 8));
+    const overdue = plan.find((p) => p.title === 'Overdue');
+    expect(overdue!.body).toContain("It is tomorrow");
+  });
+
+  it('drops the joke entirely once a bill is over a week overdue', () => {
+    const occs = [row({ dueDate: '2026-06-01', label: 'Maxis', amount: 89 })];
+    const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(10, 8));
+    const overdue = plan.find((p) => p.title === 'Overdue');
+    expect(overdue!.body).toBe("Maxis is 9 days overdue, RM 89.00. No jokes on this one, just letting you know.");
+  });
+
   it('pushes a badly-overdue nudge to the next future slot instead of the elapsed +2-day one', () => {
     const occs = [row({ dueDate: '2026-06-01' })]; // 9 days overdue by the 10th
     const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(10, 8));
@@ -83,5 +118,21 @@ describe('planCommitmentReminders', () => {
     const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(1, 8));
     expect(plan.find((p) => p.title === 'Overdue')).toBeUndefined();
     expect(plan.find((p) => p.title === 'Bills this month')).toBeDefined();
+  });
+
+  it('every entry, digest or overdue, is tagged as the commitment kind', () => {
+    const occs = [row({ dueDate: '2026-06-05' }), row({ dueDate: '2026-06-20', label: 'Astro' })];
+    const plan = planCommitmentReminders({ enabled: true, occurrences: occs }, at(10, 8));
+    expect(plan.length).toBeGreaterThan(0);
+    expect(plan.every((e) => e.kind === 'commitment')).toBe(true);
+  });
+
+  it("never verdicts the user's own spending, across digest and overdue tiers alike (ui-engagement-plan.md Step 7, item 5)", () => {
+    const forbidden = [/over ?budget/i, /overspen/i, /you spent too much/i, /you('| a)re over/i];
+    const dueDates = ['2026-06-02', '2026-06-05', '2026-06-10', '2026-06-25'];
+    for (const dueDate of dueDates) {
+      const plan = planCommitmentReminders({ enabled: true, occurrences: [row({ dueDate })] }, at(15, 8));
+      for (const e of plan) for (const re of forbidden) expect(e.body).not.toMatch(re);
+    }
   });
 });

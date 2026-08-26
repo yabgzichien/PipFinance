@@ -14,7 +14,14 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { todayISO } from '../lib/duplicates';
-import { planCommitmentReminders, planLogReminders, planOwedReminders } from '../lib/reminders';
+import {
+  capDailyReminders,
+  inferredFireHour,
+  planCommitmentReminders,
+  planLogReminders,
+  planOwedReminders,
+  type ReminderKind,
+} from '../lib/reminders';
 import { groupOpenSharesByPerson, oldestOverdueDays } from '../lib/split';
 import { lastActiveDay } from '../lib/streak';
 import { configureNotifications, syncScheduledReminders } from '../notifications';
@@ -31,6 +38,7 @@ export function useReminderSync(): void {
     transactions,
     openShares,
     reminderCadence,
+    reminderHourOverride,
     owedReminderEnabled,
     commitmentOccurrences,
     commitments,
@@ -61,12 +69,25 @@ export function useReminderSync(): void {
           })
           .filter((r): r is NonNullable<typeof r> => r !== null);
 
-        await syncScheduledReminders({
-          log: planLogReminders(
-            { cadence: reminderCadence, lastLoggedDay: lastActiveDay(transactions, now) },
+        // Behaviour-inferred fire hour (ui-engagement-plan.md Step 7, item 1): the hour the
+        // user actually logs at, minus 30 minutes, falling back to REMINDER_HOUR until there
+        // is enough history. A Settings override always wins over the inference.
+        const loggedHours = transactions.map((t) => new Date(t.createdAt).getHours());
+        const inferred = inferredFireHour(loggedHours);
+        const fireHour = reminderHourOverride ?? inferred.hour;
+        const fireMinute = reminderHourOverride === null ? inferred.minute : 0;
+
+        const merged = [
+          ...planLogReminders(
+            {
+              cadence: reminderCadence,
+              lastLoggedDay: lastActiveDay(transactions, now),
+              fireHour,
+              fireMinute,
+            },
             now
           ),
-          owed: planOwedReminders(
+          ...planOwedReminders(
             {
               enabled: owedReminderEnabled,
               oldestOverdueDays: oldestOverdueDays(openShares, today),
@@ -74,10 +95,21 @@ export function useReminderSync(): void {
             },
             now
           ),
-          commitment: planCommitmentReminders(
+          ...planCommitmentReminders(
             { enabled: commitmentReminderEnabled, occurrences: commitmentRows },
             now
           ),
+        ];
+
+        // Hard cap of two reminders a day, enforced across every kind combined (item 3), then
+        // split back out by kind for the notification adapter's existing plan shape.
+        const capped = capDailyReminders(merged);
+        const byKind = (kind: ReminderKind) => capped.filter((e) => e.kind === kind);
+
+        await syncScheduledReminders({
+          log: byKind('log'),
+          owed: byKind('owed'),
+          commitment: byKind('commitment'),
         });
       } catch {
         /* reminders are a convenience; never let them break a screen */
@@ -85,8 +117,8 @@ export function useReminderSync(): void {
     };
 
     sync();
-    // Foreground signal, same as the lender poll: coming back to the app is the moment the
-    // ladder is most likely stale, since a day may have passed since it was last planned.
+    // Foreground signal: coming back to the app is the moment the ladder is most likely
+    // stale, since a day may have passed since it was last planned.
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') sync();
     });
@@ -100,6 +132,7 @@ export function useReminderSync(): void {
     transactions,
     openShares,
     reminderCadence,
+    reminderHourOverride,
     owedReminderEnabled,
     commitmentOccurrences,
     commitments,

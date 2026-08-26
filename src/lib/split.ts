@@ -6,6 +6,7 @@
 //      reconciling against what actually left the account.
 //   2. The payer absorbs every rounding residue. RM100 across three people is
 //      33.33 / 33.33 / 33.34, with the extra cent on the person who fronted the money.
+import { round2 } from './currency';
 import { merchantKey } from './normalize';
 import type { ShareStatus, SplitMethod } from './types';
 
@@ -19,6 +20,11 @@ export function fromCents(cents: number): number {
   return Math.round(cents) / 100;
 }
 
+/** Convert a native debt amount to MYR at a frozen split FX rate. */
+export function receivableMyr(nativeAmount: number, fxRate: number): number {
+  return round2(nativeAmount * fxRate);
+}
+
 /**
  * Splits `totalCents` across `weights` as whole cents that sum to EXACTLY `totalCents`.
  *
@@ -26,9 +32,6 @@ export function fromCents(cents: number): number {
  * three shares each rounding up a third of a cent hands out a cent nobody paid. Assigning
  * against a running cumulative target instead makes the rounding error cancel rather than
  * accumulate, so the total is exact by construction at any number of participants.
- *
- * Ported from `apportion` in belanjawankuBudget.ts, which solves the same problem for
- * whole-ringgit budget lines.
  */
 export function apportionCents(weights: number[], totalCents: number): number[] {
   const total = weights.reduce((s, w) => s + w, 0);
@@ -128,6 +131,77 @@ export function computeSplit(input: SplitInput): SplitResult {
   };
 }
 
+/** The per-person portions behind a saved `shares` split, as `computeSplit` would take them. */
+export interface RecoveredShares {
+  selfWeight: number;
+  weights: Record<string, number>;
+}
+
+/** Nobody portions a bill 500 ways; past this, the amounts are exact figures, not portions. */
+const MAX_RECOVERED_WEIGHT = 500;
+
+/**
+ * Recover the per-person portions behind an already-saved `shares` split.
+ *
+ * A `SplitDraft` (and the `splits` table under it) persists only `{personId, owed}` — there
+ * is nowhere for the weights themselves to live. So re-opening a saved split had no portions
+ * to restore and fell back to one each, which silently re-cut the bill equally the moment the
+ * sheet appeared: a RM120 dinner saved as 30/60/30 redisplayed as 40/40/40, and saving from
+ * there wrote those wrong figures to the receivable.
+ *
+ * The amounts are proportional to the weights, so the ratios are recoverable: divide through
+ * by the smallest share and round. What makes that safe rather than a guess is the check at
+ * the end — the candidate is only returned if re-running `computeSplit` reproduces the saved
+ * amounts to the cent. Anything else (an `exact` split, a manually adjusted one, a ratio too
+ * fine to survive cent-rounding) returns null, and the caller shows the saved amounts as
+ * exact figures instead of inventing portions that would change them.
+ */
+export function sharesFromSplit(
+  gross: number,
+  ownShare: number,
+  shares: { personId: string; owed: number }[]
+): RecoveredShares | null {
+  if (shares.length === 0) return null;
+
+  const ownCents = toCents(ownShare);
+  const owedCents = shares.map((s) => toCents(s.owed));
+  // A participant owing nothing has no ratio to read, and a weight of 0 is not something the
+  // sheet can express anyway (the stepper floors at 1).
+  if (owedCents.some((c) => c <= 0)) return null;
+
+  const includeSelf = ownCents > 0;
+  const unit = Math.min(...owedCents, includeSelf ? ownCents : Infinity);
+  if (unit <= 0) return null;
+
+  const weights = owedCents.map((c) => Math.round(c / unit));
+  const selfBase = includeSelf ? Math.round(ownCents / unit) : 0;
+  if (weights.some((w) => w < 1 || w > MAX_RECOVERED_WEIGHT)) return null;
+  if (selfBase > MAX_RECOVERED_WEIGHT) return null;
+
+  // The payer absorbs every rounding residue (invariant 2 at the top of this file), so their
+  // share can read a shade high or low against a clean ratio; the neighbours cover that.
+  const candidates = includeSelf ? [selfBase, selfBase - 1, selfBase + 1] : [0];
+  for (const selfWeight of candidates) {
+    if (includeSelf && selfWeight < 1) continue;
+    const replay = computeSplit({
+      gross,
+      method: 'shares',
+      includeSelf,
+      selfWeight,
+      participants: shares.map((s, i) => ({ personId: s.personId, weight: weights[i] })),
+    });
+    if (toCents(replay.ownShare) !== ownCents) continue;
+    if (replay.shares.some((s, i) => toCents(s.owed) !== owedCents[i])) continue;
+    return {
+      // With the payer off the bill the weight is unused; report 1 so the sheet's stepper has
+      // a legal value to sit on if the user puts themselves back on.
+      selfWeight: includeSelf ? selfWeight : 1,
+      weights: Object.fromEntries(shares.map((s, i) => [s.personId, weights[i]])),
+    };
+  }
+  return null;
+}
+
 /**
  * Why this split cannot be saved, as a sentence the user can act on, or null when it is fine.
  *
@@ -215,11 +289,29 @@ export interface ReceiptLine {
  * service charge applies to the subtotal, and service tax then applies to the subtotal PLUS
  * the service charge, which is how the receipt itself computes it.
  */
+export type DiscountUnit = 'pct' | 'amount';
+
+/**
+ * 'before' applies against the items subtotal, ahead of service charge and tax (the usual
+ * case for a voucher). 'after' applies against the final total, the way a receipt sometimes
+ * prints a discount line below the tax.
+ */
+export type DiscountTiming = 'before' | 'after';
+
+export interface Discount {
+  unit: DiscountUnit;
+  /** A ringgit amount when unit is 'amount', a percentage (0-100) when unit is 'pct'. */
+  value: number;
+  timing: DiscountTiming;
+}
+
 export interface Surcharges {
   /** Service charge, conventionally 10%. */
   serviceChargePct: number;
   /** Service tax (SST on F&B), conventionally 6%. */
   taxPct: number;
+  /** A voucher or discount, absent when the receipt shows none and nobody has added one. */
+  discount?: Discount | null;
 }
 
 export const DEFAULT_SURCHARGES: Surcharges = { serviceChargePct: 10, taxPct: 6 };
@@ -236,13 +328,45 @@ export interface ItemizedResult {
 }
 
 /**
+ * The subtotal plus service charge, tax, and a voucher, in cents.
+ *
+ * A 'before' discount reduces the subtotal first, so service charge and tax land on the
+ * discounted base, the way a voucher applied at the till would. An 'after' discount leaves
+ * service charge and tax on the full subtotal and comes off the resulting total instead,
+ * matching a discount line printed below the tax.
+ */
+function computeItemizedTotalCents(subtotalCents: number, surcharges: Surcharges): number {
+  const discount = surcharges.discount;
+  const svcPct = Math.max(0, surcharges.serviceChargePct);
+  const taxPct = Math.max(0, surcharges.taxPct);
+
+  if (discount && discount.timing === 'before') {
+    const discountCents =
+      discount.unit === 'amount' ? toCents(discount.value) : Math.round((subtotalCents * discount.value) / 100);
+    const base = Math.max(0, subtotalCents - discountCents);
+    const serviceCents = Math.round((base * svcPct) / 100);
+    const taxCents = Math.round(((base + serviceCents) * taxPct) / 100);
+    return base + serviceCents + taxCents;
+  }
+
+  const serviceCents = Math.round((subtotalCents * svcPct) / 100);
+  const taxCents = Math.round(((subtotalCents + serviceCents) * taxPct) / 100);
+  const rawCents = subtotalCents + serviceCents + taxCents;
+  if (!discount) return rawCents;
+
+  const discountCents =
+    discount.unit === 'amount' ? toCents(discount.value) : Math.round((rawCents * discount.value) / 100);
+  return Math.max(0, rawCents - discountCents);
+}
+
+/**
  * Divide a receipt line by line.
  *
- * Each line is split equally among whoever ate it, then the service charge and tax are
- * allocated in proportion to what each person's items came to. Whatever is left between that
- * and what the bank actually charged becomes a shared line split equally, because the card
- * charge is the only figure that has to reconcile: the ledger is built on what left the
- * account, not on what the paper said.
+ * Each line is split equally among whoever ate it, then the service charge, tax, and a
+ * voucher are allocated in proportion to what each person's items came to. Whatever is left
+ * between that and what the bank actually charged becomes a shared line split equally,
+ * because the card charge is the only figure that has to reconcile: the ledger is built on
+ * what left the account, not on what the paper said.
  *
  * `participants` is the full table with the payer LAST, so every rounding residue lands on
  * the person who fronted the money, exactly as the simpler methods do.
@@ -280,23 +404,26 @@ export function computeItemized(
     eaters.forEach((id, i) => (subtotals[indexOf[id]] += each[i]));
   }
 
-  const serviceCents = Math.round((subtotalCents * Math.max(0, surcharges.serviceChargePct)) / 100);
-  const taxCents = Math.round(((subtotalCents + serviceCents) * Math.max(0, surcharges.taxPct)) / 100);
-  const computedCents = subtotalCents + serviceCents + taxCents;
+  const computedCents = computeItemizedTotalCents(subtotalCents, surcharges);
 
-  // Surcharges ride on each person's own items. With no items at all there is nothing to ride
-  // on, so they fall back to an even split.
-  const surchargeWeights = subtotalCents > 0 ? subtotals : people.map(() => 1);
-  const surchargeEach = apportionCents(surchargeWeights, serviceCents + taxCents);
+  // Everything beyond each person's own items — service charge, tax, and a voucher, whichever
+  // way it nets out — rides on each person's own items, same as a surcharge. With no items at
+  // all there is nothing to ride on, so it falls back to an even split. It can go negative when
+  // a discount outweighs the surcharges, which apportionCents cannot express, so it is split on
+  // the absolute value and flipped back, the same trick the reconciliation line below uses.
+  const extraCents = computedCents - subtotalCents;
+  const extraWeights = subtotalCents > 0 ? subtotals : people.map(() => 1);
+  const extraEach = apportionCents(extraWeights, Math.abs(extraCents));
+  const extraSign = extraCents < 0 ? -1 : 1;
 
-  // The reconciliation line. Negative when the bank charged less than the paper said (a
-  // discount applied at the till), which apportionCents cannot express, so it is split on the
-  // absolute value and flipped back.
+  // The reconciliation line. Negative when the bank charged less than the paper said (a tip or
+  // a discount the extraction missed), which apportionCents cannot express, so it is split on
+  // the absolute value and flipped back.
   const diffCents = chargedCents - computedCents;
   const diffEach = apportionCents(people.map(() => 1), Math.abs(diffCents));
   const diffSign = diffCents < 0 ? -1 : 1;
 
-  const totals = people.map((_, i) => subtotals[i] + surchargeEach[i] + diffSign * diffEach[i]);
+  const totals = people.map((_, i) => subtotals[i] + extraSign * extraEach[i] + diffSign * diffEach[i]);
 
   const selfIndex = indexOf[SELF];
   return {
@@ -321,6 +448,8 @@ export interface OpenShare {
   /** The day the bill was paid; a transfer that predates it cannot be settling it. */
   billDate: string | null;
   merchant: string;
+  currency?: string;
+  fxRate?: number | null;
 }
 
 /** An extracted inbound row that might be someone paying you back. */

@@ -1,9 +1,12 @@
 // __tests__/recap.test.ts
 import {
-  monthlyIncomeStatement,
-  spentByCategory,
-  computeAdherence,
   availableMonths,
+  categoryComparisons,
+  computeAdherence,
+  hasComparisonData,
+  monthlyIncomeStatement,
+  prevMonthKey,
+  spentByCategory,
 } from '../src/lib/recap';
 import type { Transaction } from '../src/lib/types';
 
@@ -106,5 +109,55 @@ describe('availableMonths', () => {
 
   it('always includes the current month even with no data', () => {
     expect(availableMonths([], [], now)).toEqual(['2026-06']);
+  });
+});
+
+describe('prevMonthKey', () => {
+  it('steps back one month within a year', () => {
+    expect(prevMonthKey('2026-06')).toBe('2026-05');
+  });
+
+  it('wraps back across a year boundary', () => {
+    expect(prevMonthKey('2026-01')).toBe('2025-12');
+  });
+});
+
+describe('categoryComparisons', () => {
+  it('pairs this month and last month spend per category, biggest current spend first', () => {
+    const txns = [
+      txn({ categoryId: 'dining', amount: 150, date: '2026-06-01' }),
+      txn({ categoryId: 'dining', amount: 100, date: '2026-05-01' }),
+      txn({ categoryId: 'fuel', amount: 80, date: '2026-06-02' }),
+    ];
+    expect(categoryComparisons(txns, '2026-06')).toEqual([
+      { catId: 'dining', current: 150, previous: 100, deltaAbs: 50 },
+      { catId: 'fuel', current: 80, previous: 0, deltaAbs: 80 },
+    ]);
+  });
+
+  it('includes a category that had spend last month but none this month', () => {
+    const txns = [txn({ categoryId: 'travel', amount: 200, date: '2026-05-01' })];
+    expect(categoryComparisons(txns, '2026-06')).toEqual([
+      { catId: 'travel', current: 0, previous: 200, deltaAbs: -200 },
+    ]);
+  });
+
+  it('returns nothing for two empty months', () => {
+    expect(categoryComparisons([], '2026-06')).toEqual([]);
+  });
+});
+
+describe('hasComparisonData', () => {
+  it('is false when the previous month has no spend at all', () => {
+    const txns = [txn({ categoryId: 'dining', amount: 50, date: '2026-06-01' })];
+    expect(hasComparisonData(txns, '2026-06')).toBe(false);
+  });
+
+  it('is true once the previous month has real spend', () => {
+    const txns = [
+      txn({ categoryId: 'dining', amount: 50, date: '2026-06-01' }),
+      txn({ categoryId: 'dining', amount: 30, date: '2026-05-01' }),
+    ];
+    expect(hasComparisonData(txns, '2026-06')).toBe(true);
   });
 });

@@ -1,10 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, type ViewStyle } from 'react-native';
+import { useReducedMotion } from '../state/useReducedMotion';
 
 /**
  * Mount entrance: gentle fade + small upward rise. Kept short and low-offset so
  * it reads as "settling in", never as a slide-show. Native-driven (opacity +
  * transform only). Pass a changing `key` from the caller to replay it.
+ *
+ * Reduced motion (docs/ui-engagement-plan.md Step 1) skips the tween entirely and mounts
+ * already at its resting state  a staged reveal built from several of these (SavedScreen,
+ * Step 2) must still show every piece, just without the choreography.
  */
 export function FadeIn({
   children,
@@ -19,8 +24,13 @@ export function FadeIn({
   duration?: number;
   offset?: number;
 }) {
-  const v = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
+  const v = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
   useEffect(() => {
+    if (reducedMotion) {
+      v.setValue(1);
+      return;
+    }
     const a = Animated.timing(v, {
       toValue: 1,
       duration,
@@ -30,7 +40,7 @@ export function FadeIn({
     });
     a.start();
     return () => a.stop();
-  }, [v, delay, duration]);
+  }, [v, delay, duration, reducedMotion]);
 
   return (
     <Animated.View
@@ -57,69 +67,56 @@ export function FadeIn({
 /**
  * Same ease-out drive as `useEased`, but between two arbitrary values  used for
  * counting a number *down* (the Attack Gallery's confidence falling from its
- * pre-check level to the capped one).
+ * pre-check level to the capped one) or, with `delay`, staged into a larger
+ * reveal (SavedScreen's transaction count, docs/ui-engagement-plan.md Step 2).
  *
  * Unlike `useEased` this starts at `from`, not at the destination: it is meant
  * to be mounted at the moment the count should begin, so showing the final
  * value first would spoil the beat. The setTimeout backstop still guarantees it
- * lands exactly on `to` if rAF stalls.
+ * lands exactly on `to` if rAF stalls. Reduced motion snaps straight to `to`
+ * rather than holding at `from`  the number is data, not a flourish, so it
+ * must still be readable with motion off.
  */
-export function useEasedFrom(from: number, to: number, duration = 900): number {
-  const [val, setVal] = useState(from);
+export function useEasedFrom(from: number, to: number, duration = 900, delay = 0): number {
+  const reducedMotion = useReducedMotion();
+  const [val, setVal] = useState(reducedMotion ? to : from);
   useEffect(() => {
+    if (reducedMotion) {
+      setVal(to);
+      return;
+    }
     let raf = 0;
+    let startTimer: ReturnType<typeof setTimeout> | null = null;
     let settled = false;
-    const start = Date.now();
     const settle = () => {
       settled = true;
       setVal(to);
     };
-    const tick = () => {
-      const t = Math.min(1, (Date.now() - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
-      setVal(from + (to - from) * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else settle();
+    const run = () => {
+      const start = Date.now();
+      const tick = () => {
+        const t = Math.min(1, (Date.now() - start) / duration);
+        const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+        setVal(from + (to - from) * eased);
+        if (t < 1) raf = requestAnimationFrame(tick);
+        else settle();
+      };
+      raf = requestAnimationFrame(tick);
     };
     setVal(from);
-    raf = requestAnimationFrame(tick);
+    startTimer = setTimeout(run, delay);
     const fallback = setTimeout(() => {
       if (!settled) settle();
-    }, duration + 300);
+    }, delay + duration + 300);
     return () => {
+      if (startTimer) clearTimeout(startTimer);
       cancelAnimationFrame(raf);
       clearTimeout(fallback);
     };
-  }, [from, to, duration]);
+  }, [from, to, duration, delay, reducedMotion]);
   return val;
 }
 
 export function useEased(target: number, duration = 950): number {
-  const [val, setVal] = useState(target);
-  useEffect(() => {
-    let raf = 0;
-    let settled = false;
-    const start = Date.now();
-    const settle = () => {
-      settled = true;
-      setVal(target);
-    };
-    const tick = () => {
-      const t = Math.min(1, (Date.now() - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
-      setVal(target * eased);
-      if (t < 1) raf = requestAnimationFrame(tick);
-      else settle();
-    };
-    setVal(0);
-    raf = requestAnimationFrame(tick);
-    const fallback = setTimeout(() => {
-      if (!settled) settle();
-    }, duration + 300);
-    return () => {
-      cancelAnimationFrame(raf);
-      clearTimeout(fallback);
-    };
-  }, [target, duration]);
-  return val;
+  return useEasedFrom(0, target, duration);
 }

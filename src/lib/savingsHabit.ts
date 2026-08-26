@@ -36,26 +36,6 @@ export interface SavingsHabit {
   monthsObserved: number;
 }
 
-/** Months of an unbroken run before Pip suggests raising the target. */
-const RUN_BEFORE_STEP_UP = 3;
-
-/**
- * Whether to nudge the borrower toward the guide's own savings figure, and to what.
- *
- * Two savings numbers exist on purpose and they should eventually meet. The habit starts at a
- * deliberately small RM50 because AKPK's guidance is to begin at an amount that survives a bad
- * month; Belanjawanku separately recommends 10% of the minimum wage for this household. Nudging
- * only once a run is established is the "increase gradually" half of that same advice, and it
- * means the suggestion arrives as evidence the borrower can afford more rather than as a target
- * set before they have kept a single month.
- *
- * Returns null when there is no run yet, no guide figure, or the target already meets it.
- */
-export function savingsStepUp(habit: SavingsHabit, guideSuggestion: number | undefined): number | null {
-  if (!guideSuggestion || guideSuggestion <= habit.target) return null;
-  return habit.monthsKept >= RUN_BEFORE_STEP_UP ? guideSuggestion : null;
-}
-
 /** Net surplus (income minus expenses) per month, oldest first, excluding the current month. */
 function fullMonthNets(txns: Transaction[], currentMonth: string): { month: string; net: number }[] {
   const byMonth = new Map<string, number>();

@@ -51,26 +51,22 @@ export function docxXmlToText(xml: string): string {
  * (case-insensitive) against the hint string.
  */
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  // expense  keyed on the COICOP-aligned defaults in src/data/categories.ts
-  housing:        ['housing', 'rent', 'rental', 'sewa', 'utility', 'utilities', 'electricity', 'water', 'gas', 'lpg', 'maintenance', 'quit rent', 'assessment', 'tnb', 'syabas', 'air selangor', 'indah water'],
-  food:           ['groceries', 'grocery', 'supermarket', 'hypermarket', 'market', 'pasar', 'aeon', 'tesco', 'mydin', 'jaya', 'lotus', 'cold storage', 'speedmart', 'provisions'],
-  dining:         ['dining', 'restaurant', 'food', 'meal', 'lunch', 'dinner', 'breakfast', 'mamak', 'hawker', 'bistro', 'eatery', 'pizza', 'burger', 'mcd', 'kfc', 'domino', 'subway', 'foodpanda', 'coffee', 'café', 'cafe', 'teh', 'kopitiam', 'starbucks', 'zus', 'oldtown', 'boba', 'bubble tea', 'milk tea'],
-  transport:      ['transport', 'fuel', 'petrol', 'diesel', 'petronas', 'shell', 'caltex', 'bhp', 'grab', 'uber', 'lyft', 'taxi', 'bus', 'train', 'lrt', 'mrt', 'ktm', 'toll', 'parking', 'transit', 'ride', 'commute', 'touch n go'],
-  communications: ['communication', 'internet', 'broadband', 'phone', 'mobile', 'telco', 'prepaid', 'postpaid', 'unifi', 'maxis', 'celcom', 'digi', 'umobile', 'yes', 'astro', 'postage'],
-  healthcare:     ['health', 'medical', 'hospital', 'clinic', 'klinik', 'pharmacy', 'doctor', 'dentist', 'medicine', 'guardian', 'watson', 'lab', 'optical'],
-  education:      ['education', 'school', 'sekolah', 'tuition', 'tadika', 'nursery', 'childcare', 'college', 'university', 'course', 'exam', 'textbook', 'stationery', 'yuran'],
-  household:      ['household', 'shopping', 'shop', 'retail', 'store', 'fashion', 'clothing', 'apparel', 'furniture', 'appliance', 'toiletries', 'personal care', 'salon', 'barber', 'laundry', 'lazada', 'shopee', 'amazon', 'zalora', 'ikea', 'h&m', 'uniqlo'],
-  recreation:     ['recreation', 'entertainment', 'movie', 'cinema', 'game', 'gaming', 'sport', 'gym', 'fitness', 'concert', 'event', 'hobby', 'travel', 'holiday', 'netflix', 'spotify', 'subscription'],
+  // expense  keyed on the 7-category defaults in src/data/categories.ts (2026-08-21 retune).
+  // Buckets that absorbed more than one old category (food, other) carry the union of the
+  // old keyword lists; buckets that narrowed (travelling from transport, rental from housing,
+  // car-instalment from debt-service) kept the old list as-is rather than trying to guess
+  // which merchant belongs to the narrower new meaning.
+  food:           ['groceries', 'grocery', 'supermarket', 'hypermarket', 'market', 'pasar', 'aeon', 'tesco', 'mydin', 'jaya', 'lotus', 'cold storage', 'speedmart', 'provisions', 'dining', 'restaurant', 'food', 'meal', 'lunch', 'dinner', 'breakfast', 'mamak', 'hawker', 'bistro', 'eatery', 'pizza', 'burger', 'mcd', 'kfc', 'domino', 'subway', 'foodpanda', 'coffee', 'café', 'cafe', 'teh', 'kopitiam', 'starbucks', 'zus', 'oldtown', 'boba', 'bubble tea', 'milk tea'],
+  entertainment:  ['recreation', 'entertainment', 'movie', 'cinema', 'game', 'gaming', 'sport', 'gym', 'fitness', 'concert', 'event', 'hobby', 'netflix', 'spotify', 'subscription'],
+  travelling:     ['transport', 'fuel', 'petrol', 'diesel', 'petronas', 'shell', 'caltex', 'bhp', 'grab', 'uber', 'lyft', 'taxi', 'bus', 'train', 'lrt', 'mrt', 'ktm', 'toll', 'parking', 'transit', 'ride', 'commute', 'touch n go', 'travel', 'holiday', 'flight', 'airasia', 'airline', 'hotel', 'agoda'],
   insurance:      ['insurance', 'takaful', 'premium', 'policy', 'bank charge', 'service charge', 'admin fee', 'late fee', 'stamp duty', 'zakat', 'donation', 'derma'],
-  'debt-service': ['loan repayment', 'debt repayment', 'repayment', 'installment', 'instalment', 'ansuran', 'financing', 'hire purchase', 'mortgage', 'credit card payment', 'ptptn'],
-  other:          ['other', 'miscellaneous', 'misc', 'unknown'],
-  // income  split by source, the way a P&L is
-  'employment-income': ['salary', 'wage', 'payroll', 'gaji', 'employment', 'remuneration', 'bonus', 'overtime', 'ot claim'],
-  'business-income':   ['business', 'trade', 'sales', 'takings', 'revenue', 'turnover', 'jualan', 'niaga', 'shopee payout', 'lazada payout', 'customer payment'],
-  'gig-income':        ['gig', 'commission', 'incentive', 'platform', 'payout', 'grab payout', 'foodpanda payout', 'delivery earning', 'freelance', 'fee earned'],
-  'transfers-in':      ['allowance', 'elaun', 'stipend', 'subsidy', 'subsistence', 'transfer', 'family support', 'bantuan', 'str', 'bsh', 'aid', 'pocket money'],
-  'investment-income': ['dividend', 'dividen', 'interest', 'faedah', 'yield', 'coupon', 'profit distribution', 'hibah', 'rental income', 'asb', 'tabung haji'],
-  'other-income':      ['other', 'refund', 'rebate', 'return', 'reimbursement', 'collect debt', 'sale of asset', 'windfall'],
+  rental:         ['housing', 'rent', 'rental', 'sewa', 'utility', 'utilities', 'electricity', 'water', 'gas', 'lpg', 'maintenance', 'quit rent', 'assessment', 'tnb', 'syabas', 'air selangor', 'indah water'],
+  'car-instalment': ['loan repayment', 'debt repayment', 'repayment', 'installment', 'instalment', 'ansuran', 'financing', 'hire purchase', 'mortgage', 'credit card payment', 'ptptn'],
+  other:          ['other', 'miscellaneous', 'misc', 'unknown', 'communication', 'internet', 'broadband', 'phone', 'mobile', 'telco', 'prepaid', 'postpaid', 'unifi', 'maxis', 'celcom', 'digi', 'umobile', 'yes', 'astro', 'postage', 'health', 'medical', 'hospital', 'clinic', 'klinik', 'pharmacy', 'doctor', 'dentist', 'medicine', 'guardian', 'watson', 'lab', 'optical', 'education', 'school', 'sekolah', 'tuition', 'tadika', 'nursery', 'childcare', 'college', 'university', 'course', 'exam', 'textbook', 'stationery', 'yuran', 'household', 'shopping', 'shop', 'retail', 'store', 'fashion', 'clothing', 'apparel', 'furniture', 'appliance', 'toiletries', 'personal care', 'salon', 'barber', 'laundry', 'lazada', 'shopee', 'amazon', 'zalora', 'ikea', 'h&m', 'uniqlo'],
+  // income (salary, allowance, other-income)
+  salary:         ['salary', 'wage', 'payroll', 'gaji', 'employment', 'remuneration', 'bonus', 'overtime', 'ot claim', 'gig', 'commission', 'incentive', 'platform', 'payout', 'grab payout', 'foodpanda payout', 'delivery earning', 'freelance', 'fee earned'],
+  allowance:      ['allowance', 'elaun', 'stipend', 'subsidy', 'subsistence', 'transfer', 'transfers', 'family support', 'bantuan', 'str', 'bsh', 'aid', 'pocket money'],
+  'other-income': ['other', 'refund', 'rebate', 'return', 'reimbursement', 'collect debt', 'sale of asset', 'windfall', 'business', 'trade', 'sales', 'takings', 'revenue', 'turnover', 'jualan', 'niaga', 'dividend', 'interest', 'investment'],
 };
 
 /** Map a free-form LLM category description to an app category id of matching kind.
@@ -98,18 +94,153 @@ export function matchSourceCategory(
   return null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Source category vocabulary
+//
+// Exports from a tracker (a spreadsheet the user already keeps by hand) carry
+// their own category labels: a small set repeated over many rows. Those labels
+// are the user's own taxonomy and must survive the import intact. A label like
+// "Toll" or "Fuel" would otherwise be swallowed by the broad `travelling`
+// keyword list, and "fyy" would land in the default bucket. Statements, by
+// contrast, carry varied free-text hints that SHOULD be keyword-mapped.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Prefix marking a category the import wants but that does not exist yet. */
+export const PENDING_CAT = 'pending:';
+
+export interface SourceLabel {
+  /** Display casing (the most common spelling seen in the document). */
+  label: string;
+  kind: TxnType;
+  /** How many rows carried this label. */
+  count: number;
+  /** Existing category with this exact label, or null if it must be created. */
+  existingId: string | null;
+}
+
+export interface SourceVocabulary {
+  /** True when the hints look like a tracker's own taxonomy rather than free text. */
+  isTracker: boolean;
+  labels: SourceLabel[];
+}
+
+// A tracker needs enough rows for the ratio to mean anything, a small label
+// set, and each label repeated rather than used once.
+const TRACKER_MIN_ROWS = 10;
+const TRACKER_MAX_LABELS = 15;
+const TRACKER_MIN_ROWS_PER_LABEL = 5;
+
+const vocabKey = (kind: TxnType, label: string) => `${kind} ${label.trim().toLowerCase()}`;
+
 /**
- * Choose a category for each imported row: learned memory first (only when its
- * kind matches the row), then the source-document category hint, then the
- * generic fallback for the row's kind.
+ * Inventory the category labels an import carries, and judge whether they look
+ * like a tracker's own taxonomy. `isTracker` is advisory: the caller decides
+ * whether to actually honour the vocabulary (see `assignImported`).
+ */
+export function detectSourceVocabulary(
+  items: ExtractedTxn[],
+  categories: Category[]
+): SourceVocabulary {
+  const groups = new Map<string, { kind: TxnType; count: number; casings: Map<string, number> }>();
+  let hinted = 0;
+
+  for (const it of items) {
+    const raw = typeof it.categoryHint === 'string' ? it.categoryHint.trim() : '';
+    if (!raw) continue;
+    hinted++;
+    const key = vocabKey(it.type, raw);
+    let g = groups.get(key);
+    if (!g) {
+      g = { kind: it.type, count: 0, casings: new Map() };
+      groups.set(key, g);
+    }
+    g.count++;
+    g.casings.set(raw, (g.casings.get(raw) ?? 0) + 1);
+  }
+
+  const labels: SourceLabel[] = [...groups.values()].map((g) => {
+    // Most common spelling wins; insertion order breaks ties, so the first
+    // spelling seen is kept when two are equally common.
+    let label = '';
+    let best = -1;
+    for (const [casing, n] of g.casings) {
+      if (n > best) {
+        best = n;
+        label = casing;
+      }
+    }
+    const existing = categories.find(
+      (c) => c.kind === g.kind && c.label.trim().toLowerCase() === label.toLowerCase()
+    );
+    return { label, kind: g.kind, count: g.count, existingId: existing ? existing.id : null };
+  });
+
+  const isTracker =
+    hinted >= TRACKER_MIN_ROWS &&
+    labels.length > 0 &&
+    labels.length <= TRACKER_MAX_LABELS &&
+    hinted / labels.length >= TRACKER_MIN_ROWS_PER_LABEL;
+
+  return { isTracker, labels };
+}
+
+/** The source label behind a `pending:` id, or null for a real id. */
+export function pendingLabel(id: string | null | undefined): string | null {
+  return typeof id === 'string' && id.startsWith(PENDING_CAT)
+    ? id.slice(PENDING_CAT.length)
+    : null;
+}
+
+/**
+ * Swap `pending:` ids for the real category ids created at commit time. A label
+ * missing from `created` was declined by the user, so its rows are dropped
+ * rather than silently filed somewhere they were never meant to go.
+ */
+export function resolvePending(
+  assignments: (string | null)[],
+  created: Record<string, string>
+): (string | null)[] {
+  return assignments.map((a) => {
+    const label = pendingLabel(a);
+    if (label === null) return a;
+    return created[label] ?? DROP;
+  });
+}
+
+/** label+kind → the category id to use, real or `pending:`-prefixed. */
+function vocabularyIndex(vocabulary: SourceVocabulary): Map<string, string> {
+  const index = new Map<string, string>();
+  for (const l of vocabulary.labels) {
+    index.set(vocabKey(l.kind, l.label), l.existingId ?? `${PENDING_CAT}${l.label}`);
+  }
+  return index;
+}
+
+/**
+ * Choose a category for each imported row.
+ *
+ * When `vocabulary` is passed the document's own labels win outright  the user
+ * asked to keep them, so they beat both learned memory and keyword mapping.
+ * Rows the document did not label, and every row when no vocabulary is passed,
+ * fall through to the original order: learned memory (only when its kind
+ * matches the row), then the category hint, then the generic fallback.
  */
 export function assignImported(
   items: ExtractedTxn[],
   memory: MemoryMap,
   categories: Category[],
-  catById: Record<string, Category>
+  catById: Record<string, Category>,
+  vocabulary?: SourceVocabulary | null
 ): string[] {
+  const sourceIds = vocabulary ? vocabularyIndex(vocabulary) : null;
+
   return items.map((it) => {
+    if (sourceIds) {
+      const raw = typeof it.categoryHint === 'string' ? it.categoryHint.trim() : '';
+      const fromSource = raw ? sourceIds.get(vocabKey(it.type, raw)) : undefined;
+      if (fromSource) return fromSource;
+    }
+
     const learned = suggestForMerchant(memory, it.merchant);
     if (learned && catById[learned] && catById[learned].kind === it.type) return learned;
 

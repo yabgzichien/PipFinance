@@ -1,21 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
+import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
+import { decimalsFor } from '../lib/currencies';
 import { todayISO } from '../lib/duplicates';
+import { listFxRates } from '../db/fxRepo';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
+import { deleteReceiptImage } from '../lib/receiptStorage';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 import { AccountLinkField } from './AccountLinkField';
 import { AddCategoryModal } from './AddCategoryModal';
+import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
 import { Icon } from './Icon';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { outstanding } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 
@@ -46,11 +52,19 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [linkId, setLinkId] = useState<string | null>(null);
   const [linkEffect, setLinkEffect] = useState<LinkEffect>('subtract');
   const [splitting, setSplitting] = useState(false);
+  const [viewingReceipt, setViewingReceipt] = useState(false);
+  // Cached rates, refreshed each time a transaction is opened for editing: needed to convert
+  // this row's MYR-equivalent into a linked account's own currency (Task 9), since
+  // `balance_entries.value` is native to the account rather than always MYR.
+  const [rates, setRates] = useState<Record<string, number>>({});
 
   const openId = txn?.id;
   useEffect(() => {
     if (txn) {
-      setAmountText(txn.amount.toFixed(2));
+      // `nativeAmount` is what the user actually typed for a foreign row; `amount` is always
+      // the MYR column. Seeding from `amount` here would show a ringgit figure in a field
+      // that saves back as the row's own currency (e.g. yuan).
+      setAmountText((txn.nativeAmount ?? txn.amount).toFixed(decimalsFor(txn.currency)));
       setType(txn.type);
       setCat(txn.categoryId);
       setRemark(txn.remark ?? '');
@@ -58,6 +72,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setLinkId(null);
       setLinkEffect('subtract');
       setSplitting(false);
+      setViewingReceipt(false);
+      listFxRates().then((fx) => setRates(ratesFromCache(fx)));
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -103,6 +119,19 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
   if (!txn) return <Modal visible={false} transparent />;
 
+  // Currency is fixed once a row is written (spec §Non-goals: changing it after the fact is
+  // out of scope for v1), so this is read-only context, not a control.
+  const decimals = decimalsFor(txn.currency);
+  const currencyLabel = txn.currency === BASE_CURRENCY ? 'RM' : txn.currency;
+
+  // The linked account's balance is native to ITS OWN currency (Task 9). No conversion (and
+  // so no rate) is needed when the row's currency already matches the account's, or the
+  // account is MYR; otherwise the account's own rate must be cached, or `deriveNative` would
+  // throw on save.
+  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
+  const linkConvertible =
+    !linkAccount || linkAccount.currency === txn.currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
+
   const switchType = (t: TxnType) => {
     if (t === type) return;
     setType(t);
@@ -118,16 +147,34 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
   const save = async () => {
     const n = parseFloat(amountText.replace(/[^0-9.]/g, ''));
+    // `txn.amount` is the MYR column; the field (and everything below) works in the row's own
+    // currency, which is `nativeAmount` for a foreign row.
+    const nativeCurrent = txn.nativeAmount ?? txn.amount;
     // A split row's amount is derived from the split, so it is not the user's to retype here:
     // letting it drift would leave `gross` and the shares reconciling against nothing.
     const amount = split
-      ? txn.amount
+      ? nativeCurrent
       : Number.isFinite(n) && n >= 0
-        ? Math.round(n * 100) / 100
-        : txn.amount;
+        ? round2(n)
+        : nativeCurrent;
     const categoryId = type === 'transfer' ? null : cat ?? (type === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID);
+    // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
+    // re-derives the MYR column itself from the row's own frozen rate.
     await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
-    if (linkId) await recordBalanceLink(linkId, amount, linkEffect, txn.date ?? todayISO());
+    // The row's MYR-equivalent, converted at the row's own frozen rate (never today's), used
+    // both for its own bookkeeping and, below, as the starting point for converting into the
+    // linked account's own currency.
+    const myrAmount = txn.fxRate != null ? round2(amount * txn.fxRate) : amount;
+    // Accounts are natively denominated (Task 9): when the row's own currency already matches
+    // the linked account's, its native amount is used unconverted rather than round-tripped
+    // through MYR (which could drift a cent from double rounding); otherwise the MYR-equivalent
+    // is converted into the account's own currency at the account's own rate (the inverse of
+    // `deriveMyr`), same principle as ManualEntryScreen's save.
+    if (linkId && linkAccount) {
+      const linkAmount =
+        linkAccount.currency === txn.currency ? amount : deriveNative(myrAmount, linkAccount.currency, rateFor(rates, linkAccount.currency));
+      await recordBalanceLink(linkId, linkAmount, linkEffect, txn.date ?? todayISO());
+    }
     onClose();
   };
 
@@ -139,6 +186,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     const label = txn.merchantRaw || currentCatLabel;
     confirmAction('Delete transaction?', `Remove “${label}”? This can’t be undone.`, 'Delete', async () => {
       await removeTransaction(txn.id);
+      if (txn.receiptUri) deleteReceiptImage(txn.receiptUri);
       onClose();
     });
   };
@@ -146,7 +194,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+      >
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
           <Text style={[styles.title, { color: colorTheme.ink }]} numberOfLines={1}>
@@ -158,6 +209,21 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {!!txn.receiptUri && (
+            <Pressable
+              onPress={() => setViewingReceipt(true)}
+              style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, marginTop: 0, marginBottom: 18 }]}
+              hitSlop={4}
+            >
+              <RNImage source={{ uri: txn.receiptUri }} style={[styles.receiptThumb, { borderColor: colorTheme.line }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>Receipt photo</Text>
+                <Text style={[styles.splitSub, { color: colorTheme.ink2 }]}>Tap to view</Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+            </Pressable>
+          )}
+
           {/* type toggle — a transfer (e.g. a DCA contribution) can never be flipped into an
               expense or income here; it moves money between two accounts, not into a category. */}
           {type === 'transfer' ? (
@@ -194,11 +260,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{split ? 'Your share' : 'Amount'}</Text>
           <View style={styles.amountRow}>
-            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>RM</Text>
+            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyLabel}</Text>
             <TextInput
               value={amountText}
-              onChangeText={setAmountText}
-              keyboardType="decimal-pad"
+              onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
+              keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
               selectTextOnFocus
               editable={!split}
               style={[
@@ -211,7 +277,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </View>
           {!!split && (
             <Text style={[styles.lockNote, { color: colorTheme.ink3 }]}>
-              RM {fmt(split.gross)} left your account. Change the split below to adjust this.
+              {fmtMoney(split.gross, txn.currency)} left your account. Change the split below to adjust this.
             </Text>
           )}
 
@@ -262,11 +328,14 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             >
               <Icon name="gift" size={18} color={theme.accent} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{split ? 'Split with friends' : 'Split with friends'}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{split ? 'Split with friends' : 'Split with friends'}</Text>
+                  <InfoButton entry="split_bill" />
+                </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {split
                     ? stillOwed > 0
-                      ? `${splitNames} owe you RM ${fmt(stillOwed)}`
+                      ? `${splitNames} owe you ${fmtMoney(stillOwed, txn.currency)}`
                       : `${splitNames} settled up`
                     : 'Record only your share and track what you are owed'}
                 </Text>
@@ -280,7 +349,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </View>
 
           <View style={{ marginTop: 20 }}>
-            <PrimaryButton onPress={save} height={52}>
+            <PrimaryButton onPress={save} height={52} disabled={!linkConvertible}>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
               <BtnLabel>Save changes</BtnLabel>
             </PrimaryButton>
@@ -291,7 +360,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             <Text style={styles.deleteText}>Delete transaction</Text>
           </Pressable>
         </ScrollView>
-      </View>
+      </KeyboardAvoidingView>
 
       <AddCategoryModal
         visible={adding}
@@ -307,7 +376,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           editor open on a stale figure would invite the user to save the old one back. */}
       <SplitSheet
         visible={splitting}
-        gross={split ? split.gross : txn.amount}
+        // Splitting for the first time must divide the row's own currency, not the MYR column
+        // (the same `nativeAmount ?? amount` rule as the amount field above); an already-split
+        // row keeps its stored gross, which was raised in that same currency at creation time.
+        gross={split ? split.gross : (txn.nativeAmount ?? txn.amount)}
+        currency={txn.currency}
         merchant={txn.merchantRaw}
         initial={splitDraft}
         onClose={() => setSplitting(false)}
@@ -326,6 +399,22 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             : undefined
         }
       />
+
+      <Modal
+        visible={viewingReceipt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewingReceipt(false)}
+      >
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewingReceipt(false)}>
+          {!!txn.receiptUri && (
+            <RNImage source={{ uri: txn.receiptUri }} style={styles.viewerImage} resizeMode="contain" />
+          )}
+          <Pressable onPress={() => setViewingReceipt(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+            <Icon name="x" size={22} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Modal>
   );
 }
@@ -383,6 +472,10 @@ const styles = StyleSheet.create({
   },
   splitTitle: { fontFamily: uiFont(700), fontSize: 14 },
   splitSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
+  receiptThumb: { width: 44, height: 44, borderRadius: 10, borderWidth: 1 },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
+  viewerClose: { position: 'absolute', right: 18, padding: 8 },
   remarkInput: {
     borderWidth: 1,
     borderRadius: radius.sm,

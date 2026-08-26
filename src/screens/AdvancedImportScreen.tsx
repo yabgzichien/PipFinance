@@ -41,8 +41,11 @@ import {
 } from '../components/ui';
 import { addAccount, listAccounts } from '../db/accountsRepo';
 import { addTransactions } from '../db/txnRepo';
+import { listFxRates } from '../db/fxRepo';
 import { DROP, type Account, type ExtractedTxn } from '../lib/types';
+import { deriveNative } from '../lib/currency';
 import { todayISO } from '../lib/duplicates';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { merchantKey } from '../lib/normalize';
 import { defaultLinkEffect } from '../lib/networth';
 import { buildPrompt, parseJSON, type ParsedAccount, type ParsedCommitment, type ParsedTransfer, type ParseResult } from '../lib/advancedImport';
@@ -169,7 +172,15 @@ type Phase =
   | 'error';
 
 
-export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
+export function AdvancedImportScreen({
+  onClose,
+  onSuccess,
+  isWizard = false,
+}: {
+  onClose: () => void;
+  onSuccess?: () => void;
+  isWizard?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -296,6 +307,11 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
 
       // 3. Update account balances with imported transactions if option enabled.
       if (updateAccountBalances) {
+        // Imported transactions and transfers are always MYR (this import format has no
+        // per-row currency; see ExtractedTxn.currency's contract). A matched target account,
+        // though, may be an existing foreign-denominated one (Task 9), so its balance link
+        // has to convert MYR into the account's own currency first.
+        const rates = ratesFromCache(await listFxRates());
         const existingAccounts = await listAccounts();
         const allAccounts = [
           ...newlyCreatedAccounts,
@@ -318,7 +334,8 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
 
           if (targetAccount) {
             const effect = defaultLinkEffect(targetAccount.kind, txn.type);
-            await recordBalanceLink(targetAccount.id, txn.amount, effect, txn.date ?? today);
+            const linkAmount = deriveNative(txn.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+            await recordBalanceLink(targetAccount.id, linkAmount, effect, txn.date ?? today);
           }
         }
 
@@ -337,7 +354,8 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
             const searchName = t.account.trim().toLowerCase();
             const targetAccount = allAccounts2.find((a) => a.name.trim().toLowerCase() === searchName);
             if (targetAccount) {
-              await recordBalanceLink(targetAccount.id, t.amount, 'subtract', t.date ?? today);
+              const linkAmount = deriveNative(t.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+              await recordBalanceLink(targetAccount.id, linkAmount, 'subtract', t.date ?? today);
             }
           }
         }
@@ -430,7 +448,7 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
               </>
             ) : (
               <>
-                Got a long PDF or spreadsheet? Copy the prompt, open your favourite AI, attach your files, and paste the JSON back.{'\n'}No API key needed.
+                Got a long PDF or spreadsheet? Copy the prompt, open your favourite AI, attach your files, and paste the JSON back.
               </>
             )}
           </BubbleText>
@@ -452,9 +470,9 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
               )}
             </Card>
             <View style={{ marginTop: 22 }}>
-              <PrimaryButton onPress={onClose}>
-                <Icon name="check" size={18} color="#fff" stroke={2.4} />
-                <BtnLabel>Done</BtnLabel>
+              <PrimaryButton onPress={() => { (onSuccess ?? onClose)(); }}>
+                <Icon name={isWizard ? 'arrowRight' : 'check'} size={18} color="#fff" stroke={2.4} />
+                <BtnLabel>{isWizard ? 'Continue setup' : 'Done'}</BtnLabel>
               </PrimaryButton>
             </View>
           </>
@@ -490,27 +508,8 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
         {phase === 'accountReview' && (
           <>
             <View style={{ marginTop: 20 }}>
-              <Eyebrow style={{ marginBottom: 12 }}>
-                {parsedAccounts.filter((a) => a.include).length} of {parsedAccounts.length} accounts selected
-              </Eyebrow>
-
-              {/* Legend */}
-              <View style={styles.legendRow}>
-                <View style={[styles.kindDot, { backgroundColor: theme.accent }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Asset</Text>
-                <View style={[styles.kindDot, { backgroundColor: colorTheme.amber, marginLeft: 12 }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Liability (outstanding balance)</Text>
-              </View>
-
-              <Card style={{ padding: 14, marginTop: 10 }}>
-                <AccountReviewList
-                  accounts={parsedAccounts}
-                  onChange={setParsedAccounts}
-                />
-              </Card>
-
               {parsedTxns.length > 0 && (
-                <Card style={{ padding: 14, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <Card style={{ padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <Pressable
                     onPress={() => setUpdateAccountBalances((prev) => !prev)}
                     hitSlop={6}
@@ -538,6 +537,25 @@ export function AdvancedImportScreen({ onClose }: { onClose: () => void }) {
                   </Pressable>
                 </Card>
               )}
+
+              <Eyebrow style={{ marginBottom: 12 }}>
+                {parsedAccounts.filter((a) => a.include).length} of {parsedAccounts.length} accounts selected
+              </Eyebrow>
+
+              {/* Legend */}
+              <View style={styles.legendRow}>
+                <View style={[styles.kindDot, { backgroundColor: theme.accent }]} />
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Asset</Text>
+                <View style={[styles.kindDot, { backgroundColor: colorTheme.amber, marginLeft: 12 }]} />
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Liability (outstanding balance)</Text>
+              </View>
+
+              <Card style={{ padding: 14, marginTop: 10 }}>
+                <AccountReviewList
+                  accounts={parsedAccounts}
+                  onChange={setParsedAccounts}
+                />
+              </Card>
             </View>
 
             <View style={{ marginTop: 18, gap: 10 }}>

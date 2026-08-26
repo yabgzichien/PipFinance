@@ -1,23 +1,41 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
+import { PipWearsHat } from '../components/Pip';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
+import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
+import { listFxRates } from '../db/fxRepo';
+import { currentMonthKey } from '../lib/budget';
+import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { todayISO } from '../lib/duplicates';
+import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
-import { suggestForMerchant } from '../lib/recommend';
+import { notify } from '../lib/platformAlert';
+import { type ScannedReceipt } from '../lib/parseReceipt';
+import { prevMonthKey } from '../lib/recap';
+import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction } from '../lib/types';
-import { emitTourSignal } from '../lib/tourSignals';
 import { useAppData, type NewLearned } from '../state/store';
+import { useBackHandler } from '../state/useBackHandler';
 import { useThemeColors } from '../state/colorScheme';
 import { AttachScreen, type PickedImage } from './AttachScreen';
 import { CategorizeScreen, type PendingSettlement } from './CategorizeScreen';
 import { ExtractScreen } from './ExtractScreen';
-import { ImportScreen } from './ImportScreen';
 import { ManualEntryScreen } from './ManualEntryScreen';
 import { ReceiptScanScreen, type ReceiptSplitResult } from './ReceiptScanScreen';
 import { SavedScreen } from './SavedScreen';
+import { ScanKindScreen } from './ScanKindScreen';
 
-type Phase = 'attach' | 'extract' | 'guessing' | 'categorize' | 'manual' | 'receipt' | 'split' | 'saved' | 'import';
+type Phase =
+  | 'attach'
+  | 'kind'
+  | 'extract'
+  | 'guessing'
+  | 'categorize'
+  | 'manual'
+  | 'receipt'
+  | 'split'
+  | 'saved';
 
 const GUESS_TIMEOUT_MS = 12000;
 
@@ -29,18 +47,29 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+type AddFlowProps = {
+  onClose: () => void;
+  initialPhase?: Phase;
+};
+
 /**
  * The add-a-receipt flow: Attach → Extract → Categorize → Saved.
  * Mirrors the design's state machine but wired to the real LLM + SQLite.
+ *
+ * Pip wears his straw hat for the whole flow. The wrapper exists because every phase below is its
+ * own early return, and because <PipSays> is shared with screens outside this flow, so the hat has
+ * to be scoped by where a Pip is rendered rather than by which component renders it.
  */
-export function AddFlow({
-  onClose,
-  initialPhase = 'attach',
-}: {
-  onClose: () => void;
-  initialPhase?: Phase;
-}) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, tourActive } = useAppData();
+export function AddFlow(props: AddFlowProps) {
+  return (
+    <PipWearsHat>
+      <AddFlowPhases {...props} />
+    </PipWearsHat>
+  );
+}
+
+function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection } = useAppData();
   const colorTheme = useThemeColors();
 
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -50,24 +79,78 @@ export function AddFlow({
   const [cached, setCached] = useState<ExtractedTxn[] | undefined>(undefined);
   const [linkId, setLinkId] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<ReceiptSplitResult | null>(null);
+  // Set once ReceiptScanScreen actually reads the picked image, so backing out to the kind
+  // question and choosing "receipt" again reuses the read instead of paying for another one.
+  const [cachedReceipt, setCachedReceipt] = useState<ScannedReceipt | null>(null);
   const [result, setResult] = useState<Transaction[]>([]);
   const [newLearned, setNewLearned] = useState<NewLearned[]>([]);
   const [hasKey, setHasKey] = useState(true);
+  // The memory-matched suggestions from this scan (source: 'learned' only, not AI guesses),
+  // carried from onExtracted to onCategorized so the auto-fill competence signal
+  // (docs/ui-engagement-plan.md Step 5) reflects what Pip actually knew at extraction time,
+  // not what the user ends up picking after reviewing.
+  const [learnedThisScan, setLearnedThisScan] = useState<(CategorySuggestion | null)[]>([]);
+  const [autoFill, setAutoFill] = useState<{ current: AutoFillStats; lastMonth: AutoFillStats } | null>(null);
+  // The real extraction round-trip, carried from ExtractScreen to the Saved screen's "Read in
+  // Ns" payoff line (docs/ui-engagement-plan.md Step 2). Null for any path that never ran a
+  // live extraction (manual entry, receipt scan, a cached re-review).
+  const [extractElapsedMs, setExtractElapsedMs] = useState<number | null>(null);
 
   useEffect(() => {
     getLLM().then((llm) => setHasKey(llm.can('extract')));
   }, []);
 
-  const onPicked = (img: PickedImage) => {
-    setImage(img);
-    setCached(undefined);
+  // Named so hardware/gesture back can call the exact same transition as each phase's own back
+  // button below — the two must never disagree about where back goes.
+  const backToAttach = () => setPhase('attach');
+  // Both readers were reached by answering the kind question, so back re-asks it. Getting the
+  // answer wrong costs one tap, not another trip to the camera.
+  const backToKind = () => setPhase(image ? 'kind' : 'attach');
+  const backFromManualOrSplit = () => setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
+  const backFromCategorize = () => {
+    setCached(extracted);
     setPhase('extract');
   };
 
-  const onExtracted = async (items: ExtractedTxn[], accountId: string | null) => {
-    emitTourSignal('scan-extracted');
+  useBackHandler(() => {
+    if (phase === 'receipt' || phase === 'extract') {
+      backToKind();
+      return true;
+    }
+    if (phase === 'kind') {
+      backToAttach();
+      return true;
+    }
+    if (phase === 'manual' || phase === 'split') {
+      backFromManualOrSplit();
+      return true;
+    }
+    if (phase === 'categorize') {
+      backFromCategorize();
+      return true;
+    }
+    // attach / guessing / saved: nothing further back within the flow, so close it —
+    // the same as tapping this phase's own close button.
+    onClose();
+    return true;
+  });
+
+  // The hub has one scan button and therefore no idea what it just captured. Rather than guess,
+  // hand off to the kind question, which routes to the itemised reader or the batch reader.
+  const onPicked = (img: PickedImage) => {
+    setImage(img);
+    setCached(undefined);
+    setExtractElapsedMs(null);
+    setAutoFill(null);
+    setReceiptResult(null);
+    setCachedReceipt(null);
+    setPhase('kind');
+  };
+
+  const onExtracted = async (items: ExtractedTxn[], accountId: string | null, elapsedMs: number | null) => {
     setExtracted(items);
     setLinkId(accountId);
+    setExtractElapsedMs(elapsedMs);
 
     const learned: (CategorySuggestion | null)[] = items.map((it) => {
       const s = suggestForMerchant(memory, it.merchant);
@@ -76,6 +159,7 @@ export function AddFlow({
       // only pre-fill if the learned category matches this item's kind
       return cat && cat.kind === it.type ? { categoryId: s, source: 'learned' } : null;
     });
+    setLearnedThisScan(learned);
 
     const missing = learned.map((s, i) => (s ? -1 : i)).filter((i) => i !== -1);
     if (missing.length === 0) {
@@ -115,37 +199,76 @@ export function AddFlow({
     splitDrafts: (SplitDraft | null)[] = [],
     settlements: (PendingSettlement | null)[] = []
   ) => {
-    const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
-    // If the whole batch was tagged to an account, move that account's balance
-    // per saved row — direction derived from account kind + txn type (an expense
-    // reduces an asset / pays down a liability; income does the reverse).
+    // If the whole batch is tagged to an account, resolve its own-currency rate BEFORE
+    // committing anything below: a missing rate must fail here, with nothing created yet,
+    // rather than throwing partway through the per-row balance-link loop, which would leave
+    // some rows committed and linked and others not, with the screen never advancing (this
+    // is called fire-and-forget from CategorizeScreen, with no try/catch anywhere upstream).
     const account = linkId ? accounts.find((a) => a.id === linkId) : null;
-    if (account) {
-      // `created` is the kept rows in order, so drop the same items commitCategorized dropped
-      // to line the drafts back up with them.
-      const keptDrafts = items.map((_, i) => splitDrafts[i] ?? null).filter((_, i) => assignments[i] !== DROP);
-      for (let k = 0; k < created.length; k++) {
-        const t = created[k];
-        // A split row saved at the payer's own share, but the whole bill left the account, so
-        // the balance moves by the gross or the cash side is short by what friends owe.
-        const moved = keptDrafts[k]?.gross ?? t.amount;
-        await recordBalanceLink(account.id, moved, defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
+    let rate: number | null = null;
+    if (account && account.currency !== BASE_CURRENCY) {
+      rate = rateFor(ratesFromCache(await listFxRates()), account.currency);
+      if (rate == null) {
+        notify("Couldn't save this batch", `No cached exchange rate for ${account.currency}. Try again when you're online.`);
+        return;
       }
     }
-    // Repayments the user confirmed: settled against the receivable, never written as income.
-    for (const s of settlements) {
-      if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
+
+    try {
+      const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
+      await applyReliefDetection(created, null);
+      // If the whole batch was tagged to an account, move that account's balance
+      // per saved row — direction derived from account kind + txn type (an expense
+      // reduces an asset / pays down a liability; income does the reverse).
+      if (account) {
+        // `created` is the kept rows in order, so drop the same items commitCategorized dropped
+        // to line the drafts back up with them.
+        const keptDrafts = items.map((_, i) => splitDrafts[i] ?? null).filter((_, i) => assignments[i] !== DROP);
+        for (let k = 0; k < created.length; k++) {
+          const t = created[k];
+          // A split row saved at the payer's own share, but the whole bill left the account, so
+          // the balance moves by the gross or the cash side is short by what friends owe. `moved`
+          // is always MYR (receipt/extract-scan items and splits are MYR-only today); `rate` was
+          // already validated above, so this conversion cannot throw.
+          const moved = keptDrafts[k]?.gross ?? t.amount;
+          await recordBalanceLink(account.id, deriveNative(moved, account.currency, rate), defaultLinkEffect(account.kind, t.type), t.date ?? todayISO());
+        }
+      }
+      // Repayments the user confirmed: settled against the receivable, never written as income.
+      for (const s of settlements) {
+        if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
+      }
+
+      // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
+      // scan Pip already knew, next to the same measure for last calendar month.
+      const stats = autoFillStats(learnedThisScan);
+      const month = currentMonthKey();
+      const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
+      setAutoFill({ current: stats, lastMonth });
+
+      setResult(created);
+      setNewLearned(learned);
+      setPhase('saved');
+    } catch (e) {
+      // Surfaced rather than left as a silent unhandled rejection: CategorizeScreen calls this
+      // fire-and-forget, so nothing else in the chain would ever tell the user this failed.
+      notify("Couldn't save this batch", e instanceof Error ? e.message : 'Something went wrong.');
     }
-    setResult(created);
-    setNewLearned(learned);
-    setPhase('saved');
-    emitTourSignal('scan-saved');
   };
 
   const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {
-    const { created, newLearned: learned } = await commitCategorized([item], [categoryId], 'manual', [split]);
+    const { created, newLearned: learned } = await commitCategorized(
+      [item],
+      [categoryId],
+      'manual',
+      [split],
+      [receiptResult?.photoUri ?? null]
+    );
+    await applyReliefDetection(created, cachedReceipt);
     setResult(created);
     setNewLearned(learned);
+    setExtractElapsedMs(null);
+    setAutoFill(null);
     setPhase('saved');
   };
 
@@ -156,14 +279,18 @@ export function AddFlow({
         onClose={onClose}
         onPicked={onPicked}
         onManual={() => setPhase('manual')}
-        onImport={() => setPhase('import')}
-        onReceipt={() => setPhase('receipt')}
-        showSamples={tourActive}
       />
     );
   }
-  if (phase === 'import') {
-    return <ImportScreen onClose={onClose} />;
+  if (phase === 'kind' && image) {
+    return (
+      <ScanKindScreen
+        image={image}
+        onBack={backToAttach}
+        onReceipt={() => setPhase('receipt')}
+        onHistory={() => setPhase('extract')}
+      />
+    );
   }
   if (phase === 'guessing') {
     return (
@@ -177,7 +304,11 @@ export function AddFlow({
   if (phase === 'receipt') {
     return (
       <ReceiptScanScreen
-        onBack={() => setPhase('attach')}
+        initialImage={image ?? undefined}
+        cachedReceipt={cachedReceipt}
+        initialDraft={receiptResult?.resumeState ?? null}
+        onScanned={setCachedReceipt}
+        onBack={backToKind}
         onManualInstead={() => {
           setReceiptResult(null);
           setPhase('split');
@@ -193,7 +324,7 @@ export function AddFlow({
     return (
       <ManualEntryScreen
         categories={categories}
-        onBack={() => setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach')}
+        onBack={backFromManualOrSplit}
         onComplete={onManualComplete}
         // Three ways in, three honest titles: a scanned receipt lands here already filled in, the
         // no-receipt path is a bare split, and 'manual' is a plain typed entry.
@@ -201,6 +332,7 @@ export function AddFlow({
         startSplitting={phase === 'split'}
         initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : null}
         initialAmount={phase === 'split' ? receiptResult?.charged ?? null : null}
+        initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : null}
         initialSplit={phase === 'split' ? receiptResult?.draft ?? null : null}
       />
     );
@@ -212,7 +344,7 @@ export function AddFlow({
         image={image}
         cachedItems={cached}
         linkId={linkId}
-        onBack={() => setPhase('attach')}
+        onBack={backToKind}
         onDone={onExtracted}
       />
     );
@@ -224,13 +356,12 @@ export function AddFlow({
         suggestions={suggestions}
         categories={categories}
         linkId={linkId}
-        onBack={() => {
-          setCached(extracted);
-          setPhase('extract');
-        }}
+        onBack={backFromCategorize}
         onComplete={onCategorized}
       />
     );
   }
-  return <SavedScreen result={result} newLearned={newLearned} catById={catById} onDone={onClose} />;
+  return (
+    <SavedScreen result={result} newLearned={newLearned} catById={catById} elapsedMs={extractElapsedMs} autoFill={autoFill} onDone={onClose} />
+  );
 }

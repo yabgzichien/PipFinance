@@ -1,5 +1,6 @@
 import { getDb, genId } from './db';
 import type { Transaction, TxnSource, TxnType } from '../lib/types';
+import { BASE_CURRENCY, deriveMyr, rederiveOnEdit } from '../lib/currency';
 
 interface TxnRow {
   id: string;
@@ -13,6 +14,9 @@ interface TxnRow {
   created_at: string;
   source: string;
   remark: string | null;
+  receipt_uri: string | null;
+  native_amount: number | null;
+  fx_rate: number | null;
 }
 
 function toTxn(r: TxnRow): Transaction {
@@ -28,6 +32,9 @@ function toTxn(r: TxnRow): Transaction {
     createdAt: r.created_at,
     source: (r.source as TxnSource) ?? 'manual',
     remark: r.remark,
+    receiptUri: r.receipt_uri,
+    nativeAmount: r.native_amount ?? null,
+    fxRate: r.fx_rate ?? null,
   };
 }
 
@@ -40,6 +47,11 @@ export interface NewTxn {
   categoryId: string | null;
   source?: TxnSource;
   remark?: string | null;
+  receiptUri?: string | null;
+  /** Defaults to 'MYR'. When set to anything else, `amount` is treated as the native figure. */
+  currency?: string;
+  /** MYR per 1 native unit. Required when `currency` is not 'MYR'. */
+  fxRate?: number | null;
 }
 
 export async function listTransactions(limit?: number): Promise<Transaction[]> {
@@ -66,42 +78,77 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
       const id = genId();
       const createdAt = new Date().toISOString();
       const remark = cleanRemark(it.remark);
+      const receiptUri = it.receiptUri ?? null;
+      const currency = it.currency ?? BASE_CURRENCY;
+      // `it.amount` is the figure the caller collected, native when currency is not MYR.
+      const derived = deriveMyr(it.amount, currency, it.fxRate ?? null);
       await db.runAsync(
         `INSERT INTO transactions
-           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark)
-         VALUES (?, ?, ?, ?, 'MYR', ?, ?, ?, ?, ?, ?)`,
+           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         it.merchantRaw,
         it.merchantKey,
-        it.amount,
+        derived.amount,
+        currency,
         it.type,
         it.date,
         it.categoryId,
         createdAt,
         it.source ?? 'manual',
-        remark
+        remark,
+        receiptUri,
+        derived.nativeAmount,
+        derived.fxRate
       );
       created.push({
         id,
         merchantRaw: it.merchantRaw,
         merchantKey: it.merchantKey,
-        amount: it.amount,
-        currency: 'MYR',
+        amount: derived.amount,
+        currency,
         type: it.type,
         date: it.date,
         categoryId: it.categoryId,
         createdAt,
         source: it.source ?? 'manual',
         remark,
+        receiptUri,
+        nativeAmount: derived.nativeAmount,
+        fxRate: derived.fxRate,
       });
     }
   });
   return created;
 }
 
-export async function updateTransactionAmount(id: string, amount: number): Promise<void> {
+/** The stored currency and frozen rate for a row, so an edit can re-derive without repricing. */
+async function currencyOf(id: string): Promise<{ currency: string; fxRate: number | null }> {
   const db = await getDb();
-  await db.runAsync('UPDATE transactions SET amount = ? WHERE id = ?', amount, id);
+  const row = await db.getFirstAsync<{ currency: string; fx_rate: number | null }>(
+    'SELECT currency, fx_rate FROM transactions WHERE id = ?',
+    id
+  );
+  return { currency: row?.currency ?? BASE_CURRENCY, fxRate: row?.fx_rate ?? null };
+}
+
+/** The columns an edit rewrites, so a caller holding the row in memory can patch it in place
+ *  instead of re-reading the whole ledger to find out what its own edit did. */
+export type TxnAmountPatch = Pick<Transaction, 'amount' | 'nativeAmount'>;
+export type TxnFieldsPatch = TxnAmountPatch & Pick<Transaction, 'type' | 'categoryId' | 'remark'>;
+
+/** `entered` is the NATIVE amount for a foreign row, matching what the edit field shows. */
+export async function updateTransactionAmount(id: string, entered: number): Promise<TxnAmountPatch> {
+  const db = await getDb();
+  const { currency, fxRate } = await currencyOf(id);
+  const d = rederiveOnEdit(entered, currency, fxRate);
+  await db.runAsync(
+    'UPDATE transactions SET amount = ?, native_amount = ? WHERE id = ?',
+    d.amount,
+    d.nativeAmount,
+    id
+  );
+  return { amount: d.amount, nativeAmount: d.nativeAmount };
 }
 
 export async function updateTransactionCategory(id: string, categoryId: string): Promise<void> {
@@ -121,21 +168,27 @@ export async function deleteTransactions(ids: string[]): Promise<void> {
   await db.runAsync(`DELETE FROM transactions WHERE id IN (${placeholders})`, ...ids);
 }
 
-/** Update amount, type, category, and remark together (used by the edit sheet). */
+/** Update amount, type, category, and remark together (used by the edit sheet).
+ *  `entered` is the NATIVE amount for a foreign row. */
 export async function updateTransactionFields(
   id: string,
-  amount: number,
+  entered: number,
   type: TxnType,
   categoryId: string | null,
   remark?: string | null
-): Promise<void> {
+): Promise<TxnFieldsPatch> {
   const db = await getDb();
+  const { currency, fxRate } = await currencyOf(id);
+  const d = rederiveOnEdit(entered, currency, fxRate);
+  const cleanedRemark = cleanRemark(remark);
   await db.runAsync(
-    'UPDATE transactions SET amount = ?, type = ?, category_id = ?, remark = ? WHERE id = ?',
-    amount,
+    'UPDATE transactions SET amount = ?, native_amount = ?, type = ?, category_id = ?, remark = ? WHERE id = ?',
+    d.amount,
+    d.nativeAmount,
     type,
     categoryId,
-    cleanRemark(remark),
+    cleanedRemark,
     id
   );
+  return { amount: d.amount, nativeAmount: d.nativeAmount, type, categoryId, remark: cleanedRemark };
 }

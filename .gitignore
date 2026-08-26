@@ -59,3 +59,10 @@ AppStoreScreenshot/
 tools/promoVideo/__pycache__/
 tools/promoVideo/out/
 __pycache__/
+
+# promo video renders / cache (regenerable, large)
+promo-video/renders/
+promo-video/.thumbnails/
+promo-video/.hyperframes/
+promo-video/capture/
+promo-video/snapshots/

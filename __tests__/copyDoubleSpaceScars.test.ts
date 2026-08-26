@@ -10,7 +10,7 @@ import * as ts from 'typescript';
 
 const ROOT = path.join(__dirname, '..');
 const COPY_DIRS = ['src/screens', 'src/components'];
-const COPY_FILES = ['src/lib/tourSteps.ts', 'src/lib/loans.ts'];
+const COPY_FILES: string[] = [];
 
 function collectSourceFiles(dir: string): string[] {
   const out: string[] = [];

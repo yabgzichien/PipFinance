@@ -1,6 +1,5 @@
-// TDD: the three richer-passport-block evidence libs (Brief P). Pure over Transaction[];
-// synthetic fixtures with known months/amounts so the aggregates are checkable by hand.
-import { computeIncomeQuality } from '../src/lib/incomeQuality';
+// TDD: richer evidence libs (Brief P). Pure over Transaction[]; synthetic fixtures with known
+// months/amounts so the aggregates are checkable by hand.
 import { detectObligations } from '../src/lib/obligations';
 import { computeSpendingProfile } from '../src/lib/spendingProfile';
 import type { Transaction } from '../src/lib/types';
@@ -27,39 +26,6 @@ const income = (mk: string, amount: number, merchant = 'Employer') =>
   tx({ type: 'income', categoryId: 'income', amount, date: `${mk}-05`, merchantRaw: merchant, merchantKey: merchant.toLowerCase() });
 const expense = (mk: string, amount: number, merchant: string, categoryId: string | null = 'shopping') =>
   tx({ type: 'expense', amount, date: `${mk}-10`, merchantRaw: merchant, merchantKey: merchant.toLowerCase().replace(/\s+/g, ''), categoryId });
-
-describe('computeIncomeQuality', () => {
-  it('a steady single salary: low variance, one source, full regularity, not seasonal', () => {
-    const txns = months.map((mk) => income(mk, 3000));
-    const q = computeIncomeQuality(txns);
-    expect(q.variationCoefficient).toBeCloseTo(0, 6);
-    expect(q.sourceCount).toBe(1);
-    expect(q.regularityRatio).toBe(1);
-    expect(q.seasonal).toBe(false);
-  });
-
-  it('lumpy income in a minority of months reads as seasonal with high variance', () => {
-    // Income only in 1 of 4 observed months (expenses mark the other months as observed).
-    const txns = [income('2026-01', 8000), ...months.map((mk) => expense(mk, 500, 'Groceries', 'groceries'))];
-    const q = computeIncomeQuality(txns);
-    expect(q.regularityRatio).toBeCloseTo(0.25, 6);
-    expect(q.seasonal).toBe(true);
-  });
-
-  it('counts distinct recurring inflow sources', () => {
-    const txns = [
-      ...months.map((mk) => income(mk, 2000, 'Employer')),
-      income('2026-01', 300, 'Side Gig'),
-      income('2026-02', 300, 'Side Gig'),
-    ];
-    expect(computeIncomeQuality(txns).sourceCount).toBe(2);
-  });
-
-  it('empty income → all-zero, non-seasonal', () => {
-    const q = computeIncomeQuality([expense('2026-01', 100, 'Shop')]);
-    expect(q).toEqual({ variationCoefficient: 0, sourceCount: 0, regularityRatio: 0, seasonal: false });
-  });
-});
 
 describe('detectObligations', () => {
   it('detects a stable monthly rent and classifies it', () => {

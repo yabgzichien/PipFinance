@@ -6,6 +6,7 @@ import {
 import {
   generateExcelWorkbook,
   generateCSV,
+  csvToHtmlTable,
   generateHTMLReport,
   generatePrintablePDFHtml,
   generateAdvancedImportJSON,
@@ -38,6 +39,7 @@ function makeAcct(over: Partial<Account>): Account {
     cls: 'cash',
     archived: false,
     createdAt: '2026-01-01T00:00:00.000Z',
+    currency: 'MYR',
     sub: null,
     symbol: null,
     ticker: null,
@@ -129,6 +131,36 @@ describe('generateCSV', () => {
   });
 });
 
+describe('csvToHtmlTable', () => {
+  const txns = [
+    makeTxn({ type: 'income', categoryId: 'salary', amount: 4500, date: '2026-06-01' }),
+    makeTxn({ type: 'expense', categoryId: 'food', amount: 500, date: '2026-06-05', merchantRaw: 'Ah <Fatt> "Kopitiam"' }),
+  ];
+  const accounts = [makeAcct({ id: 'a1' })];
+  const entries = [makeEntry({ value: 6000 })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Nurul');
+
+  it('renders the CSV report as a real HTML table instead of raw text', () => {
+    const csv = generateCSV(bundle);
+    const html = csvToHtmlTable(csv);
+
+    expect(html).toContain('<table>');
+    expect(html).toContain('<tr class="section"><td colspan="8">TRANSACTION LEDGER</td></tr>');
+    // Row cells land in their own <td>, not a single comma-joined blob.
+    expect(html).toMatch(/<td>Nurul<\/td>/);
+    expect(html).toMatch(/<td>4500<\/td>/);
+  });
+
+  it('escapes HTML special characters in cell content', () => {
+    const csv = generateCSV(bundle);
+    const html = csvToHtmlTable(csv);
+
+    expect(html).toContain('Ah &lt;Fatt&gt; &quot;Kopitiam&quot;');
+    expect(html).not.toContain('Ah <Fatt>');
+  });
+});
+
 describe('generateHTMLReport', () => {
   const txns = [
     makeTxn({ type: 'income', categoryId: 'salary', amount: 3500, date: '2026-05-01' }),
@@ -213,11 +245,12 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
   const commitment: Commitment = {
     id: 'c1', label: 'S&P 500 DCA', merchantKey: 'stockbroker-dca', kind: 'investment', amount: 200,
     categoryId: null, fromAccountId: 'a1', toAccountId: 'a2', dueDay: 15, startMonth: '2026-05',
-    endMonth: null, archived: false, createdAt: '2026-05-01T00:00:00.000Z',
+    endMonth: null, archived: false, createdAt: '2026-05-01T00:00:00.000Z', reliefCode: null,
+    currency: 'MYR',
   };
   const occurrences: CommitmentOccurrence[] = [
-    { id: 'o1', commitmentId: 'c1', dueDate: '2026-05-15', month: '2026-05', amount: 200, paidAmount: 200, paidOn: '2026-05-14', status: 'paid', txnId: null, txnCreated: true, unitsAdded: 1.5, priceMYR: 400, createdAt: '2026-05-01T00:00:00.000Z' },
-    { id: 'o2', commitmentId: 'c1', dueDate: '2026-06-15', month: '2026-06', amount: 200, paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false, unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z' },
+    { id: 'o1', commitmentId: 'c1', dueDate: '2026-05-15', month: '2026-05', amount: 200, paidAmount: 200, paidOn: '2026-05-14', status: 'paid', txnId: null, txnCreated: true, unitsAdded: 1.5, priceMYR: 400, createdAt: '2026-05-01T00:00:00.000Z', fxRate: null },
+    { id: 'o2', commitmentId: 'c1', dueDate: '2026-06-15', month: '2026-06', amount: 200, paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false, unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z', fxRate: null },
   ];
 
   it('keeps a transfer out of the `transactions` array and puts it in `transfers` instead', () => {

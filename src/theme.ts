@@ -48,9 +48,9 @@ export const LIGHT_COLORS: StructuralColors = {
 } as const;
 
 /** Dark counterpart. `bg`/`ink` are anchored to the app's existing "dark card" tokens
- *  (`passportDark`/`shotInk` below) rather than invented from scratch — those were already
- *  a hand-picked dark-surface pair in this brand's hue. Every value here (and every accent
- *  preset's `dark` variant in accentPresets.ts) is checked by tools/contrastAudit/audit.js. */
+ *  (`shotInk` below) rather than invented from scratch — those were already a hand-picked
+ *  dark-surface pair in this brand's hue. Every value here (and every accent preset's `dark`
+ *  variant in accentPresets.ts) is checked by tools/contrastAudit/audit.js. */
 export const DARK_COLORS: StructuralColors = {
   bg: '#0a1810',
   surface: '#192419',
@@ -80,30 +80,42 @@ export const colors = {
   // fake-screenshot header
   shotHead: '#11231a',
   shotInk: '#eaf3ee',
-
-  deltaUp: '#42e893', // "+8 pts" up-arrow green on dark surfaces
-  passportDark: '#11231a',
 } as const;
-
-/**
- * Five score-band colors from the approved redesign  a warm→deep-green ramp.
- * Used by the credit gauge, the dashboard mini band-bar, and the lender band bar.
- */
-export const bandColors = {
-  Building: '#c0392b',
-  Fair: '#d98a00',
-  Good: '#3ab07a',
-  Strong: '#1f8a5b',
-  Excellent: '#145c3d',
-} as const;
-
-/** Ordered band list (low → high) for rendering the 5-segment band bar. */
-export const BAND_ORDER = ['Building', 'Fair', 'Good', 'Strong', 'Excellent'] as const;
 
 export const radius = {
   sm: 14,
   md: 22,
   lg: 28,
+} as const;
+
+/**
+ * The app-wide spacing scale (docs/ui-design-plan.md §4). Every padding/margin/gap in
+ * migrated files must be one of these six values (or 0) — enforced by
+ * tools/typeAudit/audit.js, not just convention. Keep this array in sync with
+ * ALLOWED_SPACING in that file; it can't import this module directly (plain Node, no TS
+ * transpile), the same constraint tools/contrastAudit/audit.js already works around.
+ */
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  base: 16,
+  lg: 24,
+  xl: 32,
+} as const;
+
+/**
+ * The app-wide type scale (docs/ui-design-plan.md §4): 5 sizes, 2 weights (500/700).
+ * Screens consume this through the Display/Title/Body/Label/Caption primitives in
+ * ui.tsx, not by declaring `fontSize` directly — tools/typeAudit/audit.js fails the
+ * build on a raw `fontSize:` outside ui.tsx.
+ */
+export const type = {
+  display: 40,
+  title: 22,
+  body: 16,
+  label: 13,
+  caption: 11,
 } as const;
 
 /**

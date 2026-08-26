@@ -1,12 +1,13 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Polyline } from 'react-native-svg';
+import Svg, { Circle, G, Line, Path, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccent } from '../state/accent';
 import { colors, platformShadow, uiFont } from '../theme';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 
-export type NavTab = 'home' | 'activity' | 'loan' | 'settings';
+export type NavTab = 'home' | 'activity' | 'networth' | 'settings';
 
 const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> = {
   home: (stroke, fill) => (
@@ -15,12 +16,11 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
   activity: (stroke) => (
     <Polyline points="22 12 18 12 15 21 9 3 6 12 2 12" fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
   ),
-  loan: (stroke) => (
-    <>
-      <Circle cx={12} cy={12} r={9} fill="none" stroke={stroke} strokeWidth={1.8} />
-      <Line x1={12} y1={8} x2={12} y2={16} stroke={stroke} strokeWidth={1.8} strokeLinecap="round" />
-      <Line x1={8} y1={12} x2={16} y2={12} stroke={stroke} strokeWidth={1.8} strokeLinecap="round" />
-    </>
+  networth: (stroke) => (
+    <G fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M3 17l6-6 4 4 7-7" />
+      <Path d="M16.5 8H21v4.5" />
+    </G>
   ),
   settings: (stroke) => (
     <>
@@ -30,19 +30,11 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
   ),
 };
 
-const TABS: { key: NavTab; label: string }[] = [
-  { key: 'home', label: 'Home' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'loan', label: 'Loan' },
-  { key: 'settings', label: 'Settings' },
-];
-
-/** Persistent bottom tab bar for the borrower app. `badges` shows a count over a tab's icon —
- *  today, the number of lender offers waiting on the borrower's accept/decline.
+/** Persistent bottom tab bar for the tracker app. `badges` shows a count over a tab's icon.
  *
  *  `onAdd` mounts the raised centre button that opens the add-a-transaction flow. It lives here
  *  rather than on the Home feed because capture is the app's core loop and used to sit four cards
- *  down the dashboard scroll: on a phone the borrower had to scroll to reach the one action they
+ *  down the dashboard scroll: on a phone the user had to scroll to reach the one action they
  *  open the app to perform. In the tab bar it is on screen from every primary tab, always. */
 export function BottomNav({
   active,
@@ -58,6 +50,14 @@ export function BottomNav({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
+
+  const tabs: { key: NavTab; label: string }[] = [
+    { key: 'home', label: t('tabHome') },
+    { key: 'activity', label: t('tabActivity') },
+    { key: 'networth', label: t('tabNetWorth') },
+    { key: 'settings', label: t('tabSettings') },
+  ];
 
   const renderTab = ({ key, label }: { key: NavTab; label: string }) => {
     const on = key === active;
@@ -93,7 +93,7 @@ export function BottomNav({
 
   return (
     <View style={[styles.bar, { backgroundColor: colorTheme.surface, borderTopColor: colorTheme.line, paddingBottom: Math.max(insets.bottom, 10) + 8 }]}>
-      {TABS.slice(0, 2).map(renderTab)}
+      {tabs.slice(0, 2).map(renderTab)}
       {onAdd && (
         <View style={styles.addSlot}>
           <Pressable
@@ -105,17 +105,17 @@ export function BottomNav({
               pressed && { transform: [{ scale: 0.94 }] },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Add a transaction"
+            accessibilityLabel={t('tabAdd')}
           >
             <Svg width={26} height={26} viewBox="0 0 24 24">
               <Line x1={12} y1={5} x2={12} y2={19} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
               <Line x1={5} y1={12} x2={19} y2={12} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
             </Svg>
           </Pressable>
-          <Text style={[styles.label, styles.addLabel, { color: theme.accent }]}>Add</Text>
+          <Text style={[styles.label, styles.addLabel, { color: theme.accent }]}>{t('tabAdd')}</Text>
         </View>
       )}
-      {TABS.slice(2).map(renderTab)}
+      {tabs.slice(2).map(renderTab)}
     </View>
   );
 }

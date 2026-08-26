@@ -18,6 +18,16 @@ export interface ExtractedTxn {
   /** A short user-written note, e.g. "lunch with client". Never extracted from the
    *  screenshot itself; the user adds it during review or manual entry. */
   remark?: string | null;
+  /** 3-letter currency code for `amount`, normalised by `normalizeCurrency` so this is never
+   *  a bad/unrecognised code  'MYR' means a plain MYR row, matching `NewTxn.currency`'s own
+   *  contract. When set to anything else, `amount` is the native figure as scanned/typed, and
+   *  `fxRate` must also be set before this can save (see `deriveMyr`): a detected foreign
+   *  currency with no cached rate yet is exactly the case the currency-activation UI exists
+   *  to close, not a reason to let this field silently drift back to MYR. */
+  currency: string;
+  /** MYR per 1 unit of `currency`, frozen at entry time. Only meaningful when `currency` is
+   *  foreign; matches `NewTxn.fxRate`. */
+  fxRate?: number | null;
 }
 
 /** A category. `id` is a stable slug (also used as the memory value). `kind`
@@ -47,6 +57,31 @@ export interface Transaction {
    *  this field existed keep working unchanged; the DB and repo always resolve it to a real
    *  value (string or null), it is only "possibly absent" from the type's point of view. */
   remark?: string | null;
+  /** Local file URI of a saved receipt photo, kept only when the user opted in while
+   *  scanning. Optional for the same reason as `remark`; null for every other source. */
+  receiptUri?: string | null;
+  /** The amount as the user entered it, in `currency`. Null for a plain MYR row, which is
+   *  why no backfill is needed on upgrade. `amount` is ALWAYS the MYR value. */
+  nativeAmount?: number | null;
+  /** MYR per 1 unit of `currency`, frozen when the row was written. Null for MYR rows. */
+  fxRate?: number | null;
+}
+
+export type ReliefOrigin = 'auto' | 'commitment' | 'manual';
+export type EvidenceState = 'complete' | 'missing-cert' | 'no-image' | 'weak-unnamed';
+
+/** A tag linking a transaction (in full or in part) to an LHDN relief line for a given year
+ *  of assessment. See docs/superpowers/specs/2026-08-23-tax-relief-tagging-design.md. */
+export interface ReliefTag {
+  id: string;
+  txnId: string;
+  code: string;
+  ya: number;
+  amount: number;
+  origin: ReliefOrigin;
+  certImageUri: string | null;
+  einvoiceImageUri: string | null;
+  createdAt: string;
 }
 
 /** merchantKey -> categoryId, the learned memory. */
@@ -77,6 +112,9 @@ export interface Account {
   quantity: number | null; // units held
   cost: number | null; // total invested amount in MYR (cost basis), for profit
   icon?: string | null; // custom gallery image URI or null
+  /** The currency this account is denominated in. Balances are stored native and
+   *  converted at read time against a live cached rate. Defaults to 'MYR'. */
+  currency: string;
 }
 
 /** A cached market price in MYR for a holding symbol. */
@@ -140,6 +178,10 @@ export interface Split {
   ownShare: number;
   method: SplitMethod;
   createdAt: string;
+  /** The currency this split is denominated in, copied from the parent transaction. */
+  currency: string;
+  /** MYR per 1 native unit, frozen when the parent transaction was written. Null for MYR splits. */
+  fxRate?: number | null;
 }
 
 /** One person's portion of a split. `paid` accumulates across partial repayments. */

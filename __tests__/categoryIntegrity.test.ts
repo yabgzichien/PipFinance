@@ -15,7 +15,6 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
 } from '../src/data/categories';
-import { buildAinaSeed, buildFaizalSeed, buildRaviSeed, type DemoSeed } from '../src/data/demoSeed';
 import { matchSourceCategory } from '../src/lib/import';
 import { buildDemoKit } from '../tools/demoKit/build';
 import type { Category } from '../src/lib/types';
@@ -23,22 +22,14 @@ import type { Category } from '../src/lib/types';
 const NOW = new Date('2026-08-07T12:00:00.000Z');
 
 const byId = new Map(ALL_SEED_CATEGORIES.map((c) => [c.id, c]));
-const expenseIds = new Set(EXPENSE_CATEGORIES.map((c) => c.id));
-const incomeIds = new Set(INCOME_CATEGORIES.map((c) => c.id));
 
 /** The seed rows as full Category objects, for the libs that take a category list. */
 const asCategories: Category[] = ALL_SEED_CATEGORIES.map((c) => ({ ...c, isDefault: true }));
 
-const PROFILES: [string, (now: Date) => DemoSeed][] = [
-  ['Aina', buildAinaSeed],
-  ['Ravi', buildRaviSeed],
-  ['Faizal', buildFaizalSeed],
-];
-
 describe('default category set', () => {
-  it('has 12 expense + 6 income categories with unique ids and no blank fields', () => {
-    expect(EXPENSE_CATEGORIES).toHaveLength(12);
-    expect(INCOME_CATEGORIES).toHaveLength(6);
+  it('has 7 expense + 3 income categories with unique ids and no blank fields', () => {
+    expect(EXPENSE_CATEGORIES).toHaveLength(7);
+    expect(INCOME_CATEGORIES).toHaveLength(3);
     expect(new Set(ALL_SEED_CATEGORIES.map((c) => c.id)).size).toBe(ALL_SEED_CATEGORIES.length);
     for (const c of ALL_SEED_CATEGORIES) {
       expect(c.id).toMatch(/^[a-z][a-z0-9-]*$/);
@@ -76,39 +67,23 @@ describe('CATEGORY_ID_REMAP (retired ids)', () => {
   it('covers every id the old default set used', () => {
     const retired = [
       'fuel', 'groceries', 'coffee', 'shopping', 'health', 'bills', 'fun',
-      'income', 'allowance', 'bonus', 'borrowers-return', 'dividend', 'interest',
+      'income', 'bonus', 'borrowers-return', 'dividend', 'interest',
+      'employment-income', 'business-income', 'gig-income', 'transfers-in', 'investment-income',
     ];
     for (const id of retired) expect(CATEGORY_ID_REMAP[id]).toBeDefined();
   });
-});
 
-describe('demo seeds reference only real categories', () => {
-  for (const [name, build] of PROFILES) {
-    it(`${name}: every transaction lands on a seeded category of the matching kind`, () => {
-      const seed = build(NOW);
-      expect(seed.transactions.length).toBeGreaterThan(0);
-      for (const t of seed.transactions) {
-        const cat = byId.get(t.categoryId ?? '');
-        expect(cat).toBeDefined();
-        expect(cat!.kind).toBe(t.type);
-      }
-    });
-
-    it(`${name}: every budget envelope is a seeded EXPENSE category`, () => {
-      const seed = build(NOW);
-      for (const id of Object.keys(seed.budget.allocations)) {
-        expect(expenseIds.has(id)).toBe(true);
-        expect(incomeIds.has(id)).toBe(false);
-      }
-    });
-  }
-
-  it('the personas still avoid the residual buckets  every row is meaningfully filed', () => {
-    for (const [, build] of PROFILES) {
-      for (const t of build(NOW).transactions) {
-        expect(t.categoryId).not.toBe(DEFAULT_EXPENSE_ID);
-        expect(t.categoryId).not.toBe(DEFAULT_INCOME_ID);
-      }
+  it('covers every expense id the 2026-08-07..2026-08-21 default set used, direct to a live id', () => {
+    // The 12-category set that existed just before the 2026-08-21 retune. `food`, `insurance`
+    // and `other` survived it (same id, different label/members) so need no remap entry; every
+    // other id here must point straight at one of the 7 current categories, not at another one
+    // of these now-retired ids  see the "no chained remaps" note on CATEGORY_ID_REMAP itself.
+    const retiredByThisRetune = [
+      'housing', 'dining', 'transport', 'communications', 'healthcare', 'education', 'household', 'recreation', 'debt-service',
+    ];
+    for (const id of retiredByThisRetune) {
+      expect(CATEGORY_ID_REMAP[id]).toBeDefined();
+      expect(byId.has(CATEGORY_ID_REMAP[id])).toBe(true);
     }
   });
 });

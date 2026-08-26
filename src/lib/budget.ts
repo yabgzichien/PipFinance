@@ -1,7 +1,7 @@
 // src/lib/budget.ts
 import type { Transaction } from './types';
 
-export type CategoryBudgetStatus = 'ok' | 'warn' | 'over';
+export type CategoryBudgetStatus = 'ok' | 'caution' | 'warn' | 'over';
 export type Allocations = Record<string, number>;
 
 /** 'YYYY-MM' from an ISO date/datetime, or null. */
@@ -63,6 +63,11 @@ export function allocatedTotal(allocations: Allocations): number {
   return Object.values(allocations).reduce((s, v) => s + v, 0);
 }
 
+/** A category allocated RM 0 (or less) isn't a budget for that category, so it's dropped here rather than left for every caller to filter. */
+export function positiveAllocations(allocations: Allocations): Allocations {
+  return Object.fromEntries(Object.entries(allocations).filter(([, v]) => v > 0));
+}
+
 export function leftover(income: number, allocations: Allocations): number {
   return income - allocatedTotal(allocations);
 }
@@ -72,6 +77,7 @@ export function categoryStatus(spent: number, allocated: number): CategoryBudget
   const ratio = spent / allocated;
   if (ratio > 1) return 'over';
   if (ratio >= 0.8) return 'warn';
+  if (ratio >= 0.5) return 'caution';
   return 'ok';
 }
 

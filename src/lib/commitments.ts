@@ -1,9 +1,5 @@
-// src/lib/commitments.ts
-// Pure logic for user-declared recurring commitments (bills and DCA investment
-// contributions): occurrence generation, month-end due-date clamping, and matching a tick
-// against an existing ledger row instead of creating a duplicate. No UI/DB imports.
+import { round2 } from './currency';
 import { merchantKey } from './normalize';
-import type { Repayment } from '../db/loansRepo';
 import type { Transaction } from './types';
 
 export type CommitmentKind = 'expense' | 'investment';
@@ -24,6 +20,11 @@ export interface Commitment {
   endMonth: string | null; // 'YYYY-MM', null = open-ended
   archived: boolean;
   createdAt: string;
+  /** LHDN relief line code this bill counts toward, set once in the Tax screen. Every future
+   *  paid occurrence auto-tags its transaction against this code. Null = not a relief bill. */
+  reliefCode: string | null;
+  /** Currency this commitment is denominated in. Defaults to 'MYR'. */
+  currency: string;
 }
 
 export interface CommitmentOccurrence {
@@ -42,6 +43,13 @@ export interface CommitmentOccurrence {
   unitsAdded: number | null;
   priceMYR: number | null;
   createdAt: string;
+  /** Frozen FX rate (MYR per native unit) when the occurrence was generated. Null for MYR. */
+  fxRate: number | null;
+}
+
+/** Convert a native commitment amount to MYR at an occurrence's frozen rate. */
+export function occurrenceMyr(nativeAmount: number, fxRate: number): number {
+  return round2(nativeAmount * fxRate);
 }
 
 export interface NewOccurrence {
@@ -126,24 +134,4 @@ export function findCommitmentMatch(
     return t;
   }
   return null;
-}
-
-/**
- * Adapt occurrences into the `Repayment` shape so `repaymentStanding.ts`'s pure arrears engine
- * (`overdueRowsFor`, `standingBucketFor`, `curedArrearsEvents`) can be reused unchanged instead
- * of re-implementing months-in-arrears logic for commitments. `'skipped'` rows are dropped: a
- * bill the user marked as not applying that month carries no ongoing arrears obligation and no
- * on-time/late record either way.
- */
-export function toArrearsRows(occurrences: CommitmentOccurrence[]): Repayment[] {
-  return occurrences
-    .filter((o): o is CommitmentOccurrence & { status: 'scheduled' | 'paid' | 'late' } => o.status !== 'skipped')
-    .map((o) => ({
-      id: o.id,
-      applicationId: o.commitmentId,
-      dueDate: o.dueDate,
-      paidOn: o.paidOn,
-      amount: o.amount,
-      status: o.status,
-    }));
 }

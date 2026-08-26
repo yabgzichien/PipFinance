@@ -36,9 +36,9 @@
         }
       ],
       [
-        "expo-camera",
+        "react-native-document-scanner-plugin",
         {
-          "cameraPermission": "Pip needs the camera to scan your IC or passport for identity verification."
+          "cameraPermission": "Pip needs the camera to scan your statement or receipt."
         }
       ],
       [
@@ -66,6 +66,13 @@
               "updatePeriodMillis": 1800000
             }
           ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "microphonePermission": false
         }
       ]
     ]

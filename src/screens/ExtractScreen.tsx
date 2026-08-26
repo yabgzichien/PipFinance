@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { Icon } from '../components/Icon';
@@ -10,13 +10,19 @@ import type { ExtractedTxn } from '../lib/types';
 import { getLLM, llmErrorMessage } from '../llm';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { useAppData } from '../state/store';
 import { uiFont } from '../theme';
+import { duration as motionDuration } from '../theme/motion';
 import type { PickedImage } from './AttachScreen';
 
-type Phase = 'scanning' | 'result' | 'error';
+// 'found' is a deliberate beat, not a loading state: the extraction has already resolved by
+// the time it shows, so it narrates a real completed step (docs/ui-engagement-plan.md Step 2
+// Act 1) rather than padding the wait. It holds for FOUND_HOLD_MS then falls into 'result'.
+type Phase = 'scanning' | 'found' | 'result' | 'error';
 
 const PREVIEW_H = 300;
+const FOUND_HOLD_MS = motionDuration.enter;
 
 export function ExtractScreen({
   image,
@@ -29,7 +35,10 @@ export function ExtractScreen({
   cachedItems?: ExtractedTxn[];
   linkId?: string | null;
   onBack: () => void;
-  onDone: (items: ExtractedTxn[], linkId: string | null) => void;
+  /** `elapsedMs` is the real extraction round-trip (image in, transactions out), null when
+   *  reviewing cached results (there's nothing to have timed). The Saved screen's "Read in
+   *  Ns" line only renders when this is a real measurement. */
+  onDone: (items: ExtractedTxn[], linkId: string | null, elapsedMs: number | null) => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -45,6 +54,13 @@ export function ExtractScreen({
   }, [accounts]);
   const [linkId, setLinkId] = useState<string | null>(initialLinkId ?? defaultAcctId);
   const [error, setError] = useState('');
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  // Live seconds counter while reading  narrates real elapsed time rather than a fabricated
+  // progress bar (docs/ui-engagement-plan.md Step 2 Act 1). Purely a text tick, not a transform
+  // loop, so it isn't gated on reduced motion the way the scanline below is.
+  const [readingSecs, setReadingSecs] = useState(0);
+  const reducedMotion = useReducedMotion();
+  const [viewingPhoto, setViewingPhoto] = useState(false);
 
   // Seed the required account once accounts are known, creating a "Cash" one if none exist.
   useEffect(() => {
@@ -58,7 +74,7 @@ export function ExtractScreen({
 
   // scanline loop while reading
   useEffect(() => {
-    if (phase !== 'scanning') return;
+    if (phase !== 'scanning' || reducedMotion) return;
     const loop = Animated.loop(
       Animated.timing(scan, {
         toValue: 1,
@@ -69,12 +85,20 @@ export function ExtractScreen({
     );
     loop.start();
     return () => loop.stop();
-  }, [phase, scan]);
+  }, [phase, reducedMotion, scan]);
+
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    setReadingSecs(0);
+    const id = setInterval(() => setReadingSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   // run extraction once on mount (skip when reviewing cached results)
   useEffect(() => {
     if (cachedItems) return;
     let alive = true;
+    const start = Date.now();
     (async () => {
       try {
         const llm = await getLLM();
@@ -83,8 +107,11 @@ export function ExtractScreen({
           mimeType: image.mime,
         });
         if (!alive) return;
+        setElapsedMs(Date.now() - start);
         setItems(rows);
-        setPhase('result');
+        // 'found' narrates the real result for a fixed beat before the full list renders,
+        // rather than jump-cutting straight from spinner to review screen.
+        setPhase('found');
       } catch (e) {
         if (!alive) return;
         setError(llmErrorMessage(e));
@@ -95,6 +122,12 @@ export function ExtractScreen({
       alive = false;
     };
   }, [image]);
+
+  useEffect(() => {
+    if (phase !== 'found') return;
+    const id = setTimeout(() => setPhase('result'), reducedMotion ? 0 : FOUND_HOLD_MS);
+    return () => clearTimeout(id);
+  }, [phase, reducedMotion]);
 
   const withSuggestions = useMemo(
     () =>
@@ -122,7 +155,14 @@ export function ExtractScreen({
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           {phase === 'scanning' && (
             <PipSays expr="think">
-              <BubbleText>Reading your screenshot…</BubbleText>
+              <BubbleText>Reading your screenshot{readingSecs > 0 ? ` (${readingSecs}s)` : '…'}</BubbleText>
+            </PipSays>
+          )}
+          {phase === 'found' && (
+            <PipSays expr="happy">
+              <BubbleText>
+                Found <B>{items.length} line{items.length === 1 ? '' : 's'}</B>…
+              </BubbleText>
             </PipSays>
           )}
           {phase === 'error' && (
@@ -149,15 +189,15 @@ export function ExtractScreen({
           )}
         </View>
 
-        {/* picked image preview with scanline */}
-        <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
+        {/* picked image preview with scanline, tappable to view full-screen */}
+        <Pressable onPress={() => setViewingPhoto(true)} style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Card style={[styles.preview, { backgroundColor: colorTheme.surface2 }]}>
             <Image source={{ uri: image.uri }} style={[styles.previewImg, { backgroundColor: colorTheme.surface2 }]} resizeMode="contain" />
             {phase === 'scanning' && (
               <Animated.View style={[styles.scanline, { borderTopColor: theme.accent }, { transform: [{ translateY }] }]} />
             )}
           </Card>
-        </View>
+        </Pressable>
 
         {phase === 'result' && items.length > 0 && (
           <View style={{ paddingHorizontal: 18, paddingTop: 20 }}>
@@ -202,7 +242,7 @@ export function ExtractScreen({
       {/* sticky footer */}
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 }, { paddingBottom: insets.bottom + 16 }]}>
         {phase === 'result' && items.length > 0 && (
-          <PrimaryButton onPress={() => onDone(items, linkId)}>
+          <PrimaryButton onPress={() => onDone(items, linkId, elapsedMs)}>
             <BtnLabel>Sort {items.length} item{items.length > 1 ? 's' : ''}</BtnLabel>
             <Icon name="arrowRight" size={19} color="#fff" />
           </PrimaryButton>
@@ -214,6 +254,15 @@ export function ExtractScreen({
           </PrimaryButton>
         )}
       </View>
+
+      <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
+          <Image source={{ uri: image.uri }} style={styles.viewerImage} resizeMode="contain" />
+          <Pressable onPress={() => setViewingPhoto(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+            <Icon name="x" size={22} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -222,6 +271,9 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   preview: { overflow: 'hidden', padding: 0 },
   previewImg: { width: '100%', height: PREVIEW_H },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
+  viewerClose: { position: 'absolute', right: 18, padding: 8 },
   scanline: {
     position: 'absolute',
     left: 0,

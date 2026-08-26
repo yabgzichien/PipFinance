@@ -15,6 +15,7 @@ interface AccountRow {
   quantity: number | null;
   cost: number | null;
   icon: string | null;
+  currency: string;
 }
 interface EntryRow {
   id: string;
@@ -44,6 +45,7 @@ function toAccount(r: AccountRow): Account {
     quantity: r.quantity ?? null,
     cost: r.cost ?? null,
     icon: r.icon ?? null,
+    currency: r.currency ?? 'MYR',
   };
 }
 function toEntry(r: EntryRow): BalanceEntry {
@@ -62,27 +64,30 @@ export async function listBalanceEntries(): Promise<BalanceEntry[]> {
   return rows.map(toEntry);
 }
 
-/** Create an account and seed its opening balance entry. */
+/** Create an account and seed its opening balance entry. `openingValue` is native to
+ *  `currency`: `balance_entries.value` stores the account's own currency, never MYR. */
 export async function addAccount(
   name: string,
   kind: AccountKind,
   cls: string,
   openingValue: number,
   asOf: string,
-  icon?: string | null
+  icon?: string | null,
+  currency: string = 'MYR'
 ): Promise<Account> {
   const db = await getDb();
   const id = genId();
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon) VALUES (?, ?, ?, ?, 0, ?, ?)',
+      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon, currency) VALUES (?, ?, ?, ?, 0, ?, ?, ?)',
       id,
       name,
       kind,
       cls,
       now,
-      icon ?? null
+      icon ?? null,
+      currency
     );
     await db.runAsync(
       'INSERT INTO balance_entries (id, account_id, value, as_of, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -93,7 +98,7 @@ export async function addAccount(
       now
     );
   });
-  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null };
+  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null, currency };
 }
 
 export async function updateAccount(id: string, fields: { name: string; cls: string; icon?: string | null }): Promise<void> {
@@ -173,7 +178,7 @@ export async function addHolding(
       icon ?? null
     );
   });
-  return { id, name, kind: 'asset', cls: 'investments', archived: false, createdAt: now, sub, symbol, ticker, quantity, cost, icon: icon ?? null };
+  return { id, name, kind: 'asset', cls: 'investments', archived: false, createdAt: now, sub, symbol, ticker, quantity, cost, icon: icon ?? null, currency: 'MYR' };
 }
 
 /** Update a holding's quantity (e.g. after buying/selling more). */
@@ -186,6 +191,36 @@ export async function updateHoldingQuantity(id: string, quantity: number): Promi
 export async function updateHoldingCost(id: string, cost: number | null): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE accounts SET cost = ? WHERE id = ?', cost, id);
+}
+
+/**
+ * Move a holding's quantity BY `delta`, reading the current value in SQL.
+ *
+ * The absolute-value setters above are right for an edit sheet, where the user typed the
+ * figure they want. They are wrong for an accumulating movement like a DCA tick, which used
+ * to read the holding out of React state, add to it, and write the result back: the store
+ * never reloaded `accounts` afterwards, so ticking two due months in a row without leaving
+ * the screen had both writes start from the same pre-tick value and the second silently
+ * erased the first month's contribution. Doing the addition in the UPDATE removes the
+ * read-modify-write entirely, so a stale in-memory copy cannot corrupt the stored figure.
+ *
+ * Clamped at zero for the same reason `refreshPrices` can leave `unitsAdded` behind: an
+ * untick against a holding whose units were never added would otherwise drive the quantity
+ * negative, and net worth would report a negative investment balance.
+ */
+export async function adjustHoldingQuantity(id: string, delta: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE accounts SET quantity = max(0, round(coalesce(quantity, 0) + ?, 8)) WHERE id = ?',
+    delta,
+    id
+  );
+}
+
+/** Move a holding's cost basis BY `delta`, clamped at zero. See `adjustHoldingQuantity`. */
+export async function adjustHoldingCost(id: string, delta: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE accounts SET cost = max(0, round(coalesce(cost, 0) + ?, 2)) WHERE id = ?', delta, id);
 }
 
 export async function getPriceCache(): Promise<PriceQuote[]> {

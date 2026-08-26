@@ -8,26 +8,32 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:type": "node tools/typeAudit/audit.js",
+    "audit:contrast": "node tools/contrastAudit/audit.js"
   },
   "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
-      "node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|@noble))"
+      "node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base))"
     ]
+  },
+  "overrides": {
+    "tslib": "^2.6.2"
   },
   "dependencies": {
     "@expo-google-fonts/hanken-grotesk": "^0.4.3",
     "@expo-google-fonts/space-grotesk": "^0.4.1",
-    "@noble/ed25519": "^3.1.0",
-    "@noble/hashes": "^2.2.0",
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.0",
-    "expo-camera": "~17.0.10",
+    "expo-asset": "~12.0.13",
+    "expo-audio": "~1.1.1",
     "expo-clipboard": "~8.0.8",
+    "expo-dev-client": "~6.0.21",
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.12",
+    "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
@@ -35,15 +41,16 @@
     "expo-status-bar": "~3.0.9",
     "fflate": "^0.8.3",
     "jest-expo": "~54.0.17",
+    "pdf-lib": "^1.17.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-android-widget": "^0.22.1",
-    "react-native-get-random-values": "~1.11.0",
-    "react-native-qrcode-svg": "^6.3.21",
+    "react-native-document-scanner-plugin": "^2.0.4",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
+    "react-native-webview": "13.15.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

@@ -1,13 +1,17 @@
-import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Image, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { catColorsForHue } from '../lib/catColors';
-import { fmt } from '../lib/format';
+import { decimalsFor } from '../lib/currencies';
+import { fmtDecimals } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { colors, numFont, platformShadow, radius, shadowCard, uiFont } from '../theme';
+import { useReducedMotion } from '../state/useReducedMotion';
+import { colors, numFont, platformShadow, radius, shadowCard, type, uiFont } from '../theme';
+import { duration as motionDuration, easing as motionEasing } from '../theme/motion';
 import { Icon, type IconName } from './Icon';
 import { Pip, type PipExpr } from './Pip';
+import { useLanguage } from '../i18n';
 
 /* ── text helpers ── */
 
@@ -16,37 +20,100 @@ export function Eyebrow({ children, style }: { children: React.ReactNode; style?
   return <Text style={[styles.eyebrow, { color: colorTheme.ink2 }, style]}>{children}</Text>;
 }
 
+/* ── type scale primitives (docs/ui-design-plan.md §4) ──
+ * Five fixed sizes, two weights (500/700). `numeric` swaps the family from Hanken Grotesk
+ * to Space Grotesk (tabular figures) for the rare case a size/weight combo here is used on
+ * a number rather than a word — money amounts should still go through <Amount>, which
+ * already owns the "RM" prefix and currency formatting; this is for bare numeric labels
+ * (streak counts, day counts) that don't want that prefix. */
+type Weight = 500 | 700;
+interface TextPrimitiveProps {
+  children: React.ReactNode;
+  weight?: Weight;
+  numeric?: boolean;
+  color?: string;
+  style?: any;
+  numberOfLines?: number;
+  /** Shrink the font (native only  react-native-web doesn't implement this) rather than wrap
+   *  or overflow when the content is longer than usual, e.g. a hero amount that got very large. */
+  adjustsFontSizeToFit?: boolean;
+  minimumFontScale?: number;
+}
+
+function textPrimitive(size: number, defaultWeight: Weight) {
+  return function TextPrimitive({ children, weight = defaultWeight, numeric, color, style, numberOfLines, adjustsFontSizeToFit, minimumFontScale }: TextPrimitiveProps) {
+    const colorTheme = useThemeColors();
+    const family = numeric ? numFont(weight) : uiFont(weight);
+    return (
+      <Text
+        style={[{ fontFamily: family, fontSize: size, color: color ?? colorTheme.ink }, style]}
+        numberOfLines={numberOfLines}
+        adjustsFontSizeToFit={adjustsFontSizeToFit}
+        minimumFontScale={minimumFontScale}
+      >
+        {children}
+      </Text>
+    );
+  };
+}
+
+/** One per screen: the hero number or headline. 40px. */
+export const Display = textPrimitive(type.display, 700);
+/** Screen and card titles. 22px. */
+export const Title = textPrimitive(type.title, 700);
+/** Default body copy — the size most text on a screen should be. 16px. */
+export const Body = textPrimitive(type.body, 500);
+/** Eyebrows, meta, secondary rows. 13px. */
+export const Label = textPrimitive(type.label, 700);
+/** Timestamps, legal, genuinely rare. 11px. */
+export const Caption = textPrimitive(type.caption, 500);
+
 export function Amount({
   value,
   size = 17,
   weight = 700,
   color,
   cur = true,
+  currency = 'MYR',
 }: {
   value: number;
   size?: number;
   weight?: number;
   color?: string;
   cur?: boolean;
+  /** 3-letter currency code the prefix and decimal places are drawn from. Defaults to 'MYR'
+   *  so every existing call site (which never passed this) keeps rendering "RM X.XX" exactly
+   *  as before. Matches `fmtMoney`'s own prefix rule: MYR shows "RM", anything else shows the
+   *  code itself, since symbols are ambiguous (the yen sign covers both JPY and CNY). */
+  currency?: string;
 }) {
   const colorTheme = useThemeColors();
   color = color ?? colorTheme.ink;
+  const prefix = currency === 'MYR' ? 'RM' : currency;
   return (
     <Text style={{ fontFamily: numFont(weight), fontSize: size, color }}>
       {cur && (
-        <Text style={{ fontFamily: numFont(600), fontSize: size * 0.66, color, opacity: 0.55 }}>RM </Text>
+        <Text style={{ fontFamily: numFont(600), fontSize: size * 0.66, color, opacity: 0.55 }}>{prefix} </Text>
       )}
-      {fmt(value)}
+      {fmtDecimals(value, decimalsFor(currency))}
     </Text>
   );
 }
 
 /* ── surfaces ── */
 
-export function Card({ children, style }: { children: React.ReactNode; style?: ViewStyle | ViewStyle[] }) {
+export function Card({
+  children,
+  style,
+  onLayout,
+}: {
+  children: React.ReactNode;
+  style?: ViewStyle | ViewStyle[];
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
   const colorTheme = useThemeColors();
   return (
-    <View style={[styles.card, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, style]}>
+    <View onLayout={onLayout} style={[styles.card, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, style]}>
       {children}
     </View>
   );
@@ -105,6 +172,8 @@ export function CategoryChip({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { tCat, t } = useLanguage();
+  const label = tCat(category);
   return (
     <Pressable
       onPress={onPress}
@@ -114,17 +183,17 @@ export function CategoryChip({
         selected && { borderColor: theme.accent, backgroundColor: theme.accentTint },
       ]}
       accessibilityRole="radio"
-      accessibilityLabel={category.label}
+      accessibilityLabel={label}
       accessibilityState={{ selected }}
     >
       <CatBadge category={category} size={34} rad={10} />
       <Text style={[styles.chipLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-        {category.label}
+        {label}
       </Text>
       {suggested && !selected && (
         <View style={[styles.learnedTag, { backgroundColor: theme.accentSoft }]}>
           <Icon name="sparkles" size={11} color={theme.accentInk} />
-          <Text style={[styles.learnedTagText, { color: theme.onTint }]}>{suggested === 'guess' ? 'AI guess' : 'learned'}</Text>
+          <Text style={[styles.learnedTagText, { color: theme.onTint }]}>{suggested === 'guess' ? t('aiGuess') : t('learned')}</Text>
         </View>
       )}
       {selected && (
@@ -160,7 +229,10 @@ export function B({ children }: { children: React.ReactNode }) {
 
 export function PipSays({
   expr = 'idle',
-  size = 52,
+  // 52 -> 60 (docs/ui-engagement-plan.md Step 3): the fine detail in the newer expressions
+  // (think's single brow, sheepish's wince) reads as a hairline below this. Kept as one shared
+  // default rather than sized per screen, so every PipSays call site stays visually consistent.
+  size = 60,
   children,
 }: {
   expr?: PipExpr;
@@ -268,12 +340,45 @@ export function TopBar({
   );
 }
 
+/**
+ * The fill glides to a new `pct` instead of cutting to it, so a wizard step advancing (or a
+ * budget allocation changing) is something the eye can follow. Mounts already at `pct` rather
+ * than sweeping up from 0: on a screen that just opened, the bar is data, not an entrance.
+ * Reduced motion snaps, same contract as everything else in docs/ui-engagement-plan.md Step 1.
+ */
 export function ProgressTrack({ pct, height = 7 }: { pct: number; height?: number }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const reducedMotion = useReducedMotion();
+  const target = Math.max(0, Math.min(100, pct));
+  const fill = useRef(new Animated.Value(target)).current;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      fill.setValue(target);
+      return;
+    }
+    // Width is a percentage string, which the native driver can't interpolate.
+    const a = Animated.timing(fill, {
+      toValue: target,
+      duration: motionDuration.enter,
+      easing: motionEasing.standard,
+      useNativeDriver: false,
+    });
+    a.start();
+    return () => a.stop();
+  }, [target, reducedMotion, fill]);
+
   return (
     <View style={[styles.track, { height, backgroundColor: colorTheme.line }]}>
-      <View style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: '100%', borderRadius: 999, backgroundColor: theme.accent }} />
+      <Animated.View
+        style={{
+          width: fill.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+          height: '100%',
+          borderRadius: 999,
+          backgroundColor: theme.accent,
+        }}
+      />
     </View>
   );
 }

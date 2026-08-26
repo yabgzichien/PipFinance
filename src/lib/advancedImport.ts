@@ -2,6 +2,7 @@
 // Pure, deterministic helpers for advanced prompt-based LLM import.
 // No UI / database / file-system imports — everything here is unit-tested.
 
+import { BASE_CURRENCY, normalizeCurrency } from './currency';
 import { ACCOUNT_CLASSES } from './networth';
 import { todayISO } from './duplicates';
 import type { ExtractedTxn } from './types';
@@ -28,6 +29,15 @@ For each transaction row found, output:
 - account: specific account name as printed on the document (e.g. "Maybank Savings", "Touch 'n Go eWallet"), or "Unknown" if not stated.
 
 Skip ONLY: running balance lines, statement totals, opening/closing balances, disclosures, headers/footers.
+
+MATRIX / SUMMARY TABLES
+Many trackers keep an overview tab laid out as a grid, where each ROW is a category and each COLUMN is a month (e.g. rows "Allowance", "Salary", "Other Income", "Rental", "Insurance", "Car Installment", "Phone Bill", "Electricity"; columns "Jan" … "Dec"). This data is REAL and is usually recorded nowhere else, so read these tabs too, not only the row-per-transaction journals.
+- Emit one transaction per filled month cell, dated the last day of that month.
+- Use the ROW label as the category, and the ROW label as the description.
+- Income rows (allowance, salary, scholarship, loan disbursement, angpao, claims, refunds) are POSITIVE. Cost rows are NEGATIVE.
+- SKIP: any budget / target column (often the first numeric column, headed "Budget" or "Monthly Budget"), every "Total" / "Net" row and column, and any cell showing a spreadsheet error such as #REF! or #DIV/0!.
+- Treat a blank cell, "-", or 0 as no transaction. Do not emit a row for it.
+- NEVER double count. If a category is already itemised row-by-row on a monthly journal tab, do NOT also emit that category's cells from the summary tab. Emit summary cells ONLY for categories that appear nowhere in the journals.
 
 ──────────────────────────────────────
 SECTION 2 — ACCOUNT BALANCES
@@ -134,6 +144,9 @@ export interface ParsedAccount {
   clsLabel: string;  // human label
   kind: 'asset' | 'liability';
   balance: number;
+  /** 3-letter code from the prompt's own "currency" field (SECTION 2), normalised so it is
+   *  never a bad/unrecognised code. */
+  currency: string;
   asOf: string;
   notes: string | null;
   include: boolean;
@@ -244,7 +257,9 @@ export function parseJSON(raw: string): ParseResult {
       typeof r.account === 'string' && r.account.trim() && r.account.trim().toLowerCase() !== 'unknown'
         ? r.account.trim()
         : null;
-    return { merchant, amount: absAmt, type, date, method: null, categoryHint, account };
+    // SECTION 1 of the prompt above never asks the model for a per-transaction currency (only
+    // SECTION 2's account balances carry one) so every imported transaction is plain MYR here.
+    return { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency: BASE_CURRENCY };
   });
 
   // ── Accounts ──
@@ -264,12 +279,14 @@ export function parseJSON(raw: string): ParseResult {
       typeof r.notes === 'string' && r.notes.trim() ? r.notes.trim() : null;
     const quantity = typeof r.quantity === 'number' && Number.isFinite(r.quantity) ? r.quantity : null;
     const cost = typeof r.cost === 'number' && Number.isFinite(r.cost) ? r.cost : null;
+    const currency = normalizeCurrency(r.currency);
     return {
       name,
       cls: clsId,
       clsLabel: meta.label,
       kind: meta.kind,
       balance,
+      currency,
       asOf,
       notes,
       include: true,

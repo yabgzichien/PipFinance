@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing } from 'react-native';
 import Svg, { Circle, Ellipse, Line, Path } from 'react-native-svg';
+import { useReducedMotion } from '../state/useReducedMotion';
 
 /**
  * "Pip" the coin-sprout mascot, ported pixel-for-pixel from the approved
@@ -10,8 +11,12 @@ import Svg, { Circle, Ellipse, Line, Path } from 'react-native-svg';
  */
 export function CoinMascot({ size = 52, float = false }: { size?: number; float?: boolean }) {
   const ty = useRef(new Animated.Value(0)).current;
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
-    if (!float) return;
+    if (!float || reducedMotion) {
+      ty.setValue(0);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(ty, { toValue: -4, duration: 1700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
@@ -20,7 +25,7 @@ export function CoinMascot({ size = 52, float = false }: { size?: number; float?
     );
     loop.start();
     return () => loop.stop();
-  }, [float, ty]);
+  }, [float, reducedMotion, ty]);
 
   return (
     <Animated.View style={{ transform: [{ translateY: ty }] }}>

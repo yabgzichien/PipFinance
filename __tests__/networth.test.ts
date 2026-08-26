@@ -5,15 +5,17 @@ import {
   netWorth,
   groupByClass,
   netWorthSeries,
+  monthsWithData,
   defaultLinkEffect,
   applyEffect,
+  toMyrValues,
 } from '../src/lib/networth';
 import type { Account, BalanceEntry } from '../src/lib/types';
 
 function acct(over: Partial<Account>): Account {
   return {
     id: 'a1', name: 'Acct', kind: 'asset', cls: 'cash', archived: false, createdAt: '2026-01-01T00:00:00.000Z',
-    sub: null, symbol: null, ticker: null, quantity: null, cost: null, ...over,
+    sub: null, symbol: null, ticker: null, quantity: null, cost: null, currency: 'MYR', ...over,
   };
 }
 function entry(over: Partial<BalanceEntry>): BalanceEntry {
@@ -96,6 +98,123 @@ describe('netWorthSeries', () => {
       { monthKey: '2026-05', assets: 1000, liabilities: 500, net: 500 },
       { monthKey: '2026-06', assets: 1200, liabilities: 300, net: 900 },
     ]);
+  });
+
+  // The cursor walk that replaced the per-month re-sort has to survive unsorted input and
+  // asOf ties, since neither the DB order nor the caller's month order is guaranteed.
+  it('matches a per-month accountValueAsOf lookup on unsorted entries', () => {
+    const accounts = [acct({ id: 'cash1', kind: 'asset', cls: 'cash' }), acct({ id: 'loan', kind: 'liability', cls: 'personal' })];
+    const entries = [
+      entry({ accountId: 'cash1', value: 1200, asOf: '2026-06-10' }),
+      entry({ accountId: 'loan', value: 500, asOf: '2026-04-20' }),
+      entry({ accountId: 'cash1', value: 1000, asOf: '2026-04-15' }),
+      // Same asOf, later createdAt: the tie-break must pick 900, not 700.
+      entry({ accountId: 'cash1', value: 700, asOf: '2026-05-02', createdAt: '2026-05-02T08:00:00.000Z' }),
+      entry({ accountId: 'cash1', value: 900, asOf: '2026-05-02', createdAt: '2026-05-02T21:00:00.000Z' }),
+      entry({ accountId: 'loan', value: 300, asOf: '2026-06-05' }),
+    ];
+    const monthKeys = ['2026-03', '2026-04', '2026-05', '2026-06'];
+    const expected = monthKeys.map((mk) => {
+      const valueById: Record<string, number> = {};
+      for (const a of accounts) {
+        valueById[a.id] = accountValueAsOf(entries.filter((e) => e.accountId === a.id), `${mk}-31`);
+      }
+      return { monthKey: mk, ...netWorth(accounts, valueById) };
+    });
+    expect(netWorthSeries(accounts, entries, monthKeys)).toEqual(expected);
+  });
+
+  it('keeps the caller’s month order even when the keys arrive out of order', () => {
+    const accounts = [acct({ id: 'cash1' })];
+    const entries = [
+      entry({ accountId: 'cash1', value: 100, asOf: '2026-04-01' }),
+      entry({ accountId: 'cash1', value: 250, asOf: '2026-06-01' }),
+    ];
+    expect(netWorthSeries(accounts, entries, ['2026-06', '2026-04', '2026-05']).map((p) => [p.monthKey, p.net])).toEqual([
+      ['2026-06', 250],
+      ['2026-04', 100],
+      ['2026-05', 100],
+    ]);
+  });
+
+  it('is 0 for an account whose first reading is after every month asked for', () => {
+    const accounts = [acct({ id: 'cash1' })];
+    const entries = [entry({ accountId: 'cash1', value: 500, asOf: '2026-09-01' })];
+    expect(netWorthSeries(accounts, entries, ['2026-04', '2026-05'])).toEqual([
+      { monthKey: '2026-04', assets: 0, liabilities: 0, net: 0 },
+      { monthKey: '2026-05', assets: 0, liabilities: 0, net: 0 },
+    ]);
+  });
+});
+
+describe('monthsWithData', () => {
+  it('returns every month from the earliest entry through now, inclusive', () => {
+    const entries = [entry({ asOf: '2026-03-10' }), entry({ asOf: '2026-05-20' })];
+    expect(monthsWithData(entries, new Date(2026, 5, 15))).toEqual(['2026-03', '2026-04', '2026-05', '2026-06']);
+  });
+  it('is empty when there are no entries yet', () => {
+    expect(monthsWithData([], new Date(2026, 5, 15))).toEqual([]);
+  });
+  it('is a single month when the earliest entry is this month', () => {
+    expect(monthsWithData([entry({ asOf: '2026-06-02' })], new Date(2026, 5, 15))).toEqual(['2026-06']);
+  });
+  it('picks the earliest asOf across multiple accounts, unsorted input', () => {
+    const entries = [entry({ accountId: 'a', asOf: '2026-04-01' }), entry({ accountId: 'b', asOf: '2026-01-15' }), entry({ accountId: 'a', asOf: '2026-02-01' })];
+    expect(monthsWithData(entries, new Date(2026, 1, 20))).toEqual(['2026-01', '2026-02']);
+  });
+});
+
+describe('toMyrValues', () => {
+  it('leaves MYR accounts untouched and needs no rate table', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' })];
+    const result = toMyrValues(accounts, { a: 1000 }, {});
+    expect(result.valueById).toEqual({ a: 1000 });
+    expect(result.unconvertible).toEqual([]);
+  });
+
+  it('converts a foreign account at the supplied rate', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    const result = toMyrValues(accounts, { a: 12000 }, { CNY: 0.63 });
+    expect(result.valueById).toEqual({ a: 7560 });
+    expect(result.unconvertible).toEqual([]);
+  });
+
+  it('EXCLUDES an account with no rate rather than counting it at parity', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' }), acct({ id: 'b', currency: 'CNY' })];
+    const result = toMyrValues(accounts, { a: 1000, b: 12000 }, {});
+    expect(result.valueById).toEqual({ a: 1000 });
+    expect(result.valueById.b).toBeUndefined();
+    expect(result.unconvertible).toEqual(['b']);
+  });
+
+  it('feeds netWorth a total that omits the unconvertible account', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' }), acct({ id: 'b', currency: 'CNY' })];
+    const { valueById } = toMyrValues(accounts, { a: 1000, b: 12000 }, {});
+    expect(netWorth(accounts, valueById).net).toBe(1000);
+  });
+
+  it('rounds converted values to 2dp', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    expect(toMyrValues(accounts, { a: 128 }, { CNY: 0.6321 }).valueById.a).toBe(80.91);
+  });
+
+  it('skips archived accounts', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY', archived: true })];
+    expect(toMyrValues(accounts, { a: 12000 }, {}).unconvertible).toEqual([]);
+  });
+});
+
+describe('netWorthSeries with rates', () => {
+  it('defaults to an empty rate table so existing MYR-only callers are unaffected', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' })];
+    const entries = [entry({ accountId: 'a', value: 500, asOf: '2026-05-01' })];
+    expect(netWorthSeries(accounts, entries, ['2026-05'])[0].net).toBe(500);
+  });
+
+  it('converts foreign balances in each month point', () => {
+    const accounts = [acct({ id: 'a', currency: 'CNY' })];
+    const entries = [entry({ accountId: 'a', value: 1000, asOf: '2026-05-01' })];
+    expect(netWorthSeries(accounts, entries, ['2026-05'], { CNY: 0.63 })[0].net).toBe(630);
   });
 });
 

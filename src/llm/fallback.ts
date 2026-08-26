@@ -1,11 +1,11 @@
 // src/llm/fallback.ts
-// Primary/secondary LLM routing. Groq is the primary for every task; if a Groq call fails
-// (no key, auth, rate limit, network, an unreadable reply, or a capability it can't serve —
-// e.g. a PDF its vision model can't ingest), the same call is retried on Gemini. This is the
-// single entry point every screen uses, so provider selection + fallback live in one place
-// instead of being re-decided per call site.
+// Primary/secondary/tertiary LLM routing. Gemini is the primary for every task; if a Gemini call fails
+// (no key, auth, rate limit, network, or an unreadable reply), the same call is retried on Groq,
+// and finally on OpenRouter. This is the single entry point every screen uses, so provider selection +
+// fallback live in one place instead of being re-decided per call site.
 import { GeminiProvider } from './gemini';
 import { GroqProvider } from './groq';
+import { OpenRouterProvider } from './openrouter';
 import { LLMError, type LLMProvider } from './types';
 import type {
   CategoryGuessInput,
@@ -22,7 +22,6 @@ export type Capability =
   | 'extractHoldings'
   | 'extractBalance'
   | 'extractSnapshot'
-  | 'extractIdentity'
   | 'extractReceipt'
   | 'guessCategories'
   | 'coach';
@@ -36,14 +35,33 @@ interface Leg {
 /** Method inputs, minus the per-provider credentials the wrapper fills in itself. */
 type Payload<T> = Omit<T, 'apiKey' | 'model'>;
 
+function splitKeys(rawKey: string): string[] {
+  return (rawKey || '')
+    .split(/[,\n]/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
 export class FallbackProvider {
   private readonly legs: Leg[];
 
   constructor(settings: LLMSettings) {
-    // Order is the fallback order: Groq first, Gemini second.
+    // Order is the fallback order: Gemini first, Groq second, OpenRouter third.
+    // Supports comma-separated keys per provider for seamless backup key failover.
+    const geminiKeys = splitKeys(settings.geminiKey);
+    const groqKeys = splitKeys(settings.groqKey);
+    const openrouterKeys = splitKeys(settings.openrouterKey);
+
     this.legs = [
-      { provider: GroqProvider, apiKey: settings.groqKey, model: settings.groqModel },
-      { provider: GeminiProvider, apiKey: settings.geminiKey, model: settings.geminiModel },
+      ...(geminiKeys.length > 0
+        ? geminiKeys.map((k) => ({ provider: GeminiProvider, apiKey: k, model: settings.geminiModel }))
+        : [{ provider: GeminiProvider, apiKey: '', model: settings.geminiModel }]),
+      ...(groqKeys.length > 0
+        ? groqKeys.map((k) => ({ provider: GroqProvider, apiKey: k, model: settings.groqModel }))
+        : [{ provider: GroqProvider, apiKey: '', model: settings.groqModel }]),
+      ...(openrouterKeys.length > 0
+        ? openrouterKeys.map((k) => ({ provider: OpenRouterProvider, apiKey: k, model: settings.openrouterModel }))
+        : [{ provider: OpenRouterProvider, apiKey: '', model: settings.openrouterModel }]),
     ];
   }
 
@@ -89,9 +107,6 @@ export class FallbackProvider {
   }
   extractSnapshot(input: Payload<DocExtractInput>) {
     return this.run<Awaited<ReturnType<NonNullable<LLMProvider['extractSnapshot']>>>>('extractSnapshot', input);
-  }
-  extractIdentity(input: Payload<DocExtractInput>) {
-    return this.run<Awaited<ReturnType<NonNullable<LLMProvider['extractIdentity']>>>>('extractIdentity', input);
   }
   extractReceipt(input: Payload<DocExtractInput>) {
     return this.run<Awaited<ReturnType<NonNullable<LLMProvider['extractReceipt']>>>>('extractReceipt', input);

@@ -1,5 +1,4 @@
-// __tests__/commitments.test.ts
-import { clampToMonth, occurrencesFor, findCommitmentMatch, toArrearsRows } from '../src/lib/commitments';
+import { clampToMonth, occurrencesFor, findCommitmentMatch, occurrenceMyr } from '../src/lib/commitments';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
 import type { Transaction } from '../src/lib/types';
 
@@ -8,7 +7,7 @@ function commitment(over: Partial<Commitment>): Commitment {
     id: 'c1', label: 'Maxis', merchantKey: 'maxis', kind: 'expense', amount: 89,
     categoryId: 'communications', fromAccountId: 'a1', toAccountId: null,
     dueDay: 5, startMonth: '2026-06', endMonth: null, archived: false,
-    createdAt: '2026-06-01T00:00:00.000Z', ...over,
+    createdAt: '2026-06-01T00:00:00.000Z', reliefCode: null, currency: 'MYR', ...over,
   };
 }
 
@@ -96,22 +95,16 @@ describe('findCommitmentMatch', () => {
   });
 });
 
-describe('toArrearsRows', () => {
-  function occ(over: Partial<CommitmentOccurrence>): CommitmentOccurrence {
-    return {
-      id: 'o1', commitmentId: 'c1', dueDate: '2026-06-05', month: '2026-06', amount: 89,
-      paidAmount: null, paidOn: null, status: 'scheduled', txnId: null, txnCreated: false,
-      unitsAdded: null, priceMYR: null, createdAt: '2026-06-01T00:00:00.000Z', ...over,
-    };
-  }
-
-  it('drops skipped occurrences', () => {
-    const rows = toArrearsRows([occ({ status: 'skipped' })]);
-    expect(rows).toEqual([]);
+describe('foreign currency commitments', () => {
+  it('freezes each occurrence at the rate current when it was generated', () => {
+    const march = occurrenceMyr(2000, 0.63);
+    const april = occurrenceMyr(2000, 0.65);
+    expect(march).toBe(1260);
+    expect(april).toBe(1300);
+    expect(march).not.toBe(april);
   });
 
-  it('maps scheduled/paid/late rows to the Repayment shape', () => {
-    const rows = toArrearsRows([occ({ status: 'paid', paidOn: '2026-06-03' })]);
-    expect(rows).toEqual([{ id: 'o1', applicationId: 'c1', dueDate: '2026-06-05', paidOn: '2026-06-03', amount: 89, status: 'paid' }]);
+  it('leaves the occurrences of a MYR commitment unconverted', () => {
+    expect(occurrenceMyr(2000, 1)).toBe(2000);
   });
 });

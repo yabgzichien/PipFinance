@@ -15,6 +15,31 @@ describe('AdvancedImport buildPrompt', () => {
     expect(prompt).toContain('leave description as null and capture the category label accurately');
   });
 
+  it('tells the model to read month-per-column summary tables, not just journals', () => {
+    const prompt = buildPrompt();
+    expect(prompt).toContain('each ROW is a category and each COLUMN is a month');
+    expect(prompt).toContain('one transaction per filled month cell');
+    expect(prompt).toContain('dated the last day of that month');
+  });
+
+  it('tells the model that summary-tab income rows are positive amounts', () => {
+    const prompt = buildPrompt();
+    expect(prompt).toContain('Income rows');
+    expect(prompt).toContain('are POSITIVE');
+  });
+
+  it('tells the model to skip budget columns, totals and error cells', () => {
+    const prompt = buildPrompt();
+    expect(prompt).toContain('budget / target column');
+    expect(prompt).toContain('#REF!');
+  });
+
+  it('tells the model never to double count a journal row from the summary tab', () => {
+    const prompt = buildPrompt();
+    expect(prompt).toContain('NEVER double count');
+    expect(prompt).toContain('already itemised');
+  });
+
   it('includes accounts and transaction section instructions', () => {
     const prompt = buildPrompt();
     expect(prompt).toContain('SECTION 1 — TRANSACTIONS');
@@ -65,6 +90,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Groceries',
       account: 'Maybank',
+      currency: 'MYR',
     });
 
     // Second txn: Income with no merchant, categoryHint "Salary"
@@ -76,6 +102,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Salary',
       account: 'Maybank',
+      currency: 'MYR',
     });
 
     // Accounts
@@ -113,6 +140,7 @@ describe('AdvancedImport parseJSON', () => {
       method: null,
       categoryHint: 'Food & Groceries',
       account: 'Credit Card',
+      currency: 'MYR',
     });
   });
 
@@ -147,6 +175,24 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.commitments).toEqual([]);
     expect(result.accounts[0].quantity).toBeNull();
     expect(result.accounts[0].cost).toBeNull();
+  });
+
+  it('carries a foreign account currency through instead of discarding it', () => {
+    const result = parseJSON(JSON.stringify({
+      accounts: [{ name: 'Bank of China', type: 'Cash', balance: 5000, currency: 'cny' }],
+    }));
+    expect(result.accounts[0].currency).toBe('CNY');
+  });
+
+  it('falls back to MYR for a missing or unsupported account currency', () => {
+    const result = parseJSON(JSON.stringify({
+      accounts: [
+        { name: 'No currency stated', type: 'Cash', balance: 100 },
+        { name: 'Bogus code', type: 'Cash', balance: 100, currency: 'ZZZ' },
+      ],
+    }));
+    expect(result.accounts[0].currency).toBe('MYR');
+    expect(result.accounts[1].currency).toBe('MYR');
   });
 
   it('parses a quantity/cost pair on an account row (version 2)', () => {
