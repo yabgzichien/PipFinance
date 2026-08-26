@@ -50,3 +50,12 @@ ryttestpdf.pdf
 Testpdfscan.pdf
 .vercel
 .env*
+
+# local scratch / scans (not for the repo)
+Random/
+docs/.obsidian/
+AppStoreScreenshot.zip
+AppStoreScreenshot/
+tools/promoVideo/__pycache__/
+tools/promoVideo/out/
+__pycache__/
