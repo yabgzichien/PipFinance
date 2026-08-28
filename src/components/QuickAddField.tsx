@@ -1,0 +1,78 @@
+// src/components/QuickAddField.tsx
+// The natural-language entry field on the add hub. Owns only its own text and submit gesture;
+// all parsing, routing, and error text come from the parent (AddFlow), which owns the flow.
+
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Icon } from './Icon';
+import { Caption, Eyebrow } from './ui';
+import { useLanguage } from '../i18n';
+import { useAccent } from '../state/accent';
+import { useThemeColors } from '../state/colorScheme';
+import { radius, spacing, uiFont } from '../theme';
+
+export function QuickAddField({
+  onSubmit,
+  busy,
+  error,
+}: {
+  onSubmit: (text: string) => void;
+  /** True while the parent is parsing. Disables submit and swaps the hint for a status line. */
+  busy: boolean;
+  /** A message from the parent's last attempt, e.g. no amount found. Null when clear. */
+  error: string | null;
+}) {
+  const { t } = useLanguage();
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const [text, setText] = useState('');
+
+  const trimmed = text.trim();
+  const canSubmit = trimmed.length > 0 && !busy;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    onSubmit(trimmed);
+  };
+
+  return (
+    <View style={{ marginBottom: spacing.md }}>
+      <Eyebrow style={{ marginBottom: spacing.sm }}>{t('quickAddLabel')}</Eyebrow>
+      <View style={[styles.row, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+        <TextInput
+          value={text}
+          onChangeText={setText}
+          onSubmitEditing={submit}
+          returnKeyType="done"
+          editable={!busy}
+          placeholder={t('quickAddPlaceholder')}
+          placeholderTextColor={colorTheme.ink3}
+          style={[styles.input, { color: colorTheme.ink }]}
+        />
+        <Pressable
+          onPress={submit}
+          disabled={!canSubmit}
+          hitSlop={6}
+          style={[
+            styles.submit,
+            { backgroundColor: canSubmit ? theme.accent : colorTheme.surface2 },
+          ]}
+        >
+          <Icon name="check" size={17} color={canSubmit ? '#fff' : colorTheme.ink3} stroke={2.4} />
+        </Pressable>
+      </View>
+      {busy ? (
+        <Caption color={colorTheme.ink2} style={styles.hint}>{t('quickAddThinking')}</Caption>
+      ) : error ? (
+        <Caption color={colorTheme.red} style={styles.hint}>{error}</Caption>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12 },
+  input: { flex: 1, fontFamily: uiFont(600), fontSize: 15, paddingVertical: 12 },
+  submit: { width: 34, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  hint: { marginTop: 6, marginLeft: 2 },
+});
