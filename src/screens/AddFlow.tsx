@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { PipWearsHat } from '../components/Pip';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
+import { getActiveCurrencies } from '../db/currencyRepo';
 import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
 import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
@@ -12,12 +13,15 @@ import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
 import { notify } from '../lib/platformAlert';
 import { type ScannedReceipt } from '../lib/parseReceipt';
+import { resolveQuickAdd } from '../lib/quickAdd';
+import type { QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
 import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
-import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction } from '../lib/types';
+import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource } from '../lib/types';
 import { useAppData, type NewLearned } from '../state/store';
 import { useBackHandler } from '../state/useBackHandler';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { AttachScreen, type PickedImage } from './AttachScreen';
 import { CategorizeScreen, type PendingSettlement } from './CategorizeScreen';
 import { ExtractScreen } from './ExtractScreen';
@@ -31,6 +35,7 @@ type Phase =
   | 'kind'
   | 'extract'
   | 'guessing'
+  | 'quickparse'
   | 'categorize'
   | 'manual'
   | 'receipt'
@@ -47,9 +52,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+export type AddFlowPhase = Phase;
+
 type AddFlowProps = {
   onClose: () => void;
   initialPhase?: Phase;
+  tutorialMode?: 'scan' | 'manual';
+  activeTourAnchor?: string | null;
+  onPhaseChange?: (phase: Phase) => void;
+  onAmountValidChange?: (valid: boolean) => void;
+  onCategoryChosen?: () => void;
 };
 
 /**
@@ -68,11 +80,26 @@ export function AddFlow(props: AddFlowProps) {
   );
 }
 
-function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
+function AddFlowPhases({
+  onClose,
+  initialPhase,
+  tutorialMode,
+  activeTourAnchor = null,
+  onPhaseChange,
+  onAmountValidChange,
+  onCategoryChosen,
+}: AddFlowProps) {
   const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection } = useAppData();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
 
-  const [phase, setPhase] = useState<Phase>(initialPhase);
+  const [phase, setPhase] = useState<Phase>(
+    initialPhase ?? (tutorialMode === 'manual' ? 'manual' : 'attach')
+  );
+
+  useEffect(() => {
+    onPhaseChange?.(phase);
+  }, [phase, onPhaseChange]);
   const [image, setImage] = useState<PickedImage | null>(null);
   const [extracted, setExtracted] = useState<ExtractedTxn[]>([]);
   const [suggestions, setSuggestions] = useState<(CategorySuggestion | null)[]>([]);
@@ -96,6 +123,13 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   // live extraction (manual entry, receipt scan, a cached re-review).
   const [extractElapsedMs, setExtractElapsedMs] = useState<number | null>(null);
 
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickError, setQuickError] = useState<string | null>(null);
+  const [quickPrefill, setQuickPrefill] = useState<QuickDraft | null>(null);
+  // A quick-add batch was typed, not read off a screenshot, so it must not be saved as
+  // 'extracted' — that would mislabel typed rows in the data-confidence weighting.
+  const [batchSource, setBatchSource] = useState<TxnSource>('extracted');
+
   useEffect(() => {
     getLLM().then((llm) => setHasKey(llm.can('extract')));
   }, []);
@@ -106,7 +140,10 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   // Both readers were reached by answering the kind question, so back re-asks it. Getting the
   // answer wrong costs one tap, not another trip to the camera.
   const backToKind = () => setPhase(image ? 'kind' : 'attach');
-  const backFromManualOrSplit = () => setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
+  const backFromManualOrSplit = () => {
+    setQuickPrefill(null);
+    setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
+  };
   const backFromCategorize = () => {
     setCached(extracted);
     setPhase('extract');
@@ -144,7 +181,62 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     setAutoFill(null);
     setReceiptResult(null);
     setCachedReceipt(null);
+    setBatchSource('extracted');
     setPhase('kind');
+  };
+
+  const onQuickAdd = async (text: string) => {
+    setQuickError(null);
+    setQuickBusy(true);
+    setPhase('quickparse');
+
+    const [llm, active] = await Promise.all([getLLM(), getActiveCurrencies()]);
+    const drafts = await resolveQuickAdd(text, {
+      memory,
+      categories,
+      activeCurrencies: active,
+      today: todayISO(),
+      llm,
+    });
+
+    setQuickBusy(false);
+
+    if (drafts.length === 0) {
+      setQuickError(t('quickAddNoAmount'));
+      setPhase('attach');
+      return;
+    }
+
+    if (drafts.length === 1) {
+      setQuickPrefill(drafts[0]);
+      setReceiptResult(null);
+      setPhase('manual');
+      return;
+    }
+
+    // Batch path: CategorizeScreen hardcodes an RM prefix, so a foreign amount would be
+    // mislabelled. Force base currency and say so rather than lie about the denomination.
+    if (drafts.some((d) => d.currency && d.currency !== BASE_CURRENCY)) {
+      setQuickError(t('quickAddForeignBatch'));
+    }
+    setExtracted(
+      drafts.map((d) => ({
+        merchant: d.label,
+        amount: d.amount,
+        type: d.type,
+        date: d.date ?? todayISO(),
+        method: null,
+        remark: null,
+        currency: BASE_CURRENCY,
+        fxRate: null,
+      }))
+    );
+    setSuggestions(drafts.map((d) => (d.categoryId ? { categoryId: d.categoryId, source: 'guess' } : null)));
+    setLearnedThisScan(drafts.map(() => null));
+    setLinkId(null);
+    setBatchSource('manual');
+    setExtractElapsedMs(null);
+    setPhase('categorize');
   };
 
   const onExtracted = async (items: ExtractedTxn[], accountId: string | null, elapsedMs: number | null) => {
@@ -215,7 +307,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
     }
 
     try {
-      const { created, newLearned: learned } = await commitCategorized(items, assignments, 'extracted', splitDrafts);
+      const { created, newLearned: learned } = await commitCategorized(items, assignments, batchSource, splitDrafts);
       await applyReliefDetection(created, null);
       // If the whole batch was tagged to an account, move that account's balance
       // per saved row — direction derived from account kind + txn type (an expense
@@ -257,6 +349,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   };
 
   const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {
+    setQuickPrefill(null);
     const { created, newLearned: learned } = await commitCategorized(
       [item],
       [categoryId],
@@ -278,7 +371,16 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
         hasKey={hasKey}
         onClose={onClose}
         onPicked={onPicked}
-        onManual={() => setPhase('manual')}
+        onManual={() => {
+          setQuickPrefill(null);
+          setPhase('manual');
+        }}
+        onQuickAdd={onQuickAdd}
+        quickBusy={quickBusy}
+        quickError={quickError}
+        showSamples={tutorialMode === 'scan' && !activeTourAnchor}
+        isTutorial={tutorialMode === 'scan'}
+        activeTourAnchor={activeTourAnchor}
       />
     );
   }
@@ -297,6 +399,15 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
       <View style={{ flex: 1, backgroundColor: colorTheme.bg, justifyContent: 'center', paddingHorizontal: 18 }}>
         <PipSays expr="think">
           <BubbleText>Thinking about your new merchants… this can take a few seconds.</BubbleText>
+        </PipSays>
+      </View>
+    );
+  }
+  if (phase === 'quickparse') {
+    return (
+      <View style={{ flex: 1, backgroundColor: colorTheme.bg, justifyContent: 'center', paddingHorizontal: 18 }}>
+        <PipSays expr="think">
+          <BubbleText>{t('quickAddThinking')}</BubbleText>
         </PipSays>
       </View>
     );
@@ -323,6 +434,7 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
   if (phase === 'manual' || phase === 'split') {
     return (
       <ManualEntryScreen
+        key={quickPrefill ? `quick:${quickPrefill.label}:${quickPrefill.amount}` : 'manual'}
         categories={categories}
         onBack={backFromManualOrSplit}
         onComplete={onManualComplete}
@@ -330,10 +442,17 @@ function AddFlowPhases({ onClose, initialPhase = 'attach' }: AddFlowProps) {
         // no-receipt path is a bare split, and 'manual' is a plain typed entry.
         title={phase !== 'split' ? undefined : receiptResult ? 'Check your receipt' : 'Split a bill'}
         startSplitting={phase === 'split'}
-        initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : null}
-        initialAmount={phase === 'split' ? receiptResult?.charged ?? null : null}
-        initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : null}
+        initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : quickPrefill?.label ?? null}
+        initialAmount={phase === 'split' ? receiptResult?.charged ?? null : quickPrefill?.amount ?? null}
+        initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : quickPrefill?.currency ?? null}
+        initialType={quickPrefill?.type ?? null}
+        initialDate={quickPrefill?.date ?? null}
+        initialCategoryId={quickPrefill?.categoryId ?? null}
         initialSplit={phase === 'split' ? receiptResult?.draft ?? null : null}
+        isTutorial={tutorialMode === 'manual'}
+        activeTourAnchor={activeTourAnchor}
+        onAmountValidChange={onAmountValidChange}
+        onCategoryChosen={onCategoryChosen}
       />
     );
   }

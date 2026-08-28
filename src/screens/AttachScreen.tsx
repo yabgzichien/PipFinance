@@ -4,7 +4,9 @@ import { Image as RNImage, Platform, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { B, Body, BubbleText, Caption, Label, PipSays, TopBar } from '../components/ui';
+import { QuickAddField } from '../components/QuickAddField';
 import { scanDocument } from '../lib/documentScanner';
+import { TourAnchor } from '../components/TourAnchor';
 import { notify } from '../lib/platformAlert';
 import { SAMPLE_STATEMENTS } from '../data/sampleStatements';
 import { useAccent } from '../state/accent';
@@ -36,28 +38,41 @@ export function AttachScreen({
   onClose,
   onPicked,
   onManual,
+  onQuickAdd,
+  quickBusy,
+  quickError,
   showSamples = false,
+  isTutorial = false,
+  activeTourAnchor = null,
 }: {
   hasKey: boolean;
   onClose: () => void;
   onPicked: (img: PickedImage) => void;
   onManual: () => void;
+  /** Hands the raw typed line to AddFlow, which owns parsing and routing. */
+  onQuickAdd: (text: string) => void;
+  quickBusy: boolean;
+  quickError: string | null;
   /** Offer the bundled demo statements as one-tap samples (used during the judge tour)
    *  alongside the real upload options, so the app never injects an image on its own. */
   showSamples?: boolean;
+  /** When true, formats Pip's speech bubble to guide the new user through their first scan. */
+  isTutorial?: boolean;
+  activeTourAnchor?: string | null;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
+  const { t, isZh } = useLanguage();
   const [busy, setBusy] = useState(false);
+  const effectiveShowSamples = showSamples || isTutorial;
   // Camera-vs-gallery is a detail of HOW you hand the image over, not a separate thing to add.
   // Expanded by default: scanning is the differentiator (see file header), so it should never
   // need an extra tap to reveal its own options.
   const [scanOpen, setScanOpen] = useState(true);
   useEffect(() => {
-    if (showSamples) setScanOpen(true);
-  }, [showSamples]);
+    if (effectiveShowSamples) setScanOpen(true);
+  }, [effectiveShowSamples]);
 
   const handleResult = (res: ImagePicker.ImagePickerResult) => {
     if (res.canceled || !res.assets?.length) return;
@@ -129,13 +144,19 @@ export function AttachScreen({
         <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm }}>
           <PipSays expr="curious">
             <BubbleText>
-              {isZh ? (
+              {isTutorial ? (
+                t('tutorialScanCoaching')
+              ) : isZh ? (
                 <>扫描<B>小票</B>或已打开应用的账单截图，我将自动识别。稍后会询问单据类型。</>
               ) : (
                 <>Scan a <B>receipt</B> or a screenshot of the app you already have open, and I’ll read it. I’ll ask which it was afterwards.</>
               )}
             </BubbleText>
           </PipSays>
+        </View>
+
+        <View style={{ paddingHorizontal: spacing.base, paddingTop: spacing.md }}>
+          <QuickAddField onSubmit={onQuickAdd} busy={quickBusy} error={quickError} />
         </View>
 
         {!hasKey && (
@@ -161,7 +182,7 @@ export function AttachScreen({
 
           {scanOpen && (
             <View style={[styles.nested, { borderLeftColor: theme.accentSoft }]}>
-              {showSamples && (
+              {effectiveShowSamples && (
                 <>
                   <Label weight={700} color={colorTheme.ink3} style={{ marginBottom: spacing.sm }}>
                     {isZh ? '没有现成截图？点击体验示例' : 'NO SCREENSHOT HANDY? TAP A SAMPLE'}
@@ -191,29 +212,33 @@ export function AttachScreen({
                   </Body>
                 </>
               )}
-              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: showSamples ? spacing.md : 0 }}>
-                <MiniButton icon="camera" label={isZh ? '拍照' : 'Take a photo'} onPress={takePhoto} disabled={busy} />
-                <MiniButton icon="gallery" label={isZh ? '从相册选择' : 'From gallery'} onPress={pickFromLibrary} disabled={busy} />
-              </View>
+              <TourAnchor id="tour_gallery_btn" activeId={activeTourAnchor}>
+                <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: effectiveShowSamples ? spacing.md : 0 }}>
+                  <MiniButton icon="camera" label={isZh ? '拍照' : 'Take a photo'} onPress={takePhoto} disabled={busy} />
+                  <MiniButton icon="gallery" label={isZh ? '从相册选择' : 'From gallery'} onPress={pickFromLibrary} disabled={busy} />
+                </View>
+              </TourAnchor>
             </View>
           )}
         </View>
 
         <View style={styles.group}>
-          <SourceButton
-            icon="pencil"
-            title={isZh ? '手动记账' : 'Enter it manually'}
-            sub={isZh ? '手动输入一笔支出或收入' : 'Type one expense or income yourself'}
-            onPress={onManual}
-            disabled={busy}
-            tone="quiet"
-          />
+          <TourAnchor id="tour_manual_btn" activeId={activeTourAnchor}>
+            <SourceButton
+              icon="pencil"
+              title={isZh ? '手动记账' : 'Enter it manually'}
+              sub={isZh ? '手动输入一笔支出或收入' : 'Type one expense or income yourself'}
+              onPress={onManual}
+              disabled={busy}
+              tone="quiet"
+            />
+          </TourAnchor>
         </View>
 
         <Caption color={colorTheme.ink2} style={styles.hint}>
           {isZh
-            ? '截图仅发送至您选择的 AI 服务商以提取交易明细。手动记账数据仅保留在您的设备本地。'
-            : 'Screenshots are sent to your chosen AI provider only to read the transactions. Manual entries stay on your device.'}
+            ? '截图仅发送至您选择的 AI 服务商以提取交易明细。快速输入的文字仅在本机无法识别时才会发送。手动记账数据仅保留在您的设备本地。'
+            : 'Screenshots are sent to your chosen AI provider only to read the transactions. Quick-add text is sent only when your device can’t read it locally. Manual entries stay on your device.'}
         </Caption>
       </ScrollView>
     </View>
