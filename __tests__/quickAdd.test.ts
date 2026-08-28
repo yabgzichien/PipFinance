@@ -1,4 +1,5 @@
 import { resolveQuickAdd, type QuickAddDeps, type QuickAddLLM } from '../src/lib/quickAdd';
+import { merchantKey } from '../src/lib/normalize';
 import type { Category, MemoryMap } from '../src/lib/types';
 
 const categories: Category[] = [
@@ -82,6 +83,75 @@ describe('resolveQuickAdd — memory outranks the model', () => {
     const out = await resolveQuickAdd('lunch 9.2, mystery 4', deps({ memory: { lunch: 'food' } as MemoryMap, llm: fakeLLM(quickAdd) }));
     expect(out[0].categoryId).toBe('food');      // memory won
     expect(out[1].categoryId).toBe('food');      // model filled the gap
+  });
+});
+
+describe('resolveQuickAdd — the label the user typed is the label that gets learned', () => {
+  it('keeps the typed label when the local parse was confident, even if the model renames it', async () => {
+    const quickAdd = jest.fn().mockResolvedValue([
+      { label: 'Dim Sum', amount: 45, type: 'expense', date: null, currency: null, categoryId: 'food' },
+    ]);
+    const out = await resolveQuickAdd('dimsum 45', deps({ llm: fakeLLM(quickAdd) }));
+    expect(out[0].label).toBe('dimsum');       // pinned, not 'Dim Sum'
+    expect(out[0].categoryId).toBe('food');    // the model's real contribution survives
+  });
+
+  it('keeps every other field the model returned', async () => {
+    const quickAdd = jest.fn().mockResolvedValue([
+      { label: 'Grab', amount: 12, type: 'income', date: '2026-08-27', currency: 'MYR', categoryId: 'salary' },
+    ]);
+    const out = await resolveQuickAdd('grabride 12', deps({ llm: fakeLLM(quickAdd) }));
+    expect(out[0]).toEqual({
+      label: 'grabride',
+      amount: 12,
+      type: 'income',
+      date: '2026-08-27',
+      currency: 'MYR',
+      categoryId: 'salary',
+    });
+  });
+
+  it('does NOT pin when the local parse was not confident — the model cleaned up a mess', async () => {
+    const quickAdd = jest.fn().mockResolvedValue([
+      { label: 'Grab', amount: 12, type: 'expense', date: null, currency: null, categoryId: 'transport' },
+    ]);
+    const out = await resolveQuickAdd('split the grab ride, my half was 12', deps({ llm: fakeLLM(quickAdd) }));
+    expect(out[0].label).toBe('Grab');
+  });
+
+  it('does NOT pin when the model returned a different number of items', async () => {
+    const quickAdd = jest.fn().mockResolvedValue([
+      { label: 'Lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
+      { label: 'Tip', amount: 1, type: 'expense', date: null, currency: null, categoryId: 'food' },
+    ]);
+    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(quickAdd) }));
+    expect(out.map((d) => d.label)).toEqual(['Lunch', 'Tip']);
+  });
+
+  it('does not pin an empty local label over a real one from the model', async () => {
+    const quickAdd = jest.fn().mockResolvedValue([
+      { label: 'Cash withdrawal', amount: 50, type: 'expense', date: null, currency: null, categoryId: 'food' },
+    ]);
+    const out = await resolveQuickAdd('50', deps({ llm: fakeLLM(quickAdd) }));
+    expect(out[0].label).toBe('Cash withdrawal');
+  });
+
+  // The whole point of the pin: the round trip has to close, or every repeat of the same
+  // phrase pays for another LLM call forever.
+  it('closes the loop — the second identical entry never reaches the LLM', async () => {
+    const firstCall = jest.fn().mockResolvedValue([
+      { label: 'Dim Sum', amount: 45, type: 'expense', date: null, currency: null, categoryId: 'food' },
+    ]);
+    const first = await resolveQuickAdd('dimsum 45', deps({ llm: fakeLLM(firstCall) }));
+    expect(firstCall).toHaveBeenCalledTimes(1);
+
+    // What commitCategorized would write: merchantKey(label) -> categoryId.
+    const learned = { [merchantKey(first[0].label)]: first[0].categoryId! } as MemoryMap;
+
+    const secondCall = jest.fn();
+    const second = await resolveQuickAdd('dimsum 45', deps({ memory: learned, llm: fakeLLM(secondCall) }));
+    expect(secondCall).not.toHaveBeenCalled();
+    expect(second[0].categoryId).toBe('food');
   });
 });
 

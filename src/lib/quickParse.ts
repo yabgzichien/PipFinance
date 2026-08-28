@@ -168,7 +168,7 @@ function parseSegment(segment: string, opts: QuickParseOptions): SegmentParse {
 
   // --- label: whatever survives, minus currency symbols and punctuation noise.
   const label = rest
-    .replace(/[$€£¥₩฿]/g, ' ')
+    .replace(/[$€£¥₩฿₹₽₸]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

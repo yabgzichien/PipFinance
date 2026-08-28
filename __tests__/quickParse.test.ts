@@ -24,6 +24,10 @@ describe('parseQuickText — amounts', () => {
     expect(d.amount).toBe(20);
     expect(d.label).toBe('dinner');
     expect(d.currency).toBeNull();
+
+    expect(parseQuickText('₹500 dinner', opts).drafts[0]).toMatchObject({ amount: 500, label: 'dinner' });
+    expect(parseQuickText('1000₽ shoes', opts).drafts[0]).toMatchObject({ amount: 1000, label: 'shoes' });
+    expect(parseQuickText('₸2000 taxi', opts).drafts[0]).toMatchObject({ amount: 2000, label: 'taxi' });
   });
 
   it('treats a comma before two digits as a decimal point', () => {

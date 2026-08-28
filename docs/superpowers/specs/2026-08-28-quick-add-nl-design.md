@@ -91,9 +91,21 @@ raw text
 
 Three properties of this flow are load-bearing.
 
-**The LLM replaces, it does not patch.** When invoked it re-parses the whole input string and
-returns complete drafts. A patch protocol — "fill field X of item 2" — would be a second
-contract to specify, validate, and test, for no gain.
+**The LLM replaces, it does not patch — with one exception, the label.** When invoked it
+re-parses the whole input string and returns complete drafts. A patch protocol — "fill field X
+of item 2" — would be a second contract to specify, validate, and test, for no gain.
+
+The exception exists because otherwise the learning loop never closes. A user types
+`dimsum 45`; the model tidies the label to `Dim Sum`; that reaches the confirm screen and so
+`commitCategorized` learns it under `merchantKey` `dim sum`. The next `dimsum` hashes to
+`dimsum`, misses, and pays for another model call — forever, however many times it was
+"learned". So when the local parse was **confident**, the typed label is pinned back over the
+model's before memory is applied. Gating on `confident` is what makes this safe: a confident
+parse means the model was consulted only because the *category* was unknown, and the local
+label is the user's own word. An unconfident parse means the input was a mess
+(`split the grab ride, my half was 12`), the local label is junk, and the model's cleanup is
+the entire reason it was called — so nothing is pinned. Positions are only trusted when both
+sides returned the same number of items.
 
 **Learned memory outranks the model.** After an LLM call, local memory hits are re-applied
 over the model's answers; the model only fills gaps. This mirrors `AddFlow.onExtracted`,
@@ -288,7 +300,11 @@ string must land in both or the suite fails.
 - **Label quality drives the memory loop.** If the local parser produces inconsistent labels
   for the same input (`lunch` vs `Lunch 9.2`), `merchantKey` normalisation must absorb it or
   memory hits will be flaky. The parser must strip the amount and currency tokens from the
-  label, not just the digits.
+  label, not just the digits. The sharper form of this risk — the *model* renaming the label,
+  so the key that gets learned is never the key the next input produces — is closed by the
+  label pin in §3, and guarded by the round-trip test in `__tests__/quickAdd.test.ts`. The
+  remaining exposure is the unconfident path, where the model's label is learned by design;
+  a user who types the same messy phrase twice pays twice.
 - **Prompt cost on the miss path.** The category list is sent on every LLM call. For a user
   with many custom categories this grows. Acceptable at v1 scale; worth watching.
 - **The 10-segment cap is a guess.** It exists to stop a pasted paragraph from spawning a
