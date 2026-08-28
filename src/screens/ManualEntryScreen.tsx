@@ -6,7 +6,8 @@ import { AddCategoryModal } from '../components/AddCategoryModal';
 import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
-import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
+import { TourAnchor } from '../components/TourAnchor';
+import { BtnLabel, BubbleText, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
@@ -22,7 +23,7 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
-import { numFont, radius, shadowToggle, uiFont } from '../theme';
+import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
 
 export function ManualEntryScreen({
   categories,
@@ -33,7 +34,14 @@ export function ManualEntryScreen({
   initialMerchant = null,
   initialAmount = null,
   initialCurrency = null,
+  initialType = null,
+  initialDate = null,
+  initialCategoryId = null,
   initialSplit = null,
+  isTutorial = false,
+  activeTourAnchor = null,
+  onAmountValidChange,
+  onCategoryChosen,
 }: {
   categories: Category[];
   onBack: () => void;
@@ -47,7 +55,21 @@ export function ManualEntryScreen({
   initialMerchant?: string | null;
   initialAmount?: number | null;
   initialCurrency?: string | null;
+  /** Prefill from a quick-add parse: the expense/income toggle, the date, and the category.
+   *  All null for every other caller, which keeps today's defaults. */
+  initialType?: TxnType | null;
+  initialDate?: string | null;
+  initialCategoryId?: string | null;
   initialSplit?: SplitDraft | null;
+  /** When true, formats Pip's speech bubble to guide the new user through manual entry. */
+  isTutorial?: boolean;
+  activeTourAnchor?: string | null;
+  /** Reports whether the typed amount is currently valid (> 0), so the guided tour's amount
+   *  step can gate its Next button on the user having actually entered something. */
+  onAmountValidChange?: (valid: boolean) => void;
+  /** Fires once a category is picked, so the guided tour's category step can auto-advance to
+   *  the actual "Add expense" button rather than exposing its own separate Next. */
+  onCategoryChosen?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -55,11 +77,13 @@ export function ManualEntryScreen({
   const { t, formatFullDate, isZh } = useLanguage();
   const { accounts, recordBalanceLink, ensureDefaultAccount } = useAppData();
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
-  const [amountText, setAmountText] = useState(initialAmount ? initialAmount.toFixed(2) : '');
-  const [dateText, setDateText] = useState(todayISO());
+  const [amountText, setAmountText] = useState(
+    initialAmount ? initialAmount.toFixed(decimalsFor(initialCurrency ?? BASE_CURRENCY)) : ''
+  );
+  const [dateText, setDateText] = useState(initialDate ?? todayISO());
   const [dateFocused, setDateFocused] = useState(false);
-  const [type, setType] = useState<TxnType>('expense');
-  const [cat, setCat] = useState<string | null>(null);
+  const [type, setType] = useState<TxnType>(initialType ?? 'expense');
+  const [cat, setCat] = useState<string | null>(initialCategoryId);
   const [remark, setRemark] = useState('');
   const [adding, setAdding] = useState(false);
   const [split, setSplit] = useState<SplitDraft | null>(initialSplit);
@@ -119,6 +143,16 @@ export function ManualEntryScreen({
   const linkConvertible =
     !linkAccount || linkAccount.currency === currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
   const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null && linkConvertible;
+
+  useEffect(() => {
+    onAmountValidChange?.(amount > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amount]);
+
+  useEffect(() => {
+    if (cat) onCategoryChosen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cat]);
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -189,6 +223,14 @@ export function ManualEntryScreen({
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
+        {isTutorial && (
+          <View style={{ marginBottom: spacing.md }}>
+            <PipSays expr="curious" size={48}>
+              <BubbleText>{t('tutorialManualCoaching')}</BubbleText>
+            </PipSays>
+          </View>
+        )}
+
         {/* type toggle */}
         <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
           {(['expense', 'income'] as TxnType[]).map((k) => {
@@ -211,21 +253,23 @@ export function ManualEntryScreen({
         </View>
 
         <Eyebrow style={{ marginBottom: 8 }}>{t('amount')}</Eyebrow>
-        <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          {isMultiCurrency(activeCurrencies) ? (
-            <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
-          ) : (
-            <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
-          )}
-          <TextInput
-            value={amountText}
-            onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
-            keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
-            placeholder={decimals === 0 ? '0' : '0.00'}
-            placeholderTextColor={colorTheme.ink3}
-            style={[styles.amountInput, { color: colorTheme.ink }]}
-          />
-        </View>
+        <TourAnchor id="tour_amount_field" activeId={activeTourAnchor}>
+          <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+            {isMultiCurrency(activeCurrencies) ? (
+              <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
+            ) : (
+              <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+            )}
+            <TextInput
+              value={amountText}
+              onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
+              keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
+              placeholder={decimals === 0 ? '0' : '0.00'}
+              placeholderTextColor={colorTheme.ink3}
+              style={[styles.amountInput, { color: colorTheme.ink }]}
+            />
+          </View>
+        </TourAnchor>
         {currency !== BASE_CURRENCY && rate != null && (
           <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
         )}
@@ -243,7 +287,9 @@ export function ManualEntryScreen({
                 <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
                   {activeSplit ? (isZh ? `自付部分：${fmtMoney(activeSplit.ownShare, currency)}` : `Your share: ${fmtMoney(activeSplit.ownShare, currency)}`) : (isZh ? '分摊账单' : 'Split with friends')}
                 </Text>
-                <InfoButton entry="split_bill" />
+                <TourAnchor id="tour_split_info" activeId={activeTourAnchor}>
+                  <InfoButton entry="split_bill" />
+                </TourAnchor>
               </View>
               <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {activeSplit
@@ -257,9 +303,11 @@ export function ManualEntryScreen({
           </Pressable>
         )}
 
-        <View style={{ marginTop: 18 }}>
-          <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} required />
-        </View>
+        <TourAnchor id="tour_account_field" activeId={activeTourAnchor}>
+          <View style={{ marginTop: 18 }}>
+            <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} required />
+          </View>
+        </TourAnchor>
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
         <TextInput
@@ -292,19 +340,21 @@ export function ManualEntryScreen({
         />
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{t('category')}</Eyebrow>
-        <View style={styles.grid}>
-          {grid.map((c) => (
-            <View key={c.id} style={styles.gridCell}>
-              <CategoryChip category={c} selected={cat === c.id} suggested={false} onPress={() => setCat(c.id)} />
+        <TourAnchor id="tour_category_grid" activeId={activeTourAnchor}>
+          <View style={styles.grid}>
+            {grid.map((c) => (
+              <View key={c.id} style={styles.gridCell}>
+                <CategoryChip category={c} selected={cat === c.id} suggested={false} onPress={() => setCat(c.id)} />
+              </View>
+            ))}
+            <View style={styles.gridCell}>
+              <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
+                <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+                <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
+              </Pressable>
             </View>
-          ))}
-          <View style={styles.gridCell}>
-            <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
-              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
-            </Pressable>
           </View>
-        </View>
+        </TourAnchor>
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Eyebrow>
         <TextInput
@@ -318,12 +368,14 @@ export function ManualEntryScreen({
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
-        <PrimaryButton onPress={save} disabled={!canSave}>
-          <Icon name="check" size={19} color="#fff" stroke={2.4} />
-          <BtnLabel>
-            {type === 'income' ? (isZh ? '添加收入' : 'Add income') : (isZh ? '添加支出' : 'Add expense')}
-          </BtnLabel>
-        </PrimaryButton>
+        <TourAnchor id="tour_add_expense_btn" activeId={activeTourAnchor}>
+          <PrimaryButton onPress={save} disabled={!canSave}>
+            <Icon name="check" size={19} color="#fff" stroke={2.4} />
+            <BtnLabel>
+              {type === 'income' ? (isZh ? '添加收入' : 'Add income') : (isZh ? '添加支出' : 'Add expense')}
+            </BtnLabel>
+          </PrimaryButton>
+        </TourAnchor>
       </View>
 
       <AddCategoryModal
