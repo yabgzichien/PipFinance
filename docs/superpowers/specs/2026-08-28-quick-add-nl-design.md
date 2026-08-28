@@ -122,8 +122,10 @@ interface QuickDraft {
 Both parsers fill the same six fields. What the *local* parser handles without a network:
 
 - **Amount** — `9.2`, `9`, `rm9.20`, `$20`, `12,50`; leading or trailing.
-- **Currency** — a symbol or 3-letter code, accepted only if present in the user's active
+- **Currency** — `RM`, or a 3-letter code, accepted only if present in the user's active
   currency list. A single-currency user can never accidentally produce a foreign row.
+  `CurrencyMeta` carries no symbol field, and `$` is ambiguous across USD, SGD, AUD and more,
+  so other symbols are stripped from the label without inferring anything.
 - **Relative dates** — `today` / `yesterday` / weekday names; `今天` / `昨天` / `星期三`.
 - **Income** — a keyword list (`salary`, `refund`, `bonus`, `工资`, `退款`, `奖金`) flips the
   type from the expense default.
@@ -157,7 +159,8 @@ with the network call living in each provider.
 
 | File | Purpose |
 |---|---|
-| `src/lib/quickParse.ts` | Pure offline parser. `parseQuickText(text, opts) → QuickDraft[]` |
+| `src/lib/quickParse.ts` | Pure offline parser. `parseQuickText(text, opts) → QuickParseResult` |
+| `src/lib/quickAdd.ts` | The §3 decision tree. `resolveQuickAdd(text, deps) → QuickDraft[]`, with the LLM and memory injected so the whole tree is testable without React or a network. |
 | `src/llm/quickAddPrompt.ts` | `QUICK_ADD_SYSTEM_PROMPT`, `buildQuickAddPrompt(...)`, `parseQuickAddReply(...)`, `QuickAddParseError` |
 | `src/components/QuickAddField.tsx` | Single-line input, submit affordance, busy and error states |
 
@@ -233,8 +236,11 @@ invents a category.** Specifically:
 - A non-finite or non-positive amount drops the entire item.
 - A currency outside the active list drops to base.
 - An invalid or out-of-range date drops to today.
-- More than 10 segments are truncated.
-- A reply that is not a JSON array throws `QuickAddParseError`.
+- More than 10 items are truncated.
+- A reply that is not a JSON object holding an `items` array throws `QuickAddParseError`.
+
+The reply shape is `{"items": [...]}` rather than a bare array because Groq and OpenRouter are
+both called with `response_format: { type: 'json_object' }`, which requires a top-level object.
 
 ### Privacy
 
@@ -247,14 +253,26 @@ cannot read it locally. This ships with the feature, not after it.
 
 Test-first, matching how `categoryGuessPrompt` and the provider tests are already written.
 
+There is no component-testing library in this repo — every existing test covers pure logic in
+`src/lib/` or `src/llm/`. That is why the decision tree lives in `src/lib/quickAdd.ts` rather
+than inside `AddFlow`: it puts the part that can be wrong under test. The screen work is
+verified by `npm run typecheck` and a manual smoke test, and adding a render-testing dependency
+is out of scope.
+
 **`__tests__/quickParse.test.ts`** — amount formats (`9.2`, `9`, `rm9.20`, `$20`, `12,50`,
 leading and trailing); English and Chinese input; income keywords flipping type; relative
 dates including `昨天` and weekday names; currency accepted only when active; multi-segment
 splitting on `,` `;` newline `，` `、`; no-amount input yielding an empty array; the segment cap.
 
 **`__tests__/quickAddPrompt.test.ts`** — a valid reply; unknown category id → `null`; kind
-mismatch → `null`; negative and `NaN` amounts → item dropped; inactive currency → base;
-malformed date → today; a fenced ` ```json ` reply parsed; non-JSON → `QuickAddParseError`.
+mismatch → `null`; negative and `NaN` amounts → item dropped; inactive currency → `null`;
+malformed date → `null`; a fenced ` ```json ` reply parsed; non-JSON and a JSON object with no
+`items` array → `QuickAddParseError`.
+
+**`__tests__/quickAdd.test.ts`** — the orchestration itself: memory-only resolution with no LLM;
+the LLM not being called when the parse was confident and memory covered every draft; memory
+overriding a model category; and the soft-failure paths (rejection, timeout, empty result) all
+falling back to the local result.
 
 **`__tests__/groq.test.ts`, `__tests__/openrouter.test.ts`** — mirror the existing
 `guessCategories` cases, including a bad response surfacing as `LLMError('bad_response')`.
