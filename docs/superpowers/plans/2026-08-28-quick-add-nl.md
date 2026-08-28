@@ -72,7 +72,7 @@ Tasks 1–4 are pure logic and fully testable. Tasks 5–8 are UI and are typech
   - `function parseQuickText(text: string, opts: QuickParseOptions): QuickParseResult`
   - `const MAX_SEGMENTS = 10`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `__tests__/quickParse.test.ts`:
 
@@ -226,12 +226,12 @@ describe('parseQuickText — segments', () => {
 
 Note the decimal-comma case: `lunch 12,50` must stay one segment, so segment splitting has to run **after** protecting a comma that sits between digits.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx jest __tests__/quickParse.test.ts`
 Expected: FAIL — `Cannot find module '../src/lib/quickParse'`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/quickParse.ts`:
 
@@ -409,14 +409,14 @@ export function parseQuickText(text: string, opts: QuickParseOptions): QuickPars
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx jest __tests__/quickParse.test.ts`
 Expected: PASS, all cases.
 
 If the weekday loop misfires on a label containing e.g. "sat" inside another word, the `\b` anchors should already prevent it — confirm the `'lunch 9.2'` cases still produce `date: null`.
 
-- [ ] **Step 5: Typecheck and commit**
+- [x] **Step 5: Typecheck and commit**
 
 ```bash
 npm run typecheck
@@ -444,7 +444,7 @@ git commit -m "feat: offline natural-language parser for quick add"
 
 This mirrors `src/llm/categoryGuessPrompt.ts` exactly — read that file first; this is the same pattern with a different payload.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `__tests__/quickAddPrompt.test.ts`:
 
@@ -592,12 +592,12 @@ describe('parseQuickAddReply', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx jest __tests__/quickAddPrompt.test.ts`
 Expected: FAIL — `Cannot find module '../src/llm/quickAddPrompt'`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/llm/quickAddPrompt.ts`:
 
@@ -746,12 +746,12 @@ export function parseQuickAddReply(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx jest __tests__/quickAddPrompt.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Typecheck and commit**
+- [x] **Step 5: Typecheck and commit**
 
 ```bash
 npm run typecheck
@@ -777,7 +777,7 @@ git commit -m "feat: quick-add prompt builder and reply validator"
 
 **Gemini deliberately does not implement this**, matching its existing omission of `guessCategories`. `FallbackProvider.legsFor` filters on `typeof provider[cap] === 'function'`, so it routes around Gemini with no special handling. Do not add it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `__tests__/groq.test.ts` (reuse the `mockFetchOnce` helper already at the top of that file):
 
@@ -846,12 +846,12 @@ describe('FallbackProvider.quickAdd', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npx jest __tests__/groq.test.ts __tests__/openrouter.test.ts __tests__/fallback.test.ts`
 Expected: FAIL — `quickAdd` is not a function / not a valid `Capability`.
 
-- [ ] **Step 3: Add the type**
+- [x] **Step 3: Add the type**
 
 In `src/llm/types.ts`, add the import and interface near `CategoryGuessInput`, and the method on `LLMProvider` next to `guessCategories`:
 
@@ -876,7 +876,7 @@ export interface QuickAddInput {
   quickAdd?(input: QuickAddInput): Promise<QuickDraft[]>;
 ```
 
-- [ ] **Step 4: Implement it on Groq**
+- [x] **Step 4: Implement it on Groq**
 
 In `src/llm/groq.ts`, add the imports and a method directly after `guessCategories`:
 
@@ -912,11 +912,11 @@ In `src/llm/groq.ts`, add the imports and a method directly after `guessCategori
   },
 ```
 
-- [ ] **Step 5: Implement it on OpenRouter**
+- [x] **Step 5: Implement it on OpenRouter**
 
 Do the same in `src/llm/openrouter.ts`, using that file's own chat-post helper and default model constant. Read its `guessCategories` first and mirror it exactly.
 
-- [ ] **Step 6: Wire the fallback router**
+- [x] **Step 6: Wire the fallback router**
 
 In `src/llm/fallback.ts`, add `'quickAdd'` to the `Capability` union, import `QuickAddInput`, and add the passthrough next to `guessCategories`:
 
@@ -926,12 +926,12 @@ In `src/llm/fallback.ts`, add `'quickAdd'` to the `Capability` union, import `Qu
   }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `npx jest __tests__/groq.test.ts __tests__/openrouter.test.ts __tests__/fallback.test.ts`
 Expected: PASS.
 
-- [ ] **Step 8: Typecheck and commit**
+- [x] **Step 8: Typecheck and commit**
 
 ```bash
 npm run typecheck
@@ -957,7 +957,7 @@ git commit -m "feat: quickAdd capability on Groq, OpenRouter, and the fallback r
 
 This is where the spec's §3 flow lives. It is a `src/lib` module, not screen code, so the whole decision tree is testable without mounting React.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `__tests__/quickAdd.test.ts`:
 
@@ -1071,12 +1071,12 @@ describe('resolveQuickAdd — failure is always soft', () => {
 
 The hanging-promise test uses a real 10ms timeout rather than fake timers, so no `jest.useFakeTimers()` is needed.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx jest __tests__/quickAdd.test.ts`
 Expected: FAIL — `Cannot find module '../src/lib/quickAdd'`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/quickAdd.ts`:
 
@@ -1173,12 +1173,12 @@ export async function resolveQuickAdd(
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx jest __tests__/quickAdd.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Run the whole suite, typecheck, and commit**
+- [x] **Step 5: Run the whole suite, typecheck, and commit**
 
 ```bash
 npm test
@@ -1199,12 +1199,12 @@ git commit -m "feat: quick-add orchestration with memory precedence and soft LLM
 
 `__tests__/i18n.test.ts` already asserts that `en` and `zh` have identical key sets and that every Chinese value is a non-empty string, so this task is verified by the existing suite.
 
-- [ ] **Step 1: Run the parity test to confirm it currently passes**
+- [x] **Step 1: Run the parity test to confirm it currently passes**
 
 Run: `npx jest __tests__/i18n.test.ts`
 Expected: PASS (baseline).
 
-- [ ] **Step 2: Add the keys to the interface**
+- [x] **Step 2: Add the keys to the interface**
 
 In `src/i18n/types.ts`, add to the `Translations` interface:
 
@@ -1216,7 +1216,7 @@ In `src/i18n/types.ts`, add to the `Translations` interface:
   quickAddForeignBatch: string;
 ```
 
-- [ ] **Step 3: Add the English strings**
+- [x] **Step 3: Add the English strings**
 
 In `src/i18n/translations/en.ts`:
 
@@ -1228,7 +1228,7 @@ In `src/i18n/translations/en.ts`:
   quickAddForeignBatch: 'Quick add handles one foreign-currency entry at a time — these were read as RM.',
 ```
 
-- [ ] **Step 4: Add the Chinese strings**
+- [x] **Step 4: Add the Chinese strings**
 
 In `src/i18n/translations/zh.ts`:
 
@@ -1240,7 +1240,7 @@ In `src/i18n/translations/zh.ts`:
   quickAddForeignBatch: '快速记账一次只支持一笔外币交易，这些已按马币记录。',
 ```
 
-- [ ] **Step 5: Run the parity test and commit**
+- [x] **Step 5: Run the parity test and commit**
 
 Run: `npx jest __tests__/i18n.test.ts`
 Expected: PASS. A key present in one file but not the other fails here.
@@ -1266,7 +1266,7 @@ git commit -m "feat(i18n): strings for quick add"
 
 All three default to today's behavior, so the three existing call sites in `AddFlow.tsx` are unaffected. There is no test for this task — the repo has no component-testing library. It is verified by typecheck plus the Task 8 smoke test.
 
-- [ ] **Step 1: Add the props to the signature**
+- [x] **Step 1: Add the props to the signature**
 
 In the destructured parameter list, alongside `initialCurrency`:
 
@@ -1286,7 +1286,7 @@ and in the type literal, next to the other `initial*` props:
   initialCategoryId?: string | null;
 ```
 
-- [ ] **Step 2: Seed the state from them**
+- [x] **Step 2: Seed the state from them**
 
 Change three `useState` initialisers:
 
@@ -1296,7 +1296,7 @@ Change three `useState` initialisers:
   const [cat, setCat] = useState<string | null>(initialCategoryId);
 ```
 
-- [ ] **Step 3: Fix the amount seed for zero-decimal currencies**
+- [x] **Step 3: Fix the amount seed for zero-decimal currencies**
 
 The existing initialiser hardcodes two decimals, which renders `JPY 1200.00`. Since this task is already touching the prefill path, correct it:
 
@@ -1308,7 +1308,7 @@ The existing initialiser hardcodes two decimals, which renders `JPY 1200.00`. Si
 
 `decimalsFor` and `BASE_CURRENCY` are already imported in this file.
 
-- [ ] **Step 4: Typecheck and commit**
+- [x] **Step 4: Typecheck and commit**
 
 ```bash
 npm run typecheck
@@ -1342,7 +1342,7 @@ export function QuickAddField(props: {
 
 Its own file because `AttachScreen.tsx` is already 377 lines. No test — no component-testing library in this repo.
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 Create `src/components/QuickAddField.tsx`. Read `src/screens/ManualEntryScreen.tsx`'s `styles.amountRow` and `src/screens/AttachScreen.tsx`'s `MiniButton` first and match their look — bordered surface, `radius.sm`, `uiFont`, theme colors from `useThemeColors()`, accent from `useAccent()`.
 
@@ -1429,7 +1429,7 @@ const styles = StyleSheet.create({
 
 If `Caption` does not accept a `color` prop, or `colorTheme.red` does not exist, check `src/components/ui.tsx` and `src/state/colorScheme.ts` and substitute the correct names rather than inventing them.
 
-- [ ] **Step 2: Typecheck and commit**
+- [x] **Step 2: Typecheck and commit**
 
 ```bash
 npm run typecheck
@@ -1453,7 +1453,7 @@ git commit -m "feat: QuickAddField component"
 - Consumes: `QuickAddField` (Task 7), `resolveQuickAdd` / `QuickDraft` (Tasks 4 and 1), the prefill props (Task 6), the strings (Task 5), `getLLM` from `src/llm`.
 - Produces: nothing downstream. This is the last task.
 
-- [ ] **Step 1: Add the props to `AttachScreen`**
+- [x] **Step 1: Add the props to `AttachScreen`**
 
 In `src/screens/AttachScreen.tsx`, add to the destructured props and the type literal:
 
@@ -1472,7 +1472,7 @@ Render the field immediately after the `PipSays` block and before the `{!hasKey 
 
 It is rendered unconditionally, including when `hasKey` is false: the offline parser works without a key, so hiding it there would remove a working feature.
 
-- [ ] **Step 2: Rewrite the privacy caption**
+- [x] **Step 2: Rewrite the privacy caption**
 
 The caption near the bottom of `AttachScreen.tsx` currently claims manual entries never leave the device, which stops being true once typed text can reach a provider. Replace both branches:
 
@@ -1482,7 +1482,7 @@ The caption near the bottom of `AttachScreen.tsx` currently claims manual entrie
             : 'Screenshots are sent to your chosen AI provider only to read the transactions. Quick-add text is sent only when your device can’t read it locally. Manual entries stay on your device.'}
 ```
 
-- [ ] **Step 3: Add the quick-add state and handler to `AddFlow`**
+- [x] **Step 3: Add the quick-add state and handler to `AddFlow`**
 
 In `src/screens/AddFlow.tsx`, add `'quickparse'` to the `Phase` union, pull `memory` and `categories` (already destructured from `useAppData`), and add:
 
@@ -1557,7 +1557,7 @@ and the handler:
 
 `setLearnedThisScan(drafts.map(() => null))` matters: that state feeds the auto-fill competence stat, which is supposed to count only learned-memory hits from a *scan*. A typed batch contributes none.
 
-- [ ] **Step 4: Use the batch provenance when committing**
+- [x] **Step 4: Use the batch provenance when committing**
 
 In `onCategorized`, change the hardcoded source:
 
@@ -1567,7 +1567,7 @@ In `onCategorized`, change the hardcoded source:
 
 Reset it wherever a scan starts, so a quick-add batch can't leak its provenance into a later scan. In `onPicked`, add `setBatchSource('extracted')` next to the other resets.
 
-- [ ] **Step 5: Render the parsing phase**
+- [x] **Step 5: Render the parsing phase**
 
 Add next to the existing `'guessing'` block, reusing its shape:
 
@@ -1585,7 +1585,7 @@ Add next to the existing `'guessing'` block, reusing its shape:
 
 Add `'quickparse'` to the `useBackHandler` fall-through so hardware back closes the flow, exactly as `'guessing'` does — it is already covered by the final `onClose()` branch, so confirm rather than change it.
 
-- [ ] **Step 6: Pass the prefill into `ManualEntryScreen`**
+- [x] **Step 6: Pass the prefill into `ManualEntryScreen`**
 
 In the `phase === 'manual' || phase === 'split'` block, extend the existing `initial*` props:
 
@@ -1606,7 +1606,7 @@ In the `phase === 'manual' || phase === 'split'` block, extend the existing `ini
 
 Clear `quickPrefill` in `backFromManualOrSplit` and at the top of `onManualComplete`, so opening the plain manual form afterwards starts empty.
 
-- [ ] **Step 7: Pass the new props to `AttachScreen`**
+- [x] **Step 7: Pass the new props to `AttachScreen`**
 
 ```tsx
       <AttachScreen
@@ -1621,7 +1621,7 @@ Clear `quickPrefill` in `backFromManualOrSplit` and at the top of `onManualCompl
       />
 ```
 
-- [ ] **Step 8: Typecheck and run the full suite**
+- [x] **Step 8: Typecheck and run the full suite**
 
 ```bash
 npm run typecheck
@@ -1630,7 +1630,7 @@ npm test
 
 Expected: both clean. Nothing in this task has a unit test; the suite must stay green because nothing it covers changed behavior.
 
-- [ ] **Step 9: Manual smoke test**
+- [x] **Step 9: Manual smoke test**
 
 Run the app (`npm run android` or `npm run ios`) and confirm, in order:
 
@@ -1643,7 +1643,7 @@ Run the app (`npm run android` or `npm run ios`) and confirm, in order:
 7. Turn on airplane mode and quick-add a known merchant. Still works, instantly.
 8. Switch the app to Chinese and repeat step 2 with `午餐 9.2`.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/screens/AttachScreen.tsx src/screens/AddFlow.tsx
