@@ -64,6 +64,32 @@ describe('parseQuickText — type', () => {
   it('flips to income on a Chinese keyword', () => {
     expect(parseQuickText('工资 4200', opts).drafts[0].type).toBe('income');
   });
+
+  // An income keyword is matched as a WORD, not a substring. "interesting" contains
+  // "interest"; treating that as income made a book purchase land as earnings.
+  it('does not flip on a keyword buried inside a longer English word', () => {
+    expect(parseQuickText('interesting book 30', opts).drafts[0].type).toBe('expense');
+    expect(parseQuickText('wages', opts).drafts).toEqual([]); // no amount, nothing to classify
+    expect(parseQuickText('bonuses swap 12', opts).drafts[0].type).toBe('expense');
+  });
+
+  // Words that point both ways depending on context are left to the model rather than
+  // guessed at: paying income tax and loan interest are expenses, not earnings.
+  it('leaves genuinely ambiguous words as an expense', () => {
+    expect(parseQuickText('income tax 500', opts).drafts[0].type).toBe('expense');
+    expect(parseQuickText('loan interest 300', opts).drafts[0].type).toBe('expense');
+    expect(parseQuickText('allowance for kid 200', opts).drafts[0].type).toBe('expense');
+    expect(parseQuickText('贷款利息 300', opts).drafts[0].type).toBe('expense');
+  });
+
+  it('still flips on the unambiguous keywords', () => {
+    for (const text of ['salary 4200', 'refund 30', 'bonus 500', 'dividend 88', 'payout 20', 'reimbursed 45']) {
+      expect(parseQuickText(text, opts).drafts[0].type).toBe('income');
+    }
+    for (const text of ['工资 4200', '退款 30', '奖金 500', '分红 88', '报销 45']) {
+      expect(parseQuickText(text, opts).drafts[0].type).toBe('income');
+    }
+  });
 });
 
 describe('parseQuickText — currency', () => {
@@ -110,6 +136,28 @@ describe('parseQuickText — dates', () => {
 
   it('treats a weekday naming today as today', () => {
     expect(parseQuickText('lunch 9.2 friday', opts).drafts[0].date).toBe('2026-08-28');
+  });
+
+  // "sun", "sat" and "wed" are ordinary English words. Reading them as weekdays both invented
+  // a date and ate a word out of the label — which also corrupts the merchant memory key, so
+  // the same phrase would never learn a category.
+  it('does not read an abbreviation that is also an ordinary English word', () => {
+    for (const [text, label] of [
+      ['sun protection 15', 'sun protection'],
+      ['sat at cafe 12', 'sat at cafe'],
+      ['wed dinner 80', 'wed dinner'],
+    ] as const) {
+      const d = parseQuickText(text, opts).drafts[0];
+      expect(d.date).toBeNull();
+      expect(d.label).toBe(label);
+    }
+  });
+
+  it('still reads the unambiguous weekday abbreviations', () => {
+    expect(parseQuickText('lunch 9.2 mon', opts).drafts[0].date).toBe('2026-08-24');
+    expect(parseQuickText('lunch 9.2 tue', opts).drafts[0].date).toBe('2026-08-25');
+    expect(parseQuickText('lunch 9.2 thu', opts).drafts[0].date).toBe('2026-08-27');
+    expect(parseQuickText('lunch 9.2 fri', opts).drafts[0].date).toBe('2026-08-28');
   });
 });
 

@@ -370,4 +370,5 @@ export const en: Translations = {
   quickAddThinking: 'Reading what you typed…',
   quickAddNoAmount: "I couldn't find an amount in that. Try something like “lunch 9.2”.",
   quickAddForeignBatch: 'Quick add handles one foreign-currency entry at a time — these were read as RM.',
+  quickAddForeignBatchTitle: 'Saved in ringgit',
 };

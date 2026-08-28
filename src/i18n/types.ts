@@ -371,4 +371,5 @@ export interface Translations {
   quickAddThinking: string;
   quickAddNoAmount: string;
   quickAddForeignBatch: string;
+  quickAddForeignBatchTitle: string;
 }

@@ -370,4 +370,5 @@ export const zh: Translations = {
   quickAddThinking: '正在读取您输入的内容…',
   quickAddNoAmount: '没有找到金额，请尝试输入“午餐 9.2”这样的格式。',
   quickAddForeignBatch: '快速记账一次只支持一笔外币交易，这些已按马币记录。',
+  quickAddForeignBatchTitle: '已按马币记录',
 };

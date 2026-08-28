@@ -145,6 +145,13 @@ function AddFlowPhases({
     setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
   };
   const backFromCategorize = () => {
+    // A quick-add batch was typed, not scanned, so there is no image and no ExtractScreen to
+    // go back to. Routing it there anyway matched no phase branch below and fell through to
+    // the SavedScreen with an empty result — a dead end that silently dropped the batch.
+    if (!image) {
+      setPhase('attach');
+      return;
+    }
     setCached(extracted);
     setPhase('extract');
   };
@@ -216,8 +223,10 @@ function AddFlowPhases({
 
     // Batch path: CategorizeScreen hardcodes an RM prefix, so a foreign amount would be
     // mislabelled. Force base currency and say so rather than lie about the denomination.
+    // Surfaced with notify, not the field's inline error: this navigates straight to
+    // CategorizeScreen, so AttachScreen unmounts and an inline message would never be read.
     if (drafts.some((d) => d.currency && d.currency !== BASE_CURRENCY)) {
-      setQuickError(t('quickAddForeignBatch'));
+      notify(t('quickAddForeignBatchTitle'), t('quickAddForeignBatch'));
     }
     setExtracted(
       drafts.map((d) => ({
@@ -333,10 +342,18 @@ function AddFlowPhases({
 
       // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
       // scan Pip already knew, next to the same measure for last calendar month.
-      const stats = autoFillStats(learnedThisScan);
-      const month = currentMonthKey();
-      const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
-      setAutoFill({ current: stats, lastMonth });
+      // Scans only. `recordAutoFill` accumulates across the month, so folding a typed
+      // quick-add batch in — always filled:0, since nothing was matched at extraction time,
+      // because nothing was extracted — would permanently drag down a stat that is supposed
+      // to measure how much of a SCAN Pip already knew.
+      if (batchSource === 'extracted') {
+        const stats = autoFillStats(learnedThisScan);
+        const month = currentMonthKey();
+        const [, lastMonth] = await Promise.all([recordAutoFill(month, stats), getAutoFillForMonth(prevMonthKey(month))]);
+        setAutoFill({ current: stats, lastMonth });
+      } else {
+        setAutoFill(null);
+      }
 
       setResult(created);
       setNewLearned(learned);

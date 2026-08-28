@@ -35,20 +35,48 @@ export interface QuickParseOptions {
 /** Stops a pasted paragraph from spawning a hundred drafts. Not a meaningful number. */
 export const MAX_SEGMENTS = 10;
 
+/**
+ * Words that mean income and nothing else.
+ *
+ * Deliberately excludes "income", "interest" and "allowance" (and 利息 / 津贴): each points
+ * both ways depending on context — income TAX and loan INTEREST are expenses, and an
+ * allowance is income to a student but an expense to the parent paying it. Guessing wrong
+ * here is worse than not guessing, because a confidently-parsed segment never reaches the
+ * model that could have disambiguated it. Those cases stay `expense` and, having no learned
+ * category, are exactly the ones resolveQuickAdd hands to the LLM.
+ */
 const INCOME_WORDS = [
-  'salary', 'wage', 'wages', 'refund', 'refunded', 'bonus', 'payout', 'income',
-  'reimbursement', 'reimbursed', 'dividend', 'interest', 'allowance',
-  '工资', '薪水', '退款', '奖金', '收入', '报销', '津贴', '利息', '分红',
+  'salary', 'wage', 'wages', 'refund', 'refunded', 'refunds', 'bonus', 'payout',
+  'reimbursement', 'reimbursed', 'dividend', 'dividends',
+  '工资', '薪水', '退款', '奖金', '收入', '报销', '分红',
 ];
 
+/**
+ * Weekday words, keyed longest-first within each day so "tuesday" is consumed before "tue".
+ *
+ * The abbreviations "sun", "sat" and "wed" are deliberately absent: they are ordinary English
+ * words ("sun protection", "sat at cafe", "wed"), and reading them as dates both invented a
+ * date and removed a token from the label — which changes the merchantKey, so the same phrase
+ * could never accumulate a learned category. The full names carry no such ambiguity.
+ */
 const WEEKDAYS: Record<string, number> = {
-  sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2,
-  wednesday: 3, wed: 3, thursday: 4, thu: 4, thurs: 4, friday: 5, fri: 5,
-  saturday: 6, sat: 6,
+  sunday: 0, monday: 1, mon: 1, tuesday: 2, tues: 2, tue: 2,
+  wednesday: 3, thursday: 4, thurs: 4, thu: 4, friday: 5, fri: 5,
+  saturday: 6,
   '星期日': 0, '周日': 0, '星期一': 1, '周一': 1, '星期二': 2, '周二': 2,
   '星期三': 3, '周三': 3, '星期四': 4, '周四': 4, '星期五': 5, '周五': 5,
   '星期六': 6, '周六': 6,
 };
+
+/** Matches an income word as a whole word for ASCII, and as a substring for CJK, which has
+ *  no word boundaries. Built once rather than per segment. */
+const INCOME_MATCHERS: Array<{ test: (haystack: string) => boolean }> = INCOME_WORDS.map((w) => {
+  if (/^[a-z]+$/.test(w)) {
+    const re = new RegExp(`\\b${w}\\b`, 'i');
+    return { test: (h: string) => re.test(h) };
+  }
+  return { test: (h: string) => h.includes(w) };
+});
 
 /** A comma between digits is a decimal or thousands mark, not a segment break. Swapped for a
  *  sentinel before splitting, then swapped back. */
@@ -136,7 +164,7 @@ function parseSegment(segment: string, opts: QuickParseOptions): SegmentParse {
 
   // --- type.
   const lowered = rest.toLowerCase();
-  const type: TxnType = INCOME_WORDS.some((w) => lowered.includes(w)) ? 'income' : 'expense';
+  const type: TxnType = INCOME_MATCHERS.some((m) => m.test(lowered)) ? 'income' : 'expense';
 
   // --- label: whatever survives, minus currency symbols and punctuation noise.
   const label = rest
