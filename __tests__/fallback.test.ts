@@ -183,3 +183,35 @@ describe('FallbackProvider — 3-tier hierarchy (Gemini -> Groq -> OpenRouter)',
   });
 });
 
+describe('FallbackProvider.quickAdd', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  const cats = [{ id: 'food', label: 'Food', kind: 'expense' as const }];
+  const payload = { text: 'lunch 9.2', categories: cats, today: '2026-08-28', activeCurrencies: ['MYR'] };
+  const items = JSON.stringify({ items: [{ label: 'lunch', amount: 9.2, type: 'expense', categoryId: 'food' }] });
+
+  it('reports the capability as unavailable with no keys', () => {
+    const llm = new FallbackProvider({ ...allKeys, geminiKey: '', groqKey: '', openrouterKey: '' });
+    expect(llm.can('quickAdd')).toBe(false);
+  });
+
+  it('skips Gemini, which does not implement quickAdd, and uses Groq', async () => {
+    routeFetch({ groq: () => ({ json: groqReply(items) }) });
+    const out = await new FallbackProvider(allKeys).quickAdd(payload);
+    expect(out[0].label).toBe('lunch');
+    const calls = (global as any).fetch.mock.calls.map((c: any[]) => String(c[0]));
+    expect(calls.some((u: string) => u.includes('generativelanguage'))).toBe(false);
+    expect(calls.some((u: string) => u.includes('api.groq.com'))).toBe(true);
+  });
+
+  it('falls back to OpenRouter when Groq fails', async () => {
+    routeFetch({
+      groq: () => ({ status: 500, json: { error: 'boom' } }),
+      openrouter: () => ({ json: openrouterReply(items) }),
+    });
+    const out = await new FallbackProvider(allKeys).quickAdd(payload);
+    expect(out[0].amount).toBe(9.2);
+  });
+});
+
+

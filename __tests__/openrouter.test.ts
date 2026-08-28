@@ -156,3 +156,30 @@ describe('OpenRouterProvider.extract', () => {
     expect(advice).toBe('Save RM50 by dining in!');
   });
 });
+
+describe('OpenRouterProvider.quickAdd', () => {
+  const cats = [{ id: 'food', label: 'Food', kind: 'expense' as const }];
+  const args = { apiKey: 'sk-or-test', model: 'openrouter/free', text: 'lunch 9.2', categories: cats, today: '2026-08-28', activeCurrencies: ['MYR'] };
+
+  it('parses a well-formed reply into drafts', async () => {
+    mockFetchOnce({
+      json: {
+        choices: [{ message: { content: JSON.stringify({ items: [{ label: 'lunch', amount: 9.2, type: 'expense', categoryId: 'food' }] }) } }],
+      },
+    });
+    const out = await OpenRouterProvider.quickAdd!(args);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ label: 'lunch', amount: 9.2, categoryId: 'food' });
+  });
+
+  it('raises bad_response when the reply is not JSON', async () => {
+    mockFetchOnce({ json: { choices: [{ message: { content: 'sorry, what?' } }] } });
+    await expect(OpenRouterProvider.quickAdd!(args)).rejects.toMatchObject({ code: 'bad_response' });
+  });
+
+  it('raises bad_response when the message content is missing', async () => {
+    mockFetchOnce({ json: { choices: [{}] } });
+    await expect(OpenRouterProvider.quickAdd!(args)).rejects.toBeInstanceOf(LLMError);
+  });
+});
+

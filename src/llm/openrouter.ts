@@ -5,6 +5,7 @@ import { parseReceipt, type ScannedReceipt } from '../lib/parseReceipt';
 import { parseSnapshot, type ScannedSnapshot } from '../lib/parseSnapshot';
 import { parseCryptoHoldings, type ScannedHolding } from '../lib/prices';
 import type { ExtractedTxn } from '../lib/types';
+import type { QuickDraft } from '../lib/quickParse';
 import {
   LLMError,
   type CategoryGuessInput,
@@ -13,6 +14,7 @@ import {
   type DocPart,
   type ExtractInput,
   type LLMProvider,
+  type QuickAddInput,
   type TestInput,
 } from './types';
 import {
@@ -33,6 +35,12 @@ import {
   CategoryGuessParseError,
   parseCategoryGuess,
 } from './categoryGuessPrompt';
+import {
+  buildQuickAddPrompt,
+  parseQuickAddReply,
+  QUICK_ADD_SYSTEM_PROMPT,
+  QuickAddParseError,
+} from './quickAddPrompt';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'openrouter/free';
@@ -243,6 +251,36 @@ export const OpenRouterProvider: LLMProvider = {
       return parseCategoryGuess(content, items, categories);
     } catch (e) {
       if (e instanceof CategoryGuessParseError) throw new LLMError('bad_response', e.message);
+      throw e;
+    }
+  },
+
+  async quickAdd({ apiKey, model, text, categories, today, activeCurrencies }: QuickAddInput): Promise<QuickDraft[]> {
+    const body = {
+      model: model || DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: QUICK_ADD_SYSTEM_PROMPT },
+        { role: 'user', content: buildQuickAddPrompt(text, categories, today, activeCurrencies) },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0,
+    };
+
+    const res = await postChat(body, apiKey);
+    let json: any;
+    try {
+      json = await res.json();
+    } catch {
+      throw new LLMError('bad_response', 'Response was not JSON.');
+    }
+    const content: unknown = json?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string') {
+      throw new LLMError('bad_response', 'Empty model response.');
+    }
+    try {
+      return parseQuickAddReply(content, categories, activeCurrencies, today);
+    } catch (e) {
+      if (e instanceof QuickAddParseError) throw new LLMError('bad_response', e.message);
       throw e;
     }
   },

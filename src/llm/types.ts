@@ -3,6 +3,8 @@ import type { ScannedHolding } from '../lib/prices';
 import type { ScannedSnapshot } from '../lib/parseSnapshot';
 import type { ScannedReceipt } from '../lib/parseReceipt';
 import type { CategoryOption, GuessableItem } from './categoryGuessPrompt';
+import type { QuickDraft } from '../lib/quickParse';
+import type { QuickAddCategoryOption } from './quickAddPrompt';
 
 export type LLMErrorCode =
   | 'no_key'
@@ -79,6 +81,17 @@ export interface CategoryGuessInput {
   categories: CategoryOption[];
 }
 
+export interface QuickAddInput {
+  apiKey: string;
+  model: string;
+  /** The raw line the user typed. */
+  text: string;
+  categories: QuickAddCategoryOption[];
+  /** ISO date, so relative words in the text can be resolved. */
+  today: string;
+  activeCurrencies: string[];
+}
+
 export interface LLMProvider {
   id: string;
   label: string;
@@ -99,6 +112,8 @@ export interface LLMProvider {
   extractReceipt?(input: DocExtractInput): Promise<ScannedReceipt>;
   /** Guess a category for merchants with no learned-memory match (new-merchant subset only). */
   guessCategories?(input: CategoryGuessInput): Promise<Record<number, string | null>>;
+  /** Turn one line of typed text into transaction drafts, when the offline parser can't. */
+  quickAdd?(input: QuickAddInput): Promise<QuickDraft[]>;
   /** Lightweight credential check for the Settings "Test" button. */
   test(input: TestInput): Promise<void>;
   /** Short, on-demand text advice (budget coach). */

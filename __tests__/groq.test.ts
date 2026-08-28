@@ -79,3 +79,30 @@ describe('GroqProvider.extract', () => {
     await expect(GroqProvider.extract(input)).rejects.toMatchObject({ code: 'bad_response' });
   });
 });
+
+describe('GroqProvider.quickAdd', () => {
+  const cats = [{ id: 'food', label: 'Food', kind: 'expense' as const }];
+  const args = { apiKey: 'gsk_test', model: 'qwen/qwen3.6-27b', text: 'lunch 9.2', categories: cats, today: '2026-08-28', activeCurrencies: ['MYR'] };
+
+  it('parses a well-formed reply into drafts', async () => {
+    mockFetchOnce({
+      json: {
+        choices: [{ message: { content: JSON.stringify({ items: [{ label: 'lunch', amount: 9.2, type: 'expense', categoryId: 'food' }] }) } }],
+      },
+    });
+    const out = await GroqProvider.quickAdd!(args);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ label: 'lunch', amount: 9.2, categoryId: 'food' });
+  });
+
+  it('raises bad_response when the reply is not JSON', async () => {
+    mockFetchOnce({ json: { choices: [{ message: { content: 'sorry, what?' } }] } });
+    await expect(GroqProvider.quickAdd!(args)).rejects.toMatchObject({ code: 'bad_response' });
+  });
+
+  it('raises bad_response when the message content is missing', async () => {
+    mockFetchOnce({ json: { choices: [{}] } });
+    await expect(GroqProvider.quickAdd!(args)).rejects.toBeInstanceOf(LLMError);
+  });
+});
+

@@ -12,6 +12,7 @@ import type {
   CoachInput,
   DocExtractInput,
   ExtractInput,
+  QuickAddInput,
 } from './types';
 import { loadSettings, type LLMSettings } from '../settings/settingsStore';
 
@@ -24,6 +25,7 @@ export type Capability =
   | 'extractSnapshot'
   | 'extractReceipt'
   | 'guessCategories'
+  | 'quickAdd'
   | 'coach';
 
 interface Leg {
@@ -113,6 +115,9 @@ export class FallbackProvider {
   }
   guessCategories(input: Payload<CategoryGuessInput>) {
     return this.run<Awaited<ReturnType<NonNullable<LLMProvider['guessCategories']>>>>('guessCategories', input);
+  }
+  quickAdd(input: Payload<QuickAddInput>) {
+    return this.run<Awaited<ReturnType<NonNullable<LLMProvider['quickAdd']>>>>('quickAdd', input);
   }
   coach(input: Payload<CoachInput>) {
     return this.run<string>('coach', input);
