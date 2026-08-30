@@ -211,4 +211,32 @@ describe('onboardingWizard', () => {
       expect(getPreviousWizardStep(currentStep, hasImported)).toBeNull();
     });
   });
+
+  describe('Wizard Localization', () => {
+    it('provides both English and Mandarin translations for setup wizard intro and nav titles', () => {
+      const { translate } = require('../src/i18n/LanguageContext');
+      
+      // Intro step translations
+      expect(translate('en', 'introTitle')).toBe('Know your money.');
+      expect(translate('zh', 'introTitle')).toBe('洞悉你的每一分钱。');
+
+      expect(translate('en', 'introSubtitle')).toContain('Screenshot the app');
+      expect(translate('zh', 'introSubtitle')).toContain('截屏你正在使用的应用');
+
+      expect(translate('en', 'introNext')).toBe('Next');
+      expect(translate('zh', 'introNext')).toBe('下一步');
+
+      // Nav titles
+      expect(translate('en', 'wizardImportTitle')).toBe('Import data');
+      expect(translate('zh', 'wizardImportTitle')).toBe('导入数据');
+      expect(translate('en', 'wizardBudgetTitle')).toBe('Budget');
+      expect(translate('zh', 'wizardBudgetTitle')).toBe('预算设置');
+      expect(translate('en', 'wizardRecurringTitle')).toBe('Recurring payment');
+      expect(translate('zh', 'wizardRecurringTitle')).toBe('周期账单');
+      expect(translate('en', 'wizardNotificationsTitle')).toBe('Notifications');
+      expect(translate('zh', 'wizardNotificationsTitle')).toBe('通知提醒');
+      expect(translate('en', 'wizardWidgetTitle')).toBe('Widget');
+      expect(translate('zh', 'wizardWidgetTitle')).toBe('小组件');
+    });
+  });
 });

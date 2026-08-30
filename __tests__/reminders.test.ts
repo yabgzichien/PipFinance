@@ -293,6 +293,25 @@ describe('owedReminderBody', () => {
     expect(body).toBe('Ali has owed you RM 42.50 for 5 days. Worth a nudge.');
   });
 
+  it('states the amount in the display currency rather than always ringgit', () => {
+    // 1 SGD = 3.17 MYR, so an MYR 42.50 debt reads as SGD 13.41 to a user viewing in SGD.
+    const body = owedReminderBody(
+      [debt({ name: 'Ali', total: 42.5, oldestDays: 5 })],
+      0,
+      { code: 'SGD', rates: { SGD: 3.17 } }
+    );
+    expect(body).toBe('Ali has owed you SGD 13.41 for 5 days. Worth a nudge.');
+  });
+
+  it('falls back to the MYR figure rather than dropping the nudge when the rate is missing', () => {
+    const body = owedReminderBody(
+      [debt({ name: 'Ali', total: 42.5, oldestDays: 5 })],
+      0,
+      { code: 'SGD', rates: {} }
+    );
+    expect(body).toBe('Ali has owed you SGD 42.50 for 5 days. Worth a nudge.');
+  });
+
   it('escalates to the annoyed tier past 7 days', () => {
     const body = owedReminderBody([debt({ name: 'Ali', total: 42.5, oldestDays: 20 })]);
     expect(body).toBe('Ali still owes you RM 42.50. 20 days of you being way too chill about this.');

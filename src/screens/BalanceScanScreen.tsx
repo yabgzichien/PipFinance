@@ -1,6 +1,6 @@
 // src/screens/BalanceScanScreen.tsx
 import * as ImagePicker from 'expo-image-picker';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
@@ -8,10 +8,12 @@ import { InstitutionBadge } from '../components/InstitutionBadge';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { getLLM, llmErrorMessage } from '../llm';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { todayISO } from '../lib/duplicates';
 import { findMatchingAccounts, matchInstitution, type Institution } from '../lib/institutions';
 import { classesFor } from '../lib/networth';
+import { BASE_CURRENCY } from '../lib/currency';
+import { getEntryCurrency } from '../db/currencyRepo';
 import { notify } from '../lib/platformAlert';
 import { searchCrypto, resolveCryptoTickers } from '../prices';
 import type { TickerResult } from '../lib/prices';
@@ -56,6 +58,14 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const [forceCreate, setForceCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newCls, setNewCls] = useState('cash');
+  // A scanned balance is native to whichever account it lands in, so every figure on this
+  // screen is labelled with that account's own currency — the currency the user enters in
+  // for a brand-new account, and the matched account's own for an existing one.
+  const [entryCurrency, setEntryCurrency] = useState<string>(BASE_CURRENCY);
+
+  useEffect(() => {
+    void getEntryCurrency().then(setEntryCurrency);
+  }, []);
 
   const handle = async (res: ImagePicker.ImagePickerResult) => {
     if (res.canceled || !res.assets?.length) return;
@@ -152,23 +162,25 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const amount = parseAmount(amountText);
   const currentVal = selectedAccount ? (accountValues[selectedAccount.id] ?? 0) : 0;
 
+  const selectedCurrency = selectedAccount?.currency ?? entryCurrency;
+
   const doReplace = async () => {
     if (!selectedAccount || amount <= 0) return;
     await setBalance(selectedAccount.id, Math.round(amount * 100) / 100, todayISO());
-    setDoneMsg(`Updated ${selectedAccount.name}'s balance to RM ${fmt(amount)}.`);
+    setDoneMsg(`Updated ${selectedAccount.name}'s balance to ${fmtMoney(amount, selectedCurrency)}.`);
     setPhase('done');
   };
   const doAddInto = async () => {
     if (!selectedAccount || amount <= 0) return;
     const next = Math.round((currentVal + amount) * 100) / 100;
     await setBalance(selectedAccount.id, next, todayISO());
-    setDoneMsg(`Added RM ${fmt(amount)} to ${selectedAccount.name}. New balance RM ${fmt(next)}.`);
+    setDoneMsg(`Added ${fmtMoney(amount, selectedCurrency)} to ${selectedAccount.name}. New balance ${fmtMoney(next, selectedCurrency)}.`);
     setPhase('done');
   };
   const doCreate = async () => {
     if (!newName.trim() || amount <= 0) return;
-    await addAccount(newName.trim(), detectedKind, newCls, Math.round(amount * 100) / 100, todayISO());
-    setDoneMsg(`Added ${newName.trim()} with an opening balance of RM ${fmt(amount)}.`);
+    await addAccount(newName.trim(), detectedKind, newCls, Math.round(amount * 100) / 100, todayISO(), null, entryCurrency);
+    setDoneMsg(`Added ${newName.trim()} with an opening balance of ${fmtMoney(amount, entryCurrency)}.`);
     setPhase('done');
   };
 
@@ -241,7 +253,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
                 {matches.map((m, i) => (
                   <Pressable key={m.id} onPress={() => setSelectedMatchId(m.id)} style={[styles.matchRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
                     <Text style={[styles.matchName, { color: colorTheme.ink }]} numberOfLines={1}>{m.name}</Text>
-                    <Text style={[styles.matchVal, { color: colorTheme.ink2 }]}>RM {fmt(accountValues[m.id] ?? 0)}</Text>
+                    <Text style={[styles.matchVal, { color: colorTheme.ink2 }]}>{fmtMoney(accountValues[m.id] ?? 0, m.currency)}</Text>
                   </Pressable>
                 ))}
               </Card>
@@ -254,7 +266,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
                   <BtnLabel>Replace {selectedAccount.name}'s balance</BtnLabel>
                 </PrimaryButton>
                 <SecondaryButton onPress={doAddInto} disabled={amount <= 0} icon="plus">
-                  Add to {selectedAccount.name}'s balance (RM {fmt(currentVal)} + RM {fmt(amount)})
+                  Add to {selectedAccount.name}'s balance ({fmtMoney(currentVal, selectedCurrency)} + {fmtMoney(amount, selectedCurrency)})
                 </SecondaryButton>
                 <Pressable onPress={() => setForceCreate(true)} hitSlop={6} style={styles.linkBtn}>
                   <Text style={[styles.linkText, { color: theme.accent }]}>Not this account? Add as a new account instead</Text>

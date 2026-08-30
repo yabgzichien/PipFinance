@@ -37,6 +37,20 @@ export function rateFor(rates: Record<string, number>, code: string): number | n
   return Number.isFinite(r) && r > 0 ? r : null;
 }
 
+/**
+ * Project an MYR amount into a display currency — the inverse of `rateFor`.
+ *
+ * Returns null rather than the raw MYR figure when the rate is unavailable, mirroring
+ * `rateFor`'s own null-over-parity contract: a caller decides the fallback, so a caller
+ * that forgets to handle null fails loudly in dev instead of quietly mislabeling MYR as
+ * the display currency.
+ */
+export function toDisplay(amountMyr: number, code: string, rates: Record<string, number>): number | null {
+  const rate = rateFor(rates, code);
+  if (rate == null) return null;
+  return Math.round((amountMyr / rate) * 100) / 100;
+}
+
 export function isStale(asOf: string, now: Date = new Date()): boolean {
   const t = Date.parse(asOf);
   if (Number.isNaN(t)) return true;

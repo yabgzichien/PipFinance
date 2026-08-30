@@ -1,68 +1,48 @@
-# Judge self-scan kit
+# Demo & Test Statement Generator
 
-Five deterministic statement mockups a judge photographs or screenshots and scans through the
-running app, so they personally execute the coverage-unlock beat instead of only watching the
-pre-loaded seed (spec `Fable5Evaluation/2026-07-12-demo-data-spec.md` sections D/E). Rebuild any
-time with:
+This tool generates deterministic statement mockups (Touch 'n Go eWallet, Maybank MAE, Grab driver payouts, mixed expense statements) used to test Pip's AI extraction pipeline, merchant memory learning, and transaction deduplication.
 
-```
+---
+
+## 1. Rebuilding Statement Mockups
+
+To regenerate the HTML mockups with current timestamps:
+
+```bash
 npx tsx tools/demoKit/build.ts
 ```
 
-This writes five HTML files to `tools/demoKit/templates/`. Rebuilding is deterministic (a
-committed PRNG seed) and always uses "now" as the build date, so the rows stay inside the
-current month  regenerate close to the actual judging date, not months ahead.
+This generates HTML template mockups in `tools/demoKit/templates/`. Rebuilding uses a committed deterministic seed and "today" as the base date so that extracted transactions fall within the active month.
 
-## The five kits
+---
 
-| # | File | What it mimics | Genuine? |
+## 2. Included Templates
+
+| # | Template | Scenario Simulated | Notes |
 |---|---|---|---|
-| 1 | `kit-1-tng-ewallet.html` | Touch 'n Go eWallet | Yes |
-| 2 | `kit-2-mae-bank.html` | Maybank2u / MAE statement | Yes  shares "Kedai Kopi Ah Seng" with Kit 1 |
-| 3 | `kit-3-grabfood-payout.html` | Grab driver weekly payouts | Yes  income only |
-| 4 | `kit-4-mixed-month.html` | A generic e-wallet, wider category spread | Yes |
-| 5 | `kit-5-fabricated.html` | A bank transfer history | No  all-round RM500/1,000/2,000 |
+| 1 | `kit-1-tng-ewallet.html` | Touch 'n Go eWallet history | Includes mixed daily purchases (Kedai Kopi Ah Seng, Tealive, groceries) |
+| 2 | `kit-2-mae-bank.html` | Maybank2u / MAE transaction log | Shares "Kedai Kopi Ah Seng" with Kit 1 to verify merchant memory learning |
+| 3 | `kit-3-grabfood-payout.html` | Grab delivery driver weekly payout | Income transaction extraction |
+| 4 | `kit-4-mixed-month.html` | Generic multi-category banking log | Wide category distribution (utilities, fuel, food, shopping) |
+| 5 | `kit-5-fabricated.html` | Round-number transfer history | Test edge-case round transactions |
 
-Kits 1-4 pass the app's own authenticity checks (Benford-plausible amounts with cents, round
-ratio ≤5%, no duplicate amounts). Kit 5 is the honest "we tried to fake it" counter-example:
-every row is a round income figure, designed to visibly drop data confidence and surface the
-round-number/plausibility reason chips  without tripping the hard integrity-floor decline (that
-drama belongs to the console's flagged path and the Attack Gallery, not this kit).
+---
 
-## Capture steps (human-gated  H7 in the human-task guide)
+## 3. Capturing Test Screenshots
 
-No headless-browser dependency was added for this (would be a heavy addition for five one-off
-screenshots); capture by hand:
+To generate PNG images for automated or manual OCR tests:
 
-1. Rebuild the kit close to the judging date: `npx tsx tools/demoKit/build.ts`.
-2. Open each `tools/demoKit/templates/kit-*.html` file in a browser.
-3. Resize the viewport to **390×844** (an iPhone-sized viewport  devtools' device toolbar, or
-   any screenshot tool that can crop to that aspect ratio).
-4. Screenshot just the phone mockup (the white rounded-corner card, not the grey page
-   background) and save as PNG into `tools/demoKit/out/` with the same base name, e.g.
-   `kit-1-tng-ewallet.png`.
-5. Repeat for all five. Commit `templates/`, `out/`, this README, `build.ts`, and
-   `build.test.ts` together.
+1. Rebuild the templates: `npx tsx tools/demoKit/build.ts`.
+2. Open any `tools/demoKit/templates/kit-*.html` file in a browser.
+3. Set the browser devtools viewport to **390 × 844** (standard mobile phone resolution).
+4. Take a screenshot of the phone card container and save to `tools/demoKit/out/` (e.g. `kit-1-tng-ewallet.png`).
 
-## Live smoke test (human-gated  spec F5)
+---
 
-Needs a live Groq key (`EXPO_PUBLIC_GROQ_API_KEY` configured), so it can't run in CI or from this
-tool alone:
+## 4. In-App Smoke Testing
 
-1. In the running app, scan `kit-1` then `kit-2`. Expect: ≥90% of rows extracted; the repeated
-   merchant "Kedai Kopi Ah Seng" fires the learning beat on its second appearance (pre-filled,
-   not a guess); the coverage chip visibly moves.
-2. Scan `kit-5` (fabricated). Expect: data confidence drops by ≥8 points with round-number/
-   plausibility reason chips, and **no** integrity-floor breach. If it does breach, the kit's
-   amounts need retuning (dial down `buildFabricatedKit`'s row count or vary a couple of the
-   amounts)  a full floor-breach decline is the console's flagged-path demo, not this kit's.
+With `EXPO_PUBLIC_GROQ_API_KEY` or `EXPO_PUBLIC_GEMINI_API_KEY` configured:
 
-## Judge instruction card (five lines, spec E)
-
-Pair this with the physical/digital kit handed to a judge:
-
-> **Try it yourself.** Attach a screenshot of one of these five sample statements in the app's
-> "Add a receipt" flow. Watch Pip read it, learn a merchant it's seen before, and move your
-> coverage chip. Try the fifth one (the bank transfer) to see the same checks catch fabricated
-> data live. Prefer typing? You can enter one transaction manually instead  the app tells you
-> which entries are typed versus scanned.
+1. Open Pip → tap **Add (+)** → **Scan / Attach**.
+2. Select `kit-1-tng-ewallet.png` and confirm extraction of all line items. Categorize "Kedai Kopi Ah Seng" as **Food**.
+3. Scan `kit-2-mae-bank.png` and observe Pip automatically pre-filling "Kedai Kopi Ah Seng" as **Food** via merchant memory.

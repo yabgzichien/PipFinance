@@ -3,7 +3,7 @@ version: alpha
 name: Pip — Frame (video / frame layer)
 description: >
   The blue-professional preset remixed onto Pip's real design tokens from
-  PipComp/src/theme.ts, then hand-corrected where the automatic role mapping was wrong for
+  src/theme.ts, then hand-corrected where the automatic role mapping was wrong for
   this brand. The unit is the frame (1920×1080). Atoms are sacred — the tinted green-grey
   canvas (#eef1ee) with white cards on top, a single green accent (#1f8a5b) rationed to
   three uses in the entire video, the three-step ink ladder, Hanken Grotesk for every word
@@ -182,7 +182,7 @@ Failure mode looks like a feature montage: many small things moving, several col
 
 ## Category colours (real, from the app)
 
-Computed from `PipComp/src/lib/catColors.ts` at the hues in `PipComp/src/data/categories.ts`:
+Computed from `src/lib/catColors.ts` at the hues in `src/data/categories.ts`:
 `bg = oklch(0.95 0.045 h)`, `fg = oklch(0.52 0.13 h)`, `solid = oklch(0.60 0.13 h)`.
 
 | Category | Hue | bg | fg | solid |

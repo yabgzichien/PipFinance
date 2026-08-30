@@ -7,12 +7,13 @@ import { Amount, Card, CatBadge, Eyebrow, TopBar, ValueToggle, type ValueMode } 
 import { catColorsForHue } from '../lib/catColors';
 import { currentMonthKey, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { categoryComparisons, hasComparisonData } from '../lib/recap';
 import type { Category, TxnType } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { shadowToggle, uiFont } from '../theme';
 
@@ -23,7 +24,8 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, catById } = useAppData();
+  const { transactions, catById, markTaskDone } = useAppData();
+  const dc = useDisplayCurrency();
   const [kind, setKind] = useState<TxnType>('expense');
   const [mode, setMode] = useState<ValueMode>('amount');
 
@@ -68,7 +70,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
         <TopBar
           title={screenTitle}
           onBack={onBack}
-          right={<ValueToggle mode={mode} onChange={setMode} />}
+          right={<ValueToggle mode={mode} onChange={setMode} currency={dc.code} />}
         />
       </View>
 
@@ -104,7 +106,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                 <Text style={[styles.pieEyebrow, { color: colorTheme.ink2 }]}>
                   {isZh ? `${new Date().getMonth() + 1}月` : monthName()}
                 </Text>
-                <Amount value={total} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
+                <Amount value={dc.convert(total)} currency={dc.code} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
               </View>
             </View>
 
@@ -115,12 +117,16 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
               {breakdown.map((b, i) => {
                 const cat = catById[b.catId] ?? fallback;
                 const pctNum = total > 0 ? Math.round((b.amt / total) * 100) : 0;
-                const primary = mode === 'amount' ? `RM ${fmt(b.amt)}` : `${pctNum}%`;
-                const secondary = mode === 'amount' ? `${pctNum}%` : `RM ${fmt(b.amt)}`;
+                const amountText = fmtMoney(dc.convert(b.amt), dc.code);
+                const primary = mode === 'amount' ? amountText : `${pctNum}%`;
+                const secondary = mode === 'amount' ? `${pctNum}%` : amountText;
                 return (
                   <Pressable
                     key={b.catId}
-                    onPress={() => onOpenCategory(b.catId)}
+                    onPress={() => {
+                      void markTaskDone('breakdown');
+                      onOpenCategory(b.catId);
+                    }}
                     style={({ pressed }) => [
                       styles.row,
                       i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }],
@@ -136,7 +142,9 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                       <Text style={[styles.secondary, { color: colorTheme.ink2 }]}>{secondary}</Text>
                       {showComparisons && b.catId in comparisonByCat && (
                         <Text style={[styles.compare, { color: colorTheme.ink3 }]}>
-                          {isZh ? `上月 RM ${fmt(comparisonByCat[b.catId])}` : `Last month RM ${fmt(comparisonByCat[b.catId])}`}
+                          {isZh
+                            ? `上月 ${fmtMoney(dc.convert(comparisonByCat[b.catId]), dc.code)}`
+                            : `Last month ${fmtMoney(dc.convert(comparisonByCat[b.catId]), dc.code)}`}
                         </Text>
                       )}
                     </View>

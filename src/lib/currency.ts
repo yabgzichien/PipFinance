@@ -86,13 +86,14 @@ export function isMultiCurrency(active: string[]): boolean {
 
 /**
  * Normalise a currency code coming out of an LLM extraction. Anything unrecognised falls
- * back to the base currency: a bad code should never fail an otherwise good extraction,
- * and MYR is the correct guess for this app's users by a wide margin.
+ * back to the default currency (defaults to BASE_CURRENCY): a bad code should never fail an
+ * otherwise good extraction.
  */
-export function normalizeCurrency(raw: unknown): string {
-  if (typeof raw !== 'string') return BASE_CURRENCY;
+export function normalizeCurrency(raw: unknown, defaultCurrency: string = BASE_CURRENCY): string {
+  const fallback = currencyMeta(defaultCurrency)?.code ?? BASE_CURRENCY;
+  if (typeof raw !== 'string') return fallback;
   const code = raw.trim().toUpperCase();
-  return currencyMeta(code) ? code : BASE_CURRENCY;
+  return currencyMeta(code) ? code : fallback;
 }
 
 /**

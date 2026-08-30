@@ -12,6 +12,7 @@ import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { Pip } from '../../components/Pip';
 import { Body, BtnLabel, Card, PrimaryButton, Title } from '../../components/ui';
+import { useLanguage } from '../../i18n';
 import * as haptics from '../../lib/haptics';
 import { ensurePermission } from '../../notifications';
 import { useThemeColors } from '../../state/colorScheme';
@@ -27,6 +28,7 @@ const PIP_BOX = PIP_SIZE * 1.42;
 export function NotificationsStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const colorTheme = useThemeColors();
   const { setReminderCadence } = useAppData();
+  const { t } = useLanguage();
   const [status, setStatus] = useState<'idle' | 'granted' | 'denied'>('idle');
   const [busy, setBusy] = useState(false);
   const granted = status === 'granted';
@@ -64,13 +66,13 @@ export function NotificationsStep({ onNext, onSkip }: { onNext: () => void; onSk
         </View>
         {/* Keyed on the outcome so the copy swap replays the entrance instead of cutting. */}
         <FadeIn key={`title-${status}`} delay={stagger}>
-          <Title style={{ textAlign: 'center' }}>{granted ? 'Pip has your back' : 'Stay on top of it'}</Title>
+          <Title style={{ textAlign: 'center' }}>{granted ? t('wizardNotifGrantedTitle') : t('wizardNotifIdleTitle')}</Title>
         </FadeIn>
         <FadeIn key={`body-${status}`} delay={stagger * 2}>
           <Body color={colorTheme.ink2} style={styles.subtitle}>
             {granted
-              ? 'Reminders are on. Pip will nudge you once a day to log what you spent, and give you a heads up before a bill is due.'
-              : 'Pip can nudge you to log spending so your streak never quietly breaks, and remind you before a bill is due.'}
+              ? t('wizardNotifGrantedBody')
+              : t('wizardNotifIdleBody')}
           </Body>
         </FadeIn>
       </View>
@@ -79,8 +81,7 @@ export function NotificationsStep({ onNext, onSkip }: { onNext: () => void; onSk
         <FadeIn>
           <Card style={[styles.notice, { backgroundColor: colorTheme.surface2 }]}>
             <Body color={colorTheme.ink2} style={{ lineHeight: 19 }}>
-              Your phone is blocking notifications for Pip. Turn them on in your device settings
-              whenever you'd like reminders. You can always continue without them for now.
+              {t('wizardNotifDeniedNotice')}
             </Body>
           </Card>
         </FadeIn>
@@ -90,7 +91,7 @@ export function NotificationsStep({ onNext, onSkip }: { onNext: () => void; onSk
         {status === 'idle' ? (
           <>
             <PrimaryButton onPress={() => void enable()} disabled={busy}>
-              <BtnLabel>{busy ? 'Asking…' : 'Enable notifications'}</BtnLabel>
+              <BtnLabel>{busy ? t('wizardAskingNotifBtn') : t('wizardEnableNotifBtn')}</BtnLabel>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
             </PrimaryButton>
             <Pressable
@@ -100,12 +101,12 @@ export function NotificationsStep({ onNext, onSkip }: { onNext: () => void; onSk
               }}
               style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
             >
-              <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>Skip for now</Text>
+              <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>{t('wizardSkipForNow')}</Text>
             </Pressable>
           </>
         ) : (
           <PrimaryButton onPress={() => { haptics.tap(); onNext(); }}>
-            <BtnLabel>Continue</BtnLabel>
+            <BtnLabel>{t('wizardContinue')}</BtnLabel>
             <Icon name="arrowRight" size={19} color="#fff" />
           </PrimaryButton>
         )}

@@ -1,4 +1,22 @@
-import { fmt, fmtCompact, fmtMoney, readTimeLabel } from '../src/lib/format';
+import { currencyPrefix, fmt, fmtCompact, fmtMoney, formatCurrencyBreakdown, readTimeLabel } from '../src/lib/format';
+
+describe('currencyPrefix', () => {
+  it('renders MYR as the local RM convention', () => {
+    expect(currencyPrefix('MYR')).toBe('RM');
+  });
+
+  it('renders any other currency as its own three-letter code', () => {
+    expect(currencyPrefix('SGD')).toBe('SGD');
+    expect(currencyPrefix('USD')).toBe('USD');
+    expect(currencyPrefix('JPY')).toBe('JPY');
+  });
+
+  it('agrees with the prefix fmtMoney itself emits, so the two can never drift', () => {
+    for (const code of ['MYR', 'SGD', 'CNY']) {
+      expect(fmtMoney(1, code).startsWith(`${currencyPrefix(code)} `)).toBe(true);
+    }
+  });
+});
 
 describe('fmtCompact', () => {
   it('matches fmt exactly under the 100K threshold', () => {
@@ -69,6 +87,11 @@ describe('fmtMoney', () => {
     expect(fmtMoney(45000, 'KRW')).toBe('KRW 45,000');
   });
 
+  it('formats 3-decimal currencies correctly', () => {
+    expect(fmtMoney(12.345, 'TND')).toBe('TND 12.345');
+    expect(fmtMoney(12.3, 'TND')).toBe('TND 12.300');
+  });
+
   it('rounds rather than truncates a zero-decimal currency', () => {
     expect(fmtMoney(1200.6, 'JPY')).toBe('JPY 1,201');
   });
@@ -84,5 +107,19 @@ describe('fmtMoney', () => {
 
   it('falls back to 0 for non-finite input, same as fmt', () => {
     expect(fmtMoney(NaN, 'MYR')).toBe('RM 0.00');
+  });
+});
+
+describe('formatCurrencyBreakdown', () => {
+  it('renders each currency as "CODE amount", separated by middle dots', () => {
+    expect(formatCurrencyBreakdown({ MYR: 3200, USD: 450 })).toBe('RM 3,200.00 · USD 450.00');
+  });
+
+  it('renders a single MYR-only breakdown the same as any other MYR amount', () => {
+    expect(formatCurrencyBreakdown({ MYR: 128 })).toBe('RM 128.00');
+  });
+
+  it('respects each currency\'s own decimal places', () => {
+    expect(formatCurrencyBreakdown({ MYR: 0, JPY: 1200 })).toBe('RM 0.00 · JPY 1,200');
   });
 });

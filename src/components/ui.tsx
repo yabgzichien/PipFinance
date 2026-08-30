@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { catColorsForHue } from '../lib/catColors';
 import { decimalsFor } from '../lib/currencies';
-import { fmtDecimals } from '../lib/format';
+import { currencyPrefix, fmtDecimals } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -89,7 +89,7 @@ export function Amount({
 }) {
   const colorTheme = useThemeColors();
   color = color ?? colorTheme.ink;
-  const prefix = currency === 'MYR' ? 'RM' : currency;
+  const prefix = currencyPrefix(currency);
   return (
     <Text style={{ fontFamily: numFont(weight), fontSize: size, color }}>
       {cur && (
@@ -385,8 +385,20 @@ export function ProgressTrack({ pct, height = 7 }: { pct: number; height?: numbe
 
 export type ValueMode = 'amount' | 'percent';
 
-/** Small RM / % segmented toggle. */
-export function ValueToggle({ mode, onChange }: { mode: ValueMode; onChange: (m: ValueMode) => void }) {
+/**
+ * Small currency / % segmented toggle. `currency` labels the amount half and must be the
+ * screen's display currency, not a hardcoded 'RM': the toggle sits directly beside figures
+ * that already convert, so a stale RM here mislabels every one of them.
+ */
+export function ValueToggle({
+  mode,
+  onChange,
+  currency = 'MYR',
+}: {
+  mode: ValueMode;
+  onChange: (m: ValueMode) => void;
+  currency?: string;
+}) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   return (
@@ -395,7 +407,9 @@ export function ValueToggle({ mode, onChange }: { mode: ValueMode; onChange: (m:
         const on = mode === m;
         return (
           <Pressable key={m} onPress={() => onChange(m)} style={[styles.vtBtn, on && { backgroundColor: theme.accentInk }]}>
-            <Text style={[styles.vtText, { color: colorTheme.ink2 }, on && styles.vtTextOn]}>{m === 'amount' ? 'RM' : '%'}</Text>
+            <Text style={[styles.vtText, { color: colorTheme.ink2 }, on && styles.vtTextOn]}>
+              {m === 'amount' ? currencyPrefix(currency) : '%'}
+            </Text>
           </Pressable>
         );
       })}

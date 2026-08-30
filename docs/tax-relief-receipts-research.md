@@ -1,4 +1,4 @@
-# Malaysian tax relief, receipt evidence, and what PipComp should build
+# Malaysian tax relief, receipt evidence, and what Pip should build
 
 Research date: 22 August 2026. Sources fetched and claims extracted by the deep-research
 workflow (23 sources, 5 search angles). **The adversarial verification pass did not run**
@@ -189,7 +189,7 @@ This is the sharpest open point in the whole research:
 *Confidence: Low on either reading as stated. Both are secondary. This needs a direct check
 against the LHDN Public Ruling on record keeping.*
 
-**Product consequence, and it is a big one: PipComp must not tell users they can throw the
+**Product consequence, and it is a big one: Pip must not tell users they can throw the
 paper away.** The safe copy is "capture it now so you can find it later, and keep the
 original where you already keep them". Getting this wrong is a liability, and it is also
 exactly the claim a competitor (ClaimLah) is already making loosely.
@@ -261,7 +261,7 @@ coverage gaps (see 3.4).
 (LHDN Specific Guideline, primary, plus ClearTax). Medium-High on the relaxation dates.*
 
 **So through 2027 at minimum, a large share of everyday Malaysian consumer spending will
-still be evidenced by an ordinary paper receipt.** That is PipComp's window, and it is a
+still be evidenced by an ordinary paper receipt.** That is Pip's window, and it is a
 real one, not a technicality.
 
 ### 3.5 The two-year vs seven-year gap
@@ -295,7 +295,7 @@ limits are roughly 100 rpm for submission and 300 rpm for status polling, with a
 pre-production sandbox at `preprod-api.myinvois.hasil.gov.my` (3 months data retention).
 *Confidence: Medium on the specific rate limits (community-maintained docs).*
 
-**Therefore the only viable capture path for PipComp is the user-side artefact: scan the
+**Therefore the only viable capture path for Pip is the user-side artefact: scan the
 QR code on the validated e-Invoice visual, or photograph the receipt.** Design around that
 constraint, do not plan for an API that will not be granted.
 
@@ -326,7 +326,7 @@ off the shelf. It has to be built.**
 
 *Confidence: High, these are direct reads of the vendors' own pages.*
 
-**Where PipComp wins:** both competitors are receipt-only silos. PipComp already holds the
+**Where Pip wins:** both competitors are receipt-only silos. Pip already holds the
 transaction ledger, categories, merchant memory (`merchantKey -> categoryId`), and receipt
 images attached to transactions (`Transaction.receiptUri`). Relief detection can ride on
 data the user is already producing for budgeting reasons, which means the tax feature costs
@@ -335,7 +335,7 @@ competitor can copy without becoming a full finance app.
 
 ---
 
-## 5. What PipComp should build
+## 5. What Pip should build
 
 ### 5.1 The core design decision: relief is a second axis, not a category
 
@@ -397,7 +397,7 @@ Three signals, in order of reliability:
 2. **Merchant memory**, reusing the existing `merchantKey` map. A gym, a clinic, a
    bookshop, an ISP: once the user confirms one, remember the merchant-to-relief mapping
    the same way categories are remembered today.
-3. **Recurring commitments**, which PipComp already models: internet subscription, medical
+3. **Recurring commitments**, which Pip already models: internet subscription, medical
    insurance premium, SSPN standing instruction, life insurance. These are the highest
    value and lowest effort reliefs, because they repeat monthly and the user has already
    told the app about them. **This is the cheapest win in the entire feature and should

@@ -8,6 +8,7 @@ import {
   mathStdDev,
   computeFinancialStatistics,
   buildFinancialReportBundle,
+  nativeTransactionTotalsByCurrency,
 } from '../src/lib/bookkeeping';
 import type { Account, BalanceEntry, Category, Transaction } from '../src/lib/types';
 
@@ -166,6 +167,36 @@ describe('computeBalanceSheet', () => {
     expect(bs.assetGroups).toHaveLength(2);
     expect(bs.liabilityGroups).toHaveLength(1);
   });
+
+  it('carries each item\'s native balance and currency alongside the MYR value', () => {
+    // Consumers that state an amount *with* a currency code (the re-importable JSON export)
+    // need the native figure; pairing `value` with the account's own currency would inflate
+    // a foreign account by its exchange rate on every round trip.
+    const accounts: Account[] = [makeAcct({ id: 'cny1', kind: 'asset', cls: 'cash', currency: 'CNY' })];
+    const entries: BalanceEntry[] = [makeEntry({ accountId: 'cny1', value: 1000, asOf: '2026-06-30' })];
+    const bs = computeBalanceSheet(accounts, entries, '2026-06-30', { CNY: 0.63 });
+    expect(bs.assetGroups[0].items[0]).toMatchObject({ value: 630, nativeValue: 1000, currency: 'CNY' });
+  });
+
+  it('converts a foreign-currency account to MYR before summing, given a rate table', () => {
+    const accounts: Account[] = [
+      makeAcct({ id: 'cash1', kind: 'asset', cls: 'cash', currency: 'MYR' }),
+      makeAcct({ id: 'cny1', kind: 'asset', cls: 'cash', currency: 'CNY' }),
+    ];
+    const entries: BalanceEntry[] = [
+      makeEntry({ accountId: 'cash1', value: 1000, asOf: '2026-06-30' }),
+      makeEntry({ accountId: 'cny1', value: 1000, asOf: '2026-06-30' }), // native CNY 1000
+    ];
+    const bs = computeBalanceSheet(accounts, entries, '2026-06-30', { CNY: 0.63 });
+    expect(bs.totalAssets).toBe(1630); // 1000 MYR + (1000 CNY * 0.63)
+  });
+
+  it('excludes a foreign-currency account with no cached rate, rather than counting it at parity', () => {
+    const accounts: Account[] = [makeAcct({ id: 'cny1', kind: 'asset', cls: 'cash', currency: 'CNY' })];
+    const entries: BalanceEntry[] = [makeEntry({ accountId: 'cny1', value: 1000, asOf: '2026-06-30' })];
+    const bs = computeBalanceSheet(accounts, entries, '2026-06-30', {});
+    expect(bs.totalAssets).toBe(0);
+  });
 });
 
 describe('math statistics helpers', () => {
@@ -213,5 +244,31 @@ describe('computeFinancialStatistics & buildFinancialReportBundle', () => {
     expect(bundle.statistics.monthlyTrends).toHaveLength(2);
     expect(bundle.statistics.monthlyTrends[0].monthKey).toBe('2026-05');
     expect(bundle.statistics.monthlyTrends[1].monthKey).toBe('2026-06');
+  });
+});
+
+describe('nativeTransactionTotalsByCurrency', () => {
+  it('groups native amounts by currency', () => {
+    const txns = [
+      makeTxn({ type: 'expense', amount: 50, currency: 'MYR' }),
+      makeTxn({ type: 'expense', amount: 63, currency: 'CNY', nativeAmount: 100 }),
+      makeTxn({ type: 'income', amount: 20, currency: 'CNY', nativeAmount: 30 }),
+    ];
+    expect(nativeTransactionTotalsByCurrency(txns)).toEqual({ MYR: 50, CNY: 130 });
+  });
+
+  it('uses amount when nativeAmount is absent (plain MYR rows)', () => {
+    const txns = [makeTxn({ type: 'income', amount: 200, currency: 'MYR' })];
+    expect(nativeTransactionTotalsByCurrency(txns)).toEqual({ MYR: 200 });
+  });
+
+  it('excludes transfers, which move money between the user\'s own accounts', () => {
+    const txns = [makeTxn({ type: 'transfer', amount: 500, currency: 'MYR' })];
+    expect(nativeTransactionTotalsByCurrency(txns)).toEqual({ MYR: 0 });
+  });
+
+  it('always includes MYR even with no MYR transactions', () => {
+    const txns = [makeTxn({ type: 'expense', amount: 63, currency: 'CNY', nativeAmount: 100 })];
+    expect(nativeTransactionTotalsByCurrency(txns)).toEqual({ MYR: 0, CNY: 100 });
   });
 });

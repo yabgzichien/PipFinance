@@ -9,7 +9,7 @@ import { activateCurrency, getActiveCurrencies } from '../db/currencyRepo';
 import { BASE_CURRENCY } from '../lib/currency';
 import { shortDate } from '../lib/dates';
 import { findDuplicate, todayISO } from '../lib/duplicates';
-import { fmt, fmtMoney } from '../lib/format';
+import { currencyPrefix, fmt, fmtMoney } from '../lib/format';
 import { assignImported, detectSourceVocabulary, pendingLabel, resolvePending, PENDING_CAT } from '../lib/import';
 import { notify } from '../lib/platformAlert';
 import { DROP, type Category, type ExtractedTxn, type TxnType } from '../lib/types';
@@ -424,7 +424,9 @@ function RowEditModal({
 
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Amount</Text>
           <View style={styles.amountRow}>
-            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>RM</Text>
+            <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>
+              {currencyPrefix(row.item.currency)}
+            </Text>
             <TextInput value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad" selectTextOnFocus style={[styles.amountInput, { color: colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]} />
           </View>
 

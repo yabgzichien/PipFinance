@@ -46,13 +46,13 @@ Long-term, the product should work for any Malaysian who wants a tracker that un
 **This instead — the twin pillar:**
 
 1. **Screenshot the apps you already live in.** Not a paper receipt, not a PDF bank statement export — a screenshot of Maybank, Touch 'n Go eWallet, GrabPay, or whatever's already open on your phone. Pip reads it and **remembers your merchants**, so categorization gets faster the more you use it. The mechanism competitors would have to copy isn't "add AI," it's "stop asking for a cleaner input than a screenshot."
-2. **It never leaves your phone.** No account, no cloud, local SQLite only. [Finory](https://www.finory.app/), a real Malaysian competitor, already markets hard on "no bank login credentials" — but only for credit cards. Pip can make the same privacy claim across the *entire* financial picture: spending, net worth, bills, splits.
+2. **It never leaves your phone.** No account required, local SQLite storage on device. [Finory](https://www.finory.app/), a real Malaysian competitor, already markets hard on "no bank login credentials" — but only for credit cards. Pip can make the same privacy claim across the *entire* financial picture: spending, net worth, bills, splits.
 
 Together: *fast in* (screenshot, not typing) and *safe in* (never leaves the device). Everything else Pip does is real, but secondary:
 
 | Supporting feature | Why it reinforces, not replaces, the headline |
 |---|---|
-| Belanjawanku national benchmark | Malaysia's own official reference budget (DOSM/EPF/Universiti Malaya) — no generic global app benchmarks against this. Makes "know your money" mean something concrete: *compared to what*. |
+| Tax relief receipt tracking | Tracks eligible categories as you spend with cap validation and receipt photo archiving so tax season is hassle-free. |
 | Net worth / assets & liabilities | "Financial freedom" framing beyond monthly spend — the fuller picture, not just a ledger. |
 | Split bills + Owed screen | Solves the "who owes who" friction directly named in §2's day-in-the-life. |
 | Recurring Commitments (bills + DCA) | One list for "what's already spoken for this month," which is exactly what the anxious-professional persona lacks visibility into. |

@@ -303,12 +303,16 @@ export const zh: Translations = {
   exploreTaskStreakDesc: '连续一周每天记一笔账，养成记账习惯。',
   exploreTaskRecapTitle: '查看月度回顾',
   exploreTaskRecapDesc: '查看本月收支情况的总结。',
+  exploreTaskQuickAddTitle: '试试快速记账',
+  exploreTaskQuickAddDesc: '输入类似"午餐 15"的文字，Pip 会帮你补全其余信息。',
   taskCelebrationToast: '已完成 {count} 个任务',
 
   // Setup Wizard / Onboarding
   introTitle: '洞悉你的每一分钱。',
   introSubtitle: '截屏你正在使用的应用（Grab、Touch \'n Go、Maybank 等），Pip 即可自动识别金额。',
   introNext: '下一步',
+  wizardDefaultCurrency: '默认货币',
+  wizardCurrencySearchPlaceholder: '搜索货币（如 USD、SGD、CNY）...',
   wizardImportTitle: '导入数据',
   wizardBudgetTitle: '预算设置',
   wizardRecurringTitle: '周期账单',

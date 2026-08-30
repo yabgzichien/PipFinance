@@ -10,20 +10,20 @@ import {
   toQuantityUnitPrice,
   type TickerResult,
 } from '../lib/prices';
+import { fetchYahooJson } from './fetchYahoo';
 import { fetchRateMYR } from './fx';
 
 const SEARCH = 'https://query1.finance.yahoo.com/v1/finance/search';
 const CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
-// A desktop UA avoids some Yahoo edge rejections.
-const HEADERS = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
 
 export async function searchSymbols(query: string, allowedTypes?: string[]): Promise<TickerResult[]> {
   const q = query.trim();
   if (!q) return [];
   try {
-    const res = await fetch(`${SEARCH}?q=${encodeURIComponent(q)}&quotesCount=25&newsCount=0`, { headers: HEADERS });
-    if (!res.ok) return [];
-    return parseYahooSearch(await res.json(), allowedTypes).slice(0, 25);
+    const url = `${SEARCH}?q=${encodeURIComponent(q)}&quotesCount=25&newsCount=0`;
+    const json = await fetchYahooJson(url);
+    if (!json) return [];
+    return parseYahooSearch(json, allowedTypes).slice(0, 25);
   } catch {
     return [];
   }
@@ -31,9 +31,10 @@ export async function searchSymbols(query: string, allowedTypes?: string[]): Pro
 
 async function chart(symbol: string) {
   try {
-    const res = await fetch(`${CHART}/${encodeURIComponent(symbol)}?range=2d&interval=1d`, { headers: HEADERS });
-    if (!res.ok) return null;
-    return parseYahooChart(await res.json());
+    const url = `${CHART}/${encodeURIComponent(symbol)}?range=2d&interval=1d`;
+    const json = await fetchYahooJson(url);
+    if (!json) return null;
+    return parseYahooChart(json);
   } catch {
     return null;
   }

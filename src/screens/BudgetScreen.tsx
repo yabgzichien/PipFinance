@@ -9,9 +9,10 @@ import { Amount, Body, Card, Caption, Eyebrow, IconButton, Label, ProgressTrack,
 import { computeIncomeBaseline } from '../lib/incomeBaseline';
 import { allocatedTotal, categoryStatus, currentMonthKey, leftover, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney } from '../lib/format';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { spacing } from '../theme';
@@ -23,6 +24,7 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const { t, formatMonthLabel, isZh } = useLanguage();
   const {
     transactions,
@@ -90,20 +92,22 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
                 <Eyebrow>{isZh ? '收入' : 'Income'}</Eyebrow>
                 <InfoButton entry="net_cash_flow" />
               </View>
-              <Amount value={expectedIncome} size={22} weight={700} />
+              <Amount value={dc.convert(expectedIncome)} currency={dc.code} size={22} weight={700} />
             </View>
             <View style={{ alignItems: 'flex-end' }}>
               <View style={styles.eyebrowRow}>
                 <Eyebrow>{left < 0 ? (isZh ? '超出' : 'Over') : (isZh ? '未分配' : 'Unallocated')}</Eyebrow>
                 {left >= 0 && <InfoButton entry="unallocated" />}
               </View>
-              <Amount value={Math.abs(left)} size={22} weight={700} color={left < 0 ? STATUS_COLOR.over : theme.accent} />
+              <Amount value={dc.convert(Math.abs(left))} currency={dc.code} size={22} weight={700} color={left < 0 ? STATUS_COLOR.over : theme.accent} />
             </View>
           </View>
           <View style={{ marginTop: spacing.md }}>
             <ProgressTrack pct={expectedIncome > 0 ? (allocated / expectedIncome) * 100 : 0} />
             <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
-              {isZh ? `已分配 RM ${fmt(allocated)} / 计划收入 RM ${fmt(expectedIncome)}` : `Allocated RM ${fmt(allocated)} of RM ${fmt(expectedIncome)}`}
+              {isZh
+                ? `已分配 ${fmtMoney(dc.convert(allocated), dc.code)} / 计划收入 ${fmtMoney(dc.convert(expectedIncome), dc.code)}`
+                : `Allocated ${fmtMoney(dc.convert(allocated), dc.code)} of ${fmtMoney(dc.convert(expectedIncome), dc.code)}`}
             </Caption>
           </View>
         </Card>
@@ -116,13 +120,13 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
             <Icon name="shield" size={17} color={theme.accent} />
             <View style={{ flex: 1 }}>
               <View style={styles.eyebrowRow}>
-                <Body weight={700}>{isZh ? `安全月收入 RM ${fmt(incomeBaseline.baseline)}` : `Safe monthly income RM ${fmt(incomeBaseline.baseline)}`}</Body>
+                <Body weight={700}>{isZh ? `安全月收入 ${fmtMoney(dc.convert(incomeBaseline.baseline), dc.code)}` : `Safe monthly income ${fmtMoney(dc.convert(incomeBaseline.baseline), dc.code)}`}</Body>
                 <InfoButton entry="safe_income" />
               </View>
               <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
                 {isZh
-                  ? `您的月收入在 RM ${fmt(incomeBaseline.low)} 至 RM ${fmt(incomeBaseline.high)} 之间波动。建议按最低收入而非平均收入规划预算。`
-                  : `Your months range RM ${fmt(incomeBaseline.low)} to RM ${fmt(incomeBaseline.high)}. Plan against the floor, not the average.`}
+                  ? `您的月收入在 ${fmtMoney(dc.convert(incomeBaseline.low), dc.code)} 至 ${fmtMoney(dc.convert(incomeBaseline.high), dc.code)} 之间波动。建议按最低收入而非平均收入规划预算。`
+                  : `Your months range ${fmtMoney(dc.convert(incomeBaseline.low), dc.code)} to ${fmtMoney(dc.convert(incomeBaseline.high), dc.code)}. Plan against the floor, not the average.`}
               </Label>
             </View>
           </Card>
@@ -142,7 +146,7 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
             { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2, opacity: pressed ? 0.9 : 1 },
           ]}
         >
-          <Icon name="trending" size={18} color={theme.accent} />
+          <Icon name="chart" size={18} color={theme.accent} />
           <View style={{ flex: 1 }}>
             <Body weight={700}>{isZh ? '月度回顾' : 'Monthly recap'}</Body>
             <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>

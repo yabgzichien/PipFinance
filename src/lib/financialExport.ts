@@ -4,16 +4,21 @@
 import * as XLSX from 'xlsx';
 import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
-import type { FinancialReportData, MonthlyTrendItem } from './bookkeeping';
+import { toDisplay } from './fx';
+import { currencyPrefix } from './format';
+import { formatCurrencyBreakdown } from './format';
+import { nativeTransactionTotalsByCurrency, type FinancialReportData, type MonthlyTrendItem } from './bookkeeping';
 import type { Commitment, CommitmentOccurrence } from './commitments';
 
 export type ExportFormat = 'xlsx' | 'csv' | 'html' | 'pdf' | 'json';
 
-/** Format a number into standard MYR currency string (e.g. RM 1,234.56). */
-export function formatCurrency(amount: number): string {
-  const isNegative = amount < 0;
-  const abs = Math.abs(amount).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return isNegative ? `-RM ${abs}` : `RM ${abs}`;
+/** Format a number into standard currency string (e.g. RM 1,234.56 or SGD 1,234.56). */
+export function formatCurrency(amount: number, code: string = 'MYR', rates?: Record<string, number>): string {
+  const converted = code === 'MYR' || !rates ? amount : (toDisplay(amount, code, rates) ?? amount);
+  const isNegative = converted < 0;
+  const abs = Math.abs(converted).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const prefix = currencyPrefix(code);
+  return isNegative ? `-${prefix} ${abs}` : `${prefix} ${abs}`;
 }
 
 /** Format percentage (e.g. 24.5%). */
@@ -273,6 +278,17 @@ export function generateCSV(data: FinancialReportData): string {
     ].join(','));
   }
 
+  // Currency Breakdown Section
+  const nativeTotals = nativeTransactionTotalsByCurrency(data.transactions);
+  if (Object.keys(nativeTotals).length > 1) {
+    lines.push('');
+    lines.push(`${csvEscape('=== CURRENCY BREAKDOWN ===')}`);
+    lines.push(`${csvEscape('Currency')},${csvEscape('Total Native Amount')}`);
+    for (const [code, amt] of Object.entries(nativeTotals)) {
+      lines.push(`${csvEscape(code)},${amt}`);
+    }
+  }
+
   return lines.join('\n');
 }
 
@@ -398,6 +414,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
       date: t.date || null,
       description: t.merchantRaw || t.merchantKey || null,
       amount: Math.round((t.type === 'income' ? Math.abs(t.amount) : -Math.abs(t.amount)) * 100) / 100,
+      currency: t.currency ?? 'MYR',
       category: (t.categoryId ? catMap.get(t.categoryId) : null) || '?',
       account: null as string | null,
     }));
@@ -408,6 +425,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
       date: t.date || null,
       description: t.merchantRaw || t.merchantKey || null,
       amount: Math.round(Math.abs(t.amount) * 100) / 100,
+      currency: t.currency ?? 'MYR',
       account: null as string | null,
     }));
 
@@ -417,11 +435,14 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     .filter((g) => g.cls !== 'receivable')
     .flatMap((g) => g.items.map((item) => {
       const meta = accountMetaById.get(item.accountId);
+      // `balance` and `currency` must agree. `item.value` is MYR-converted, so pairing it
+      // with the account's own currency code would re-import a foreign account inflated by
+      // its exchange rate; `nativeValue` is the figure that currency actually denominates.
       return {
         name: item.name,
         type: g.clsLabel,
-        balance: Math.abs(item.value),
-        currency: 'MYR',
+        balance: Math.abs(item.nativeValue),
+        currency: item.currency,
         as_of: data.balanceSheet.asOfDate,
         notes: item.ticker || item.symbol || null,
         quantity: meta?.quantity ?? null,
@@ -433,6 +454,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     label: c.label,
     kind: c.kind,
     amount: c.amount,
+    currency: c.currency ?? 'MYR',
     dueDay: c.dueDay,
     category: c.categoryId ? catMap.get(c.categoryId) ?? null : null,
     fromAccount: c.fromAccountId ? accountNameById.get(c.fromAccountId) ?? null : null,
@@ -467,17 +489,24 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
 // ---------------------------------------------------------------------------
 
 export function generateHTMLReport(data: FinancialReportData): string {
+  const displayCode = data.displayCurrency || 'MYR';
+  const displayRates = data.displayRates || {};
+  const fmtC = (amt: number) => formatCurrency(amt, displayCode, displayRates);
+  const nativeTotals = nativeTransactionTotalsByCurrency(data.transactions);
+  const multiCurrency = Object.keys(nativeTotals).length > 1;
+  const breakdownStr = multiCurrency ? formatCurrencyBreakdown(nativeTotals) : '';
+
   const catMap = new Map<string, string>();
   for (const c of data.categories) catMap.set(c.id, c.label);
 
   // Generate SVG Bar Chart: Monthly Income vs Expenses
-  const barChartSvg = renderMonthlyBarChartSvg(data.statistics.monthlyTrends);
+  const barChartSvg = renderMonthlyBarChartSvg(data.statistics.monthlyTrends, displayCode, displayRates);
 
   // Generate SVG Donut Chart: Expense Breakdown
-  const donutChartSvg = renderExpenseDonutSvg(data.statistics.expenseCategoryBreakdown);
+  const donutChartSvg = renderExpenseDonutSvg(data.statistics.expenseCategoryBreakdown, displayCode, displayRates);
 
   // Generate SVG Area/Line Chart: Net Worth Trend
-  const netWorthChartSvg = renderNetWorthTrendSvg(data.statistics.monthlyTrends);
+  const netWorthChartSvg = renderNetWorthTrendSvg(data.statistics.monthlyTrends, displayCode, displayRates);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -611,7 +640,7 @@ export function generateHTMLReport(data: FinancialReportData): string {
     <header>
       <div class="title-group">
         <h1>Financial Statement & Bookkeeping Report</h1>
-        <p>Name: <strong>${escapeHtml(data.userName)}</strong> &bull; Period: <strong>${escapeHtml(data.period.label)}</strong> &bull; As of: <strong>${escapeHtml(data.balanceSheet.asOfDate)}</strong></p>
+        <p>Name: <strong>${escapeHtml(data.userName)}</strong> &bull; Period: <strong>${escapeHtml(data.period.label)}</strong> &bull; As of: <strong>${escapeHtml(data.balanceSheet.asOfDate)}</strong> &bull; Currency: <strong>${escapeHtml(displayCode)}</strong></p>
       </div>
       <div class="btn-group">
         <button class="btn secondary" onclick="window.print()">Print / Save PDF</button>
@@ -622,25 +651,27 @@ export function generateHTMLReport(data: FinancialReportData): string {
     <div class="grid grid-4">
       <div class="card">
         <div class="kpi-title">Total Revenue</div>
-        <div class="kpi-val" style="color: var(--accent);">${formatCurrency(data.incomeStatement.totalIncome)}</div>
-        <div class="kpi-sub">Mean: ${formatCurrency(data.statistics.meanMonthlyIncome)}/mo</div>
+        <div class="kpi-val" style="color: var(--accent);">${fmtC(data.incomeStatement.totalIncome)}</div>
+        <div class="kpi-sub">Mean: ${fmtC(data.statistics.meanMonthlyIncome)}/mo</div>
       </div>
       <div class="card">
         <div class="kpi-title">Total Expenses</div>
-        <div class="kpi-val" style="color: var(--danger);">${formatCurrency(data.incomeStatement.totalExpense)}</div>
-        <div class="kpi-sub">Mean: ${formatCurrency(data.statistics.meanMonthlyExpense)}/mo</div>
+        <div class="kpi-val" style="color: var(--danger);">${fmtC(data.incomeStatement.totalExpense)}</div>
+        <div class="kpi-sub">Mean: ${fmtC(data.statistics.meanMonthlyExpense)}/mo</div>
       </div>
       <div class="card">
         <div class="kpi-title">Net Savings & Margin</div>
-        <div class="kpi-val">${formatCurrency(data.incomeStatement.netIncome)}</div>
+        <div class="kpi-val">${fmtC(data.incomeStatement.netIncome)}</div>
         <div class="kpi-sub">Savings Rate: <span class="badge">${data.incomeStatement.savingsRate}%</span></div>
       </div>
       <div class="card">
         <div class="kpi-title">Net Worth (Balance Sheet)</div>
-        <div class="kpi-val">${formatCurrency(data.balanceSheet.netWorth)}</div>
-        <div class="kpi-sub">Assets: ${formatCurrency(data.balanceSheet.totalAssets)} &bull; Liab: ${formatCurrency(data.balanceSheet.totalLiabilities)}</div>
+        <div class="kpi-val">${fmtC(data.balanceSheet.netWorth)}</div>
+        <div class="kpi-sub">Assets: ${fmtC(data.balanceSheet.totalAssets)} &bull; Liab: ${fmtC(data.balanceSheet.totalLiabilities)}</div>
       </div>
     </div>
+
+    ${breakdownStr ? `<div style="margin-top: -12px; margin-bottom: 24px; font-size: 13px; color: var(--ink-dim);">Currency breakdown (native): <strong>${escapeHtml(breakdownStr)}</strong></div>` : ''}
 
     <!-- STATISTICAL DISTRIBUTION METRICS -->
     <div class="card" style="margin-bottom: 24px;">
@@ -648,11 +679,11 @@ export function generateHTMLReport(data: FinancialReportData): string {
       <div class="grid grid-4" style="margin-top: 12px; margin-bottom: 0;">
         <div>
           <div class="kpi-sub">Income Median</div>
-          <div style="font-size: 16px; font-weight: 600;">${formatCurrency(data.statistics.medianMonthlyIncome)}</div>
+          <div style="font-size: 16px; font-weight: 600;">${fmtC(data.statistics.medianMonthlyIncome)}</div>
         </div>
         <div>
           <div class="kpi-sub">Income Std Deviation</div>
-          <div style="font-size: 16px; font-weight: 600;">${formatCurrency(data.statistics.stdDevMonthlyIncome)}</div>
+          <div style="font-size: 16px; font-weight: 600;">${fmtC(data.statistics.stdDevMonthlyIncome)}</div>
         </div>
         <div>
           <div class="kpi-sub">Income Volatility (CV)</div>
@@ -660,7 +691,7 @@ export function generateHTMLReport(data: FinancialReportData): string {
         </div>
         <div>
           <div class="kpi-sub">Min / Max Monthly Income</div>
-          <div style="font-size: 14px; font-weight: 600;">${formatCurrency(data.statistics.minMonthlyIncome)} &ndash; ${formatCurrency(data.statistics.maxMonthlyIncome)}</div>
+          <div style="font-size: 14px; font-weight: 600;">${fmtC(data.statistics.minMonthlyIncome)} &ndash; ${fmtC(data.statistics.maxMonthlyIncome)}</div>
         </div>
       </div>
     </div>
@@ -697,13 +728,13 @@ export function generateHTMLReport(data: FinancialReportData): string {
               <tr>
                 <td>${escapeHtml(r.categoryLabel)}</td>
                 <td class="amount">${r.percentage}%</td>
-                <td class="amount" style="color: var(--accent);">${formatCurrency(r.amount)}</td>
+                <td class="amount" style="color: var(--accent);">${fmtC(r.amount)}</td>
               </tr>
             `).join('')}
             <tr class="total-row">
               <td>Total Revenue</td>
               <td class="amount">100%</td>
-              <td class="amount">${formatCurrency(data.incomeStatement.totalIncome)}</td>
+              <td class="amount">${fmtC(data.incomeStatement.totalIncome)}</td>
             </tr>
           </tbody>
         </table>
@@ -717,20 +748,20 @@ export function generateHTMLReport(data: FinancialReportData): string {
               <tr>
                 <td>${escapeHtml(r.categoryLabel)}</td>
                 <td class="amount">${r.percentage}%</td>
-                <td class="amount" style="color: var(--danger);">${formatCurrency(r.amount)}</td>
+                <td class="amount" style="color: var(--danger);">${fmtC(r.amount)}</td>
               </tr>
             `).join('')}
             <tr class="total-row">
               <td>Total Expenses</td>
               <td class="amount">100%</td>
-              <td class="amount">${formatCurrency(data.incomeStatement.totalExpense)}</td>
+              <td class="amount">${fmtC(data.incomeStatement.totalExpense)}</td>
             </tr>
           </tbody>
         </table>
 
         <div style="margin-top: 14px; padding: 10px; background: var(--bg); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 700;">Net Surplus / Profit</span>
-          <span style="font-weight: 700; font-size: 16px; color: ${data.incomeStatement.netIncome >= 0 ? 'var(--accent)' : 'var(--danger)'};">${formatCurrency(data.incomeStatement.netIncome)}</span>
+          <span style="font-weight: 700; font-size: 16px; color: ${data.incomeStatement.netIncome >= 0 ? 'var(--accent)' : 'var(--danger)'};">${fmtC(data.incomeStatement.netIncome)}</span>
         </div>
       </div>
 
@@ -746,13 +777,13 @@ export function generateHTMLReport(data: FinancialReportData): string {
               <tr>
                 <td>${escapeHtml(i.name)}</td>
                 <td class="amount" style="color: var(--ink-dim);">${escapeHtml(g.clsLabel)}</td>
-                <td class="amount">${formatCurrency(i.value)}</td>
+                <td class="amount">${fmtC(i.value)}</td>
               </tr>
             `)).join('')}
             <tr class="total-row">
               <td>Total Assets</td>
               <td></td>
-              <td class="amount">${formatCurrency(data.balanceSheet.totalAssets)}</td>
+              <td class="amount">${fmtC(data.balanceSheet.totalAssets)}</td>
             </tr>
           </tbody>
         </table>
@@ -766,20 +797,20 @@ export function generateHTMLReport(data: FinancialReportData): string {
               <tr>
                 <td>${escapeHtml(i.name)}</td>
                 <td class="amount" style="color: var(--ink-dim);">${escapeHtml(g.clsLabel)}</td>
-                <td class="amount">${formatCurrency(i.value)}</td>
+                <td class="amount">${fmtC(i.value)}</td>
               </tr>
             `)).join('')}
             <tr class="total-row">
               <td>Total Liabilities</td>
               <td></td>
-              <td class="amount">${formatCurrency(data.balanceSheet.totalLiabilities)}</td>
+              <td class="amount">${fmtC(data.balanceSheet.totalLiabilities)}</td>
             </tr>
           </tbody>
         </table>
 
         <div style="margin-top: 14px; padding: 10px; background: var(--bg); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
           <span style="font-weight: 700;">Owner Equity (Net Worth)</span>
-          <span style="font-weight: 700; font-size: 16px;">${formatCurrency(data.balanceSheet.netWorth)}</span>
+          <span style="font-weight: 700; font-size: 16px;">${fmtC(data.balanceSheet.netWorth)}</span>
         </div>
       </div>
     </div>
@@ -796,7 +827,7 @@ export function generateHTMLReport(data: FinancialReportData): string {
             <th>Category</th>
             <th>Merchant / Payee</th>
             <th>Remark</th>
-            <th class="amount">Amount (MYR)</th>
+            <th class="amount">Amount (${escapeHtml(displayCode)})</th>
           </tr>
         </thead>
         <tbody>
@@ -810,7 +841,7 @@ export function generateHTMLReport(data: FinancialReportData): string {
                 <td><strong>${escapeHtml(t.merchantRaw || t.merchantKey || 'N/A')}</strong></td>
                 <td style="color: var(--ink-dim); font-size: 12px;">${escapeHtml(t.remark || '')}</td>
                 <td class="amount" style="color: ${t.type === 'income' ? 'var(--accent)' : 'var(--ink)'}; font-weight: 600;">
-                  ${t.type === 'income' ? '+' : '-'}${formatCurrency(Math.abs(t.amount))}
+                  ${t.type === 'income' ? '+' : '-'}${fmtC(Math.abs(t.amount))}
                 </td>
               </tr>
             `;
@@ -841,6 +872,9 @@ export function generateHTMLReport(data: FinancialReportData): string {
 export function generatePrintablePDFHtml(data: FinancialReportData): string {
   const catMap = new Map<string, string>();
   for (const c of data.categories) catMap.set(c.id, c.label);
+  const displayCode = data.displayCurrency || 'MYR';
+  const displayRates = data.displayRates || {};
+  const fmtC = (amt: number) => formatCurrency(amt, displayCode, displayRates);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -849,89 +883,87 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
   <title>Financial Statement - ${escapeHtml(data.userName)}</title>
   <style>
     @page {
-      size: A4 portrait;
-      margin: 15mm 15mm 15mm 15mm;
+      size: A4;
+      margin: 15mm 15mm 20mm 15mm;
     }
     body {
-      font-family: 'Times New Roman', Times, serif, system-ui;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
       color: #111;
+      font-size: 9.5pt;
+      line-height: 1.35;
       background: #fff;
-      font-size: 11pt;
-      line-height: 1.4;
-      margin: 0;
-      padding: 0;
     }
     .header {
-      text-align: center;
       border-bottom: 2pt solid #111;
       padding-bottom: 8pt;
-      margin-bottom: 14pt;
+      margin-bottom: 12pt;
     }
     .header h1 {
       font-size: 16pt;
+      font-weight: bold;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin: 0 0 4pt 0;
+      margin: 0 0 2pt 0;
     }
     .header .sub {
-      font-size: 10pt;
+      font-size: 9pt;
       color: #444;
-      margin: 2pt 0;
     }
     .meta-grid {
       display: flex;
       justify-content: space-between;
-      font-size: 9.5pt;
-      margin-bottom: 14pt;
-      padding: 6pt 0;
-      border-bottom: 1pt solid #ccc;
+      margin-bottom: 12pt;
+      font-size: 8.5pt;
+      background: #f8f8f8;
+      padding: 6pt 10pt;
+      border: 0.5pt solid #eee;
     }
     .section-title {
       font-size: 11pt;
       font-weight: bold;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
-      border-bottom: 1.5pt solid #222;
-      padding-bottom: 2pt;
+      border-bottom: 1pt solid #333;
+      padding-bottom: 3pt;
       margin-top: 14pt;
       margin-bottom: 6pt;
+      letter-spacing: 0.03em;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 9.5pt;
       margin-bottom: 10pt;
+      font-size: 8.5pt;
+    }
+    th, td {
+      padding: 4pt 6pt;
+      text-align: left;
     }
     th {
-      border-bottom: 1pt solid #222;
-      padding: 4pt 2pt;
-      text-align: left;
-      font-size: 8.5pt;
+      border-bottom: 1pt solid #888;
+      font-weight: bold;
+      font-size: 8pt;
       text-transform: uppercase;
     }
-    td {
-      padding: 3.5pt 2pt;
-      border-bottom: 0.5pt solid #eee;
-    }
-    .amount {
+    td.amount, th.amount {
       text-align: right;
       font-variant-numeric: tabular-nums;
       font-family: 'Courier New', Courier, monospace;
     }
-    .subtotal {
+    tr.subtotal td {
+      border-top: 0.5pt solid #888;
       font-weight: bold;
-      border-top: 1pt solid #444;
+      background: #fafafa;
     }
-    .grand-total {
+    tr.grand-total td {
+      border-top: 1.5pt solid #111;
+      border-bottom: 2pt double #111;
       font-weight: bold;
-      border-top: 1pt solid #111;
-      border-bottom: 2.5pt double #111;
-      background-color: #f9f9f9;
+      font-size: 9.5pt;
+      background: #f0f0f0;
     }
     .two-col {
       display: flex;
-      gap: 16pt;
-      page-break-inside: avoid;
+      gap: 14pt;
     }
     .col {
       flex: 1;
@@ -970,26 +1002,26 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
     <div><strong>Name:</strong> ${escapeHtml(data.userName)}</div>
     <div><strong>Period:</strong> ${escapeHtml(data.period.label)}</div>
     <div><strong>As of Date:</strong> ${escapeHtml(data.balanceSheet.asOfDate)}</div>
-    <div><strong>Currency:</strong> MYR (Ringgit)</div>
+    <div><strong>Currency:</strong> ${escapeHtml(displayCode === 'MYR' ? 'MYR (Ringgit)' : displayCode)}</div>
   </div>
 
   <!-- EXECUTIVE SUMMARY KPIS -->
   <div class="kpi-box">
     <div class="kpi-item">
       <div class="label">Total Revenue</div>
-      <div class="val">${formatCurrency(data.incomeStatement.totalIncome)}</div>
+      <div class="val">${fmtC(data.incomeStatement.totalIncome)}</div>
     </div>
     <div class="kpi-item">
       <div class="label">Total Expenses</div>
-      <div class="val">${formatCurrency(data.incomeStatement.totalExpense)}</div>
+      <div class="val">${fmtC(data.incomeStatement.totalExpense)}</div>
     </div>
     <div class="kpi-item">
       <div class="label">Net Surplus / Savings</div>
-      <div class="val">${formatCurrency(data.incomeStatement.netIncome)}</div>
+      <div class="val">${fmtC(data.incomeStatement.netIncome)}</div>
     </div>
     <div class="kpi-item">
       <div class="label">Net Worth Position</div>
-      <div class="val">${formatCurrency(data.balanceSheet.netWorth)}</div>
+      <div class="val">${fmtC(data.balanceSheet.netWorth)}</div>
     </div>
     <div class="kpi-item">
       <div class="label">Savings Margin</div>
@@ -1004,7 +1036,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
       <tr>
         <th style="width: 50%;">Account / Category Description</th>
         <th class="amount" style="width: 20%;">Share (%)</th>
-        <th class="amount" style="width: 30%;">Amount (MYR)</th>
+        <th class="amount" style="width: 30%;">Amount (${escapeHtml(displayCode)})</th>
       </tr>
     </thead>
     <tbody>
@@ -1013,13 +1045,13 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
         <tr>
           <td style="padding-left: 12pt;">${escapeHtml(r.categoryLabel)}</td>
           <td class="amount">${r.percentage}%</td>
-          <td class="amount">${formatCurrency(r.amount)}</td>
+          <td class="amount">${fmtC(r.amount)}</td>
         </tr>
       `).join('')}
       <tr class="subtotal">
         <td>TOTAL REVENUES (A)</td>
         <td class="amount">100.0%</td>
-        <td class="amount">${formatCurrency(data.incomeStatement.totalIncome)}</td>
+        <td class="amount">${fmtC(data.incomeStatement.totalIncome)}</td>
       </tr>
 
       <tr><td colspan="3" style="font-weight: bold; background: #f0f0f0; margin-top: 6pt;">Operating &amp; Living Expenses</td></tr>
@@ -1027,19 +1059,19 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
         <tr>
           <td style="padding-left: 12pt;">${escapeHtml(r.categoryLabel)}</td>
           <td class="amount">${r.percentage}%</td>
-          <td class="amount">${formatCurrency(r.amount)}</td>
+          <td class="amount">${fmtC(r.amount)}</td>
         </tr>
       `).join('')}
       <tr class="subtotal">
         <td>TOTAL EXPENSES (B)</td>
         <td class="amount">100.0%</td>
-        <td class="amount">${formatCurrency(data.incomeStatement.totalExpense)}</td>
+        <td class="amount">${fmtC(data.incomeStatement.totalExpense)}</td>
       </tr>
 
       <tr class="grand-total">
         <td>NET INCOME / SURPLUS FOR PERIOD (A - B)</td>
         <td class="amount">${data.incomeStatement.savingsRate}%</td>
-        <td class="amount">${formatCurrency(data.incomeStatement.netIncome)}</td>
+        <td class="amount">${fmtC(data.incomeStatement.netIncome)}</td>
       </tr>
     </tbody>
   </table>
@@ -1051,7 +1083,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
     <div class="col">
       <table>
         <thead>
-          <tr><th>Assets &amp; Holdings</th><th class="amount">Value (MYR)</th></tr>
+          <tr><th>Assets &amp; Holdings</th><th class="amount">Value (${escapeHtml(displayCode)})</th></tr>
         </thead>
         <tbody>
           ${data.balanceSheet.assetGroups.map((g) => `
@@ -1059,13 +1091,13 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
             ${g.items.map((i) => `
               <tr>
                 <td style="padding-left: 8pt;">${escapeHtml(i.name)}</td>
-                <td class="amount">${formatCurrency(i.value)}</td>
+                <td class="amount">${fmtC(i.value)}</td>
               </tr>
             `).join('')}
           `).join('')}
           <tr class="grand-total">
             <td>TOTAL ASSETS</td>
-            <td class="amount">${formatCurrency(data.balanceSheet.totalAssets)}</td>
+            <td class="amount">${fmtC(data.balanceSheet.totalAssets)}</td>
           </tr>
         </tbody>
       </table>
@@ -1075,7 +1107,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
     <div class="col">
       <table>
         <thead>
-          <tr><th>Liabilities &amp; Obligations</th><th class="amount">Value (MYR)</th></tr>
+          <tr><th>Liabilities &amp; Obligations</th><th class="amount">Value (${escapeHtml(displayCode)})</th></tr>
         </thead>
         <tbody>
           ${data.balanceSheet.liabilityGroups.length === 0 ? '<tr><td colspan="2">No outstanding debt recorded</td></tr>' : ''}
@@ -1084,22 +1116,22 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
             ${g.items.map((i) => `
               <tr>
                 <td style="padding-left: 8pt;">${escapeHtml(i.name)}</td>
-                <td class="amount">${formatCurrency(i.value)}</td>
+                <td class="amount">${fmtC(i.value)}</td>
               </tr>
             `).join('')}
           `).join('')}
           <tr class="subtotal">
             <td>TOTAL LIABILITIES</td>
-            <td class="amount">${formatCurrency(data.balanceSheet.totalLiabilities)}</td>
+            <td class="amount">${fmtC(data.balanceSheet.totalLiabilities)}</td>
           </tr>
           <tr><td colspan="2" style="font-weight: bold; background: #f5f5f5;">Owner Equity</td></tr>
           <tr>
             <td style="padding-left: 8pt;">Net Worth Position</td>
-            <td class="amount">${formatCurrency(data.balanceSheet.netWorth)}</td>
+            <td class="amount">${fmtC(data.balanceSheet.netWorth)}</td>
           </tr>
           <tr class="grand-total">
             <td>TOTAL LIABILITIES &amp; EQUITY</td>
-            <td class="amount">${formatCurrency(data.balanceSheet.totalLiabilities + data.balanceSheet.netWorth)}</td>
+            <td class="amount">${fmtC(data.balanceSheet.totalLiabilities + data.balanceSheet.netWorth)}</td>
           </tr>
         </tbody>
       </table>
@@ -1115,17 +1147,17 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
     <tbody>
       <tr>
         <td>Mean (Average) Monthly Income</td>
-        <td class="amount">${formatCurrency(data.statistics.meanMonthlyIncome)}</td>
+        <td class="amount">${fmtC(data.statistics.meanMonthlyIncome)}</td>
         <td>Average monthly cash intake</td>
       </tr>
       <tr>
         <td>Median Monthly Income</td>
-        <td class="amount">${formatCurrency(data.statistics.medianMonthlyIncome)}</td>
+        <td class="amount">${fmtC(data.statistics.medianMonthlyIncome)}</td>
         <td>Central 50th percentile floor</td>
       </tr>
       <tr>
         <td>Income Standard Deviation</td>
-        <td class="amount">${formatCurrency(data.statistics.stdDevMonthlyIncome)}</td>
+        <td class="amount">${fmtC(data.statistics.stdDevMonthlyIncome)}</td>
         <td>Monthly earnings volatility measure</td>
       </tr>
       <tr>
@@ -1135,7 +1167,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
       </tr>
       <tr>
         <td>Mean Monthly Expense</td>
-        <td class="amount">${formatCurrency(data.statistics.meanMonthlyExpense)}</td>
+        <td class="amount">${fmtC(data.statistics.meanMonthlyExpense)}</td>
         <td>Average living cost run-rate</td>
       </tr>
     </tbody>
@@ -1151,7 +1183,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
         <th style="width: 10%;">Type</th>
         <th style="width: 22%;">Category</th>
         <th style="width: 32%;">Merchant / Counterparty</th>
-        <th class="amount" style="width: 22%;">Amount (MYR)</th>
+        <th class="amount" style="width: 22%;">Amount (${escapeHtml(displayCode)})</th>
       </tr>
     </thead>
     <tbody>
@@ -1163,7 +1195,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
             <td>${t.type.toUpperCase()}</td>
             <td>${escapeHtml(cat)}</td>
             <td>${escapeHtml(t.merchantRaw || t.merchantKey || 'N/A')}</td>
-            <td class="amount">${t.type === 'income' ? '+' : '-'}${formatCurrency(Math.abs(t.amount))}</td>
+            <td class="amount">${t.type === 'income' ? '+' : '-'}${fmtC(Math.abs(t.amount))}</td>
           </tr>
         `;
       }).join('')}
@@ -1183,7 +1215,7 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
 // 5. SVG CHART RENDERERS (SELF-CONTAINED, ZERO EXTERNAL DEPENDENCIES)
 // ---------------------------------------------------------------------------
 
-function renderMonthlyBarChartSvg(trends: MonthlyTrendItem[]): string {
+function renderMonthlyBarChartSvg(trends: MonthlyTrendItem[], displayCode: string = 'MYR', displayRates: Record<string, number> = {}): string {
   if (trends.length === 0) {
     return `<div style="padding: 20px; text-align: center; color: var(--ink-dim);">No monthly data in this period.</div>`;
   }
@@ -1214,10 +1246,10 @@ function renderMonthlyBarChartSvg(trends: MonthlyTrendItem[]): string {
 
     barsHtml += `
       <rect x="${xInc.toFixed(1)}" y="${yInc.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${hInc.toFixed(1)}" rx="3" fill="#22c55e" opacity="0.9">
-        <title>${t.monthLabel} Income: ${formatCurrency(t.income)}</title>
+        <title>${t.monthLabel} Income: ${formatCurrency(t.income, displayCode, displayRates)}</title>
       </rect>
       <rect x="${xExp.toFixed(1)}" y="${yExp.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${hExp.toFixed(1)}" rx="3" fill="#ef4444" opacity="0.85">
-        <title>${t.monthLabel} Expense: ${formatCurrency(t.expense)}</title>
+        <title>${t.monthLabel} Expense: ${formatCurrency(t.expense, displayCode, displayRates)}</title>
       </rect>
       <text x="${xCenter.toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">${t.monthLabel}</text>
     `;
@@ -1248,7 +1280,7 @@ function renderMonthlyBarChartSvg(trends: MonthlyTrendItem[]): string {
   `;
 }
 
-function renderExpenseDonutSvg(categories: { label: string; amount: number; percentage: number; hue: number }[]): string {
+function renderExpenseDonutSvg(categories: { label: string; amount: number; percentage: number; hue: number }[], displayCode: string = 'MYR', displayRates: Record<string, number> = {}): string {
   if (categories.length === 0) {
     return `<div style="padding: 20px; text-align: center; color: var(--ink-dim);">No expenses in this period.</div>`;
   }
@@ -1277,7 +1309,7 @@ function renderExpenseDonutSvg(categories: { label: string; amount: number; perc
       <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${color}" stroke-width="${strokeWidth}"
         stroke-dasharray="${strokeDasharray}" stroke-dashoffset="${strokeDashoffset}"
         transform="rotate(-90 ${cx} ${cy})">
-        <title>${c.label}: ${formatCurrency(c.amount)} (${c.percentage}%)</title>
+        <title>${c.label}: ${formatCurrency(c.amount, displayCode, displayRates)} (${c.percentage}%)</title>
       </circle>
     `;
 
@@ -1296,14 +1328,14 @@ function renderExpenseDonutSvg(categories: { label: string; amount: number; perc
         <circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="currentColor" stroke-opacity="0.08" stroke-width="${strokeWidth}" />
         ${pathsHtml}
         <text x="${cx}" y="${cy - 4}" text-anchor="middle" font-size="10" fill="currentColor" opacity="0.6">Total Spent</text>
-        <text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">${formatCurrency(total)}</text>
+        <text x="${cx}" y="${cy + 14}" text-anchor="middle" font-size="12" font-weight="700" fill="currentColor">${formatCurrency(total, displayCode, displayRates)}</text>
       </svg>
       <div style="flex: 1; min-width: 160px;">${legendHtml}</div>
     </div>
   `;
 }
 
-function renderNetWorthTrendSvg(trends: MonthlyTrendItem[]): string {
+function renderNetWorthTrendSvg(trends: MonthlyTrendItem[], displayCode: string = 'MYR', displayRates: Record<string, number> = {}): string {
   if (trends.length <= 1) {
     return `<div style="padding: 20px; text-align: center; color: var(--ink-dim);">Requires at least 2 monthly data points for trajectory.</div>`;
   }
@@ -1335,7 +1367,7 @@ function renderNetWorthTrendSvg(trends: MonthlyTrendItem[]): string {
   points.forEach((p) => {
     dotsHtml += `
       <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="#22c55e" stroke="var(--bg)" stroke-width="2">
-        <title>${p.label}: ${formatCurrency(p.val)}</title>
+        <title>${p.label}: ${formatCurrency(p.val, displayCode, displayRates)}</title>
       </circle>
       <text x="${p.x.toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.6">${p.label}</text>
     `;
@@ -1349,8 +1381,10 @@ function renderNetWorthTrendSvg(trends: MonthlyTrendItem[]): string {
           <stop offset="100%" stop-color="#22c55e" stop-opacity="0.0"/>
         </linearGradient>
       </defs>
+      <!-- Area fill -->
       <path d="${areaD}" fill="url(#nwGrad)" />
-      <path d="${pathD}" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" />
+      <!-- Stroke line -->
+      <path d="${pathD}" fill="none" stroke="#22c55e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
       ${dotsHtml}
     </svg>
   `;

@@ -13,10 +13,31 @@
 // app was opened, which is ample for a habit whose whole point is opening the app.
 
 import { AGING_DAYS, type PersonDebt } from './split';
-import { fmt } from './format';
+import { fmtMoney } from './format';
+import { toDisplay } from './fx';
 import { notificationTitle, type NotificationClass } from './voice';
 
 export type { NotificationClass } from './voice';
+
+/**
+ * The currency reminder copy states amounts in, plus the rates to get there. Amounts reaching
+ * this module are MYR-canonical like everywhere else, so a notification would otherwise read
+ * "RM 400" to a user whose every on-screen total says SGD. Defaults to plain MYR, which is
+ * what every existing caller and test gets.
+ */
+export interface ReminderDisplay {
+  code: string;
+  rates: Record<string, number>;
+}
+
+const MYR_DISPLAY: ReminderDisplay = { code: 'MYR', rates: {} };
+
+/** Format an MYR figure in the reminder's display currency, falling back to the MYR number
+ *  itself if the rate is missing — a nudge is worth sending with a slightly off denomination,
+ *  and never worth dropping. */
+function money(amountMyr: number, display: ReminderDisplay = MYR_DISPLAY): string {
+  return fmtMoney(toDisplay(amountMyr, display.code, display.rates) ?? amountMyr, display.code);
+}
 export type ReminderCadence = 'off' | 'daily' | 'weekly';
 
 /** The three kinds of reminder this app schedules. Lives here rather than in
@@ -199,6 +220,8 @@ export function planLogReminders(input: LogReminderInput, now: Date): ReminderPl
 
 export interface OwedReminderInput {
   enabled: boolean;
+  /** Currency to state amounts in. Omitted means plain MYR. */
+  display?: ReminderDisplay;
   /** Age of the oldest unpaid bill across everyone, from `oldestOverdueDays` in lib/split.ts. */
   oldestOverdueDays: number;
   /** Who owes what, biggest first, from `groupOpenSharesByPerson`. */
@@ -230,7 +253,7 @@ export function planOwedReminders(input: OwedReminderInput, now: Date): Reminder
       at: atLocalTime(day, REMINDER_HOUR, OWED_REMINDER_MINUTE),
       title: notificationTitle('save', day),
       // Ages advance with each rung for the same reason the log ladder's do.
-      body: owedReminderBody(input.debts, day - localDayNumber(now)),
+      body: owedReminderBody(input.debts, day - localDayNumber(now), input.display ?? MYR_DISPLAY),
       kind: 'owed',
     });
   }
@@ -298,6 +321,8 @@ export interface CommitmentReminderRow {
 export interface CommitmentReminderInput {
   enabled: boolean;
   occurrences: CommitmentReminderRow[];
+  /** Currency to state amounts in. Omitted means plain MYR. */
+  display?: ReminderDisplay;
 }
 
 /** `dayNumber` for a plain 'YYYY-MM-DD' string, read as a local calendar date. */
@@ -350,7 +375,7 @@ export function planCommitmentReminders(input: CommitmentReminderInput, now: Dat
     out.push({
       at,
       title: COMMITMENT_DIGEST_TITLE,
-      body: commitmentDigestBody(rows, earliestDueDay, today, total),
+      body: commitmentDigestBody(rows, earliestDueDay, today, total, input.display ?? MYR_DISPLAY),
       kind: 'commitment',
     });
   }
@@ -364,7 +389,7 @@ export function planCommitmentReminders(input: CommitmentReminderInput, now: Dat
     out.push({
       at,
       title: COMMITMENT_OVERDUE_TITLE,
-      body: overdueBillBody(o.label, o.amount, dayNumberOf(o.dueDate), today),
+      body: overdueBillBody(o.label, o.amount, dayNumberOf(o.dueDate), today, input.display ?? MYR_DISPLAY),
       kind: 'commitment',
     });
   }
@@ -418,10 +443,10 @@ function daysUntil(earliestDueDay: number, today: number): number {
  * Tier 3 also fires when several bills are clustered close together, even if the nearest one
  * is a few days out, since the crunch is the total landing at once rather than any single date.
  */
-function commitmentDigestBody(rows: CommitmentReminderRow[], earliestDueDay: number, today: number, total: number): string {
+function commitmentDigestBody(rows: CommitmentReminderRow[], earliestDueDay: number, today: number, total: number, display: ReminderDisplay): string {
   const count = rows.length;
   const label = `${count} bill${count === 1 ? '' : 's'}`;
-  const amount = `RM ${fmt(total)}`;
+  const amount = money(total, display);
   const until = daysUntil(earliestDueDay, today);
 
   const dueDays = rows.map((r) => dayNumberOf(r.dueDate));
@@ -441,9 +466,9 @@ function commitmentDigestBody(rows: CommitmentReminderRow[], earliestDueDay: num
  * an overdue bill can mean the money genuinely was not there, not just procrastination, and
  * that is not something to be cute about.
  */
-function overdueBillBody(label: string, amount: number, dueDay: number, today: number): string {
+function overdueBillBody(label: string, amount: number, dueDay: number, today: number, display: ReminderDisplay): string {
   const days = Math.max(0, today - dueDay);
-  const amt = `RM ${fmt(amount)}`;
+  const amt = money(amount, display);
 
   if (days <= 2) {
     const ago = days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
@@ -470,26 +495,26 @@ function owedOthersSuffix(rest: number): string {
  * `daysAhead` shifts every age forward to what it will be on the evening this fires, so a
  * reminder scheduled three weeks out does not arrive quoting today's number.
  */
-export function owedReminderBody(debts: PersonDebt[], daysAhead = 0): string {
+export function owedReminderBody(debts: PersonDebt[], daysAhead = 0, display: ReminderDisplay = MYR_DISPLAY): string {
   if (debts.length === 0) return 'Nobody owes you anything right now.';
 
   const [top] = debts;
   const days = top.oldestDays + daysAhead;
-  const amount = fmt(top.total);
+  const amount = money(top.total, display);
   const rest = debts.length - 1;
 
   if (days <= 7) {
-    const lead = `${top.name} has owed you RM ${amount} for ${days} days.`;
+    const lead = `${top.name} has owed you ${amount} for ${days} days.`;
     return rest === 0 ? `${lead} Worth a nudge.` : `${lead}${owedOthersSuffix(rest)}`;
   }
   if (days <= 20) {
-    const lead = `${top.name} still owes you RM ${amount}. ${days} days of you being way too chill about this.`;
+    const lead = `${top.name} still owes you ${amount}. ${days} days of you being way too chill about this.`;
     return `${lead}${owedOthersSuffix(rest)}`;
   }
   if (days <= 45) {
-    const lead = `${top.name} owes you RM ${amount}. ${days} days. At this point it's not a debt, it's a situationship.`;
+    const lead = `${top.name} owes you ${amount}. ${days} days. At this point it's not a debt, it's a situationship.`;
     return `${lead}${owedOthersSuffix(rest)}`;
   }
-  const lead = `${top.name} has owed you RM ${amount} for ${days} days. Pip isn't even going to make a joke about this one. That's how bad it's gotten.`;
+  const lead = `${top.name} has owed you ${amount} for ${days} days. Pip isn't even going to make a joke about this one. That's how bad it's gotten.`;
   return `${lead}${owedOthersSuffix(rest)}`;
 }

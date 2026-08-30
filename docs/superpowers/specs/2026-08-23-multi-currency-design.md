@@ -4,7 +4,7 @@ Status: approved for implementation. Date: 2026-08-23.
 
 ## Problem
 
-PipComp assumes every number is MYR. `transactions.amount`, `balance_entries.value`,
+Pip originally assumed every number was MYR. `transactions.amount`, `balance_entries.value`,
 `budget_allocation.amount` and every total derived from them are unlabelled ringgit. For the
 core Malaysian user that is correct and should stay correct.
 

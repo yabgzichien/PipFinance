@@ -13,10 +13,13 @@ import { Icon, type IconName } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { BtnLabel, CatBadge, Eyebrow, PrimaryButton } from '../../components/ui';
 import { NoFallbackCategoryError } from '../../db/categoriesRepo';
+import { useLanguage } from '../../i18n';
+import { currencyPrefix } from '../../lib/format';
 import * as haptics from '../../lib/haptics';
 import { confirmAction, notify } from '../../lib/platformAlert';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
+import { useDisplayCurrency } from '../../state/useDisplayCurrency';
 import { useAppData } from '../../state/store';
 import { numFont, radius, spacing, uiFont } from '../../theme';
 import { stagger } from '../../theme/motion';
@@ -24,6 +27,8 @@ import { stagger } from '../../theme/motion';
 export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
+  const { t, tCat } = useLanguage();
   const { categories, saveBudget, deleteCategory, updateCategoryLabel, updateCategoryIcon } = useAppData();
   const expenseCats = useMemo(() => categories.filter((c) => c.kind === 'expense'), [categories]);
 
@@ -69,7 +74,7 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
   };
 
   const removeCategory = (id: string, label: string) => {
-    confirmAction('Delete category?', `Remove "${label}"? This can't be undone.`, 'Delete', async () => {
+    confirmAction(t('wizardDeleteCategoryTitle'), t('wizardDeleteCategoryBody', { label }), t('delete'), async () => {
       try {
         await deleteCategory(id);
         setSelected((prev) => {
@@ -99,9 +104,9 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
 
   return (
     <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
-      <Eyebrow style={{ marginBottom: spacing.sm }}>Expected monthly income (optional)</Eyebrow>
+      <Eyebrow style={{ marginBottom: spacing.sm }}>{t('wizardExpectedIncomeOptional')}</Eyebrow>
       <View style={[styles.incomeCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
-        <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+        <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
         <TextInput
           value={incomeText}
           onChangeText={setIncomeText}
@@ -112,14 +117,15 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
         />
       </View>
 
-      <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>Categories</Eyebrow>
-      <Body2 color={colorTheme.ink2}>Tap to pick, the pencil to rename or change the picture.</Body2>
+      <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>{t('wizardCategories')}</Eyebrow>
+      <Body2 color={colorTheme.ink2}>{t('wizardBudgetInstruction')}</Body2>
 
       <View style={{ marginTop: spacing.sm }}>
         {/* Rows land one after another rather than all at once, capped at index 4 so a long
             category list still finishes settling inside half a second. */}
         {expenseCats.map((c, i) => {
           const isSelected = selected.has(c.id);
+          const catLabel = tCat(c);
           return (
             <FadeIn key={c.id} delay={Math.min(i, 4) * stagger} offset={8}>
               <View
@@ -137,16 +143,16 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
                   style={styles.rowTapZone}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: isSelected }}
-                  accessibilityLabel={c.label}
+                  accessibilityLabel={catLabel}
                 >
                   <CatBadge category={c} size={38} />
                   <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-                    {c.label}
+                    {catLabel}
                   </Text>
                 </Pressable>
                 {isSelected && (
                   <View style={[styles.amountWrap, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                    <Text style={[styles.rmSmall, { color: colorTheme.ink2 }]}>RM</Text>
+                    <Text style={[styles.rmSmall, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
                     <TextInput
                       value={amounts[c.id] ?? ''}
                       onChangeText={(v) => setAmounts((p) => ({ ...p, [c.id]: v }))}
@@ -157,10 +163,10 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
                     />
                   </View>
                 )}
-                <Pressable onPress={() => startEdit(c.id, c.label, c.icon)} hitSlop={8} style={styles.iconBtn}>
+                <Pressable onPress={() => startEdit(c.id, catLabel, c.icon)} hitSlop={8} style={styles.iconBtn}>
                   <Icon name="pencil" size={15} color={colorTheme.ink2} />
                 </Pressable>
-                <Pressable onPress={() => removeCategory(c.id, c.label)} hitSlop={8} style={styles.iconBtn}>
+                <Pressable onPress={() => removeCategory(c.id, catLabel)} hitSlop={8} style={styles.iconBtn}>
                   <Icon name="trash" size={16} color="#b3261e" />
                 </Pressable>
               </View>
@@ -170,7 +176,7 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
                   <TextInput
                     value={editLabel}
                     onChangeText={setEditLabel}
-                    placeholder="Category name"
+                    placeholder={t('wizardCategoryNamePlaceholder')}
                     placeholderTextColor={colorTheme.ink3}
                     style={[styles.editInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
                     maxLength={22}
@@ -191,10 +197,10 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
                   </View>
                   <View style={styles.editActions}>
                     <Pressable onPress={() => setEditingId(null)} hitSlop={6} disabled={editBusy}>
-                      <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>Cancel</Text>
+                      <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>{t('cancel')}</Text>
                     </Pressable>
                     <Pressable onPress={saveEdit} hitSlop={6} disabled={editBusy}>
-                      <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? 'Saving…' : 'Save'}</Text>
+                      <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? t('saving') : t('save')}</Text>
                     </Pressable>
                   </View>
                 </FadeIn>
@@ -208,20 +214,20 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
           style={[styles.addRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}
         >
           <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-          <Text style={[styles.addRowText, { color: theme.accent }]}>New category</Text>
+          <Text style={[styles.addRowText, { color: theme.accent }]}>{t('wizardNewCategory')}</Text>
         </Pressable>
       </View>
 
       <View style={styles.footer}>
         <PrimaryButton onPress={() => void finish()}>
-          <BtnLabel>Save & continue</BtnLabel>
+          <BtnLabel>{t('wizardSaveContinue')}</BtnLabel>
           <Icon name="arrowRight" size={19} color="#fff" />
         </PrimaryButton>
         <Pressable
           onPress={() => { haptics.tap(); onSkip(); }}
           style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
         >
-          <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>Skip for now</Text>
+          <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>{t('wizardSkipForNow')}</Text>
         </Pressable>
       </View>
 

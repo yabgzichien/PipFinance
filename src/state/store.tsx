@@ -93,6 +93,7 @@ import {
 } from '../db/commitmentsRepo';
 import { findCommitmentMatch, occurrenceMyr, type Commitment, type CommitmentOccurrence, type CommitmentKind } from '../lib/commitments';
 import { matchSourceCategory } from '../lib/import';
+import type { ExploreTaskId } from '../lib/tasks';
 import type { ParsedCommitment } from '../lib/advancedImport';
 import {
   addReliefTag,
@@ -137,11 +138,15 @@ const STREAK_FREEZE_MONTH_KEY = 'streak_freeze_month';
 const STREAK_FREEZE_AVAILABLE_KEY = 'streak_freeze_available';
 const STREAK_FREEZE_SPENT_FOR_KEY = 'streak_freeze_spent_for';
 const STREAK_PAUSED_SINCE_KEY = 'streak_paused_since';
+const TUTORIAL_SCAN_DONE_KEY = 'tutorial_scan_done';
+const TUTORIAL_MANUAL_DONE_KEY = 'tutorial_manual_done';
+const TUTORIAL_DISMISSED_KEY = 'tutorial_dismissed';
+const EXPLORE_TASKS_DONE_KEY = 'explore_tasks_done';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
 import { listFxRates } from '../db/fxRepo';
-import { refreshFxRates } from '../db/currencyRepo';
+import { getEntryCurrency, refreshFxRates } from '../db/currencyRepo';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { notify } from '../lib/platformAlert';
@@ -262,6 +267,21 @@ interface AppData {
   onboardingComplete: boolean;
   /** Mark the one-time setup complete. */
   completeOnboarding: () => Promise<void>;
+  /** Post-setup onboarding tutorial missions state */
+  tutorialScanDone: boolean;
+  tutorialManualDone: boolean;
+  tutorialDismissed: boolean;
+  tutorialComplete: boolean;
+  completeTutorialScan: () => Promise<void>;
+  completeTutorialManual: () => Promise<void>;
+  dismissTutorial: () => Promise<void>;
+  resetTutorial: () => Promise<void>;
+  /** Explore-tasks checklist surfaced from the Home mascot. See src/lib/tasks.ts. */
+  tasksDone: ExploreTaskId[];
+  markTaskDone: (id: ExploreTaskId, celebrate?: boolean) => Promise<void>;
+  /** Count of task completions the Home mascot hasn't celebrated yet. See TaskCelebration. */
+  pendingTaskCelebrations: number;
+  clearTaskCelebrations: () => void;
   refreshAll: () => Promise<void>;
   addCategory: (label: string, icon: string, hue: number, kind: Category['kind']) => Promise<string>;
   deleteCategory: (id: string) => Promise<void>;
@@ -378,17 +398,30 @@ interface AppData {
    *  in between. */
   streakCelebrationToken: number;
 
-  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string) => Promise<string>;
+  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null) => Promise<string>;
   /** Returns a default account id for the add flows, creating a "Cash" account if none exist. */
   ensureDefaultAccount: () => Promise<string>;
-  updateAccount: (id: string, fields: { name: string; cls: string; icon?: string | null }) => Promise<void>;
+  updateAccount: (
+    id: string,
+    fields: {
+      name: string;
+      cls: string;
+      icon?: string | null;
+      interestRate?: number | null;
+      sub?: string | null;
+      symbol?: string | null;
+      ticker?: string | null;
+      quantity?: number | null;
+      cost?: number | null;
+    }
+  ) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
   setBalance: (accountId: string, value: number, asOf: string) => Promise<void>;
   /** Adjust a linked account's balance. `amount` must already be in THAT account's own
    *  currency (see `deriveNative`): `balance_entries.value` is native to the account, never
    *  assumed MYR. */
   recordBalanceLink: (accountId: string, amount: number, effect: LinkEffect, asOf: string) => Promise<void>;
-  addHolding: (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null) => Promise<void>;
+  addHolding: (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null, interestRate?: number | null) => Promise<string>;
   updateHoldingQuantity: (id: string, quantity: number) => Promise<void>;
   setHoldingCost: (id: string, cost: number | null) => Promise<void>;
   refreshPrices: () => Promise<void>;
@@ -449,6 +482,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
   const [prices, setPrices] = useState<Record<string, PriceQuote>>({});
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [tutorialScanDone, setTutorialScanDoneState] = useState(false);
+  const [tutorialManualDone, setTutorialManualDoneState] = useState(false);
+  const [tutorialDismissed, setTutorialDismissedState] = useState(false);
   const [reminderCadence, setReminderCadenceState] = useState<ReminderCadence>('off');
   const [reminderHourOverride, setReminderHourOverrideState] = useState<number | null>(null);
   const [owedReminderEnabled, setOwedReminderEnabledState] = useState(false);
@@ -460,9 +496,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
+  const [tasksDone, setTasksDoneState] = useState<ExploreTaskId[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -474,6 +511,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         listBalanceEntries(),
         getPriceCache(),
         getMeta(ONBOARDING_KEY),
+        getMeta(TUTORIAL_SCAN_DONE_KEY),
+        getMeta(TUTORIAL_MANUAL_DONE_KEY),
+        getMeta(TUTORIAL_DISMISSED_KEY),
+        getMeta(EXPLORE_TASKS_DONE_KEY),
         getMeta(REMINDER_CADENCE_KEY),
         getMeta(REMINDER_HOUR_OVERRIDE_KEY),
         getMeta(OWED_REMINDER_KEY),
@@ -530,6 +571,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setStreakPausedSinceDayState(Number.isFinite(parsedPausedSince) ? parsedPausedSince : null);
 
     setOnboardingComplete(onboardingFlag === 'true');
+    setTutorialScanDoneState(tutorialScanRaw === 'true');
+    setTutorialManualDoneState(tutorialManualRaw === 'true');
+    setTutorialDismissedState(tutorialDismissedRaw === 'true');
+    try {
+      const parsedTasksDone = exploreTasksDoneRaw ? JSON.parse(exploreTasksDoneRaw) : [];
+      setTasksDoneState(Array.isArray(parsedTasksDone) ? parsedTasksDone : []);
+    } catch {
+      setTasksDoneState([]);
+    }
     setCategories(cats);
     setTransactions(txns);
     setMemory(mem);
@@ -713,6 +763,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           merchant: txn?.merchantRaw ?? 'A shared bill',
           currency: split?.currency ?? txn?.currency ?? BASE_CURRENCY,
           fxRate: split?.fxRate ?? txn?.fxRate ?? null,
+          remark: txn?.remark ?? null,
+          categoryId: txn?.categoryId ?? null,
+          gross: split?.gross ?? txn?.amount ?? outstanding(s),
+          owed: s.owed,
+          paid: s.paid,
         };
       })
       .filter((s) => s.outstanding > 0);
@@ -776,6 +831,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       // the two arrays would fall out of step if this were indexed off the original items.
       const draftFor: (SplitDraft | null)[] = [];
 
+      const cachedFx = ratesFromCache(await listFxRates());
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const a = assignments[i];
@@ -791,6 +847,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           await upsertMemory(key, categoryId);
         }
 
+        const currency = it.currency ?? BASE_CURRENCY;
+        const fxRate = it.fxRate !== undefined ? it.fxRate : (currency !== BASE_CURRENCY ? rateFor(cachedFx, currency) : null);
+
         toInsert.push({
           merchantRaw: it.merchant,
           merchantKey: key,
@@ -804,10 +863,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           source,
           remark: it.remark,
           receiptUri: receiptUris?.[i] ?? null,
-          // Forwarded as-is: undefined for every caller that doesn't set them (today, every
-          // caller but ManualEntryScreen), which addTransactions already treats as a plain MYR row.
-          currency: it.currency,
-          fxRate: it.fxRate,
+          currency,
+          fxRate,
         });
         draftFor.push(draft);
       }
@@ -826,6 +883,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setTransactions(txns);
       setMemory(mem);
       if (splitCount > 0) await refreshSplitState();
+
+      if (created.length > 0) {
+        if (source === 'manual') {
+          void setMeta(TUTORIAL_MANUAL_DONE_KEY, 'true');
+          setTutorialManualDoneState(true);
+        } else {
+          void setMeta(TUTORIAL_SCAN_DONE_KEY, 'true');
+          setTutorialScanDoneState(true);
+        }
+      }
 
       return { created, newLearned };
     },
@@ -1024,6 +1091,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const resetAllData = useCallback(async () => {
     await dbResetAllData();
+    await Promise.all([
+      setMeta(TUTORIAL_SCAN_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_MANUAL_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_DISMISSED_KEY, 'false'),
+      setMeta(EXPLORE_TASKS_DONE_KEY, '[]'),
+    ]);
     await refreshAll();
   }, [refreshAll]);
 
@@ -1036,14 +1109,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   // streak widget. Only force-quitting the app used to clear it.
   const resetToOnboarding = useCallback(async () => {
     await dbResetAllData();
-    await setMeta(ONBOARDING_KEY, 'false');
+    await Promise.all([
+      setMeta(ONBOARDING_KEY, 'false'),
+      setMeta(TUTORIAL_SCAN_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_MANUAL_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_DISMISSED_KEY, 'false'),
+      setMeta(EXPLORE_TASKS_DONE_KEY, '[]'),
+    ]);
     await refreshAll();
     setOnboardingComplete(false);
   }, [refreshAll]);
 
   const addAccount = useCallback(
-    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string) => {
-      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon, currency);
+    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null) => {
+      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon, currency, interestRate);
       const [accts, entries] = await Promise.all([listAccounts(), listBalanceEntries()]);
       setAccounts(accts);
       setBalanceEntries(entries);
@@ -1055,18 +1134,24 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   // Every transaction is tied to an account now, so the add flows need a guaranteed
   // default. Prefer an existing cash account; otherwise create a "Cash" one (opening
   // balance 0, dated today). Returns the account id to preselect.
+  //
+  // The new account takes the user's entry currency, not ringgit. This account is created
+  // silently behind someone's very first expense, so hardcoding MYR here quietly denominated
+  // the whole ledger in a currency the user never chose: an SGD expense would be converted
+  // into an MYR account and every balance shown back to them read "RM".
   const ensureDefaultAccount = useCallback(async (): Promise<string> => {
     const activeAccts = accounts.filter((a) => !a.archived);
     const existing = activeAccts.find((a) => a.cls === 'cash') ?? activeAccts[0];
     if (existing) return existing.id;
-    const created = await dbAddAccount('Cash', 'asset', 'cash', 0, new Date().toISOString().slice(0, 10), null);
+    const currency = await getEntryCurrency();
+    const created = await dbAddAccount('Cash', 'asset', 'cash', 0, new Date().toISOString().slice(0, 10), null, currency);
     const [accts, entries] = await Promise.all([listAccounts(), listBalanceEntries()]);
     setAccounts(accts);
     setBalanceEntries(entries);
     return created.id;
   }, [accounts]);
 
-  const updateAccount = useCallback(async (id: string, fields: { name: string; cls: string; icon?: string | null }) => {
+  const updateAccount = useCallback(async (id: string, fields: Parameters<typeof dbUpdateAccount>[1]) => {
     await dbUpdateAccount(id, fields);
     setAccounts(await listAccounts());
   }, []);
@@ -1106,9 +1191,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addHolding = useCallback(
-    async (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null) => {
-      await dbAddHolding(name, sub, symbol, ticker, quantity, cost, icon);
+    async (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null, interestRate?: number | null) => {
+      const created = await dbAddHolding(name, sub, symbol, ticker, quantity, cost, icon, interestRate);
       setAccounts(await listAccounts());
+      return created.id;
     },
     []
   );
@@ -1265,6 +1351,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           dueDay: p.dueDay,
           startMonth: p.startMonth,
           endMonth: p.endMonth,
+          currency: p.currency ?? BASE_CURRENCY,
         });
         for (const occ of p.occurrences) {
           await dbInsertOccurrence(created.id, {
@@ -1737,6 +1824,67 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setOnboardingComplete(true);
   }, []);
 
+  const completeTutorialScan = useCallback(async () => {
+    await setMeta(TUTORIAL_SCAN_DONE_KEY, 'true');
+    setTutorialScanDoneState(true);
+  }, []);
+
+  const completeTutorialManual = useCallback(async () => {
+    await setMeta(TUTORIAL_MANUAL_DONE_KEY, 'true');
+    setTutorialManualDoneState(true);
+  }, []);
+
+  const dismissTutorial = useCallback(async () => {
+    await setMeta(TUTORIAL_DISMISSED_KEY, 'true');
+    setTutorialDismissedState(true);
+  }, []);
+
+  const resetTutorial = useCallback(async () => {
+    await Promise.all([
+      setMeta(TUTORIAL_SCAN_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_MANUAL_DONE_KEY, 'false'),
+      setMeta(TUTORIAL_DISMISSED_KEY, 'false'),
+    ]);
+    setTutorialScanDoneState(false);
+    setTutorialManualDoneState(false);
+    setTutorialDismissedState(false);
+  }, []);
+
+  const tutorialComplete = (tutorialScanDone && tutorialManualDone) || tutorialDismissed;
+
+  // Sticky once true: a task marked done never un-marks, even if the underlying signal (e.g.
+  // the streak) later regresses  see docs discussion in src/lib/tasks.ts. `celebrate` is false
+  // only for the initial load's pass over already-satisfied derived tasks (see the effect
+  // below) so a returning user with e.g. hasBudget already true doesn't get a completion toast
+  // for something they finished during onboarding, sessions ago.
+  const [pendingTaskCelebrations, setPendingTaskCelebrations] = useState(0);
+  const markTaskDone = useCallback(async (id: ExploreTaskId, celebrate: boolean = true) => {
+    setTasksDoneState((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      void setMeta(EXPLORE_TASKS_DONE_KEY, JSON.stringify(next));
+      if (celebrate) setPendingTaskCelebrations((n) => n + 1);
+      return next;
+    });
+  }, []);
+  const clearTaskCelebrations = useCallback(() => setPendingTaskCelebrations(0), []);
+
+  const hasBudget = expectedIncome > 0 || Object.keys(allocations).length > 0;
+
+  // Tasks whose completion is a plain derivation of state already tracked elsewhere in the
+  // store: watch the signal and mark the task done the first time it goes true. Tasks with no
+  // natural "already true" signal (export, breakdown, currency, recap, add-account) are instead
+  // marked directly at their point of use in the relevant screen.
+  const initialTaskCheckDone = useRef(false);
+  useEffect(() => {
+    if (!ready) return;
+    const celebrate = initialTaskCheckDone.current;
+    if (effectiveStreak >= 7 && !tasksDone.includes('streak')) void markTaskDone('streak', celebrate);
+    if (hasBudget && !tasksDone.includes('budget')) void markTaskDone('budget', celebrate);
+    if (commitments.length > 0 && !tasksDone.includes('recurringBill')) void markTaskDone('recurringBill', celebrate);
+    initialTaskCheckDone.current = true;
+  }, [ready, effectiveStreak, hasBudget, commitments, tasksDone, markTaskDone]);
+
   const coverage = useMemo(() => computeCoverage(transactions), [transactions]);
 
   const taxRequestableCount = useMemo(() => {
@@ -1762,6 +1910,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const value: AppData = {
     onboardingComplete,
     completeOnboarding,
+    tutorialScanDone,
+    tutorialManualDone,
+    tutorialDismissed,
+    tutorialComplete,
+    completeTutorialScan,
+    completeTutorialManual,
+    dismissTutorial,
+    resetTutorial,
+    tasksDone,
+    markTaskDone,
+    pendingTaskCelebrations,
+    clearTaskCelebrations,
     ready,
     categories,
     catById,
@@ -1770,7 +1930,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     expectedIncome,
     allocations,
     snapshots,
-    hasBudget: expectedIncome > 0 || Object.keys(allocations).length > 0,
+    hasBudget,
     accounts,
     balanceEntries,
     prices,

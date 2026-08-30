@@ -43,3 +43,37 @@ describe('spotlightFrames', () => {
     expect(padded.cutout.width).toBe(tight.cutout.width + 24);
   });
 });
+
+describe('tourAnchorRect', () => {
+  const { reportTourAnchor, clearTourAnchor, getTourAnchor, onTourAnchor } = require('../src/lib/tourAnchorRect');
+
+  beforeEach(() => {
+    clearTourAnchor('test_anchor');
+    clearTourAnchor('another_anchor');
+  });
+
+  it('reports and gets active tour anchor rect', () => {
+    reportTourAnchor('test_anchor', { x: 50, y: 100, width: 200, height: 60 });
+    const current = getTourAnchor();
+    expect(current).toEqual({
+      id: 'test_anchor',
+      rect: { x: 50, y: 100, width: 200, height: 60 },
+    });
+  });
+
+  it('notifies listeners when anchor reports or changes', () => {
+    const listener = jest.fn();
+    const unsub = onTourAnchor(listener);
+
+    reportTourAnchor('another_anchor', { x: 10, y: 20, width: 30, height: 40 });
+    expect(listener).toHaveBeenCalledWith({
+      id: 'another_anchor',
+      rect: { x: 10, y: 20, width: 30, height: 40 },
+    });
+
+    clearTourAnchor('another_anchor');
+    expect(listener).toHaveBeenCalledWith(null);
+
+    unsub();
+  });
+});

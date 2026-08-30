@@ -50,13 +50,35 @@ export function fmtCompact(n: number): string {
 }
 
 /**
- * Format an amount with its currency prefix. MYR keeps the local "RM" convention;
- * everything else uses the 3-letter code, because symbols are ambiguous (the yen sign
- * covers both JPY and CNY) and Hermes has patchy symbol font coverage.
+ * The prefix a currency renders under. MYR keeps the local "RM" convention; everything else
+ * uses the 3-letter code, because symbols are ambiguous (the yen sign covers both JPY and
+ * CNY) and Hermes has patchy symbol font coverage.
+ *
+ * This exists so the literal "RM" lives in exactly one place. Every UI that needs a bare
+ * currency label without a number beside it — a segmented toggle, a standalone prefix glyph
+ * next to an input field — must call this rather than hardcoding 'RM', which is precisely
+ * how those labels came to ignore the user's chosen display currency.
+ */
+export function currencyPrefix(currency: string): string {
+  return currency === 'MYR' ? 'RM' : currency;
+}
+
+/**
+ * Format an amount with its currency prefix, e.g. "RM 1,200.00" or "SGD 340.50".
  */
 export function fmtMoney(amount: number, currency: string): string {
-  const prefix = currency === 'MYR' ? 'RM' : currency;
-  return `${prefix} ${fmtDecimals(amount, decimalsFor(currency))}`;
+  return `${currencyPrefix(currency)} ${fmtDecimals(amount, decimalsFor(currency))}`;
+}
+
+/**
+ * "RM 3,200.00 · USD 450.00" — a per-currency breakdown line. Renders in the object's own
+ * key order, which callers (`nativeAccountTotalsByCurrency`, `nativeTransactionTotalsByCurrency`)
+ * already guarantee puts MYR first.
+ */
+export function formatCurrencyBreakdown(totals: Record<string, number>): string {
+  return Object.entries(totals)
+    .map(([code, amount]) => fmtMoney(amount, code))
+    .join(' · ');
 }
 
 /**

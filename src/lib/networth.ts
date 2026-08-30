@@ -16,7 +16,7 @@ export interface ClassMeta {
 
 /** The fixed asset/liability classes, in display order. */
 export const ACCOUNT_CLASSES: ClassMeta[] = [
-  { id: 'cash', label: 'Cash', kind: 'asset', icon: 'wallet' },
+  { id: 'cash', label: 'Cash & Bank', kind: 'asset', icon: 'wallet' },
   { id: 'investments', label: 'Investments', kind: 'asset', icon: 'trending' },
   // Money friends owe you from split bills. Maintained by the split engine, never by hand.
   { id: 'receivable', label: 'Owed to me', kind: 'asset', icon: 'gift', managed: true },
@@ -111,6 +111,24 @@ export function toMyrValues(
     out[a.id] = round2((valueById[a.id] ?? 0) * rate);
   }
   return { valueById: out, unconvertible };
+}
+
+/**
+ * Native (unconverted) account balances grouped by currency — the per-currency breakdown
+ * row on Net Worth. Unlike `toMyrValues`, nothing here is converted: a CNY 500 account
+ * contributes to the CNY bucket at 500, not its MYR equivalent.
+ */
+export function nativeAccountTotalsByCurrency(
+  accounts: Account[],
+  nativeValueById: Record<string, number>
+): Record<string, number> {
+  const out: Record<string, number> = { MYR: 0 };
+  for (const a of accounts) {
+    if (a.archived) continue;
+    const v = nativeValueById[a.id] ?? 0;
+    out[a.currency] = round2((out[a.currency] ?? 0) + v);
+  }
+  return out;
 }
 
 export interface ClassGroup {

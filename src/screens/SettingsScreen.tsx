@@ -8,6 +8,7 @@ import { getActiveCurrencies } from '../db/currencyRepo';
 import { clearMemory } from '../db/memoryRepo';
 import { getProvider, llmErrorMessage } from '../llm';
 import { isMultiCurrency } from '../lib/currency';
+import { fmtMoney } from '../lib/format';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
@@ -15,6 +16,7 @@ import * as sound from '../lib/sound';
 import { ensurePermission } from '../notifications';
 import { useAccent, useAccentPreset } from '../state/accent';
 import { useColorSchemeMode, useThemeColors, type ColorSchemeMode } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
@@ -26,8 +28,9 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const { t, formatCadence, formatMotion } = useLanguage();
-  const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding } = useAppData();
+  const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
 
@@ -186,7 +189,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             <View style={{ flex: 1 }}>
               <Text style={[styles.providerName, { color: colorTheme.ink }]}>
                 {hasBudget
-                  ? t('budgetSummary', { income: `RM ${expectedIncome.toFixed(2)}`, count: allocationCount })
+                  ? t('budgetSummary', { income: fmtMoney(dc.convert(expectedIncome), dc.code), count: allocationCount })
                   : t('noBudgetSet')}
               </Text>
             </View>
@@ -295,6 +298,27 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
         )}
+
+        <Pressable
+          onPress={async () => {
+            await resetTutorial();
+            notify(t('tutorialTitle'), t('tutorialReplayedToast'));
+          }}
+          style={({ pressed }) => [
+            styles.providerRow,
+            styles.migrateRow,
+            { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+            { marginTop: 12, opacity: pressed ? 0.9 : 1 },
+          ]}
+        >
+          <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+            <Icon name="sparkles" size={16} color={theme.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('replayTutorial')}</Text>
+          </View>
+          <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+        </Pressable>
 
         {/* Distinct "danger zone" treatment  this is the one irreversible action on this
             screen, so it shouldn't look like every other settings row. */}

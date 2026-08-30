@@ -44,7 +44,7 @@ Both halves of the positioning's twin pillar appear:
 - **Fast in** — the spine of the video (Scenes A and B).
 - **Safe in** — carried by one caption at the close rather than a scene of its own.
 
-## Positioning constraints (from PipComp/docs/business-plan.md)
+## Positioning constraints (from docs/business-plan.md)
 
 These were settled before this video existed and are not up for relitigation here.
 
@@ -96,15 +96,15 @@ you already have open and I'll read it"), so the ad and the product speak in one
 - **App footage: hybrid, and now traced from real component source, not just tokens.**
   Real device capture for the extract-to-categorize proof moment, including the "Learned"
   tag on a remembered merchant, is still the open item (see Open items). Until captured,
-  the HTML rebuild is read directly from `PipComp/src/screens/DashboardScreen.tsx`,
-  `ImportReviewScreen.tsx`, and `PipComp/src/components/ui.tsx` / `Icon.tsx` /
+  the HTML rebuild is read directly from `src/screens/DashboardScreen.tsx`,
+  `ImportReviewScreen.tsx`, and `src/components/ui.tsx` / `Icon.tsx` /
   `PieChart.tsx` — exact colours, radii, type roles, icon glyphs and layout order, not an
   approximation from `theme.ts` alone. See `STORYBOARD.md` § "The real-UI pass".
 - **Source screen: generic look-alike.** A plausible Malaysian e-wallet transaction list,
   RM amounts, local-sounding merchants, neutral branding. **No real bank or e-wallet
   trademarks** — this is commercial marketing on a paid store listing. This one screen is
   deliberately NOT Pip's UI and is exempt from the real-UI pass by design.
-- **Mascot** from `PipComp/src/components/Pip.tsx` / `PipComp/assets/icon.png`.
+- **Mascot** from `src/components/Pip.tsx` / `assets/icon.png`.
 - **Fonts** Hanken Grotesk + Space Grotesk, frozen locally. Never fetched at render time.
 - **Music** one bed, must be Content ID clean (see Compliance).
 
@@ -115,7 +115,7 @@ you already have open and I'll read it"), so the ad and the product speak in one
   the category chip resolve and the Left to Spend number), but two of those three were a
   marketing embellishment the real app does not do — see `STORYBOARD.md` § "The real-UI
   pass" for what changed and why.
-- Design spec authored from `PipComp/src/theme.ts` **and the real component source**
+- Design spec authored from `src/theme.ts` **and the real component source**
   (`ui.tsx`, screen files) rather than tokens alone, so the video and the app cannot drift
   apart visually.
 

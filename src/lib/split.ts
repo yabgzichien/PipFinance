@@ -360,6 +360,14 @@ function computeItemizedTotalCents(subtotalCents: number, surcharges: Surcharges
 }
 
 /**
+ * Computes the bill total for a set of line items and surcharges in currency units.
+ */
+export function computeBillTotal(lines: { amount: number }[], surcharges: Surcharges): number {
+  const subtotalCents = lines.reduce((s, l) => s + Math.max(0, toCents(l.amount)), 0);
+  return fromCents(computeItemizedTotalCents(subtotalCents, surcharges));
+}
+
+/**
  * Divide a receipt line by line.
  *
  * Each line is split equally among whoever ate it, then the service charge, tax, and a
@@ -450,6 +458,16 @@ export interface OpenShare {
   merchant: string;
   currency?: string;
   fxRate?: number | null;
+  /** User note or food/expense description from the parent transaction. */
+  remark?: string | null;
+  /** Category id from the parent transaction (e.g. food, groceries). */
+  categoryId?: string | null;
+  /** Full gross bill amount fronted by the payer. */
+  gross?: number;
+  /** Original amount owed by this person before any partial payments. */
+  owed?: number;
+  /** Amount already paid against this share. */
+  paid?: number;
 }
 
 /** An extracted inbound row that might be someone paying you back. */

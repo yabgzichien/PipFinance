@@ -14,6 +14,7 @@ import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { Pip } from '../../components/Pip';
 import { Body, BtnLabel, PrimaryButton, Title } from '../../components/ui';
+import { useLanguage } from '../../i18n';
 import * as haptics from '../../lib/haptics';
 import { useThemeColors } from '../../state/colorScheme';
 import { spacing, uiFont } from '../../theme';
@@ -25,6 +26,7 @@ const PIP_SIZE = 88;
 
 export function WidgetStep({ onFinish }: { onFinish: () => void }) {
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   const [asked, setAsked] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -55,14 +57,14 @@ export function WidgetStep({ onFinish }: { onFinish: () => void }) {
         </FadeIn>
         <FadeIn delay={stagger}>
           <Title style={{ marginTop: spacing.base, textAlign: 'center' }}>
-            {CAN_PIN ? 'Add the streak widget' : 'The streak widget'}
+            {CAN_PIN ? t('wizardWidgetCanPinTitle') : t('wizardWidgetNoPinTitle')}
           </Title>
         </FadeIn>
         <FadeIn delay={stagger * 2}>
           <Body color={colorTheme.ink2} style={styles.subtitle}>
             {CAN_PIN
-              ? "Pin Pip's streak widget to your home screen to see your logging streak at a glance, no need to open the app."
-              : "Pip's streak widget shows your logging streak at a glance, without opening the app. It's on Android for now, so there's nothing to pin on this device."}
+              ? t('wizardWidgetCanPinBody')
+              : t('wizardWidgetNoPinBody')}
           </Body>
         </FadeIn>
       </View>
@@ -71,19 +73,23 @@ export function WidgetStep({ onFinish }: { onFinish: () => void }) {
         {CAN_PIN ? (
           <>
             <PrimaryButton onPress={() => void addWidget()} disabled={busy}>
-              <BtnLabel>{asked ? 'Add widget again' : busy ? 'Opening…' : 'Add widget'}</BtnLabel>
+              <BtnLabel>
+                {asked ? t('wizardAddWidgetAgain') : busy ? t('wizardAddWidgetOpening') : t('wizardAddWidget')}
+              </BtnLabel>
               <Icon name="pin" size={17} color="#fff" />
             </PrimaryButton>
             <Pressable
               onPress={finish}
               style={({ pressed }) => [styles.finishBtn, pressed && styles.finishPressed]}
             >
-              <Text style={[styles.finishText, { color: colorTheme.ink2 }]}>{asked ? 'Finish' : 'Finish without adding'}</Text>
+              <Text style={[styles.finishText, { color: colorTheme.ink2 }]}>
+                {asked ? t('wizardFinish') : t('wizardFinishWithoutAdding')}
+              </Text>
             </Pressable>
           </>
         ) : (
           <PrimaryButton onPress={finish}>
-            <BtnLabel>Finish</BtnLabel>
+            <BtnLabel>{t('wizardFinish')}</BtnLabel>
             <Icon name="check" size={18} color="#fff" stroke={2.4} />
           </PrimaryButton>
         )}

@@ -1,49 +1,99 @@
-# Deploying the borrower app (web)
+# Deploying Pip (Web & Android)
 
-Web export is the fast path for a judge link; an Android APK (via EAS Build) is a separate,
-optional step for the semifinal table — see the end of this doc.
+This guide covers deploying Pip as a static web application and building production Android binaries for the Google Play Store.
 
-## Recommended: Vercel
+---
 
-1. **Import the repo** in the Vercel dashboard, or run `vercel` from this directory with the
-   Vercel CLI installed.
-2. **Root Directory:** set to `PipComp`.
-3. `vercel.json` (already in this folder) sets the build command
-   (`npx expo export --platform web`), the output directory (`dist`), and — the one
-   non-obvious requirement — the `Cross-Origin-Opener-Policy: same-origin` /
-   `Cross-Origin-Embedder-Policy: require-corp` headers every route needs. **Web SQLite
-   (wa-sqlite/WASM) will not load without these headers**; `metro.config.js` sets them for
-   `expo start --web`'s dev server, but a hosted static build needs the host itself to send
-   them, which is what `vercel.json` does here. If you deploy anywhere other than Vercel,
-   port the same two headers to that host's config (Netlify: a `_headers` file; Cloudflare
-   Pages: a `_headers` file; Nginx: `add_header` in the server block).
-4. **Environment variables:** `EXPO_PUBLIC_GROQ_API_KEY` and, if you want document import
-   live, `EXPO_PUBLIC_GEMINI_API_KEY` (see `.env.example`). Both are inlined into the client
-   bundle at build time (that's how `EXPO_PUBLIC_*` vars work) — not secret in a shipped app,
-   same caveat as local dev. The in-app Settings screen's key (stored via `expo-secure-store`
-   on native / browser storage on web) takes precedence at runtime if a judge pastes their
-   own.
-5. Deploy.
+## 1. Web Deployment
 
-## After deploying
+Pip can be exported as a Progressive Web App (PWA) / static web app using Expo Web.
 
-- Load the URL, go to Settings → Load demo profile, and confirm the dashboard renders (not a
-  blank screen) — this is the SQLite/COOP/COEP check.
-- Confirm Credit → Passport → mint works (QR renders, no white-screen) and Loans shows the
-  coverage-gated tiers, not "Likely approved" everywhere.
-- Point the console's borrower-facing surfaces (or the demo script) at this URL once it's
-  stable, and update `src/lib/lenderDirectory.ts` / the console deploy if the two need to
-  reference each other's live URLs.
+### Essential Requirement: Web SQLite Headers
+Pip uses `wa-sqlite` (WASM SQLite) for browser persistence. WASM SQLite requires SharedArrayBuffer support, which modern browsers only enable when the hosting server returns these exact security headers:
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
 
-## Android APK (optional, for the semifinal table)
+Without these two headers, web SQLite initialization will fail and the app will display a storage error.
 
-Not attempted in this pass — it needs an Expo/EAS account and app signing credentials that
-only the account owner has. Once you have an EAS account: `npx eas build --platform android`
-from this directory (after `npx eas login` and `eas build:configure`). Keep the web build as
-the primary judge-facing artifact; the APK is a nice-to-have for a physical demo table.
+### Option A: Vercel (Recommended)
+`vercel.json` in the project root is already configured with the required build command and COOP/COEP headers:
 
-## Known limitation
+```json
+{
+  "buildCommand": "npx expo export --platform web",
+  "outputDirectory": "dist",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+      ]
+    }
+  ]
+}
+```
 
-Web SQLite is alpha upstream (wa-sqlite). If the COOP/COEP headers can't be set on a chosen
-host for some reason, fall back to the Android APK or Expo Go for the borrower app and rely
-on the console for the web-only judge experience.
+**Steps to deploy on Vercel:**
+1. Import the repository in your Vercel Dashboard.
+2. In Project Settings, set **Framework Preset** to `Other` or `Expo`.
+3. Add Environment Variables (optional, for client-side AI scanning):
+   - `EXPO_PUBLIC_GROQ_API_KEY`
+   - `EXPO_PUBLIC_GEMINI_API_KEY`
+4. Click **Deploy**.
+
+### Option B: Netlify / Cloudflare Pages
+If deploying on Netlify or Cloudflare Pages, include a `_headers` file in `public/` (or copy to `dist/` during build):
+```
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+```
+
+### Option C: Nginx
+In your Nginx server block:
+```nginx
+location / {
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    try_files $uri $uri/ /index.html;
+}
+```
+
+---
+
+## 2. Android Deployment (Google Play Store)
+
+Android production builds are created using [Expo Application Services (EAS Build)](https://docs.expo.dev/build/introduction/).
+
+### Prerequisites
+1. Install EAS CLI:
+   ```bash
+   npm install -g eas-cli
+   ```
+2. Log in to your Expo account:
+   ```bash
+   eas login
+   ```
+3. Ensure `app.json` has the correct bundle identifier (`com.yabg.pipexpensestracker`) and version numbers.
+
+### Building APK (Testing / Direct Install)
+To build a preview APK that can be installed directly on an Android device:
+```bash
+eas build --platform android --profile preview
+```
+
+### Building AAB (Google Play Store Release)
+To build an Android App Bundle (`.aab`) for upload to Google Play Console:
+```bash
+eas build --platform android --profile production
+```
+
+---
+
+## 3. Post-Deployment Verification Checklist
+
+1. **Storage Smoke Test**: Open the web or mobile app, go to **Settings → Load demo profile**, and confirm the dashboard renders transactions, net worth, and budgets without database errors.
+2. **AI Screenshot Scanner**: Navigate to **Add (+) → Scan / Attach**, upload an e-wallet screenshot, and verify that line items are parsed and categorized.
+3. **Budget & Net Worth**: Verify that changes to transactions immediately update category budget progress bars and Net Worth calculations.
+4. **Data Export**: Go to **Settings → Export Data** and verify that PDF / Excel (.xlsx) / CSV exports generate cleanly.

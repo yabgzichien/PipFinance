@@ -60,9 +60,16 @@ tools/promoVideo/__pycache__/
 tools/promoVideo/out/
 __pycache__/
 
+# AI assistant local configs
+.claude/
+
 # promo video renders / cache (regenerable, large)
 promo-video/renders/
 promo-video/.thumbnails/
 promo-video/.hyperframes/
 promo-video/capture/
 promo-video/snapshots/
+
+# test artifacts
+tax-relief-evidence-*.zip
+*.zip

@@ -6,7 +6,8 @@ import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
+import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import {
   availableMonths,
   categoryComparisons,
@@ -21,6 +22,7 @@ import type { Category } from '../lib/types';
 import { useAccent } from '../state/accent';
 import type { AccentTheme } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import type { StructuralColors } from '../theme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
@@ -90,12 +92,16 @@ function IncomeHero({
   expenses,
   net,
   networth,
+  dc,
+  breakdown,
 }: {
   month: string;
   income: number;
   expenses: number;
   net: number;
   networth: { net: number; delta: number } | null;
+  dc: DisplayCurrency;
+  breakdown: string;
 }) {
   const { formatMonthLabel, isZh } = useLanguage();
   const positive = net >= 0;
@@ -121,12 +127,12 @@ function IncomeHero({
       {/* Income */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
         <Text style={styles.heroLineLabel}>{isZh ? '总收入' : 'Income'}</Text>
-        <Text style={styles.heroVal}>RM {fmt(income)}</Text>
+        <Text style={styles.heroVal}>{fmtMoney(dc.convert(income), dc.code)}</Text>
       </View>
       {/* Expenses */}
       <View style={[styles.heroLine, styles.heroLineBorder]}>
         <Text style={styles.heroLineLabel}>{isZh ? '总支出' : 'Expenses'}</Text>
-        <Text style={[styles.heroVal, { color: 'rgba(255,255,255,0.72)' }]}>− RM {fmt(expenses)}</Text>
+        <Text style={[styles.heroVal, { color: 'rgba(255,255,255,0.72)' }]}>− {fmtMoney(dc.convert(expenses), dc.code)}</Text>
       </View>
       {/* Net cash flow */}
       <View style={[styles.heroLine, { paddingTop: 12 }]}>
@@ -134,9 +140,13 @@ function IncomeHero({
           {isZh ? '净现金流' : 'Net Cash Flow'}
         </Text>
         <Text style={[styles.heroNcf, { color: positive ? TINT.ncfUp : TINT.ncfDown }]}>
-          {positive ? '+' : '−'} RM {fmt(Math.abs(net))}
+          {positive ? '+' : '−'} {fmtMoney(dc.convert(Math.abs(net)), dc.code)}
         </Text>
       </View>
+
+      {breakdown.length > 0 && (
+        <Text style={styles.heroBreakdown}>{breakdown}</Text>
+      )}
 
       {/* Net-worth impact strip */}
       {networth && (
@@ -144,7 +154,7 @@ function IncomeHero({
           <View>
             <Text style={styles.nwLabel}>{isZh ? '月末净资产' : 'Month-End Net Worth'}</Text>
             <Text style={styles.nwVal}>
-              {networth.net < 0 ? '− ' : ''}RM {fmt(Math.abs(networth.net))}
+              {networth.net < 0 ? '− ' : ''}{fmtMoney(dc.convert(Math.abs(networth.net)), dc.code)}
             </Text>
           </View>
           <View style={styles.nwDivider} />
@@ -161,7 +171,7 @@ function IncomeHero({
                 />
               </Svg>
               <Text style={[styles.nwDelta, { color: networth.delta >= 0 ? TINT.ncfUp : TINT.ncfDown }]}>
-                {networth.delta >= 0 ? '+' : '−'}RM {fmt(Math.abs(networth.delta))}
+                {networth.delta >= 0 ? '+' : '−'}{fmtMoney(dc.convert(Math.abs(networth.delta)), dc.code)}
               </Text>
             </View>
           </View>
@@ -173,7 +183,7 @@ function IncomeHero({
 }
 
 // ── Category row (target vs actual) ───────────────────────────────────────────
-function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: number; alloc: number; isLast: boolean }) {
+function CategoryRow({ cat, spent, alloc, isLast, dc }: { cat: Category; spent: number; alloc: number; isLast: boolean; dc: DisplayCurrency }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { tCat, isZh } = useLanguage();
@@ -193,12 +203,12 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
           <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
         </View>
         <View style={styles.catNums}>
-          <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(spent)}</Text>
-          <Text style={[styles.catTarget, { color: colorTheme.ink2 }]}> / {fmt(alloc)}</Text>
+          <Text style={[styles.catActual, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(spent), dc.code)}</Text>
+          <Text style={[styles.catTarget, { color: colorTheme.ink2 }]}> / {fmt(dc.convert(alloc))}</Text>
         </View>
         <View style={[styles.badge, { backgroundColor: statusBg(st, theme), borderColor: statusBorder(st, theme) }]}>
           <Text style={[styles.badgeText, { color }]}>
-            {diff === 0 ? (isZh ? '达标' : 'On target') : over ? `+${fmt(diff)}` : `−${fmt(diff)}`}
+            {diff === 0 ? (isZh ? '达标' : 'On target') : over ? `+${fmt(dc.convert(diff))}` : `−${fmt(dc.convert(diff))}`}
           </Text>
         </View>
       </View>
@@ -210,7 +220,7 @@ function CategoryRow({ cat, spent, alloc, isLast }: { cat: Category; spent: numb
 
       <View style={styles.catFoot}>
         <Text style={[styles.catPct, { color }]}>{isZh ? `占预算 ${pct}%` : `${pct}% of budget`}</Text>
-        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>{isZh ? `预算 RM ${fmt(alloc)}` : `budget RM ${fmt(alloc)}`}</Text>
+        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>{isZh ? `预算 ${fmtMoney(dc.convert(alloc), dc.code)}` : `budget ${fmtMoney(dc.convert(alloc), dc.code)}`}</Text>
       </View>
     </View>
   );
@@ -247,7 +257,12 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage } = useAppData();
+  const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage, markTaskDone } = useAppData();
+
+  useEffect(() => {
+    void markTaskDone('recap');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const snapshotMonths = useMemo(() => Object.keys(snapshots), [snapshots]);
   const months = useMemo(
@@ -261,6 +276,11 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const month = months.includes(selected) ? selected : months[0];
 
   const statement = useMemo(() => monthlyIncomeStatement(transactions, month), [transactions, month]);
+  const dc = useDisplayCurrency();
+  const monthNativeTotals = useMemo(
+    () => nativeTransactionTotalsByCurrency(transactions.filter((t) => txnMonthKey(t) === month)),
+    [transactions, month]
+  );
   const spentByCat = useMemo(() => spentByCategory(transactions, month), [transactions, month]);
   const snapshot = snapshots[month];
   const allocations = snapshot?.allocations ?? {};
@@ -303,13 +323,13 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
         out.push({
           type: 'warn',
           text: isZh
-            ? `${tCat(cat)} 超出 RM ${fmt(o.over)}：支出 RM ${fmt(o.spent)} / 预算 RM ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}。`
-            : `${cat.label} over by RM ${fmt(o.over)}: RM ${fmt(o.spent)} of ${fmt(o.allocated)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
+            ? `${tCat(cat)} 超出 ${fmtMoney(dc.convert(o.over), dc.code)}：支出 ${fmtMoney(dc.convert(o.spent), dc.code)} / 预算 ${fmtMoney(dc.convert(o.allocated), dc.code)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}。`
+            : `${cat.label} over by ${fmtMoney(dc.convert(o.over), dc.code)}: ${fmtMoney(dc.convert(o.spent), dc.code)} of ${fmtMoney(dc.convert(o.allocated), dc.code)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
         });
       }
     }
     return out;
-  }, [adherence, catById, isZh, tCat]);
+  }, [adherence, catById, isZh, tCat, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stripRef = useRef<ScrollView>(null);
 
@@ -397,6 +417,8 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           expenses={statement.expenses}
           net={statement.net}
           networth={networth}
+          dc={dc}
+          breakdown={formatCurrencyBreakdown(monthNativeTotals)}
         />
 
         {showComparisons && (
@@ -412,9 +434,9 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     <CatBadge category={cat} size={30} rad={9} />
                     <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[styles.compareNow, { color: colorTheme.ink }]}>RM {fmt(c.current)}</Text>
+                      <Text style={[styles.compareNow, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(c.current), dc.code)}</Text>
                       <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>
-                        {isZh ? `上月 RM ${fmt(c.previous)}` : `Last month RM ${fmt(c.previous)}`}
+                        {isZh ? `上月 ${fmtMoney(dc.convert(c.previous), dc.code)}` : `Last month ${fmtMoney(dc.convert(c.previous), dc.code)}`}
                       </Text>
                     </View>
                   </View>
@@ -429,7 +451,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
             {/* Spending breakdown */}
             <View style={styles.sectionHead}>
               <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出明细' : 'Spending'}</Text>
-              <Text style={[styles.sectionSub, { color: colorTheme.ink2 }]}>RM {fmt(statement.expenses)}</Text>
+              <Text style={[styles.sectionSub, { color: colorTheme.ink2 }]}>{fmtMoney(dc.convert(statement.expenses), dc.code)}</Text>
             </View>
             <Card style={styles.listCard}>
               {budgetedIds.map((id, i) => (
@@ -439,6 +461,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                   spent={spentByCat[id] ?? 0}
                   alloc={allocations[id]}
                   isLast={i === budgetedIds.length - 1 && unbudgetedSpent <= 0}
+                  dc={dc}
                 />
               ))}
               {unbudgetedSpent > 0 && (
@@ -449,7 +472,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
                     </View>
                     <Text style={[styles.catLabel, { color: colorTheme.ink }]}>{isZh ? '未列入预算' : 'Unbudgeted'}</Text>
                   </View>
-                  <Text style={[styles.catActual, { color: colorTheme.ink }]}>RM {fmt(unbudgetedSpent)}</Text>
+                  <Text style={[styles.catActual, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(unbudgetedSpent), dc.code)}</Text>
                 </View>
               )}
             </Card>
@@ -581,9 +604,10 @@ const styles = StyleSheet.create({
   heroLineLabel: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 0.9, textTransform: 'uppercase', color: 'rgba(255,255,255,0.46)' },
   heroVal: { fontFamily: HERO_NUM, fontSize: 20, color: '#fff' },
   heroNcf: { fontFamily: HERO_NUM, fontSize: 28 },
+  heroBreakdown: { color: '#ffffff', fontSize: 13, fontFamily: uiFont(700), fontWeight: '700', marginTop: -4, marginBottom: 6 },
 
   // net-worth strip
-  nwStrip: { marginTop: 16, backgroundColor: 'rgba(0,0,0,0.20)', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  nwStrip: { marginTop: 16, backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   nwLabel: { fontFamily: uiFont(500), fontSize: 11, letterSpacing: 0.7, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)', marginBottom: 3 },
   nwVal: { fontFamily: HERO_NUM, fontSize: 18, color: '#fff' },
   nwDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.12)' },

@@ -12,14 +12,14 @@ import {
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BottomNav, type NavTab } from './src/components/BottomNav';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { Pip } from './src/components/Pip';
-import { AddFlow } from './src/screens/AddFlow';
+import { AddFlow, type AddFlowPhase } from './src/screens/AddFlow';
 import { AllTransactionsScreen } from './src/screens/AllTransactionsScreen';
 import { CategoryDetailScreen } from './src/screens/CategoryDetailScreen';
 import { BreakdownScreen } from './src/screens/BreakdownScreen';
@@ -40,17 +40,19 @@ import { TaxScreen } from './src/screens/TaxScreen';
 import { CurrencySettingsScreen } from './src/screens/CurrencySettingsScreen';
 import { GlossaryModal } from './src/components/InfoButton';
 import { AppAlertModal } from './src/components/AppAlertModal';
+import { TourSpotlight, type TourStepInfo } from './src/components/TourSpotlight';
 import { AccentProvider, useAccent } from './src/state/accent';
 import { AlertHostProvider } from './src/state/alertHost';
 import { ColorSchemeProvider, useColorSchemeMode, useThemeColors } from './src/state/colorScheme';
-import { GlossaryProvider } from './src/state/glossary';
-import { LanguageProvider } from './src/i18n';
+import { GlossaryProvider, useGlossary } from './src/state/glossary';
+import { LanguageProvider, useLanguage } from './src/i18n';
 import { AppDataProvider, useAppData } from './src/state/store';
 import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
 import { syncStreakWidget } from './src/widget/syncStreakWidget';
 import { backTargetFor, type Screen } from './src/lib/screenNav';
+import { EXPLORE_TASKS, type ExploreTaskId } from './src/lib/tasks';
 import { platformShadow, uiFont } from './src/theme';
 
 /**
@@ -184,10 +186,34 @@ function StatusClock({ color }: { color: string }) {
   return <Text style={[webStyles.clock, { color }]}>{`${hh}:${mm}`}</Text>;
 }
 
+export type TourStepKey =
+  | 'plus'
+  | 'scan_explain'
+  | 'manual_btn'
+  | 'manual_amount'
+  | 'manual_split_glossary'
+  | 'manual_account'
+  | 'manual_category'
+  | 'manual_add_expense'
+  | 'activity_tip'
+  | 'networth_tab'
+  | 'settings_tab'
+  | 'recap_tip'
+  | 'done';
+
+const MANUAL_TOUR_SUB_STEPS: TourStepKey[] = [
+  'manual_amount',
+  'manual_split_glossary',
+  'manual_account',
+  'manual_category',
+  'manual_add_expense',
+];
+
 function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
-  const { ready, onboardingComplete, taxRequestableCount } = useAppData();
+  const { ready, onboardingComplete, taxRequestableCount, tutorialComplete, dismissTutorial } = useAppData();
   const accentTheme = useAccent();
   const theme = useThemeColors();
+  const { t } = useLanguage();
   useWebFocusRing(accentTheme.accent);
   // Global rather than per-screen: the reminder ladder has to be re-armed whenever the app is
   // opened or a transaction is saved, and neither is tied to any one screen. No-ops on web.
@@ -203,10 +229,289 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [calendarOrigin, setCalendarOrigin] = useState<Screen>('recap');
   const [exportMonth, setExportMonth] = useState<string | undefined>(undefined);
   const [exportOrigin, setExportOrigin] = useState<Screen>('settings');
+  const [addTutorialMode, setAddTutorialMode] = useState<'scan' | 'manual' | undefined>(undefined);
+  const [addPhase, setAddPhase] = useState<AddFlowPhase>('attach');
+  const [tourStep, setTourStep] = useState<TourStepKey>(() => (!tutorialComplete ? 'plus' : 'done'));
+  // Gates the manual-amount tour step's Next button: App doesn't own the amount field, so
+  // ManualEntryScreen reports validity up through AddFlow's onAmountValidChange.
+  const [amountValid, setAmountValid] = useState(false);
+  // Gates the split-glossary tour step's Next button on having actually opened the glossary
+  // entry it points at — read straight off the app-wide glossary context rather than adding
+  // another prop just for the tour.
+  const { openEntry: openGlossaryEntry } = useGlossary();
+  const [sawSplitGlossary, setSawSplitGlossary] = useState(false);
+  const [guidedExploreTaskId, setGuidedExploreTaskId] = useState<ExploreTaskId | null>(null);
+
+  useEffect(() => {
+    if (screen !== 'home' && guidedExploreTaskId) {
+      setGuidedExploreTaskId(null);
+    }
+  }, [screen, guidedExploreTaskId]);
+
+  useEffect(() => {
+    // tutorialComplete loads asynchronously from storage, arriving after tourStep's initial
+    // (lazy, one-time) state has already been seeded from its pre-load default — so both
+    // directions need syncing here, not just "not complete yet, (re)start the tour": without
+    // the tutorialComplete-is-true branch, a returning user whose tutorial was already done
+    // would see the tour restart from step 1 on every reload, since nothing else ever moves
+    // tourStep back to 'done' once the real value of tutorialComplete arrives.
+    if (!tutorialComplete && tourStep === 'done') {
+      setTourStep('plus');
+    } else if (tutorialComplete && tourStep !== 'done') {
+      setTourStep('done');
+    }
+  }, [tutorialComplete, tourStep]);
+
+  useEffect(() => {
+    if (tourStep !== 'manual_split_glossary') {
+      setSawSplitGlossary(false);
+      return;
+    }
+    if (openGlossaryEntry === 'split_bill') setSawSplitGlossary(true);
+  }, [tourStep, openGlossaryEntry]);
+
+  const handleAddPhaseChange = (phase: AddFlowPhase) => {
+    setAddPhase(phase);
+    if (phase === 'manual') {
+      if (tourStep === 'manual_btn' || tourStep === 'scan_explain' || tourStep === 'plus') {
+        setTourStep('manual_amount');
+      }
+    } else if (phase === 'attach') {
+      if (MANUAL_TOUR_SUB_STEPS.includes(tourStep)) {
+        setTourStep('manual_btn');
+      }
+    } else if (phase === 'saved') {
+      // The manual walkthrough's last step (tapping "Add expense") hands off to the
+      // activity-tab tip once the user is actually back on Home — that transition happens in
+      // AddFlow's onClose below, triggered by the Saved screen's Done button, not here.
+      if (tourStep !== 'done' && tourStep !== 'manual_add_expense') {
+        setTourStep('done');
+      }
+    }
+  };
+
+  const handleCategoryChosen = () => {
+    if (tourStep === 'manual_category') setTourStep('manual_add_expense');
+  };
+
+  const activeAnchorId: string | null = useMemo(() => {
+    if (tourStep === 'plus' && screen === 'home') return 'tour_plus_btn';
+    if (tourStep === 'scan_explain' && screen === 'add' && addPhase === 'attach') return 'tour_gallery_btn';
+    if (tourStep === 'manual_btn' && screen === 'add' && addPhase === 'attach') return 'tour_manual_btn';
+    if (tourStep === 'manual_amount' && screen === 'add' && addPhase === 'manual') return 'tour_amount_field';
+    if (tourStep === 'manual_split_glossary' && screen === 'add' && addPhase === 'manual') return 'tour_split_info';
+    if (tourStep === 'manual_account' && screen === 'add' && addPhase === 'manual') return 'tour_account_field';
+    if (tourStep === 'manual_category' && screen === 'add' && addPhase === 'manual') return 'tour_category_grid';
+    if (tourStep === 'manual_add_expense' && screen === 'add' && addPhase === 'manual') return 'tour_add_expense_btn';
+    if (tourStep === 'activity_tip' && screen === 'home') return 'tour_activity_tab';
+    if (tourStep === 'networth_tab' && screen === 'home') return 'tour_networth_tab';
+    if (tourStep === 'settings_tab' && screen === 'home') return 'tour_settings_tab';
+    if (tourStep === 'recap_tip' && screen === 'home') return 'tour_recap_btn';
+
+    if (guidedExploreTaskId && screen === 'home') {
+      const task = EXPLORE_TASKS.find((t) => t.id === guidedExploreTaskId);
+      return task?.anchorId ?? null;
+    }
+    return null;
+  }, [tourStep, screen, addPhase, guidedExploreTaskId]);
+
+  const TOTAL_TOUR_STEPS = 12;
+
+  const currentTourStepInfo: TourStepInfo | null = useMemo(() => {
+    if (!activeAnchorId) return null;
+    // dismissTutorial persists to storage (awaits) before flipping tutorialComplete, so it
+    // lands in a separate render from a synchronous setTourStep('done'). Sequencing done AFTER
+    // the dismiss resolves keeps the "reopen at 'plus' while tutorial isn't complete" effect
+    // above from ever observing tourStep 'done' alongside a still-stale tutorialComplete=false,
+    // which would otherwise flip the tour straight back to step 1.
+    const skipTour = () => {
+      dismissTutorial().then(() => setTourStep('done'));
+    };
+    if (tourStep === 'plus' && screen === 'home') {
+      return {
+        id: 'tour_plus',
+        anchorId: 'tour_plus_btn',
+        stepNumber: 1,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepPlusTitle'),
+        body: t('tourStepPlusBody'),
+        showNext: false,
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'scan_explain' && screen === 'add') {
+      return {
+        id: 'tour_scan',
+        anchorId: 'tour_gallery_btn',
+        stepNumber: 2,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepScanTitle'),
+        body: t('tourStepScanBody'),
+        showNext: true,
+        onNext: () => setTourStep('manual_btn'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_btn' && screen === 'add') {
+      return {
+        id: 'tour_manual_btn',
+        anchorId: 'tour_manual_btn',
+        stepNumber: 3,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepManualBtnTitle'),
+        body: t('tourStepManualBtnBody'),
+        showNext: false,
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_amount' && screen === 'add') {
+      return {
+        id: 'tour_manual_amount',
+        anchorId: 'tour_amount_field',
+        stepNumber: 4,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepAmountTitle'),
+        body: t('tourStepAmountBody'),
+        showNext: amountValid,
+        onNext: () => setTourStep('manual_split_glossary'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_split_glossary' && screen === 'add') {
+      return {
+        id: 'tour_manual_split_glossary',
+        anchorId: 'tour_split_info',
+        stepNumber: 5,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepSplitGlossaryTitle'),
+        body: t('tourStepSplitGlossaryBody'),
+        showNext: sawSplitGlossary,
+        onNext: () => setTourStep('manual_account'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_account' && screen === 'add') {
+      return {
+        id: 'tour_manual_account',
+        anchorId: 'tour_account_field',
+        stepNumber: 6,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepAccountTitle'),
+        body: t('tourStepAccountBody'),
+        showNext: true,
+        onNext: () => setTourStep('manual_category'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_category' && screen === 'add') {
+      return {
+        id: 'tour_manual_category',
+        anchorId: 'tour_category_grid',
+        stepNumber: 7,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepCategoryTitle'),
+        body: t('tourStepCategoryBody'),
+        // No Next here: picking a category (onCategoryChosen, below) advances straight to the
+        // add-expense step, which anchors on the real button so it isn't hidden behind the dim
+        // overlay the way a distant, un-highlighted button would be.
+        showNext: false,
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'manual_add_expense' && screen === 'add') {
+      return {
+        id: 'tour_manual_add_expense',
+        anchorId: 'tour_add_expense_btn',
+        stepNumber: 8,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepAddExpenseTitle'),
+        body: t('tourStepAddExpenseBody'),
+        showNext: false,
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'activity_tip' && screen === 'home') {
+      return {
+        id: 'tour_activity_tip',
+        anchorId: 'tour_activity_tab',
+        stepNumber: 9,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepActivityTipTitle'),
+        body: t('tourStepActivityTipBody'),
+        showNext: true,
+        onNext: () => setTourStep('networth_tab'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'networth_tab' && screen === 'home') {
+      return {
+        id: 'tour_networth_tab',
+        anchorId: 'tour_networth_tab',
+        stepNumber: 10,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepNetWorthTitle'),
+        body: t('tourStepNetWorthBody'),
+        showNext: true,
+        onNext: () => setTourStep('settings_tab'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'settings_tab' && screen === 'home') {
+      return {
+        id: 'tour_settings_tab',
+        anchorId: 'tour_settings_tab',
+        stepNumber: 11,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepSettingsTitle'),
+        body: t('tourStepSettingsBody'),
+        showNext: true,
+        onNext: () => setTourStep('recap_tip'),
+        onSkip: skipTour,
+      };
+    }
+    if (tourStep === 'recap_tip' && screen === 'home') {
+      return {
+        id: 'tour_recap_tip',
+        anchorId: 'tour_recap_btn',
+        stepNumber: 12,
+        totalSteps: TOTAL_TOUR_STEPS,
+        title: t('tourStepRecapTitle'),
+        body: t('tourStepRecapBody'),
+        showNext: true,
+        onNext: skipTour,
+        onSkip: skipTour,
+      };
+    }
+    if (guidedExploreTaskId && screen === 'home') {
+      const task = EXPLORE_TASKS.find((t) => t.id === guidedExploreTaskId);
+      if (task && activeAnchorId) {
+        return {
+          id: `explore_${task.id}`,
+          anchorId: activeAnchorId,
+          badgeLabel: t('exploreGuideBadge'),
+          title: t(task.titleKey),
+          body: t(task.descriptionKey),
+          showNext: true,
+          onNext: () => setGuidedExploreTaskId(null),
+          onSkip: () => setGuidedExploreTaskId(null),
+        };
+      }
+    }
+    return null;
+  }, [activeAnchorId, tourStep, screen, t, dismissTutorial, amountValid, sawSplitGlossary, guidedExploreTaskId]);
+
   const openExport = (from: Screen, month?: string) => {
     setExportOrigin(from);
     setExportMonth(month);
     setScreen('export');
+  };
+
+  const handleOpenAdd = () => {
+    if (tourStep === 'plus') {
+      setTourStep('scan_explain');
+    }
+    setAddTutorialMode(undefined);
+    setScreen('add');
   };
 
   // The single "go back" action for every screen — used by each screen's own back button below
@@ -298,7 +603,9 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       <View style={styles.fill}>
       {screen === 'home' && (
         <DashboardScreen
-          onScan={() => setScreen('add')}
+          onScan={handleOpenAdd}
+          activeTourAnchor={activeAnchorId}
+          onGuideExploreTask={(task) => setGuidedExploreTaskId(task.id)}
           onOpenAll={() => {
             setTxnFilter(null);
             setScreen('transactions');
@@ -321,11 +628,28 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setCalendarMonth(undefined);
             setScreen('calendar');
           }}
+          onOpenCurrencySettings={() => setScreen('currencySettings')}
+          onOpenExport={() => openExport('home')}
         />
       )}
       {screen === 'add' && (
         <AddFlow
-          onClose={goBack}
+          tutorialMode={addTutorialMode}
+          activeTourAnchor={activeAnchorId}
+          onPhaseChange={handleAddPhaseChange}
+          onAmountValidChange={setAmountValid}
+          onCategoryChosen={handleCategoryChosen}
+          onClose={() => {
+            setAddTutorialMode(undefined);
+            if (tourStep === 'scan_explain' || tourStep === 'manual_btn') {
+              setTourStep('plus');
+            } else if (tourStep === 'manual_add_expense') {
+              // The manual walkthrough just saved; show the activity-tab tip once this Done
+              // press actually lands the user back on Home (goBack, below).
+              setTourStep('activity_tip');
+            }
+            goBack();
+          }}
         />
       )}
       {screen === 'settings' && (
@@ -402,9 +726,16 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         <BottomNav
           active={navTab}
           onNavigate={goTab}
-          onAdd={() => setScreen('add')}
+          onAdd={handleOpenAdd}
+          activeTourAnchor={activeAnchorId}
         />
       )}
+      <TourSpotlight
+        step={currentTourStepInfo}
+        onDimPress={() => {
+          if (guidedExploreTaskId) setGuidedExploreTaskId(null);
+        }}
+      />
       <GlossaryModal />
       <AppAlertModal />
     </View>

@@ -21,7 +21,7 @@ import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
 import { Icon } from './Icon';
-import { fmtMoney } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { outstanding } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 
@@ -70,7 +70,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setRemark(txn.remark ?? '');
       setExpanded(false);
       setLinkId(null);
-      setLinkEffect('subtract');
+      setLinkEffect(defaultLinkEffect('asset', txn.type));
       setSplitting(false);
       setViewingReceipt(false);
       listFxRates().then((fx) => setRates(ratesFromCache(fx)));
@@ -122,7 +122,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   // Currency is fixed once a row is written (spec §Non-goals: changing it after the fact is
   // out of scope for v1), so this is read-only context, not a control.
   const decimals = decimalsFor(txn.currency);
-  const currencyLabel = txn.currency === BASE_CURRENCY ? 'RM' : txn.currency;
+  const currencyLabel = currencyPrefix(txn.currency);
 
   // The linked account's balance is native to ITS OWN currency (Task 9). No conversion (and
   // so no rate) is needed when the row's currency already matches the account's, or the
@@ -171,9 +171,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // is converted into the account's own currency at the account's own rate (the inverse of
     // `deriveMyr`), same principle as ManualEntryScreen's save.
     if (linkId && linkAccount) {
+      const effect: LinkEffect = linkAccount.kind === 'liability' ? linkEffect : defaultLinkEffect(linkAccount.kind, type);
       const linkAmount =
         linkAccount.currency === txn.currency ? amount : deriveNative(myrAmount, linkAccount.currency, rateFor(rates, linkAccount.currency));
-      await recordBalanceLink(linkId, linkAmount, linkEffect, txn.date ?? todayISO());
+      await recordBalanceLink(linkId, linkAmount, effect, txn.date ?? todayISO());
     }
     onClose();
   };

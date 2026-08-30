@@ -9,6 +9,8 @@ import {
   defaultLinkEffect,
   applyEffect,
   toMyrValues,
+  nativeAccountTotalsByCurrency,
+  ACCOUNT_CLASSES,
 } from '../src/lib/networth';
 import type { Account, BalanceEntry } from '../src/lib/types';
 
@@ -204,6 +206,33 @@ describe('toMyrValues', () => {
   });
 });
 
+describe('nativeAccountTotalsByCurrency', () => {
+  it('groups native balances by each account\'s own currency', () => {
+    const accounts = [
+      acct({ id: 'a', currency: 'MYR' }),
+      acct({ id: 'b', currency: 'USD' }),
+      acct({ id: 'c', currency: 'USD' }),
+    ];
+    const totals = nativeAccountTotalsByCurrency(accounts, { a: 1000, b: 200, c: 50 });
+    expect(totals).toEqual({ MYR: 1000, USD: 250 });
+  });
+
+  it('always includes MYR, even at zero, so the base case never looks incomplete', () => {
+    const accounts = [acct({ id: 'b', currency: 'USD' })];
+    expect(nativeAccountTotalsByCurrency(accounts, { b: 100 })).toEqual({ MYR: 0, USD: 100 });
+  });
+
+  it('skips archived accounts', () => {
+    const accounts = [acct({ id: 'a', currency: 'USD', archived: true })];
+    expect(nativeAccountTotalsByCurrency(accounts, { a: 500 })).toEqual({ MYR: 0 });
+  });
+
+  it('treats a missing native value as zero rather than throwing', () => {
+    const accounts = [acct({ id: 'a', currency: 'MYR' })];
+    expect(nativeAccountTotalsByCurrency(accounts, {})).toEqual({ MYR: 0 });
+  });
+});
+
 describe('netWorthSeries with rates', () => {
   it('defaults to an empty rate table so existing MYR-only callers are unaffected', () => {
     const accounts = [acct({ id: 'a', currency: 'MYR' })];
@@ -234,5 +263,17 @@ describe('applyEffect', () => {
     expect(applyEffect(100, 25.5, 'add')).toBe(125.5);
     expect(applyEffect(50, 10, 'subtract')).toBe(40);
     expect(applyEffect(0, 1 / 3, 'add')).toBe(0.33);
+  });
+});
+
+describe('ACCOUNT_CLASSES', () => {
+  it('includes Cash & Bank as the cash class label', () => {
+    const cashMeta = ACCOUNT_CLASSES.find((c) => c.id === 'cash');
+    expect(cashMeta?.label).toBe('Cash & Bank');
+  });
+
+  it('supports accounts with optional interestRate (APR)', () => {
+    const accountWithAPR = acct({ id: 'inv_fd', cls: 'investments', interestRate: 3.85 });
+    expect(accountWithAPR.interestRate).toBe(3.85);
   });
 });

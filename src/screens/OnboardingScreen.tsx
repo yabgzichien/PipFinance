@@ -19,6 +19,7 @@ import {
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useBackHandler, useExitConfirm } from '../state/useBackHandler';
+import { useLanguage } from '../i18n';
 import { spacing } from '../theme';
 import { AdvancedImportScreen } from './AdvancedImportScreen';
 import { BudgetStep } from './onboarding/BudgetStep';
@@ -32,6 +33,7 @@ export function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const colorTheme = useThemeColors();
   const { completeOnboarding } = useAppData();
+  const { t } = useLanguage();
 
   const [step, setStep] = useState<WizardStep>('intro');
   const [hasImported, setHasImported] = useState(false);
@@ -74,11 +76,28 @@ export function OnboardingScreen() {
 
   const navInfo = getWizardNavInfo(step, hasImported);
 
+  const getLocalizedWizardTitle = (title: string) => {
+    switch (title) {
+      case 'Import data':
+        return t('wizardImportTitle');
+      case 'Budget':
+        return t('wizardBudgetTitle');
+      case 'Recurring payment':
+        return t('wizardRecurringTitle');
+      case 'Notifications':
+        return t('wizardNotificationsTitle');
+      case 'Widget':
+        return t('wizardWidgetTitle');
+      default:
+        return title;
+    }
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       {navInfo && (
         <View style={{ paddingTop: insets.top + 4 }}>
-          <TopBar title={navInfo.title} onBack={goBack} />
+          <TopBar title={getLocalizedWizardTitle(navInfo.title)} onBack={goBack} />
           <View style={{ paddingHorizontal: 18, paddingTop: 2 }}>
             <ProgressTrack pct={navInfo.progressPct} height={5} />
           </View>

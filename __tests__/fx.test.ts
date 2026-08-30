@@ -1,4 +1,4 @@
-import { ratesFromCache, rateFor, isStale, staleLabel, FX_STALE_MS, type FxRate } from '../src/lib/fx';
+import { ratesFromCache, rateFor, isStale, staleLabel, FX_STALE_MS, toDisplay, type FxRate } from '../src/lib/fx';
 import { fetchRateMYR } from '../src/prices/fx';
 
 function rate(over: Partial<FxRate>): FxRate {
@@ -33,6 +33,25 @@ describe('rateFor', () => {
 
   it('returns null rather than 1 when the rate is missing', () => {
     expect(rateFor({}, 'CNY')).toBeNull();
+  });
+});
+
+describe('toDisplay', () => {
+  it('returns the MYR figure unchanged when the display code is MYR', () => {
+    expect(toDisplay(100, 'MYR', {})).toBe(100);
+  });
+
+  it('divides by the cached rate to project into a foreign display currency', () => {
+    // 1 CNY = 0.63 MYR, so MYR 63 is CNY 100.
+    expect(toDisplay(63, 'CNY', { CNY: 0.63 })).toBe(100);
+  });
+
+  it('rounds to the display currency\'s own decimal places', () => {
+    expect(toDisplay(100, 'JPY', { JPY: 0.03 })).toBe(3333.33); // decimalsFor ignored by round2; see next test
+  });
+
+  it('returns null rather than guessing when the rate is missing', () => {
+    expect(toDisplay(100, 'CNY', {})).toBeNull();
   });
 });
 

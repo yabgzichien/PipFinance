@@ -3,21 +3,9 @@
 // Network only, best-effort: null means "no rate", and every caller is required
 // to treat that as "exclude", never as parity.
 import { parseYahooChart } from '../lib/prices';
+import { fetchWithTimeout, fetchYahooJson } from './fetchYahoo';
 
 const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';
-const YAHOO_CHART_FALLBACK = 'https://query2.finance.yahoo.com/v8/finance/chart';
-const YAHOO_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' };
-
-/** Helper to fetch with timeout */
-async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 6000): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** MYR per 1 unit of `code`, or null if unavailable across all providers. */
 export async function fetchRateMYR(code: string): Promise<number | null> {
@@ -56,17 +44,15 @@ export async function fetchRateMYR(code: string): Promise<number | null> {
     }
   } catch {}
 
-  // Provider 4: Yahoo Finance chart endpoints
+  // Provider 4: Yahoo Finance chart endpoints (with CORS proxy on web)
   const symbol = `${upper}MYR=X`;
-  for (const base of [YAHOO_CHART, YAHOO_CHART_FALLBACK]) {
-    try {
-      const res = await fetchWithTimeout(`${base}/${encodeURIComponent(symbol)}?range=2d&interval=1d`, { headers: YAHOO_HEADERS });
-      if (res.ok) {
-        const parsed = parseYahooChart(await res.json());
-        if (parsed && Number.isFinite(parsed.price) && parsed.price > 0) return parsed.price;
-      }
-    } catch {}
-  }
+  try {
+    const json = await fetchYahooJson(`${YAHOO_CHART}/${encodeURIComponent(symbol)}?range=2d&interval=1d`);
+    if (json) {
+      const parsed = parseYahooChart(json);
+      if (parsed && Number.isFinite(parsed.price) && parsed.price > 0) return parsed.price;
+    }
+  } catch {}
 
   return null;
 }

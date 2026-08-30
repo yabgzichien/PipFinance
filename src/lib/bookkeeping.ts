@@ -6,6 +6,7 @@
 
 import type { Account, AccountKind, BalanceEntry, Category, Transaction } from './types';
 import { ACCOUNT_CLASSES, CLASS_BY_ID, accountValueAsOf } from './networth';
+import { rateFor } from './fx';
 
 export type ReportPeriodType = 'monthly' | 'yearly' | 'all-time' | 'custom';
 
@@ -41,7 +42,14 @@ export interface BalanceSheetItem {
   name: string;
   cls: string;
   clsLabel: string;
+  /** MYR-converted value, which is what every total on the sheet is summed from. */
   value: number;
+  /** The balance in the account's own currency, before conversion. Carried alongside `value`
+   *  so a consumer that needs to state an amount *with* its currency — the re-importable JSON
+   *  export — can do so honestly instead of pairing an MYR figure with a foreign code. */
+  nativeValue: number;
+  /** The currency `nativeValue` is denominated in. */
+  currency: string;
   sub: string | null;
   symbol: string | null;
   ticker: string | null;
@@ -115,6 +123,8 @@ export interface FinancialReportData {
   transactions: Transaction[];
   categories: Category[];
   accounts: Account[];
+  displayCurrency?: string;
+  displayRates?: Record<string, number>;
 }
 
 const MONTH_NAMES = [
@@ -208,6 +218,21 @@ export function filterTransactionsByPeriod(
 }
 
 /**
+ * Native (unconverted) transaction amounts grouped by currency — the per-currency
+ * breakdown on Activity, Recap, and Export. Transfers are excluded: they move money
+ * between the user's own accounts rather than being spent or received in a currency.
+ */
+export function nativeTransactionTotalsByCurrency(txns: Transaction[]): Record<string, number> {
+  const out: Record<string, number> = { MYR: 0 };
+  for (const t of txns) {
+    if (t.type === 'transfer') continue;
+    const native = t.nativeAmount ?? t.amount;
+    out[t.currency] = Math.round(((out[t.currency] ?? 0) + native) * 100) / 100;
+  }
+  return out;
+}
+
+/**
  * Compute the traditional Income Statement (Profit & Loss) for a given period.
  */
 export function computeIncomeStatement(
@@ -286,7 +311,8 @@ export function computeIncomeStatement(
 export function computeBalanceSheet(
   accounts: Account[],
   balanceEntries: BalanceEntry[],
-  asOfDate: string
+  asOfDate: string,
+  rates: Record<string, number> = {}
 ): BalanceSheet {
   const byAccount: Record<string, BalanceEntry[]> = {};
   for (const e of balanceEntries) (byAccount[e.accountId] ??= []).push(e);
@@ -299,7 +325,12 @@ export function computeBalanceSheet(
 
   for (const a of accounts) {
     if (a.archived) continue;
-    const value = accountValueAsOf(byAccount[a.id] ?? [], asOfDate);
+    const native = accountValueAsOf(byAccount[a.id] ?? [], asOfDate);
+    const rate = rateFor(rates, a.currency);
+    // No cached rate: exclude rather than count a foreign balance at parity, same policy
+    // toMyrValues already applies to the Net Worth screen.
+    if (rate == null) continue;
+    const value = Math.round(native * rate * 100) / 100;
     const meta = CLASS_BY_ID[a.cls];
     const clsLabel = meta?.label || a.cls;
 
@@ -309,6 +340,8 @@ export function computeBalanceSheet(
       cls: a.cls,
       clsLabel,
       value: Math.round(value * 100) / 100,
+      nativeValue: Math.round(native * 100) / 100,
+      currency: a.currency,
       sub: a.sub,
       symbol: a.symbol,
       ticker: a.ticker,
@@ -407,7 +440,8 @@ export function computeFinancialStatistics(
   categories: Category[],
   accounts: Account[],
   balanceEntries: BalanceEntry[],
-  period: ReportPeriod
+  period: ReportPeriod,
+  rates: Record<string, number> = {}
 ): FinancialStatistics {
   const filtered = filterTransactionsByPeriod(txns, period);
   const catMap = new Map<string, Category>();
@@ -455,7 +489,9 @@ export function computeFinancialStatistics(
     let lTotal = 0;
     for (const a of accounts) {
       if (a.archived) continue;
-      const val = accountValueAsOf(byAccount[a.id] ?? [], asOf);
+      const rate = rateFor(rates, a.currency);
+      if (rate == null) continue;
+      const val = accountValueAsOf(byAccount[a.id] ?? [], asOf) * rate;
       if (a.kind === 'asset') aTotal += val;
       else lTotal += val;
     }
@@ -542,11 +578,13 @@ export function buildFinancialReportBundle(
   accounts: Account[],
   balanceEntries: BalanceEntry[],
   period: ReportPeriod,
-  userName: string = 'Pip User'
+  userName: string = 'Pip User',
+  rates: Record<string, number> = {},
+  displayCurrency: string = 'MYR'
 ): FinancialReportData {
   const incomeStatement = computeIncomeStatement(txns, categories, period);
-  const balanceSheet = computeBalanceSheet(accounts, balanceEntries, period.asOfDate);
-  const statistics = computeFinancialStatistics(txns, categories, accounts, balanceEntries, period);
+  const balanceSheet = computeBalanceSheet(accounts, balanceEntries, period.asOfDate, rates);
+  const statistics = computeFinancialStatistics(txns, categories, accounts, balanceEntries, period, rates);
   const filteredTxns = filterTransactionsByPeriod(txns, period);
 
   return {
@@ -559,5 +597,7 @@ export function buildFinancialReportBundle(
     transactions: [...filteredTxns].sort((a, b) => ((b.date || '') < (a.date || '') ? -1 : (b.date || '') > (a.date || '') ? 1 : 0)),
     categories,
     accounts,
+    displayCurrency,
+    displayRates: rates,
   };
 }

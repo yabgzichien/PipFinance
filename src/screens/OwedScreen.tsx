@@ -6,12 +6,13 @@ import { InfoButton } from '../components/InfoButton';
 import { Amount, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
-import { fmt, fmtMoney } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { RECEIVABLE_CLS } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { AGING_DAYS, groupOpenSharesByPerson, type OpenShare, type PersonDebt } from '../lib/split';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { colors, numFont, radius, uiFont } from '../theme';
@@ -26,8 +27,9 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
-  const { openShares, accounts, settleShare, writeOffShare } = useAppData();
+  const { isZh, tCat } = useLanguage();
+  const { openShares, accounts, catById, settleShare, writeOffShare } = useAppData();
+  const dc = useDisplayCurrency();
   const today = useMemo(() => todayISO(), []);
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -42,11 +44,17 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const aging = byPerson.filter((p) => p.oldestDays >= AGING_DAYS);
 
   const confirmWriteOff = (share: OpenShare) => {
+    const itemDesc = share.remark?.trim()
+      ? (share.merchant && share.merchant !== 'A shared bill'
+          ? `${share.merchant} (${share.remark.trim()})`
+          : share.remark.trim())
+      : share.merchant;
+
     confirmAction(
       isZh ? '核销坏账？' : 'Write this off?',
       isZh
-        ? `确认核销 ${share.personName} 欠您的 “${share.merchant}” 款项 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}？这笔款项将转换为您今天的个人支出。`
-        : `Give up on the ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} ${share.personName} owes you for “${share.merchant}”? It becomes your own expense, dated today.`,
+        ? `确认核销 ${share.personName} 欠您的 “${itemDesc}” 款项 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}？这笔款项将转换为您今天的个人支出。`
+        : `Give up on the ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} ${share.personName} owes you for “${itemDesc}”? It becomes your own expense, dated today.`,
       isZh ? '核销' : 'Write off',
       () => writeOffShare(share.shareId)
     );
@@ -83,8 +91,8 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
               <PipSays expr="curious">
                 <BubbleText>
                   {isZh
-                    ? `${aging[0].name} 已欠您 RM ${fmt(aging[0].total)} 达 ${aging[0].oldestDays} 天${aging.length === 2 ? '，另有 1 人也已逾期' : aging.length > 2 ? `，另有 ${aging.length - 1} 人也已逾期` : ''}。`
-                    : `${aging[0].name} has owed you RM ${fmt(aging[0].total)} for ${aging[0].oldestDays} days${aging.length === 2 ? ', and 1 other is overdue too' : aging.length > 2 ? `, and ${aging.length - 1} others are overdue too` : ''}.`}
+                    ? `${aging[0].name} 已欠您 ${fmtMoney(dc.convert(aging[0].total), dc.code)} 达 ${aging[0].oldestDays} 天${aging.length === 2 ? '，另有 1 人也已逾期' : aging.length > 2 ? `，另有 ${aging.length - 1} 人也已逾期` : ''}。`
+                    : `${aging[0].name} has owed you ${fmtMoney(dc.convert(aging[0].total), dc.code)} for ${aging[0].oldestDays} days${aging.length === 2 ? ', and 1 other is overdue too' : aging.length > 2 ? `, and ${aging.length - 1} others are overdue too` : ''}.`}
                 </BubbleText>
               </PipSays>
             )}
@@ -92,9 +100,9 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
             <Card style={styles.totalCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Eyebrow>{isZh ? '待收回款项' : 'Still owed to you'}</Eyebrow>
-                <InfoButton entry="split_bill" />
+                <InfoButton entry="owed_to_you" />
               </View>
-              <Amount value={total} size={30} weight={700} color={theme.accent} />
+              <Amount value={dc.convert(total)} currency={dc.code} size={30} weight={700} color={theme.accent} />
               <Text style={[styles.totalSub, { color: colorTheme.ink2 }]}>
                 {isZh
                   ? '作为应收款资产计入净资产，而不是您未实际承担的支出。'
@@ -135,34 +143,62 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                           <Text style={[styles.ageText, { color: colorTheme.amber }]}>{isZh ? '已逾期' : 'Overdue'}</Text>
                         </View>
                       )}
-                      <Amount value={p.total} size={15} weight={700} color={theme.accent} />
+                      <Amount value={dc.convert(p.total)} currency={dc.code} size={15} weight={700} color={theme.accent} />
                       <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}>
                         <Icon name="chevronDown" size={16} color={colorTheme.ink3} />
                       </View>
                     </Pressable>
 
                     {open &&
-                      p.shares.map((share) => (
-                        <View key={share.shareId} style={[styles.shareRow, { backgroundColor: colorTheme.surface2, borderTopColor: colorTheme.line2 }]}>
-                          <View style={{ flex: 1, minWidth: 0 }}>
-                            <Text style={[styles.shareMerchant, { color: colorTheme.ink }]} numberOfLines={1}>
-                              {share.merchant}
-                            </Text>
-                            <Text style={[styles.shareSub, { color: colorTheme.ink2 }]}>
-                              {isZh
-                                ? `${shortDate(share.billDate)} · 待还 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}`
-                                : `${shortDate(share.billDate)} · ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding`}
-                            </Text>
+                      p.shares.map((share) => {
+                        const cat = share.categoryId ? catById[share.categoryId] : undefined;
+                        const catLabel = cat ? tCat(cat) : undefined;
+                        const hasRemark = !!share.remark && share.remark.trim().length > 0;
+                        const hasMerchant = !!share.merchant && share.merchant !== 'A shared bill' && share.merchant.trim().length > 0;
+
+                        // Merchant or primary title
+                        const primaryName = hasMerchant
+                          ? share.merchant
+                          : (hasRemark ? share.remark!.trim() : (catLabel || (isZh ? '分摊账单' : 'Shared bill')));
+
+                        // Food / expense / item description (if remark exists and is not identical to the merchant name)
+                        const expenseDescription = hasRemark && hasMerchant && share.remark!.trim().toLowerCase() !== share.merchant.trim().toLowerCase()
+                          ? share.remark!.trim()
+                          : undefined;
+
+                        const curr = share.currency ?? 'MYR';
+                        const isPartial = (share.paid ?? 0) > 0;
+                        const hasGross = (share.gross ?? 0) > share.outstanding;
+
+                        return (
+                          <View key={share.shareId} style={[styles.shareRow, { backgroundColor: colorTheme.surface2, borderTopColor: colorTheme.line2 }]}>
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={[styles.shareMerchant, { color: colorTheme.ink }]} numberOfLines={1}>
+                                {primaryName}
+                              </Text>
+                              {expenseDescription && (
+                                <Text style={[styles.shareDescription, { color: colorTheme.ink2 }]} numberOfLines={2}>
+                                  {expenseDescription}
+                                </Text>
+                              )}
+                              <Text style={[styles.shareSub, { color: colorTheme.ink3 }]} numberOfLines={1}>
+                                {shortDate(share.billDate)}
+                                {catLabel && catLabel !== primaryName && catLabel !== expenseDescription ? ` · ${catLabel}` : ''}
+                                {` · ${isZh ? '待还' : ''} ${fmtMoney(share.outstanding, curr)}${isZh ? '' : ' outstanding'}`}
+                                {isPartial ? ` · ${isZh ? '已付' : 'paid'} ${fmtMoney(share.paid!, curr)}` : ''}
+                                {hasGross && !isPartial ? ` · ${isZh ? '账单' : 'bill'} ${fmtMoney(share.gross!, curr)}` : ''}
+                              </Text>
+                            </View>
+                            <Pressable onPress={() => setSettling(share)} style={[styles.settleBtn, { backgroundColor: theme.accent }]} hitSlop={4}>
+                              <Icon name="check" size={14} color={colors.onAccent} stroke={2.4} />
+                              <Text style={styles.settleText}>{isZh ? '结清' : 'Settle'}</Text>
+                            </Pressable>
+                            <Pressable onPress={() => confirmWriteOff(share)} hitSlop={8} accessibilityLabel="Write off">
+                              <Icon name="trash" size={16} color={colorTheme.ink3} />
+                            </Pressable>
                           </View>
-                          <Pressable onPress={() => setSettling(share)} style={[styles.settleBtn, { backgroundColor: theme.accent }]} hitSlop={4}>
-                            <Icon name="check" size={14} color={colors.onAccent} stroke={2.4} />
-                            <Text style={styles.settleText}>{isZh ? '结清' : 'Settle'}</Text>
-                          </Pressable>
-                          <Pressable onPress={() => confirmWriteOff(share)} hitSlop={8} accessibilityLabel="Write off">
-                            <Icon name="trash" size={16} color={colorTheme.ink3} />
-                          </Pressable>
-                        </View>
-                      ))}
+                        );
+                      })}
                   </View>
                 );
               })}
@@ -247,9 +283,11 @@ function SettleSheet({
               {isZh ? `${share.personName} 已还款` : `${share.personName} paid you back`}
             </Text>
             <Text style={[styles.sheetSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
-              {isZh
-                ? `${share.merchant} · 待还 ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}`
-                : `${share.merchant} · ${fmtMoney(share.outstanding, share.currency ?? 'MYR')} outstanding`}
+              {share.merchant}
+              {share.remark && share.remark.trim().toLowerCase() !== share.merchant.trim().toLowerCase()
+                ? ` (${share.remark.trim()})`
+                : ''}
+              {` · ${isZh ? '待还' : ''} ${fmtMoney(share.outstanding, share.currency ?? 'MYR')}${isZh ? '' : ' outstanding'}`}
             </Text>
           </View>
           <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
@@ -259,7 +297,7 @@ function SettleSheet({
 
         <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '收到还款金额' : 'How much came back'}</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{(share.currency ?? 'MYR') === 'MYR' ? 'RM' : share.currency}</Text>
+          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(share.currency ?? 'MYR')}</Text>
           <TextInput
             value={amountText}
             onChangeText={setAmountText}
@@ -361,7 +399,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   shareMerchant: { fontFamily: uiFont(600), fontSize: 13.5 },
-  shareSub: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 1 },
+  shareDescription: { fontFamily: uiFont(500), fontSize: 12, lineHeight: 16, marginTop: 1 },
+  shareSub: { fontFamily: uiFont(500), fontSize: 11, marginTop: 2 },
   settleBtn: {
     flexDirection: 'row',
     alignItems: 'center',

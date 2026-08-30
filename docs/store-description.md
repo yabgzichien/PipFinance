@@ -24,8 +24,8 @@ THE FULL PICTURE, NOT JUST THIS MONTH
 - Net worth: cash, crypto, stocks, and gold at live prices, minus what you still owe.
 - Recurring commitments: bills and recurring investments in one list, so nothing renews without you noticing.
 
-BUILT FOR MALAYSIA
-Pip benchmarks your spending against Belanjawanku, Malaysia's own reference budget from DOSM, EPF, and Universiti Malaya, so "know your money" means something concrete: compared to what. Tax relief is tracked by LHDN category (G6 to G13) as you spend, with the cap for each one, so filing season isn't a scramble.
+TAX RELIEF RECEIPT TRACKING
+Tax relief is tracked by eligible categories as you spend, with the cap for each one, so filing season isn't a scramble. Attach and archive receipt evidence directly on your device.
 
 SPLIT BILLS THE WAY THE RECEIPT ACTUALLY WORKS
 Split down to the item, with service charge, service tax, and vouchers applied the way they were on the actual bill, not divided evenly and hoped for the best. The Owed screen keeps track of who still needs to pay you back.

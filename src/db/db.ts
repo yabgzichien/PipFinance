@@ -81,7 +81,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       quantity    REAL,
       cost        REAL,
       icon        TEXT,
-      currency    TEXT NOT NULL DEFAULT 'MYR'
+      currency    TEXT NOT NULL DEFAULT 'MYR',
+      interest_rate REAL
     );
     CREATE TABLE IF NOT EXISTS balance_entries (
       id          TEXT PRIMARY KEY NOT NULL,
@@ -208,7 +209,7 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   }
 
   // Migration: holding columns on `accounts` for live-priced investments.
-  for (const col of ['sub TEXT', 'symbol TEXT', 'ticker TEXT', 'quantity REAL', 'cost REAL', 'icon TEXT']) {
+  for (const col of ['sub TEXT', 'symbol TEXT', 'ticker TEXT', 'quantity REAL', 'cost REAL', 'icon TEXT', 'interest_rate REAL']) {
     try {
       await db.execAsync(`ALTER TABLE accounts ADD COLUMN ${col}`);
     } catch {
@@ -421,7 +422,7 @@ export async function resetAllData(): Promise<void> {
       DELETE FROM deleted_default_categories;
     `);
     // Without this, "Reset all data" leaves the app still in CNY entry mode.
-    await db.runAsync("DELETE FROM app_meta WHERE key IN ('active_currencies', 'entry_currency')");
+    await db.runAsync("DELETE FROM app_meta WHERE key IN ('active_currencies', 'entry_currency', 'display_currency')");
     await seedCategories(db);
   });
 }

@@ -303,12 +303,16 @@ export const en: Translations = {
   exploreTaskStreakDesc: 'Log something every day for a week to build the habit.',
   exploreTaskRecapTitle: 'Check your monthly recap',
   exploreTaskRecapDesc: 'See a summary of how your spending and income went this month.',
+  exploreTaskQuickAddTitle: 'Try quick add',
+  exploreTaskQuickAddDesc: 'Type something like "lunch 15" and Pip fills in the rest.',
   taskCelebrationToast: '{count} task{plural} completed',
 
   // Setup Wizard / Onboarding
   introTitle: 'Know your money.',
-  introSubtitle: "Screenshot the app you already have open, Grab, Touch 'n Go, Maybank, whatever it is, and Pip reads the numbers.",
+  introSubtitle: "Screenshot the app you already have, eWallets, Banks, Investments, whatever it is and Pips reads the numbers.",
   introNext: 'Next',
+  wizardDefaultCurrency: 'Default currency',
+  wizardCurrencySearchPlaceholder: 'Search currency (e.g. USD, SGD, EUR)...',
   wizardImportTitle: 'Import data',
   wizardBudgetTitle: 'Budget',
   wizardRecurringTitle: 'Recurring payment',

@@ -72,6 +72,17 @@ export const ZH_GLOSSARY: Record<string, GlossaryEntry> = {
       '当您为多人账单付款时，只有属于您自己的份额会计入个人支出。其余金额将作为应收款项计入您的总净资产中，避免虚增支出。\n\n' +
       '当对方还款时，结清操作会冲销这笔待收款并增加您的现金账户余额，不会重复记录为收入。如果某笔款项确实无法收回，核销操作会将其转化为当天的个人支出。',
   },
+  quick_add: {
+    term: '直接输入',
+    short: '使用日常文字直接记录交易，无需逐项手动填写。',
+    body:
+      '直接输入金额和用途文字，Pip 会自动识别金额、备注、分类及日期。\n\n' +
+      '示例：\n' +
+      '• 午餐 9.2（记录 RM9.20 餐饮支出）\n' +
+      '• 昨天咖啡 15（按昨天日期记录支出）\n' +
+      '• 工资 5000（自动识别为收入）\n' +
+      '• 午餐 12，打车 18（一次输入多笔交易）',
+  },
 };
 
 export function getGlossaryEntry(entryKey: string, lang: SupportedLanguage = 'en'): GlossaryEntry | undefined {

@@ -6,10 +6,11 @@ import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
 import { Amount, BtnLabel, Card, CatBadge, Eyebrow, Label, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
 import { allocatedTotal, averageMonthlySpend, leftover } from '../lib/budget';
-import { fmt } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { baselineExplanation, computeIncomeBaseline } from '../lib/incomeBaseline';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useBackHandler } from '../state/useBackHandler';
 import { numFont, radius, spacing, uiFont } from '../theme';
@@ -18,6 +19,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const {
     transactions,
     categories,
@@ -99,7 +101,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         {/* Income section */}
         <Eyebrow style={{ marginBottom: spacing.sm }}>Expected monthly income</Eyebrow>
         <Card style={styles.incomeCard}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
           <TextInput
             value={incomeText}
             onChangeText={setIncomeText}
@@ -112,8 +114,8 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         {income6.months > 0 && (
           <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs, marginLeft: spacing.xs }}>
             {income6.irregular
-              ? `Your income swings between RM ${fmt(income6.low)} and RM ${fmt(income6.high)}, so Pip suggests planning against RM ${fmt(income6.baseline)}. ${baselineExplanation(income6)}`
-              : `Your recent average is RM ${fmt(income6.average)}.`}
+              ? `Your income swings between ${fmtMoney(dc.convert(income6.low), dc.code)} and ${fmtMoney(dc.convert(income6.high), dc.code)}, so Pip suggests planning against ${fmtMoney(dc.convert(income6.baseline), dc.code)}. ${baselineExplanation(income6)}`
+              : `Your recent average is ${fmtMoney(dc.convert(income6.average), dc.code)}.`}
           </Label>
         )}
 
@@ -141,7 +143,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
               </Text>
             </View>
             <View style={[styles.allocInputWrap, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-              <Text style={[styles.rmSmall, { color: colorTheme.ink2 }]}>RM</Text>
+              <Text style={[styles.rmSmall, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
               <TextInput
                 value={amounts[c.id] ?? ''}
                 onChangeText={(v) => setAmounts((p) => ({ ...p, [c.id]: v }))}
@@ -171,10 +173,10 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         <View style={{ marginBottom: spacing.sm }}>
           <View style={styles.summary}>
             <Text style={[styles.summaryText, { color: colorTheme.ink2 }]}>
-              Allocated <Amount value={total} size={13} weight={700} /> of <Amount value={income} size={13} weight={700} />
+              Allocated <Amount value={dc.convert(total)} currency={dc.code} size={13} weight={700} /> of <Amount value={dc.convert(income)} currency={dc.code} size={13} weight={700} />
             </Text>
             <Text style={[styles.summaryText, { color: left < 0 ? '#c5402f' : theme.accentInk }]}>
-              {left < 0 ? `Over by RM ${fmt(-left)}` : `RM ${fmt(left)} left`}
+              {left < 0 ? `Over by ${fmtMoney(dc.convert(-left), dc.code)}` : `${fmtMoney(dc.convert(left), dc.code)} left`}
             </Text>
           </View>
           <View style={{ marginTop: spacing.xs }}>

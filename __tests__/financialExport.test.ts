@@ -10,6 +10,7 @@ import {
   generateHTMLReport,
   generatePrintablePDFHtml,
   generateAdvancedImportJSON,
+  formatCurrency,
 } from '../src/lib/financialExport';
 import { parseJSON } from '../src/lib/advancedImport';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
@@ -327,6 +328,46 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
     const json = generateAdvancedImportJSON(bundle);
     expect(JSON.parse(json).commitments).toEqual([]);
   });
+
+  it('exports multi-currency transactions, accounts, transfers and commitments with currencies preserved', () => {
+    const multiTxns = [
+      makeTxn({ type: 'income', categoryId: 'salary', amount: 5000, currency: 'SGD', date: '2026-06-01', merchantRaw: 'Singapore Client' }),
+      makeTxn({ type: 'expense', categoryId: 'food', amount: 35, currency: 'USD', date: '2026-06-05', merchantRaw: 'US SaaS' }),
+      makeTxn({ type: 'transfer', categoryId: null, amount: 1000, currency: 'USD', date: '2026-06-15', merchantRaw: 'Wise USD Transfer' }),
+    ];
+    const multiAccounts = [
+      makeAcct({ id: 'a_sgd', name: 'DBS SGD', kind: 'asset', cls: 'cash', currency: 'SGD' }),
+    ];
+    const multiEntries = [
+      makeEntry({ accountId: 'a_sgd', value: 12000, asOf: '2026-06-30' }),
+    ];
+    const multiCommitment: Commitment = {
+      id: 'c_usd', label: 'AWS Server', merchantKey: 'aws-server', kind: 'expense', amount: 50, currency: 'USD',
+      categoryId: 'food', fromAccountId: 'a_sgd', toAccountId: null, dueDay: 1, startMonth: '2026-01',
+      endMonth: null, archived: false, createdAt: '2026-01-01T00:00:00.000Z', reliefCode: null,
+    };
+    const multiBundle = buildFinancialReportBundle(multiTxns, mockCategories, multiAccounts, multiEntries, period, 'Nurul', { SGD: 3.5, USD: 4.7 });
+    const json = generateAdvancedImportJSON(multiBundle, { commitments: [multiCommitment], occurrences: [] });
+    const parsed = parseJSON(json);
+
+    expect(parsed.transactions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ merchant: 'Singapore Client', amount: 5000, currency: 'SGD' }),
+      expect.objectContaining({ merchant: 'US SaaS', amount: 35, currency: 'USD' }),
+    ]));
+    expect(parsed.transfers).toEqual([
+      expect.objectContaining({ description: 'Wise USD Transfer', amount: 1000, currency: 'USD' }),
+    ]);
+    // The exported balance must be the account's own native SGD figure, not the MYR value
+    // the balance sheet converted it to (12000 × 3.5 = 42000). A re-import reads `balance`
+    // as being denominated in the `currency` beside it, so emitting MYR here would inflate
+    // the account by the exchange rate on every round trip.
+    expect(parsed.accounts).toEqual([
+      expect.objectContaining({ name: 'DBS SGD', currency: 'SGD', balance: 12000 }),
+    ]);
+    expect(parsed.commitments).toEqual([
+      expect.objectContaining({ label: 'AWS Server', currency: 'USD', amount: 50 }),
+    ]);
+  });
 });
 
 describe('generatePrintablePDFHtml', () => {
@@ -348,3 +389,57 @@ describe('generatePrintablePDFHtml', () => {
     expect(pdfHtml).toContain('IV. Itemized Transaction Ledger');
   });
 });
+
+describe('formatCurrency', () => {
+  it('formats standard MYR by default', () => {
+    expect(formatCurrency(1234.56)).toBe('RM 1,234.56');
+    expect(formatCurrency(-50)).toBe('-RM 50.00');
+    expect(formatCurrency(0)).toBe('RM 0.00');
+  });
+
+  it('converts to foreign display currency when code and rates are provided', () => {
+    const rates = { SGD: 3.3, USD: 4.4 };
+    expect(formatCurrency(330, 'SGD', rates)).toBe('SGD 100.00');
+    expect(formatCurrency(-440, 'USD', rates)).toBe('-USD 100.00');
+  });
+});
+
+describe('generateCSV with multi-currency', () => {
+  const txns = [
+    makeTxn({ type: 'income', categoryId: 'salary', amount: 3300, currency: 'SGD', nativeAmount: 1000, date: '2026-06-01' }),
+    makeTxn({ type: 'expense', categoryId: 'food', amount: 50, currency: 'MYR', date: '2026-06-05' }),
+  ];
+  const accounts = [makeAcct({ id: 'a1' })];
+  const entries = [makeEntry({ value: 6000 })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Nurul');
+
+  it('appends CURRENCY BREAKDOWN section when multiple currencies exist', () => {
+    const csv = generateCSV(bundle);
+    expect(csv).toContain('=== CURRENCY BREAKDOWN ===');
+    expect(csv).toContain('"Currency","Total Native Amount"');
+    expect(csv).toContain('"MYR",50');
+    expect(csv).toContain('"SGD",1000');
+  });
+});
+
+describe('generateHTMLReport with displayCurrency', () => {
+  const txns = [
+    makeTxn({ type: 'income', categoryId: 'salary', amount: 3300, currency: 'SGD', nativeAmount: 1000, date: '2026-06-01' }),
+    makeTxn({ type: 'expense', categoryId: 'food', amount: 330, currency: 'SGD', nativeAmount: 100, date: '2026-06-10' }),
+  ];
+  const accounts = [makeAcct({ id: 'a1' })];
+  const entries = [makeEntry({ value: 3300, asOf: '2026-06-30' })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const rates = { SGD: 3.3 };
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Faizal', rates, 'SGD');
+
+  it('renders report in selected display currency', () => {
+    const html = generateHTMLReport(bundle);
+    expect(html).toContain('Currency: <strong>SGD</strong>');
+    expect(html).toContain('SGD 1,000.00'); // 3300 MYR / 3.3
+    expect(html).toContain('SGD 100.00'); // 330 MYR / 3.3
+    expect(html).toContain('Amount (SGD)');
+  });
+});
+

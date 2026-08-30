@@ -5,7 +5,7 @@ import { Icon } from '../components/Icon';
 import { FadeIn, useEasedFrom } from '../components/Motion';
 import { Pip } from '../components/Pip';
 import { Amount, Body, BtnLabel, Card, CatBadge, Caption, Display, Eyebrow, PrimaryButton } from '../components/ui';
-import { fmt, readTimeLabel } from '../lib/format';
+import { fmtMoney, readTimeLabel } from '../lib/format';
 import { payoff } from '../lib/haptics';
 import type { AutoFillStats } from '../lib/recommend';
 import { payoff as playChime } from '../lib/sound';
@@ -13,6 +13,7 @@ import { outstanding } from '../lib/split';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { useAppData, type NewLearned } from '../state/store';
 import { uiFont } from '../theme';
@@ -46,6 +47,7 @@ export function SavedScreen({
   const { t, tCat, isZh } = useLanguage();
   const pop = useRef(new Animated.Value(0)).current;
   const { splits, shares } = useAppData();
+  const dc = useDisplayCurrency();
   const hasResults = result.length > 0;
 
   useEffect(() => {
@@ -97,9 +99,9 @@ export function SavedScreen({
               <FadeIn delay={motionDuration.enter} duration={motionDuration.base} style={{ alignItems: 'center' }}>
                 <Body weight={700} color={colorTheme.ink} style={{ textAlign: 'center', marginTop: 4 }}>
                   {isZh ? (
-                    `已添加 ${result.length} 笔交易 · 共 RM ${fmt(total)}`
+                    `已添加 ${result.length} 笔交易 · 共 ${fmtMoney(dc.convert(total), dc.code)}`
                   ) : (
-                    <>{result.length} transaction{result.length > 1 ? 's' : ''} · <Amount value={total} size={16} weight={700} /> added</>
+                    <>{result.length} transaction{result.length > 1 ? 's' : ''} · <Amount value={dc.convert(total)} currency={dc.code} size={16} weight={700} /> added</>
                   )}
                 </Body>
                 {elapsedMs != null && (
@@ -120,7 +122,7 @@ export function SavedScreen({
         </View>
 
         {newLearned.length > 0 && (
-          <FadeIn delay={motionDuration.celebrate} duration={motionDuration.enter} style={{ paddingHorizontal: 18, paddingTop: 22 }}>
+          <FadeIn delay={motionDuration.celebrate + 50} duration={motionDuration.enter} style={{ paddingHorizontal: 18, paddingTop: 16 }}>
             <Card style={[styles.learnCard, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
               <View style={styles.learnHead}>
                 <Icon name="sparkles" size={17} color={theme.accent} />
@@ -172,12 +174,14 @@ export function SavedScreen({
                       <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
                         <Icon name="gift" size={10} color={theme.accentInk} />
                         <Text style={[styles.owedChipText, { color: theme.onTint }]}>
-                          {isZh ? `待收回 RM ${fmt(owedByTxn[t.id])}` : `RM ${fmt(owedByTxn[t.id])} owed to you`}
+                          {isZh
+                            ? `待收回 ${fmtMoney(dc.convert(owedByTxn[t.id]), dc.code)}`
+                            : `${fmtMoney(dc.convert(owedByTxn[t.id]), dc.code)} owed to you`}
                         </Text>
                       </View>
                     )}
                   </View>
-                  <Amount value={t.amount} size={14} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
+                  <Amount value={t.nativeAmount ?? t.amount} currency={t.currency} size={14} weight={600} color={income ? theme.accent : transfer ? colorTheme.ink2 : colorTheme.ink} />
                 </View>
               );
             })}

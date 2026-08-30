@@ -2,10 +2,11 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line, Path } from 'react-native-svg';
-import { fmt, fmtMoney } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import type { Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { colors, numFont, platformShadow, shadowCard, uiFont } from '../theme';
@@ -149,6 +150,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
+  const dc = useDisplayCurrency();
   return (
     <View style={styles.summaryRow}>
       <View
@@ -162,7 +164,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
           <View style={[styles.summaryDot, { backgroundColor: theme.accent }]} />
           <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '收入' : 'INCOME'}</Text>
         </View>
-        <Text style={[styles.summaryAmount, { color: colorTheme.ink }]}>RM{fmt(income)}</Text>
+        <Text style={[styles.summaryAmount, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(income), dc.code)}</Text>
       </View>
       <View
         style={[
@@ -175,7 +177,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
           <View style={[styles.summaryDot, { backgroundColor: colorTheme.red }]} />
           <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出' : 'EXPENSE'}</Text>
         </View>
-        <Text style={[styles.summaryAmount, { color: colorTheme.red }]}>RM{fmt(expense)}</Text>
+        <Text style={[styles.summaryAmount, { color: colorTheme.red }]}>{fmtMoney(dc.convert(expense), dc.code)}</Text>
       </View>
     </View>
   );
@@ -427,6 +429,7 @@ function DayTransactionList({
   const colorTheme = useThemeColors();
   const { isZh, tCat } = useLanguage();
   const { catById } = useAppData();
+  const dc = useDisplayCurrency();
   // e.g. "Tue, May 26"
   const d = new Date(year, month - 1, day);
   const weekdayIdx = (d.getDay() + 6) % 7; // Mon-first
@@ -472,7 +475,7 @@ function DayTransactionList({
           <View style={[styles.dayNetRow, { backgroundColor: colorTheme.surface2 }]}>
             <Text style={[styles.dayNetLabel, { color: colorTheme.ink2 }]}>{isZh ? '结余' : 'Net'}</Text>
             <Text style={[styles.dayNetVal, { color: dayData.net >= 0 ? theme.accentInk : colorTheme.red }]}>
-              {dayData.net >= 0 ? '+' : '−'} RM {fmt(Math.abs(dayData.net))}
+              {dayData.net >= 0 ? '+' : '−'} {fmtMoney(dc.convert(Math.abs(dayData.net)), dc.code)}
             </Text>
           </View>
         </View>

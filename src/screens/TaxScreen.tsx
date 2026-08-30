@@ -11,7 +11,7 @@ import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefS
 import { addReliefTag, listReliefTags } from '../db/reliefRepo';
 import { saveOrDownloadExport } from '../lib/financialExport';
 import { notify } from '../lib/platformAlert';
-import { buildAuditPackPdf } from '../lib/taxExport';
+import { buildAuditPackPdf, buildEvidenceZip } from '../lib/taxExport';
 import type { ReliefTag, Transaction } from '../lib/types';
 import { fmt, fmtMoney } from '../lib/format';
 import { useAccent } from '../state/accent';
@@ -49,7 +49,8 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const [mappingCommitments, setMappingCommitments] = useState(false);
   const [addingManually, setAddingManually] = useState(false);
   const [manualSearch, setManualSearch] = useState('');
-  const [exporting, setExporting] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingZip, setExportingZip] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,27 +138,51 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             </Text>
           </Pressable>
           <Pressable
-            disabled={exporting || !schedule || !tags || tags.length === 0}
+            disabled={exportingPdf || !schedule || !tags || tags.length === 0}
             onPress={async () => {
               if (!schedule || !tags) return;
-              setExporting(true);
+              setExportingPdf(true);
               try {
                 try {
                   const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
-                  const result = await saveOrDownloadExport(`tax-relief-audit-pack-${ya}.pdf`, bytes, 'application/pdf');
-                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成报税资料包。' : 'Could not build the audit pack.'));
+                  const result = await saveOrDownloadExport(`tax-relief-statement-${ya}.pdf`, bytes, 'application/pdf');
+                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成报税表。' : 'Could not build the tax relief statement.'));
                 } catch {
-                  notify(isZh ? '导出失败' : 'Export failed', isZh ? '生成报税资料包时出现问题。' : 'Something went wrong building the audit pack.');
+                  notify(isZh ? '导出失败' : 'Export failed', isZh ? '生成报税表时出现问题。' : 'Something went wrong building the tax relief statement.');
                 }
               } finally {
-                setExporting(false);
+                setExportingPdf(false);
               }
             }}
-            style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0, opacity: exporting || !tags?.length ? 0.5 : 1 }]}
+            style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0, opacity: exportingPdf || !tags?.length ? 0.5 : 1 }]}
           >
             <Icon name="download" size={16} color={theme.accent} />
             <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
-              {exporting ? (isZh ? '正在生成...' : 'Building...') : (isZh ? '导出报税资料包' : 'Export audit pack')}
+              {exportingPdf ? (isZh ? '正在生成...' : 'Building PDF...') : (isZh ? '导出报税表 (PDF)' : 'Export tax PDF')}
+            </Text>
+          </Pressable>
+          <Pressable
+            disabled={exportingZip || !schedule || !tags || tags.length === 0}
+            onPress={async () => {
+              if (!schedule || !tags) return;
+              setExportingZip(true);
+              try {
+                try {
+                  const bytes = await buildEvidenceZip(ya, schedule, tags, transactions);
+                  const result = await saveOrDownloadExport(`tax-relief-evidence-${ya}.zip`, bytes, 'application/zip');
+                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成小票证据包。' : 'Could not package receipt evidence.'));
+                } catch {
+                  notify(isZh ? '导出失败' : 'Export failed', isZh ? '打包小票证据时出现问题。' : 'Something went wrong packaging receipt evidence.');
+                }
+              } finally {
+                setExportingZip(false);
+              }
+            }}
+            style={[styles.actionRow, { borderColor: colorTheme.line2, marginTop: 0, opacity: exportingZip || !tags?.length ? 0.5 : 1 }]}
+          >
+            <Icon name="download" size={16} color={theme.accent} />
+            <Text style={{ color: theme.accent, fontFamily: uiFont(700), fontSize: 13.5 }}>
+              {exportingZip ? (isZh ? '正在打包...' : 'Zipping...') : (isZh ? '导出小票包 (.zip)' : 'Export receipts (.zip)')}
             </Text>
           </Pressable>
         </View>

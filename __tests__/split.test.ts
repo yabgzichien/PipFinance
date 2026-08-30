@@ -2,6 +2,7 @@ import {
   AGING_DAYS,
   applyPayment,
   apportionCents,
+  computeBillTotal,
   computeItemized,
   computeSplit,
   DEFAULT_SURCHARGES,
@@ -309,6 +310,37 @@ describe('computeItemized with a discount', () => {
   });
 });
 
+describe('computeBillTotal', () => {
+  it('computes simple subtotal with no surcharges', () => {
+    const lines = [{ amount: 12.5 }, { amount: 6.0 }, { amount: 3.5 }];
+    expect(computeBillTotal(lines, { serviceChargePct: 0, taxPct: 0 })).toBe(22.0);
+  });
+
+  it('computes total with service charge and tax', () => {
+    // Subtotal = 100. 10% service charge = 10. 6% tax on 110 = 6.60. Total = 116.60.
+    const lines = [{ amount: 50 }, { amount: 50 }];
+    expect(computeBillTotal(lines, DEFAULT_SURCHARGES)).toBe(116.6);
+  });
+
+  it('computes total with a before-discount', () => {
+    // Subtotal = 100, RM20 discount before -> base 80. 10% service = 8, 6% tax on 88 = 5.28. Total = 93.28.
+    const discount: Discount = { unit: 'amount', value: 20, timing: 'before' };
+    const lines = [{ amount: 100 }];
+    expect(computeBillTotal(lines, { serviceChargePct: 10, taxPct: 6, discount })).toBe(93.28);
+  });
+
+  it('computes total with an after-discount', () => {
+    // Subtotal = 100 -> 116.60 with surcharges, then RM10 off -> 106.60.
+    const discount: Discount = { unit: 'amount', value: 10, timing: 'after' };
+    const lines = [{ amount: 100 }];
+    expect(computeBillTotal(lines, { ...DEFAULT_SURCHARGES, discount })).toBe(106.6);
+  });
+
+  it('returns 0 for empty lines', () => {
+    expect(computeBillTotal([], DEFAULT_SURCHARGES)).toBe(0);
+  });
+});
+
 describe('outstanding and receivable total', () => {
   it('nets paid off owed and never goes negative', () => {
     expect(outstanding({ owed: 80, paid: 50 })).toBe(30);
@@ -572,3 +604,49 @@ describe('sharesFromSplit', () => {
     expect(sharesFromSplit(100, 100, [])).toBeNull();
   });
 });
+
+describe('OpenShare enriched fields', () => {
+  const TODAY = '2026-06-15';
+
+  it('preserves remark, categoryId, gross, owed, and paid in grouped open shares', () => {
+    const shares: OpenShare[] = [
+      {
+        shareId: 's1',
+        personId: 'p1',
+        personName: 'Ali',
+        outstanding: 35.0,
+        billDate: '2026-06-01',
+        merchant: 'Village Park Restaurant',
+        remark: 'Nasi Lemak Ayam Goreng',
+        categoryId: 'food',
+        gross: 105.0,
+        owed: 35.0,
+        paid: 0,
+      },
+      {
+        shareId: 's2',
+        personId: 'p1',
+        personName: 'Ali',
+        outstanding: 20.0,
+        billDate: '2026-06-05',
+        merchant: 'Hai Di Lao',
+        remark: 'Steamboat dinner',
+        categoryId: 'food',
+        gross: 120.0,
+        owed: 40.0,
+        paid: 20.0,
+      },
+    ];
+
+    const grouped = groupOpenSharesByPerson(shares, TODAY);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0].shares).toHaveLength(2);
+    expect(grouped[0].shares[0].remark).toBe('Nasi Lemak Ayam Goreng');
+    expect(grouped[0].shares[0].categoryId).toBe('food');
+    expect(grouped[0].shares[0].gross).toBe(105.0);
+    expect(grouped[0].shares[1].remark).toBe('Steamboat dinner');
+    expect(grouped[0].shares[1].paid).toBe(20.0);
+    expect(grouped[0].shares[1].owed).toBe(40.0);
+  });
+});
+

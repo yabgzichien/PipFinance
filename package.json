@@ -1,6 +1,6 @@
 {
   "name": "pip-expenses-tracker",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -10,7 +10,10 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "audit:type": "node tools/typeAudit/audit.js",
-    "audit:contrast": "node tools/contrastAudit/audit.js"
+    "audit:contrast": "node tools/contrastAudit/audit.js",
+    "limits": "sucrase-node tools/limitDashboard/report.ts",
+    "limits:watch": "sucrase-node tools/limitDashboard/report.ts --watch",
+    "limits:web": "sucrase-node tools/limitDashboard/report.ts --web"
   },
   "jest": {
     "preset": "jest-expo",

@@ -34,6 +34,12 @@ export const SUPPORTED_CURRENCIES: CurrencyMeta[] = [
   { code: 'KHR', label: 'Cambodian Riel', decimals: 0 },
   { code: 'LAK', label: 'Lao Kip', decimals: 0 },
   { code: 'MMK', label: 'Myanmar Kyat', decimals: 0 },
+  { code: 'TND', label: 'Tunisian Dinar', decimals: 3 },
+  { code: 'INR', label: 'Indian Rupee', decimals: 2 },
+  { code: 'KZT', label: 'Kazakhstani Tenge', decimals: 2 },
+  { code: 'RUB', label: 'Russian Ruble', decimals: 2 },
+  { code: 'UZS', label: 'Uzbekistani Som', decimals: 2 },
+  { code: 'PLN', label: 'Polish Złoty', decimals: 2 },
 ];
 
 const BY_CODE: Record<string, CurrencyMeta> = Object.fromEntries(

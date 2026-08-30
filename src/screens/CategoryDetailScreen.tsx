@@ -11,11 +11,12 @@ import * as haptics from '../lib/haptics';
 import { txnMonthKey } from '../lib/budget';
 import { catColorsForHue } from '../lib/catColors';
 import { monthLabel, shortDate } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import type { Category, Transaction } from '../lib/types';
 import { EXPENSE_ICONS, INCOME_ICONS, isCustomIcon } from './CategoriesScreen';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { platformShadow, spacing, type as typeScale } from '../theme';
@@ -76,6 +77,7 @@ export function CategoryDetailScreen({
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, formatShortDate, isZh } = useLanguage();
   const { transactions, categories, catById, updateCategoryIcon, updateCategoryLabel } = useAppData();
+  const dc = useDisplayCurrency();
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [activeId, setActiveId] = useState(categoryId);
   const [monthKey, setMonthKey] = useState(todayMonthKey());
@@ -329,7 +331,7 @@ export function CategoryDetailScreen({
             <View style={styles.heroTop}>
               <CatBadge category={cat} size={48} />
               <View style={{ flex: 1 }}>
-                <Amount value={total} size={typeScale.display} weight={700} />
+                <Amount value={dc.convert(total)} currency={dc.code} size={typeScale.display} weight={700} />
                 <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
                   {isZh
                     ? `${formatMonthLabel(monthKey, true)} 共 ${items.length} 笔交易`
@@ -337,7 +339,7 @@ export function CategoryDetailScreen({
                 </Caption>
                 {showCompare && (
                   <Caption color={colorTheme.ink3} style={{ marginTop: spacing.xs }}>
-                    {isZh ? `上月 · RM ${fmt(prevTotal)}` : `Last month · RM ${fmt(prevTotal)}`}
+                    {isZh ? `上月 · ${fmtMoney(dc.convert(prevTotal), dc.code)}` : `Last month · ${fmtMoney(dc.convert(prevTotal), dc.code)}`}
                   </Caption>
                 )}
               </View>

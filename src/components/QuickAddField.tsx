@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Icon } from './Icon';
+import { InfoButton } from './InfoButton';
 import { Caption, Eyebrow } from './ui';
 import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
@@ -37,7 +38,10 @@ export function QuickAddField({
 
   return (
     <View style={{ marginBottom: spacing.md }}>
-      <Eyebrow style={{ marginBottom: spacing.sm }}>{t('quickAddLabel')}</Eyebrow>
+      <View style={styles.eyebrowRow}>
+        <Eyebrow>{t('quickAddLabel')}</Eyebrow>
+        <InfoButton entry="quick_add" />
+      </View>
       <View style={[styles.row, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
         <TextInput
           value={text}
@@ -71,6 +75,7 @@ export function QuickAddField({
 }
 
 const styles = StyleSheet.create({
+  eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12 },
   input: { flex: 1, fontFamily: uiFont(600), fontSize: 15, paddingVertical: 12 },
   submit: { width: 34, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },

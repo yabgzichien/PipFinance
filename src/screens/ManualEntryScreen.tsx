@@ -102,7 +102,7 @@ export function ManualEntryScreen({
       setActiveCurrencies(active);
       if (initialCurrency) {
         setCurrency(initialCurrency);
-      } else if (initialAmount == null) {
+      } else {
         setCurrency(entry);
       }
       setRates(ratesFromCache(fx));
@@ -129,7 +129,11 @@ export function ManualEntryScreen({
     return (act.find((a) => a.cls === 'cash') ?? act[0])?.id ?? null;
   }, [accounts]);
   const [linkId, setLinkId] = useState<string | null>(defaultAcctId);
-  const [linkEffect, setLinkEffect] = useState<LinkEffect>('subtract');
+  const [linkEffect, setLinkEffect] = useState<LinkEffect>(() => {
+    const act = accounts.filter((a) => !a.archived);
+    const initialAcc = defaultAcctId ? act.find((a) => a.id === defaultAcctId) : null;
+    return initialAcc ? defaultLinkEffect(initialAcc.kind, initialType ?? 'expense') : (initialType === 'income' ? 'add' : 'subtract');
+  });
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
   const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
@@ -173,7 +177,11 @@ export function ManualEntryScreen({
   // Seed the required account selection once accounts are known, creating a
   // default "Cash" account if the user has none yet.
   useEffect(() => {
-    if (linkId) return;
+    if (linkId) {
+      const a = accounts.find((x) => x.id === linkId);
+      if (a) setLinkEffect(defaultLinkEffect(a.kind, type));
+      return;
+    }
     if (defaultAcctId) selectLink(defaultAcctId);
     else ensureDefaultAccount().then(selectLink);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,9 +217,10 @@ export function ManualEntryScreen({
     // drift a cent from double rounding); otherwise the MYR-equivalent is converted into the
     // account's own currency at the account's own rate (the inverse of `deriveMyr`).
     if (linkId && linkAccount) {
+      const effect: LinkEffect = linkAccount.kind === 'liability' ? linkEffect : defaultLinkEffect(linkAccount.kind, type);
       const linkAmt =
         linkAccount.currency === currency ? amt : deriveNative(myrAmt, linkAccount.currency, rateFor(rates, linkAccount.currency));
-      await recordBalanceLink(linkId, linkAmt, linkEffect, validDate);
+      await recordBalanceLink(linkId, linkAmt, effect, validDate);
     }
     onComplete(item, cat, activeSplit);
   };

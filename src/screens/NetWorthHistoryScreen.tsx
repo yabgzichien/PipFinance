@@ -7,10 +7,11 @@ import { Amount, Body, Caption, Card, Label, Title, TopBar } from '../components
 import { listFxRates } from '../db/fxRepo';
 import { monthLabel } from '../lib/dates';
 import { ratesFromCache } from '../lib/fx';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
 import { monthsWithData, netWorthSeries, type NetWorthPoint } from '../lib/networth';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { radius, spacing, type as typeScale, uiFont } from '../theme';
@@ -25,6 +26,7 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { t, formatMonthLabel, isZh } = useLanguage();
   const { accounts, balanceEntries } = useAppData();
+  const dc = useDisplayCurrency();
   const [search, setSearch] = useState('');
   const [rates, setRates] = useState<Record<string, number>>({});
 
@@ -129,11 +131,11 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
                           <Body weight={700}>{formatMonthLabel(r.monthKey, true)}</Body>
                           {r.delta !== null && (
                             <Label weight={700} color={up ? theme.accent : colorTheme.red} style={{ marginTop: spacing.xs }}>
-                              {up ? '▲' : '▼'} RM {fmt(Math.abs(r.delta))} {isZh ? '比上月' : 'vs prev month'}
+                              {up ? '▲' : '▼'} {fmtMoney(dc.convert(Math.abs(r.delta)), dc.code)} {isZh ? '比上月' : 'vs prev month'}
                             </Label>
                           )}
                         </View>
-                        <Amount value={r.net} size={typeScale.body} weight={700} color={r.net < 0 ? colorTheme.red : colorTheme.ink} />
+                        <Amount value={dc.convert(r.net)} currency={dc.code} size={typeScale.body} weight={700} color={r.net < 0 ? colorTheme.red : colorTheme.ink} />
                       </View>
                     );
                   })}

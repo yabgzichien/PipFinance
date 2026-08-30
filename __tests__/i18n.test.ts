@@ -65,7 +65,7 @@ describe('Glossary Localization', () => {
   it('contains Chinese translations for all glossary entries defined in English GLOSSARY', () => {
     const glossaryKeys = Object.keys(GLOSSARY);
     for (const key of glossaryKeys) {
-      const zhEntry = getGlossaryEntry(key, 'zh');
+      const zhEntry = ZH_GLOSSARY[key];
       expect(zhEntry).toBeDefined();
       expect(zhEntry?.term.length).toBeGreaterThan(0);
       expect(zhEntry?.short.length).toBeGreaterThan(0);

@@ -13,7 +13,10 @@
 
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
+import { getDisplayCurrency } from '../db/currencyRepo';
+import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
+import { ratesFromCache } from '../lib/fx';
 import {
   capDailyReminders,
   inferredFireHour,
@@ -59,6 +62,10 @@ export function useReminderSync(): void {
 
         const now = new Date();
         const today = todayISO();
+        // Notification copy states amounts in the same currency the app's screens do.
+        const [displayCode, fxRows] = await Promise.all([getDisplayCurrency(), listFxRates()]);
+        if (!alive) return;
+        const display = { code: displayCode, rates: ratesFromCache(fxRows) };
         const debts = groupOpenSharesByPerson(openShares, today);
 
         const commitmentById = new Map(commitments.map((c) => [c.id, c]));
@@ -92,11 +99,12 @@ export function useReminderSync(): void {
               enabled: owedReminderEnabled,
               oldestOverdueDays: oldestOverdueDays(openShares, today),
               debts,
+              display,
             },
             now
           ),
           ...planCommitmentReminders(
-            { enabled: commitmentReminderEnabled, occurrences: commitmentRows },
+            { enabled: commitmentReminderEnabled, occurrences: commitmentRows, display },
             now
           ),
         ];

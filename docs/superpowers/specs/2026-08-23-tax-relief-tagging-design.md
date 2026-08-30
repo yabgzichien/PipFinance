@@ -8,7 +8,7 @@ Background research: [docs/tax-relief-receipts-research.md](../../tax-relief-rec
 Malaysian taxpayers self-declare relief amounts into MyTax/Form BE with no receipts
 submitted at filing time. The real burden is (a) knowing which of their spending qualifies
 for a relief line at all, and (b) holding evidence good enough to survive an LHDN audit for
-up to 7 years. PipComp already captures receipt images and line items on scan
+up to 7 years. Pip already captures receipt images and line items on scan
 (`ScannedReceipt`, `Transaction.receiptUri`) and already tracks recurring bills
 (`Commitment`). This feature reuses that data to tag transactions against LHDN relief
 categories automatically, flag when the evidence behind a tag is weak, and produce a

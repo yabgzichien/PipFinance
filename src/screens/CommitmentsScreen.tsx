@@ -16,11 +16,12 @@ import { BASE_CURRENCY, decimalsFor, isMultiCurrency } from '../lib/currency';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { monthLabel, shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
-import { fmt, fmtMoney } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { RECEIVABLE_CLS } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { colors, numFont, radius, uiFont } from '../theme';
@@ -61,6 +62,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
     skipCommitment,
     previewCommitmentMatch,
   } = useAppData();
+  const dc = useDisplayCurrency();
 
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
   const [rates, setRates] = useState<Record<string, number>>({});
@@ -141,8 +143,8 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
       confirmAction(
         isZh ? '检测到匹配交易' : 'Found a matching transaction',
         isZh
-          ? `在 ${shortDate(match.date ?? match.createdAt)} 发现 ${match.merchantRaw || c.label} · RM ${fmt(match.amount)}。是否关联至此账单，而不是创建新流水？`
-          : `${match.merchantRaw || c.label} · RM ${fmt(match.amount)} on ${shortDate(match.date ?? match.createdAt)}. Link it to this bill instead of logging a new one?`,
+          ? `在 ${shortDate(match.date ?? match.createdAt)} 发现 ${match.merchantRaw || c.label} · ${fmtMoney(match.nativeAmount ?? match.amount, match.currency)}。是否关联至此账单，而不是创建新流水？`
+          : `${match.merchantRaw || c.label} · ${fmtMoney(match.nativeAmount ?? match.amount, match.currency)} on ${shortDate(match.date ?? match.createdAt)}. Link it to this bill instead of logging a new one?`,
         isZh ? '关联交易' : 'Link it',
         async () => { await payCommitment(o.id); }
       );
@@ -198,7 +200,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
                   ? (isZh ? '本月已全部付清' : 'All caught up')
                   : (isZh ? `本月剩余 ${unpaidCount} 项待付` : `${unpaidCount} left this month`)}
               </Eyebrow>
-              <Amount value={monthTotal} size={28} weight={700} color={theme.accent} />
+              <Amount value={dc.convert(monthTotal)} currency={dc.code} size={28} weight={700} color={theme.accent} />
               {record.total > 0 && (
                 <Text style={[styles.recordLine, { color: colorTheme.ink2 }]}>
                   {isZh
@@ -596,7 +598,7 @@ function CommitmentEditorModal({
                 {isMultiCurrency(activeCurrencies) && !editingExisting ? (
                   <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
                 ) : (
-                  <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currency === BASE_CURRENCY ? 'RM' : currency}</Text>
+                  <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
                 )}
                 <TextInput
                   value={amountText}
@@ -638,7 +640,7 @@ function CommitmentEditorModal({
           {kind === 'investment' && (
             <View style={{ marginTop: 18 }}>
               {investmentAccounts.length === 0 ? (
-                <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+                <Text style={[styles.emptySub, { color: colorTheme.amber }]}>
                   {isZh ? '请先在净资产中添加投资账户或持仓，然后再来设置定投计划。' : 'Add an investment holding or account in Net Worth first, then come back to set up the DCA.'}
                 </Text>
               ) : (

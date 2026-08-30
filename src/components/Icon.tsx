@@ -13,7 +13,7 @@ export type IconName =
   | 'chevronDown' | 'scan' | 'trending' | 'clock' | 'arrowRight' | 'search' | 'gallery' | 'wallet'
   | 'trash' | 'sliders' | 'gear' | 'alert' | 'pencil' | 'gift' | 'return' | 'percent'
   | 'home' | 'scale' | 'signal' | 'book' | 'shield' | 'store' | 'download' | 'file' | 'table'
-  | 'copy' | 'upload' | 'code' | 'pin';
+  | 'copy' | 'upload' | 'code' | 'pin' | 'chart' | 'filter';
 
 type RenderFn = (stroke: string, sw: number) => React.ReactNode;
 
@@ -194,6 +194,11 @@ const ICONS: Record<IconName, RenderFn> = {
       <Circle cx={8.5} cy={17} r={2} />
     </G>
   ),
+  filter: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Path d="M3 4.5h18l-7 8.2V19l-4 2v-8.3L3 4.5z" />
+    </G>
+  ),
   gear: (s, w) => (
     <G fill="none" stroke={s} strokeWidth={w}>
       <Circle cx={12} cy={12} r={3} />
@@ -326,6 +331,13 @@ const ICONS: Record<IconName, RenderFn> = {
       <Path d="M12 2a5 5 0 00-5 5c0 3.2 3.4 6.7 4.3 7.6a1 1 0 001.4 0C13.6 13.7 17 10.2 17 7a5 5 0 00-5-5z" />
       <Circle cx={12} cy={7} r={2} />
       <Line x1={12} y1={14.6} x2={12} y2={22} />
+    </G>
+  ),
+  chart: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Path d="M18 20V10" />
+      <Path d="M12 20V4" />
+      <Path d="M6 20V14" />
     </G>
   ),
 };

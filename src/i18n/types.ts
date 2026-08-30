@@ -304,12 +304,16 @@ export interface Translations {
   exploreTaskStreakDesc: string;
   exploreTaskRecapTitle: string;
   exploreTaskRecapDesc: string;
+  exploreTaskQuickAddTitle: string;
+  exploreTaskQuickAddDesc: string;
   taskCelebrationToast: string;
 
   // Setup Wizard / Onboarding
   introTitle: string;
   introSubtitle: string;
   introNext: string;
+  wizardDefaultCurrency: string;
+  wizardCurrencySearchPlaceholder: string;
   wizardImportTitle: string;
   wizardBudgetTitle: string;
   wizardRecurringTitle: string;

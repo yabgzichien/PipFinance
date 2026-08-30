@@ -1,137 +1,270 @@
 // tools/limitDashboard/report.ts
-// Ad-hoc usage report for the three shared LLM API keys baked into the app build
-// (EXPO_PUBLIC_GEMINI_API_KEY / EXPO_PUBLIC_GROQ_API_KEY / EXPO_PUBLIC_OPENROUTER_API_KEY,
-// see src/settings/settingsStore.ts). PipComp embeds one key set for every install, so each
-// provider's usage against these keys IS the combined usage of the whole user base  there's
-// no per-user key to aggregate separately.
+// Visual CLI Dashboard & Progress Bar Report for Shared LLM API Keys
 //
-// Coverage differs by provider, since only OpenRouter exposes a real usage-polling API:
-//   - OpenRouter: GET /api/v1/key  exact daily/weekly/monthly spend and remaining credit.
-//   - Groq: no usage-polling API exists. Fires one minimal ping request (same shape as
-//     GroqProvider.test in src/llm/groq.ts) and reads the x-ratelimit-* response headers
-//     a live RPM/TPM snapshot, NOT a daily total. Costs a sliver of real quota to run.
-//   - Gemini: no usage API at all. Prints the AI Studio console URL as a manual-check reminder.
+// Coverage & Polling:
+//   - OpenRouter: GET /api/v1/key -> exact spend, credit limit, and rate limits.
+//   - Groq: minimal ping to read x-ratelimit-* response headers -> live RPM/TPM headroom gauge.
+//   - Gemini: live connectivity ping + free-tier quota reference & AI Studio usage console link.
+//   - Failover Keys: Inspects every backup key to detect silent primary exhaustion.
 //
-// Checks every failover key per provider (src/llm/fallback.ts supports comma/newline-separated
-// backup keys), not just the first one, since a burned-out primary silently falling back to a
-// backup is exactly what this should surface.
-//
-// Run: npx tsx tools/limitDashboard/report.ts
+// Usage:
+//   npx tsx tools/limitDashboard/report.ts            # One-shot visual CLI dashboard
+//   npx tsx tools/limitDashboard/report.ts --watch    # Live refresh mode (updates every 5s)
+//   npx tsx tools/limitDashboard/report.ts --web      # Export and open interactive HTML GUI
+//   npx tsx tools/limitDashboard/report.ts --json     # Machine-readable JSON output
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'child_process';
+import {
+  fetchAllMetrics,
+  type DashboardMetrics,
+  type OpenRouterKeyMetric,
+  type GroqKeyMetric,
+  type GeminiKeyMetric,
+} from './metrics';
+import {
+  colors,
+  renderProgressBar,
+  renderBadge,
+  renderCard,
+  formatUSD,
+  formatNum,
+  generateHtmlDashboard,
+} from './ui';
 
-const ENV_LOCAL = path.join(__dirname, '../../.env.local');
-const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_PING_MODEL = 'qwen/qwen3.6-27b';
+const HTML_OUTPUT_PATH = path.join(__dirname, 'dashboard.html');
 
-function readEnvLocal(): Record<string, string> {
-  if (!fs.existsSync(ENV_LOCAL)) return {};
-  const out: Record<string, string> = {};
-  for (const line of fs.readFileSync(ENV_LOCAL, 'utf8').split('\n')) {
-    const m = line.match(/^([A-Z_]+)\s*=\s*(.*)$/);
-    if (m) out[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
-  }
-  return out;
+function renderHeader(): string {
+  const line1 = colors.bold('  PIPCOMP SHARED-KEY FREE TIER DASHBOARD');
+  const line2 = colors.dim('  Real-time quota headroom, spend progress & failover health');
+  const line3 = colors.gray('  Architecture: 1. Gemini (Primary) → 2. Groq (Fast Fallback) → 3. OpenRouter');
+  return renderCard('System Monitor', [line1, line2, '', line3], 76);
 }
 
-function splitKeys(raw: string): string[] {
-  return (raw || '').split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
-}
+function renderOpenRouterSection(keys: OpenRouterKeyMetric[]): string {
+  const lines: string[] = [];
 
-function keysFor(envVar: string, envLocal: Record<string, string>): string[] {
-  return splitKeys(process.env[envVar] || envLocal[envVar] || '');
-}
-
-function mask(key: string): string {
-  return key.length <= 10 ? '***' : `${key.slice(0, 6)}...${key.slice(-4)}`;
-}
-
-async function reportOpenRouter(keys: string[]): Promise<void> {
-  console.log('\n=== OpenRouter (real usage numbers) ===');
   if (keys.length === 0) {
-    console.log('  no key configured');
-    return;
+    lines.push(colors.yellow('  (No OpenRouter keys configured in .env.local)'));
+    return renderCard('1. OpenRouter (Spend & Credit Limits)', lines, 76);
   }
-  for (const key of keys) {
-    try {
-      const res = await fetch('https://openrouter.ai/api/v1/key', {
-        headers: { Authorization: `Bearer ${key}` },
-      });
-      if (!res.ok) {
-        console.log(`  ${mask(key)}: HTTP ${res.status}`);
-        continue;
-      }
-      const { data } = await res.json();
-      const limit = data.limit === null ? 'unlimited' : data.limit;
-      console.log(
-        `  ${mask(key)}: usage=${data.usage} (today=${data.usage_daily}, week=${data.usage_weekly}, month=${data.usage_monthly}) ` +
-          `limit=${limit} remaining=${data.limit_remaining ?? 'n/a'} freeTier=${data.is_free_tier}`
-      );
-    } catch (e: any) {
-      console.log(`  ${mask(key)}: request failed  ${e.message}`);
+
+  keys.forEach((k, idx) => {
+    const roleLabel = idx === 0 ? colors.cyan('[Primary]') : colors.magenta(`[Failover #${idx}]`);
+    const tierBadge = k.is_free_tier ? renderBadge('FREE TIER', 'info') : renderBadge('PAID TIER', 'neutral');
+    let statusBadge = renderBadge('HEALTHY', 'ok');
+    if (k.status === 'warning') statusBadge = renderBadge('WARN', 'warn');
+    else if (k.status === 'rate_limited') statusBadge = renderBadge('LIMITED', 'error');
+    else if (k.status === 'error') statusBadge = renderBadge('ERROR', 'error');
+
+    lines.push(`${roleLabel} ${colors.bold(k.maskedKey)}  ${tierBadge} ${statusBadge}`);
+
+    if (k.errorMessage) {
+      lines.push(colors.red(`    Error: ${k.errorMessage}`));
+      return;
     }
-  }
-}
 
-async function reportGroq(keys: string[]): Promise<void> {
-  console.log('\n=== Groq (live RPM/TPM snapshot, not a daily total) ===');
-  if (keys.length === 0) {
-    console.log('  no key configured');
-    return;
-  }
-  for (const key of keys) {
-    try {
-      const res = await fetch(GROQ_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
-          model: GROQ_PING_MODEL,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-          temperature: 0,
-        }),
-      });
-      if (!res.ok && res.status !== 429) {
-        console.log(`  ${mask(key)}: HTTP ${res.status}`);
-        continue;
-      }
-      const h = res.headers;
-      console.log(
-        `  ${mask(key)}: requests ${h.get('x-ratelimit-remaining-requests') ?? '?'}/${h.get('x-ratelimit-limit-requests') ?? '?'} remaining, ` +
-          `tokens ${h.get('x-ratelimit-remaining-tokens') ?? '?'}/${h.get('x-ratelimit-limit-tokens') ?? '?'} remaining` +
-          (res.status === 429 ? '  (rate-limited right now)' : '')
-      );
-    } catch (e: any) {
-      console.log(`  ${mask(key)}: request failed  ${e.message}`);
+    // Spend Progress Bar
+    if (k.limit !== null && k.limit > 0) {
+      const pct = (k.usage / k.limit) * 100;
+      const bar = renderProgressBar(pct, { width: 22 });
+      lines.push(`    Spend Limit:  ${bar} (${formatUSD(k.usage)} / ${formatUSD(k.limit)})`);
+      lines.push(`    Remaining:    ${colors.bold(formatUSD(k.limit_remaining))}`);
+    } else {
+      lines.push(`    Total Spend:  ${colors.bold(formatUSD(k.usage))}  ${colors.dim('(No account credit cap set)')}`);
     }
-  }
+
+    // Spend Breakdown
+    lines.push(
+      `    Breakdown:    Today: ${colors.cyan(formatUSD(k.usage_daily))}  │  Week: ${colors.cyan(
+        formatUSD(k.usage_weekly)
+      )}  │  Month: ${colors.cyan(formatUSD(k.usage_monthly))}`
+    );
+
+    if (k.rate_limit) {
+      lines.push(
+        `    Rate Limit:   ${colors.dim(`${k.rate_limit.requests} req / ${k.rate_limit.interval}`)}`
+      );
+    }
+    if (idx < keys.length - 1) lines.push(colors.gray('    ' + '─'.repeat(68)));
+  });
+
+  return renderCard('🌐 OpenRouter (Usage & Credits)', lines, 76);
 }
 
-function reportGemini(keys: string[]): void {
-  console.log('\n=== Gemini (no usage API  check manually) ===');
+function renderGroqSection(keys: GroqKeyMetric[]): string {
+  const lines: string[] = [];
+
   if (keys.length === 0) {
-    console.log('  no key configured');
-    return;
+    lines.push(colors.yellow('  (No Groq keys configured in .env.local)'));
+    return renderCard('2. Groq (Live Rate Limit Headroom)', lines, 76);
   }
-  console.log('  https://aistudio.google.com/usage');
-  for (const key of keys) {
-    console.log(`  configured key: ${mask(key)}`);
+
+  keys.forEach((g, idx) => {
+    const roleLabel = idx === 0 ? colors.cyan('[Primary]') : colors.magenta(`[Failover #${idx}]`);
+    let statusBadge = renderBadge('READY', 'ok');
+    if (g.status === 'warning') statusBadge = renderBadge('WARN', 'warn');
+    else if (g.status === 'rate_limited') statusBadge = renderBadge('429 LIMITED', 'error');
+    else if (g.status === 'error') statusBadge = renderBadge('OFFLINE', 'error');
+
+    lines.push(`${roleLabel} ${colors.bold(g.maskedKey)}  ${statusBadge}  ${colors.dim(`[Model: ${g.model}]`)}`);
+
+    if (g.errorMessage && g.status === 'error') {
+      lines.push(colors.red(`    Error: ${g.errorMessage}`));
+      return;
+    }
+
+    // RPM Progress Bar
+    const rpmBar = renderProgressBar(g.rpmPercentUsed, { width: 22 });
+    lines.push(
+      `    RPM (Req/Min): ${rpmBar} (${g.rpmUsed} / ${g.rpmLimit} used · ${colors.bold(
+        String(g.rpmRemaining)
+      )} left)`
+    );
+
+    // TPM Progress Bar
+    const tpmBar = renderProgressBar(g.tpmPercentUsed, { width: 22 });
+    lines.push(
+      `    TPM (Tokens):  ${tpmBar} (${formatNum(g.tpmUsed)} / ${formatNum(g.tpmLimit)} used · ${colors.bold(
+        formatNum(g.tpmRemaining)
+      )} left)`
+    );
+
+    if (g.resetTime) {
+      lines.push(`    Cooldown:      Reset in ${colors.yellow(g.resetTime)}`);
+    }
+
+    if (idx < keys.length - 1) lines.push(colors.gray('    ' + '─'.repeat(68)));
+  });
+
+  return renderCard('⚡ Groq (Live RPM / TPM Headroom)', lines, 76);
+}
+
+function renderGeminiSection(keys: GeminiKeyMetric[]): string {
+  const lines: string[] = [];
+
+  if (keys.length === 0) {
+    lines.push(colors.yellow('  (No Gemini keys configured in .env.local)'));
+    return renderCard('3. Google Gemini (Primary OCR & Docs)', lines, 76);
   }
+
+  keys.forEach((gm, idx) => {
+    const roleLabel = idx === 0 ? colors.cyan('[Primary]') : colors.magenta(`[Failover #${idx}]`);
+    let statusBadge = renderBadge('ACTIVE', 'ok');
+    if (gm.status === 'rate_limited') statusBadge = renderBadge('429 LIMITED', 'error');
+    else if (gm.status === 'error') statusBadge = renderBadge('INVALID / OFFLINE', 'error');
+
+    lines.push(`${roleLabel} ${colors.bold(gm.maskedKey)}  ${statusBadge}  ${colors.dim(`[Model: ${gm.model}]`)}`);
+
+    if (gm.errorMessage && gm.status === 'error') {
+      lines.push(colors.red(`    Error: ${gm.errorMessage}`));
+    } else {
+      lines.push(`    Free Quota:    ${colors.green('15 RPM')}  │  ${colors.green('1,500 RPD (Per Day)')}  │  ${colors.green('1,000,000 TPM')}`);
+    }
+    lines.push(`    Console:       ${colors.cyan(gm.consoleUrl)}`);
+
+    if (idx < keys.length - 1) lines.push(colors.gray('    ' + '─'.repeat(68)));
+  });
+
+  return renderCard('✨ Google Gemini (Primary OCR & Docs)', lines, 76);
+}
+
+function renderFailoverSummary(metrics: DashboardMetrics): string {
+  const lines: string[] = [];
+  const allKeysCount = metrics.openrouter.length + metrics.groq.length + metrics.gemini.length;
+  const anyRateLimited = [
+    ...metrics.openrouter,
+    ...metrics.groq,
+    ...metrics.gemini,
+  ].some((k) => k.status === 'rate_limited');
+
+  if (anyRateLimited) {
+    lines.push(
+      colors.yellow('  ⚠ Caution: One or more shared keys reached their rate limit. Fallback is active.')
+    );
+  } else {
+    lines.push(
+      colors.green('  ✔ All configured keys are operational. Automatic failover pool is ready.')
+    );
+  }
+
+  lines.push(
+    `  Total Keys Configured: ${colors.bold(String(allKeysCount))} (Gemini: ${metrics.gemini.length}, Groq: ${
+      metrics.groq.length
+    }, OpenRouter: ${metrics.openrouter.length})`
+  );
+  lines.push(`  Report Timestamp:      ${colors.dim(new Date(metrics.timestamp).toLocaleString())}`);
+
+  return renderCard('Status & Failover Health', lines, 76);
+}
+
+export function printCliDashboard(metrics: DashboardMetrics): void {
+  console.log('\n' + renderHeader());
+  console.log('\n' + renderGeminiSection(metrics.gemini));
+  console.log('\n' + renderGroqSection(metrics.groq));
+  console.log('\n' + renderOpenRouterSection(metrics.openrouter));
+  console.log('\n' + renderFailoverSummary(metrics) + '\n');
+}
+
+export function openUrl(filePath: string): void {
+  const start =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'win32'
+      ? 'start'
+      : 'xdg-open';
+  exec(`${start} "${filePath}"`, () => {});
 }
 
 async function main(): Promise<void> {
-  const envLocal = readEnvLocal();
-  const openrouterKeys = keysFor('EXPO_PUBLIC_OPENROUTER_API_KEY', envLocal);
-  const groqKeys = keysFor('EXPO_PUBLIC_GROQ_API_KEY', envLocal);
-  const geminiKeys = keysFor('EXPO_PUBLIC_GEMINI_API_KEY', envLocal);
+  const args = process.argv.slice(2);
+  const isWatch = args.includes('--watch') || args.includes('-w');
+  const isWeb = args.includes('--web') || args.includes('--gui');
+  const isJson = args.includes('--json');
 
-  console.log('PipComp shared-key usage report');
-  console.log("Every install shares these keys, so this IS the whole user base's usage.");
+  if (isJson) {
+    const metrics = await fetchAllMetrics();
+    console.log(JSON.stringify(metrics, null, 2));
+    return;
+  }
 
-  await reportOpenRouter(openrouterKeys);
-  await reportGroq(groqKeys);
-  reportGemini(geminiKeys);
+  if (isWeb) {
+    console.log(colors.cyan('Generating interactive HTML Limit Dashboard...'));
+    const metrics = await fetchAllMetrics();
+    const html = generateHtmlDashboard(metrics);
+    fs.writeFileSync(HTML_OUTPUT_PATH, html, 'utf8');
+    console.log(colors.green(`✔ Dashboard exported to: ${HTML_OUTPUT_PATH}`));
+    console.log(colors.dim('Opening in browser...'));
+    openUrl(HTML_OUTPUT_PATH);
+    return;
+  }
+
+  if (isWatch) {
+    const delayArgIndex = args.indexOf('--delay');
+    const delayMs = delayArgIndex !== -1 && args[delayArgIndex + 1] ? Number(args[delayArgIndex + 1]) : 5000;
+
+    const refresh = async () => {
+      // Clear terminal screen
+      process.stdout.write('\x1b[2J\x1b[0;0H');
+      console.log(colors.cyan(`[LIVE WATCH MODE - Refreshing every ${delayMs / 1000}s. Press Ctrl+C to exit]`));
+      const metrics = await fetchAllMetrics();
+      printCliDashboard(metrics);
+    };
+
+    await refresh();
+    setInterval(refresh, delayMs);
+    return;
+  }
+
+  // Default one-shot CLI view
+  const metrics = await fetchAllMetrics();
+  printCliDashboard(metrics);
 }
 
-main();
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(colors.red(`Fatal error in Limit Dashboard: ${err.message}`));
+    process.exit(1);
+  });
+}

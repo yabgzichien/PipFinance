@@ -11,7 +11,7 @@ import type { ExtractedTxn } from './types';
 // Prompt builder
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function buildPrompt(): string {
+export function buildPrompt(defaultCurrency: string = BASE_CURRENCY): string {
   return `Parse every transaction AND every account balance from the uploaded file(s) into JSON. Files may be bank statements, e-wallet exports, investment reports, loan statements, Google Sheets, Excel, CSV, or any financial record.
 
 ──────────────────────────────────────
@@ -21,6 +21,7 @@ For each transaction row found, output:
 - date: YYYY-MM-DD
 - description: merchant / payee name if available (clean name, remove codes, reference numbers, trailing digits), OR null if no merchant name is present (e.g. exports from personal finance apps / trackers that only record categories).
 - amount: NEGATIVE for expenses / debits, POSITIVE for income / credits
+- currency: 3-letter ISO code (e.g. "MYR", "USD", "SGD", "CNY", "JPY", "EUR", "GBP", etc.) read from the currency symbol, column, or statement header — use "${defaultCurrency}" if not stated
 - category: describe the category freely based on what you actually see in the document.
     • If the document / tracker already labels a category, ALWAYS preserve and use that label.
     • Use plain English (e.g. "restaurant", "groceries", "petrol", "salary", "online shopping", "electricity bill").
@@ -46,7 +47,7 @@ For each distinct account / holding in the file(s), output one entry:
 - name: account name as shown in the document
 - type: one of → "Cash", "Investments", "Mortgage", "Personal Loan", "Credit Card", "Pay Later", "Car Loan"
 - balance: current balance as a POSITIVE number (outstanding amount for loans/cards)
-- currency: 3-letter code (e.g. "MYR", "USD") — use "MYR" if not stated
+- currency: 3-letter code (e.g. "MYR", "USD", "SGD", "CNY", "JPY", "EUR", "GBP", etc.) — use "${defaultCurrency}" if not stated
 - as_of: YYYY-MM-DD date of the balance reading, or the statement end date
 - notes: ticker symbol for investments (e.g. "AAPL", "BTC"), or null
 
@@ -61,10 +62,10 @@ REPLY FORMAT — ONLY a JSON code block, no other text:
     "period": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }
   },
   "transactions": [
-    { "date": "YYYY-MM-DD", "description": "...", "amount": -0.00, "category": "...", "account": "..." }
+    { "date": "YYYY-MM-DD", "description": "...", "amount": -0.00, "currency": "${defaultCurrency}", "category": "...", "account": "..." }
   ],
   "accounts": [
-    { "name": "...", "type": "Cash", "balance": 0.00, "currency": "MYR", "as_of": "YYYY-MM-DD", "notes": null }
+    { "name": "...", "type": "Cash", "balance": 0.00, "currency": "${defaultCurrency}", "as_of": "YYYY-MM-DD", "notes": null }
   ]
 }
 \`\`\`
@@ -87,6 +88,7 @@ interface LLMTxn {
   date?: unknown;
   description?: unknown;
   amount?: unknown;
+  currency?: unknown;
   category?: unknown;
   account?: unknown;
 }
@@ -106,6 +108,7 @@ interface LLMTransfer {
   date?: unknown;
   description?: unknown;
   amount?: unknown;
+  currency?: unknown;
   account?: unknown;
 }
 
@@ -120,6 +123,7 @@ interface LLMCommitment {
   label?: unknown;
   kind?: unknown;
   amount?: unknown;
+  currency?: unknown;
   dueDay?: unknown;
   category?: unknown;
   fromAccount?: unknown;
@@ -164,6 +168,7 @@ export interface ParsedTransfer {
   description: string;
   amount: number; // always positive
   account: string | null;
+  currency: string;
 }
 
 export interface ParsedCommitmentOccurrence {
@@ -179,6 +184,7 @@ export interface ParsedCommitment {
   label: string;
   kind: 'expense' | 'investment';
   amount: number;
+  currency: string;
   dueDay: number;
   category: string | null;
   fromAccount: string | null;
@@ -227,7 +233,7 @@ const OCCURRENCE_STATUSES = new Set(['scheduled', 'paid', 'late', 'skipped']);
 const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_KEY_RE = /^\d{4}-\d{2}$/;
 
-export function parseJSON(raw: string): ParseResult {
+export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY): ParseResult {
   const stripped = raw
     .replace(/^```(?:json)?\s*/im, '')
     .replace(/\s*```\s*$/im, '')
@@ -257,9 +263,8 @@ export function parseJSON(raw: string): ParseResult {
       typeof r.account === 'string' && r.account.trim() && r.account.trim().toLowerCase() !== 'unknown'
         ? r.account.trim()
         : null;
-    // SECTION 1 of the prompt above never asks the model for a per-transaction currency (only
-    // SECTION 2's account balances carry one) so every imported transaction is plain MYR here.
-    return { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency: BASE_CURRENCY };
+    const currency = normalizeCurrency(r.currency, defaultCurrency);
+    return { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency };
   });
 
   // ── Accounts ──
@@ -279,7 +284,7 @@ export function parseJSON(raw: string): ParseResult {
       typeof r.notes === 'string' && r.notes.trim() ? r.notes.trim() : null;
     const quantity = typeof r.quantity === 'number' && Number.isFinite(r.quantity) ? r.quantity : null;
     const cost = typeof r.cost === 'number' && Number.isFinite(r.cost) ? r.cost : null;
-    const currency = normalizeCurrency(r.currency);
+    const currency = normalizeCurrency(r.currency, defaultCurrency);
     return {
       name,
       cls: clsId,
@@ -307,7 +312,8 @@ export function parseJSON(raw: string): ParseResult {
       typeof r.account === 'string' && r.account.trim() && r.account.trim().toLowerCase() !== 'unknown'
         ? r.account.trim()
         : null;
-    return { date, description, amount, account };
+    const currency = normalizeCurrency(r.currency, defaultCurrency);
+    return { date, description, amount, account, currency };
   });
 
   // ── Commitments (version 2) ──
@@ -327,6 +333,7 @@ export function parseJSON(raw: string): ParseResult {
       const startMonth = MONTH_KEY_RE.test(rawStart) ? rawStart : todayISO().slice(0, 7);
       const rawEnd = typeof r.endMonth === 'string' ? r.endMonth.trim() : '';
       const endMonth = MONTH_KEY_RE.test(rawEnd) ? rawEnd : null;
+      const currency = normalizeCurrency(r.currency, defaultCurrency);
       const occRows = Array.isArray(r.occurrences) ? r.occurrences : [];
       const occurrences: ParsedCommitmentOccurrence[] = occRows
         .map((o): ParsedCommitmentOccurrence | null => {
@@ -339,7 +346,7 @@ export function parseJSON(raw: string): ParseResult {
           return { dueDate: rawDue, status, paidOn, paidAmount };
         })
         .filter((o): o is ParsedCommitmentOccurrence => o !== null);
-      return { label, kind, amount, dueDay, category, fromAccount, toAccount, startMonth, endMonth, occurrences };
+      return { label, kind, amount, currency, dueDay, category, fromAccount, toAccount, startMonth, endMonth, occurrences };
     })
     .filter((c): c is ParsedCommitment => c !== null);
 

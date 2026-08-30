@@ -8,13 +8,17 @@ import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { PieChart } from '../components/PieChart';
 import { Pip } from '../components/Pip';
+import { TaskListSheet } from '../components/TaskListSheet';
+import { TourAnchor } from '../components/TourAnchor';
 import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
 import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
 import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
-import { fmt, fmtCompact } from '../lib/format';
+import { currencyPrefix, fmt, fmtCompact, fmtMoney } from '../lib/format';
 import { netWorth, netWorthSeries } from '../lib/networth';
+import type { Screen } from '../lib/screenNav';
 import { lastActiveDay, localDayNumber } from '../lib/streak';
+import { computeExploreTaskStatus, type ExploreTask } from '../lib/tasks';
 import { AGING_DAYS, daysBetween } from '../lib/split';
 import * as haptics from '../lib/haptics';
 import type { Category } from '../lib/types';
@@ -23,8 +27,9 @@ import { useNow } from '../state/useNow';
 import { useReducedMotion } from '../state/useReducedMotion';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
-import { shadowCard, spacing } from '../theme';
+import { shadowCard, spacing, uiFont } from '../theme';
 import { duration as motionDuration } from '../theme/motion';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
@@ -62,6 +67,10 @@ export function DashboardScreen({
   onOpenOwed = () => {},
   onOpenCommitments = () => {},
   onOpenCalendar = () => {},
+  onOpenCurrencySettings = () => {},
+  onOpenExport = () => {},
+  onGuideExploreTask = () => {},
+  activeTourAnchor = null,
 }: {
   onScan: () => void;
   onOpenAll: () => void;
@@ -76,6 +85,13 @@ export function DashboardScreen({
   /** Opens the activity calendar (CalendarScreen), defaulted to the current month, so the
    *  streak card's tap target has somewhere real to go. */
   onOpenCalendar?: () => void;
+  /** Destinations for the mascot's "things to explore" checklist rows. */
+  onOpenCurrencySettings?: () => void;
+  onOpenExport?: () => void;
+  /** Guided spotlight callback when tapping an explore checklist row */
+  onGuideExploreTask?: (task: ExploreTask) => void;
+  /** Active guided-tour anchor id, so the Recap header icon can spotlight itself. */
+  activeTourAnchor?: string | null;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -100,7 +116,57 @@ export function DashboardScreen({
     streakStartLabel,
     streakPaused,
     streakCelebrationToken,
+    tutorialComplete,
+    tasksDone,
+    pendingTaskCelebrations,
+    clearTaskCelebrations,
   } = useAppData();
+  const taskStatus = useMemo(() => computeExploreTaskStatus(tasksDone), [tasksDone]);
+  const [tasksSheetOpen, setTasksSheetOpen] = useState(false);
+
+  // A task completed elsewhere (e.g. exporting a report, or turning on a currency) surfaces its
+  // one-shot toast here, the first time Home renders after it: pendingTaskCelebrations is a
+  // count rather than a token because more than one task could complete before the user makes
+  // it back to Home. The count is frozen into local state at the moment the toast starts so a
+  // completion mid-animation doesn't rewrite the text of a toast already on screen.
+  const [taskCelebrating, setTaskCelebrating] = useState(false);
+  const [celebratedTaskCount, setCelebratedTaskCount] = useState(0);
+  // The toast has to render above the streak card and empty-state Card below it in the
+  // ScrollView, not just above its own header row: a plain nested `zIndex` only wins within its
+  // own stacking context, and those cards each start a new one (shadows/animated wrappers), so
+  // a toast mounted inside the header row painted *underneath* them regardless of zIndex. It's
+  // rendered instead as a sibling of the ScrollView, positioned via measureInWindow the same way
+  // TourSpotlight locates its cutout (see frameOffset there) — mascotRef's rect minus this
+  // overlay's own rect, so it lines up with the mascot regardless of any surrounding letterboxing.
+  const mascotRef = useRef<View>(null);
+  const celebrationOverlayRef = useRef<View>(null);
+  const [celebrationAnchor, setCelebrationAnchor] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (pendingTaskCelebrations > 0 && !taskCelebrating) {
+      setCelebratedTaskCount(pendingTaskCelebrations);
+      // Cleared here, not in the animation's onDone: onDone's timer is canceled if the user
+      // navigates off Home (unmounting DashboardScreen) before it fires, which used to leave
+      // pendingTaskCelebrations stuck at its old value  it'd then re-celebrate, possibly
+      // stacked with a newer completion, the next time Home mounted.
+      clearTaskCelebrations();
+      mascotRef.current?.measureInWindow((mx, my, mw, mh) => {
+        celebrationOverlayRef.current?.measureInWindow((ox, oy) => {
+          setCelebrationAnchor({ x: mx - ox, y: my - oy, width: mw, height: mh });
+          setTaskCelebrating(true);
+          haptics.commit();
+        });
+      });
+    }
+  }, [pendingTaskCelebrations, taskCelebrating, clearTaskCelebrations]);
+  const navigateToExploreTask = (screen: Screen) => {
+    if (screen === 'breakdown') onOpenBreakdown();
+    else if (screen === 'networth') onOpenNetWorth();
+    else if (screen === 'currencySettings') onOpenCurrencySettings();
+    else if (screen === 'export') onOpenExport();
+    else if (screen === 'commitments') onOpenCommitments();
+    else if (screen === 'budget') onOpenBudget();
+    else if (screen === 'recap') onOpenRecap();
+  };
   const nw = useMemo(() => netWorth(accounts, accountValues), [accounts, accountValues]);
   const netWorthTrend = useMemo(
     () => netWorthSeries(accounts, balanceEntries, lastMonths(6)).map((p) => p.net),
@@ -126,6 +192,8 @@ export function DashboardScreen({
     for (const t of monthExpenses) m[t.categoryId ?? 'other'] = (m[t.categoryId ?? 'other'] ?? 0) + t.amount;
     return m;
   }, [monthExpenses]);
+
+  const dc = useDisplayCurrency();
 
   const breakdown = useMemo(() => {
     const byCat: Record<string, number> = {};
@@ -181,7 +249,7 @@ export function DashboardScreen({
     if (commitmentsDue.overdue) {
       return {
         icon: 'clock' as IconName,
-        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
         sub: 'Something is overdue. Tap to catch up.',
         onPress: onOpenCommitments,
       };
@@ -189,7 +257,7 @@ export function DashboardScreen({
     if (owed.overdue) {
       return {
         icon: 'gift' as IconName,
-        title: `RM ${fmt(owed.total)} owed to you`,
+        title: `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
         sub: `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`,
         onPress: onOpenOwed,
       };
@@ -197,7 +265,7 @@ export function DashboardScreen({
     if (commitmentsDue.count > 0) {
       return {
         icon: 'clock' as IconName,
-        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · RM ${fmt(commitmentsDue.total)}`,
+        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
         sub: 'Due this month. Tap to tick off.',
         onPress: onOpenCommitments,
       };
@@ -205,13 +273,13 @@ export function DashboardScreen({
     if (owed.total > 0) {
       return {
         icon: 'gift' as IconName,
-        title: `RM ${fmt(owed.total)} owed to you`,
+        title: `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
         sub: `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`,
         onPress: onOpenOwed,
       };
     }
     return null;
-  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed]);
+  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const empty = transactions.length === 0;
 
@@ -241,10 +309,21 @@ export function DashboardScreen({
     haptics.payoff();
   }, [streakCelebrationToken]);
 
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (activeTourAnchor === 'tour_budget_card') {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    } else if (activeTourAnchor === 'tour_breakdown_card') {
+      scrollRef.current?.scrollTo({ y: 140, animated: true });
+    } else if (activeTourAnchor === 'tour_streak_card' || activeTourAnchor === 'tour_recap_btn') {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    }
+  }, [activeTourAnchor]);
+
   return (
     <FadeIn style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       {/* Bottom padding clears the bottom nav's raised Add button, which overhangs the bar. */}
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 40 /* spacing-audit-ignore: tab-bar clearance, not rhythm */ }} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 40 /* spacing-audit-ignore: tab-bar clearance, not rhythm */ }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
@@ -252,52 +331,74 @@ export function DashboardScreen({
             <Title>{formatGreeting(now)}</Title>
           </View>
           <View style={styles.headerActions}>
-            <HeaderIcon name="trending" onPress={onOpenRecap} />
-            <View style={[styles.pipBubble, { backgroundColor: theme.accentTint }]}>
-              {sleepy ? <Pip size={52} expr="sleepy" /> : <Pip size={58} expr="idle" float />}
+            <TourAnchor id="tour_recap_btn" activeId={activeTourAnchor}>
+              <HeaderIcon name="chart" onPress={onOpenRecap} />
+            </TourAnchor>
+            <View ref={mascotRef} style={styles.mascotWrap}>
+              <Pressable
+                onPress={() => setTasksSheetOpen(true)}
+                style={({ pressed }) => [styles.pipBubble, { backgroundColor: theme.accentTint }, pressed && { transform: [{ scale: 0.94 }] }]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  taskStatus.pendingCount > 0
+                    ? `${taskStatus.pendingCount} ${t('exploreTasksBadgeLabel')}`
+                    : t('exploreTasksSheetTitle')
+                }
+              >
+                {sleepy ? <Pip size={44} expr="sleepy" /> : <Pip size={49} expr="idle" float />}
+                {taskStatus.pendingCount > 0 && (
+                  <View style={[styles.mascotBadge, { backgroundColor: colorTheme.red, borderColor: colorTheme.bg }]}>
+                    <Text style={styles.mascotBadgeText}>{taskStatus.pendingCount > 9 ? '9+' : taskStatus.pendingCount}</Text>
+                  </View>
+                )}
+              </Pressable>
             </View>
           </View>
         </View>
 
         {empty ? (
-          <EmptyState />
+          tutorialComplete && <EmptyState />
         ) : (
           <>
             {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
                 checks, before the money. Tapping it opens the full activity calendar. */}
-            <View style={styles.streakWrap}>
-              <StreakCard
-                streak={streak}
-                week={streakWeek}
-                todayIndex={streakTodayIndex}
-                freezeAvailable={streakFreezeAvailable}
-                graduated={streakGraduated}
-                startLabel={streakStartLabel}
-                paused={streakPaused}
-                onPress={onOpenCalendar}
-              />
-              {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
-            </View>
+            <TourAnchor id="tour_streak_card" activeId={activeTourAnchor}>
+              <View style={styles.streakWrap}>
+                <StreakCard
+                  streak={streak}
+                  week={streakWeek}
+                  todayIndex={streakTodayIndex}
+                  freezeAvailable={streakFreezeAvailable}
+                  graduated={streakGraduated}
+                  startLabel={streakStartLabel}
+                  paused={streakPaused}
+                  onPress={onOpenCalendar}
+                />
+                {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
+              </View>
+            </TourAnchor>
 
             {/* 2 — Money: a segmented Cash flow / Net worth card, same as before. The Cash flow
                 side's headline number is adaptive rather than fixed (see CashFlowView) so a
                 first-run or pre-payday user is never greeted by a red negative. */}
-            <SummaryCard
-              net={net}
-              received={received}
-              spent={spent}
-              budgetLeft={budgetLeft}
-              hasAnyIncome={hasAnyIncome}
-              hasBudget={hasBudget}
-              breakdown={breakdown}
-              catById={catById}
-              onSeeAll={onOpenBreakdown}
-              netWorthValue={nw.net}
-              assets={nw.assets}
-              liabilities={nw.liabilities}
-              netWorthTrend={netWorthTrend}
-              onOpenNetWorth={onOpenNetWorth}
-            />
+            <TourAnchor id="tour_breakdown_card" activeId={activeTourAnchor}>
+              <SummaryCard
+                net={net}
+                received={received}
+                spent={spent}
+                budgetLeft={budgetLeft}
+                hasAnyIncome={hasAnyIncome}
+                hasBudget={hasBudget}
+                breakdown={breakdown}
+                catById={catById}
+                onSeeAll={onOpenBreakdown}
+                netWorthValue={nw.net}
+                assets={nw.assets}
+                liabilities={nw.liabilities}
+                netWorthTrend={netWorthTrend}
+                onOpenNetWorth={onOpenNetWorth}
+              />
+            </TourAnchor>
 
             {/* 3 — Needs you: at most one row. Today up to three independent cards could all
                 render at once (owed / commitments / safe income); this picks the single most
@@ -318,45 +419,47 @@ export function DashboardScreen({
             )}
 
             {/* This month budget */}
-            <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
-              {hasBudget ? (
-                <>
-                  <View style={styles.sectionHead}>
-                    <Eyebrow>{isZh ? `本月预算 · ${monthName()}` : `Budget This Month · ${monthName()}`}</Eyebrow>
-                    <Pressable onPress={onOpenBudget} hitSlop={8}>
-                      <Label weight={700} color={theme.accent}>{t('manage')}</Label>
-                    </Pressable>
-                  </View>
-                  <BudgetProgressList
-                    allocations={allocations}
-                    spentByCat={spentByCat}
-                    catById={catById}
-                    onPressCategory={onOpenCategory}
-                  />
-                </>
-              ) : (
-                <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
-                  <Card style={styles.budgetCta}>
-                    <View style={[styles.ctaIcon, { backgroundColor: theme.accentTint }]}>
-                      <Icon name="wallet" size={22} color={theme.accent} />
+            <TourAnchor id="tour_budget_card" activeId={activeTourAnchor}>
+              <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
+                {hasBudget ? (
+                  <>
+                    <View style={styles.sectionHead}>
+                      <Eyebrow>{isZh ? `本月预算 · ${monthName()}` : `Budget This Month · ${monthName()}`}</Eyebrow>
+                      <Pressable onPress={onOpenBudget} hitSlop={8}>
+                        <Label weight={700} color={theme.accent}>{t('manage')}</Label>
+                      </Pressable>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Body weight={700}>{isZh ? '设置月度预算' : 'Set a monthly budget'}</Body>
-                      <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
-                        {isZh ? '规划预计收入并设置各分类限额。' : 'Plan income and allocate spend per category.'}
-                      </Label>
-                    </View>
-                    <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-                  </Card>
-                </Pressable>
-              )}
-            </View>
+                    <BudgetProgressList
+                      allocations={allocations}
+                      spentByCat={spentByCat}
+                      catById={catById}
+                      onPressCategory={onOpenCategory}
+                    />
+                  </>
+                ) : (
+                  <Pressable onPress={onOpenBudget} style={({ pressed }) => [{ opacity: pressed ? 0.95 : 1 }]}>
+                    <Card style={styles.budgetCta}>
+                      <View style={[styles.ctaIcon, { backgroundColor: theme.accentTint }]}>
+                        <Icon name="wallet" size={22} color={theme.accent} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Body weight={700}>{isZh ? '设置月度预算' : 'Set a monthly budget'}</Body>
+                        <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+                          {isZh ? '规划预计收入并设置各分类限额。' : 'Plan income and allocate spend per category.'}
+                        </Label>
+                      </View>
+                      <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                    </Card>
+                  </Pressable>
+                )}
+              </View>
+            </TourAnchor>
           </>
         )}
 
         {/* Empty state: nothing to explore yet, so the one thing to do gets a full-width CTA on
             top of the bottom-nav button. */}
-        {empty && (
+        {empty && tutorialComplete && (
           <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
             <PrimaryButton onPress={onScan} height={54}>
               <Icon name="plus" size={21} color="#fff" stroke={2.4} />
@@ -366,6 +469,30 @@ export function DashboardScreen({
           </View>
         )}
       </ScrollView>
+      <View ref={celebrationOverlayRef} style={[StyleSheet.absoluteFillObject, styles.taskCelebrationOverlay]} pointerEvents="none">
+        {taskCelebrating && celebrationAnchor && (
+          <View
+            style={[
+              styles.taskCelebrationAnchor,
+              { left: celebrationAnchor.x, top: celebrationAnchor.y, width: celebrationAnchor.width, height: celebrationAnchor.height },
+            ]}
+          >
+            <TaskCelebration
+              count={celebratedTaskCount}
+              onDone={() => setTaskCelebrating(false)}
+            />
+          </View>
+        )}
+      </View>
+      <TaskListSheet
+        visible={tasksSheetOpen}
+        tasksDone={tasksDone}
+        onClose={() => setTasksSheetOpen(false)}
+        onGuide={(task) => {
+          setTasksSheetOpen(false);
+          onGuideExploreTask(task);
+        }}
+      />
     </FadeIn>
   );
 }
@@ -684,6 +811,97 @@ function StreakCelebration({ onDone }: { onDone: () => void }) {
   );
 }
 
+const TASK_EMBER_COUNT = 3;
+
+/**
+ * One-shot celebration when the user completes one of the mascot's "things to explore" tasks
+ * (see src/lib/tasks.ts) and comes back to Home. Deliberately smaller than StreakCelebration
+ * (fewer embers, no Pip pop) since this fires far more often  8 times per install at most, vs.
+ * the streak's every-day cadence  and a toast pill names what just happened, since "one of
+ * eight possible things" isn't legible from a burst alone the way a streak number already is.
+ *
+ * Same mount-driven/reduced-motion contract as StreakCelebration: skips entirely (both the burst
+ * and the toast) under reduced motion, calling `onDone` immediately.
+ */
+function TaskCelebration({ count, onDone }: { count: number; onDone: () => void }) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const reducedMotion = useReducedMotion();
+  const { t } = useLanguage();
+  const embers = useRef(Array.from({ length: TASK_EMBER_COUNT }, () => new Animated.Value(0))).current;
+  const toast = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (reducedMotion) {
+      onDone();
+      return;
+    }
+    const emberAnims = embers.map((e, i) =>
+      Animated.timing(e, {
+        toValue: 1,
+        duration: motionDuration.celebrate,
+        delay: 60 + i * 40,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      })
+    );
+    Animated.parallel(emberAnims).start();
+    const toastHoldMs = 1500;
+    Animated.sequence([
+      Animated.timing(toast, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.delay(toastHoldMs),
+      Animated.timing(toast, { toValue: 0, duration: 260, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+    const tailMs = 220 + toastHoldMs + 260;
+    const timer = setTimeout(onDone, tailMs);
+    return () => clearTimeout(timer);
+    // Intentionally mount-only, same reasoning as StreakCelebration above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (reducedMotion) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.taskCelebrationWrap}>
+      {embers.map((e, i) => {
+        const spread = (i - (TASK_EMBER_COUNT - 1) / 2) * 8;
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.taskEmber,
+              { backgroundColor: theme.accent },
+              {
+                opacity: e.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 1, 0] }),
+                transform: [
+                  { translateY: e.interpolate({ inputRange: [0, 1], outputRange: [0, -30] }) },
+                  { translateX: e.interpolate({ inputRange: [0, 1], outputRange: [0, spread] }) },
+                  { scale: e.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0.2] }) },
+                ],
+              },
+            ]}
+          />
+        );
+      })}
+      <Animated.View
+        style={[
+          styles.taskToast,
+          { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2, ...shadowCard },
+          {
+            opacity: toast,
+            transform: [{ translateY: toast.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }],
+          },
+        ]}
+      >
+        <Icon name="check" size={13} color={theme.accent} stroke={2.6} />
+        <Caption color={colorTheme.ink} style={{ marginLeft: 5 }}>
+          {t('taskCelebrationToast', { count })}
+        </Caption>
+      </Animated.View>
+    </View>
+  );
+}
+
 /**
  * React Native Web's `pagingEnabled` sets `scroll-snap-type: x mandatory` on the scroller and
  * `scroll-snap-align: start` on a wrapper it auto-generates around each direct child, but never
@@ -753,6 +971,7 @@ function SummaryCard({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const panels = useMemo(() => heroPanels(hasBudget), [hasBudget]);
   const defaultPanel = useMemo(
     () => adaptivePanel(hasAnyIncome, hasBudget),
@@ -802,7 +1021,7 @@ function SummaryCard({
           {panels.map((panel) => (
             <View key={panel} ref={pinWebScrollSnapStop} style={{ width: cardWidth }}>
               {panel === 'networth' ? (
-                <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} trend={netWorthTrend} onSeeAll={onOpenNetWorth} />
+                <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} trend={netWorthTrend} onSeeAll={onOpenNetWorth} dc={dc} />
               ) : (
                 <CashFlowView
                   panel={panel}
@@ -813,6 +1032,7 @@ function SummaryCard({
                   breakdown={breakdown}
                   catById={catById}
                   onSeeAll={onSeeAll}
+                  dc={dc}
                 />
               )}
             </View>
@@ -844,6 +1064,7 @@ function CashFlowView({
   breakdown,
   catById,
   onSeeAll,
+  dc,
 }: {
   panel: Exclude<HeroPanel, 'networth'>;
   net: number;
@@ -853,6 +1074,7 @@ function CashFlowView({
   breakdown: { catId: string; amt: number }[];
   catById: Record<string, Category>;
   onSeeAll: () => void;
+  dc: DisplayCurrency;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -874,7 +1096,7 @@ function CashFlowView({
         : (isZh ? `${monthName()} 还剩 ${daysLeftInMonth()} 天` : `${daysLeftInMonth()} days left in ${monthName()}`);
   const heroValue = panel === 'spent' ? spent : panel === 'cashflow' ? net : budgetLeft;
   const heroNegative = heroValue < 0;
-  const heroAmount = `RM ${fmtCompact(Math.abs(heroValue))}`;
+  const heroAmount = `${currencyPrefix(dc.code)} ${fmtCompact(Math.abs(dc.convert(heroValue)))}`;
 
   // Cash flow and spent both get a signed, colored treatment so either reads at a glance
   // without reading the caption underneath: cash flow uses accounting parentheses, spent a
@@ -900,7 +1122,7 @@ function CashFlowView({
         <View style={{ flex: 1 }}>
           <View style={styles.eyebrowRow}>
             <Eyebrow>{eyebrow}</Eyebrow>
-            <InfoButton entry={panel === 'cashflow' ? 'net_cash_flow' : panel === 'left' ? 'unallocated' : 'net_cash_flow'} />
+            {panel === 'cashflow' && <InfoButton entry="net_cash_flow" />}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: spacing.xs }}>
             <Display numeric color={heroColor} adjustsFontSizeToFit numberOfLines={1} minimumFontScale={0.55}>{heroText}</Display>
@@ -909,7 +1131,7 @@ function CashFlowView({
         </View>
         {panel === 'cashflow' && (
           <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-            <Label numeric color={theme.onTint}>{`RM ${fmt(received)}`}</Label>
+            <Label numeric color={theme.onTint}>{fmtMoney(dc.convert(received), dc.code)}</Label>
             <Caption color={colorTheme.ink2}>{isZh ? '收入' : 'income'}</Caption>
           </View>
         )}
@@ -938,12 +1160,14 @@ function NetWorthView({
   liabilities,
   trend,
   onSeeAll,
+  dc,
 }: {
   net: number;
   assets: number;
   liabilities: number;
   trend: number[];
   onSeeAll: () => void;
+  dc: DisplayCurrency;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -970,13 +1194,13 @@ function NetWorthView({
               minimumFontScale={0.55}
               style={styles.netWorthAmount}
             >
-              {`${pos ? '' : '−'}RM ${fmtCompact(Math.abs(net))}`}
+              {`${pos ? '' : '−'}${currencyPrefix(dc.code)} ${fmtCompact(Math.abs(dc.convert(net)))}`}
             </Display>
           </View>
           <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{isZh ? '资产 − 负债 · 今日' : 'Assets − Liabilities · today'}</Caption>
         </View>
         <View style={[styles.incomeBadge, { backgroundColor: theme.accentSoft }]}>
-          <Label numeric color={theme.onTint}>{`RM ${fmt(assets)}`}</Label>
+          <Label numeric color={theme.onTint}>{fmtMoney(dc.convert(assets), dc.code)}</Label>
           <Caption color={colorTheme.ink2}>{t('assets')}</Caption>
         </View>
       </View>
@@ -990,7 +1214,7 @@ function NetWorthView({
             <NetWorthSparkline values={trend} color={trendColor} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Label weight={500} numberOfLines={1}>
-                {delta === null ? (isZh ? '近6个月趋势' : '6-month trend') : `${deltaUp ? '+' : '−'}RM ${fmt(Math.abs(delta))} ${isZh ? '较上月' : 'vs last month'}`}
+                {delta === null ? (isZh ? '近6个月趋势' : '6-month trend') : `${deltaUp ? '+' : '−'}${fmtMoney(dc.convert(Math.abs(delta)), dc.code)} ${isZh ? '较上月' : 'vs last month'}`}
               </Label>
               <Caption color={colorTheme.ink2} style={{ marginTop: 2 }}>{isZh ? '近6个月趋势' : '6-month trend'}</Caption>
             </View>
@@ -1006,14 +1230,18 @@ function NetWorthSparkline({ values, color }: { values: number[]; color: string 
   const W = 56;
   const H = 56;
   const pd = 6;
+  if (values.length < 2) return null;
   const mn = Math.min(...values);
   const mx = Math.max(...values);
-  const rng = mx - mn || 1;
-  const pts = values.map((v, i) => [pd + (i / (values.length - 1)) * (W - pd * 2), pd + (1 - (v - mn) / rng) * (H - pd * 2)]);
+  const rng = mx - mn;
+  const pts = values.map((v, i) => [
+    pd + (i / (values.length - 1)) * (W - pd * 2),
+    rng === 0 ? H / 2 : pd + (1 - (v - mn) / rng) * (H - pd * 2),
+  ]);
   const line = pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
   const last = pts[pts.length - 1];
   return (
-    <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+    <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ width: W, height: H }}>
       <Path d={line} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
       <Circle cx={last[0]} cy={last[1]} r={3} fill={color} />
     </Svg>
@@ -1038,7 +1266,29 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.xs, paddingBottom: spacing.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerIcon: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
-  pipBubble: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  mascotWrap: { position: 'relative' },
+  // zIndex has to be set here, on the overlay itself, not just on its taskCelebrationAnchor
+  // child: a child's zIndex only ranks it among ITS OWN siblings, and this overlay has none  it
+  // competes against the ScrollView (its actual sibling) as a peer, where both defaulted to
+  // "auto" and the browser wasn't reliably picking DOM order (this View, though later in the
+  // tree, kept painting under ScrollView's content). An explicit zIndex here removes that
+  // ambiguity outright instead of relying on paint order between two auto-zIndex siblings.
+  taskCelebrationOverlay: { zIndex: 1000, elevation: 1000 },
+  taskCelebrationAnchor: { position: 'absolute' },
+  pipBubble: { width: 38, height: 38, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  mascotBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -8,
+    minWidth: 17.6,
+    height: 17.6,
+    borderRadius: 999,
+    paddingHorizontal: 4.4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  mascotBadgeText: { color: '#fff', fontSize: 10.5, fontFamily: uiFont(800), lineHeight: 13 },
 
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
@@ -1081,6 +1331,26 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   ember: { position: 'absolute', bottom: 20, width: 7, height: 7, borderRadius: 4 },
+
+  /* task-completed celebration (mascot bubble) */
+  taskCelebrationWrap: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    alignItems: 'flex-end',
+    zIndex: 3,
+  },
+  taskEmber: { position: 'absolute', top: 16, right: 16, width: 5, height: 5, borderRadius: 3 },
+  taskToast: {
+    position: 'absolute',
+    top: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
 
   /* summary hero carousel */
   heroDotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },

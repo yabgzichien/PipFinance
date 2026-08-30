@@ -7,6 +7,7 @@ import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { Pip } from '../../components/Pip';
 import { Body, BtnLabel, Card, Eyebrow, PrimaryButton, Title } from '../../components/ui';
+import { useLanguage } from '../../i18n';
 import * as haptics from '../../lib/haptics';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
@@ -28,6 +29,7 @@ export function ImportStep({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
 
   const handleStartImport = () => {
     haptics.tap();
@@ -60,28 +62,28 @@ export function ImportStep({
         </FadeIn>
         <FadeIn delay={stagger}>
           <Title style={{ marginTop: spacing.base, textAlign: 'center' }}>
-            {hasImported ? 'Your data is imported' : 'Switching from another tracker?'}
+            {hasImported ? t('importDoneTitle') : t('importSwitchTracker')}
           </Title>
         </FadeIn>
         <FadeIn delay={stagger * 2}>
           <Body color={colorTheme.ink2} style={styles.subtitle}>
             {hasImported
-              ? "You're all set. Continue to finish setting up Pip, or bring in another file first."
-              : 'If you have data from an old money manager, bank statements, or spreadsheets, Pip can bring it all over with AI.'}
+              ? t('importDoneSubtitle')
+              : t('importSwitchSubtitle')}
           </Body>
         </FadeIn>
       </View>
 
       <FadeIn delay={stagger * 3}>
         <Card style={[styles.infoCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <Eyebrow style={{ marginBottom: 8, color: colorTheme.ink }}>What Pip can import</Eyebrow>
+          <Eyebrow style={{ marginBottom: 8, color: colorTheme.ink }}>{t('importWhatPipCanImport')}</Eyebrow>
           <View style={styles.benefitRow}>
             <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
               <Icon name="receipt" size={15} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>Transactions & spending</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>Past expenses and income automatically categorized</Text>
+              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitTxnTitle')}</Text>
+              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitTxnDesc')}</Text>
             </View>
           </View>
 
@@ -90,8 +92,8 @@ export function ImportStep({
               <Icon name="wallet" size={15} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>Accounts & balances</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>Bank, e-wallet, savings & liability balances</Text>
+              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitAccountsTitle')}</Text>
+              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitAccountsDesc')}</Text>
             </View>
           </View>
 
@@ -100,15 +102,15 @@ export function ImportStep({
               <Icon name="clock" size={15} color={theme.accent} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>Recurring bills</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>Monthly subscriptions and repeating commitments</Text>
+              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitRecurringTitle')}</Text>
+              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitRecurringDesc')}</Text>
             </View>
           </View>
 
           <View style={[styles.compatibleBox, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
             <Icon name="sparkles" size={13} color={theme.accent} />
             <Text style={[styles.compatibleText, { color: colorTheme.ink2 }]}>
-              Works with Money Manager, Spendee, Wallet, Monefy, Excel, bank PDFs & statements.
+              {t('importCompatibleText')}
             </Text>
           </View>
         </Card>
@@ -118,17 +120,17 @@ export function ImportStep({
         {hasImported ? (
           <>
             <PrimaryButton onPress={handleContinue}>
-              <BtnLabel>Continue</BtnLabel>
+              <BtnLabel>{t('importContinue')}</BtnLabel>
               <Icon name="arrowRight" size={18} color="#fff" />
             </PrimaryButton>
             <Pressable
               onPress={handleStartImport}
               style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
               accessibilityRole="button"
-              accessibilityLabel="Import something else instead"
+              accessibilityLabel={t('importSomethingElse')}
             >
               <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
-                Import something else instead
+                {t('importSomethingElse')}
               </Text>
             </Pressable>
           </>
@@ -136,16 +138,16 @@ export function ImportStep({
           <>
             <PrimaryButton onPress={handleStartImport}>
               <Icon name="sparkles" size={18} color="#fff" />
-              <BtnLabel>Import from old money manager</BtnLabel>
+              <BtnLabel>{t('importFromOldTracker')}</BtnLabel>
             </PrimaryButton>
             <Pressable
               onPress={handleSkip}
               style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
               accessibilityRole="button"
-              accessibilityLabel="I don't have anything to import, start fresh"
+              accessibilityLabel={t('importNoDataStartFresh')}
             >
               <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
-                I don't have anything to import
+                {t('importNoDataStartFresh')}
               </Text>
             </Pressable>
           </>

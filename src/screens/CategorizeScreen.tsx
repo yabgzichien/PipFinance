@@ -8,7 +8,8 @@ import { SplitSheet } from '../components/SplitSheet';
 import { Amount, B, BtnLabel, BubbleText, Card, CategoryChip, PipSays, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
 import { applyDateEdit, fullDateWithWeekday, ISO_DATE_RE, isValidIsoDate, shortDate } from '../lib/dates';
 import { findDuplicate, todayISO } from '../lib/duplicates';
-import { fmt } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
+import { BASE_CURRENCY } from '../lib/currency';
 import { CLASS_BY_ID } from '../lib/networth';
 import { suggestSettlement } from '../lib/split';
 import { DROP, type Category, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type TxnType } from '../lib/types';
@@ -114,6 +115,9 @@ export function CategorizeScreen({
   const keptCount = stepIndices.filter((i) => assignments[i] !== DROP).length;
 
   const activeSplit = hasSteps ? splitDrafts[originalIndex] : null;
+  // Every amount on this screen is the reviewed item's own native figure, so it is labelled
+  // with the item's currency rather than the app-wide display currency.
+  const itemCurrency = item?.currency ?? BASE_CURRENCY;
 
   // Only inbound rows can be a repayment, and only while the duplicate banner is not already
   // holding the screen. Recomputed per step rather than up front so an amount edit re-matches.
@@ -330,7 +334,7 @@ export function CategorizeScreen({
               <DateEditor value={item!.date} onChange={setDate} />
               <RemarkEditor value={item!.remark ?? null} onChange={setRemark} />
             </View>
-            <AmountEditor value={item!.amount} income={isIncome} onChange={setAmount} />
+            <AmountEditor value={item!.amount} currency={item!.currency ?? BASE_CURRENCY} income={isIncome} onChange={setAmount} />
           </Card>
 
           {!isIncome && !showBanner && (
@@ -343,13 +347,19 @@ export function CategorizeScreen({
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>
-                    {activeSplit ? (isZh ? `自付部分：RM ${fmt(activeSplit.ownShare)}` : `Your share: RM ${fmt(activeSplit.ownShare)}`) : (isZh ? '分摊账单' : 'Split with friends')}
+                    {activeSplit
+                      ? (isZh
+                          ? `自付部分：${fmtMoney(activeSplit.ownShare, itemCurrency)}`
+                          : `Your share: ${fmtMoney(activeSplit.ownShare, itemCurrency)}`)
+                      : (isZh ? '分摊账单' : 'Split with friends')}
                   </Text>
                   <InfoButton entry="split_bill" />
                 </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {activeSplit
-                    ? (isZh ? `待收回 RM ${fmt(activeSplit.gross - activeSplit.ownShare)}` : `RM ${fmt(activeSplit.gross - activeSplit.ownShare)} owed back to you`)
+                    ? (isZh
+                        ? `待收回 ${fmtMoney(activeSplit.gross - activeSplit.ownShare, itemCurrency)}`
+                        : `${fmtMoney(activeSplit.gross - activeSplit.ownShare, itemCurrency)} owed back to you`)
                     : (isZh ? '全桌买单？只记录您的自付部分' : 'Paid for the table? Record only your share')}
                 </Text>
               </View>
@@ -365,9 +375,9 @@ export function CategorizeScreen({
               </View>
               <Text style={[styles.bannerText, { color: colorTheme.ink }]}>
                 {isZh ? (
-                  <>您已在 {dupDay} 记录过 <B>{item!.merchant}</B>（RM {fmt(item!.amount)}）。确定再次记录？</>
+                  <>您已在 {dupDay} 记录过 <B>{item!.merchant}</B>（{fmtMoney(item!.amount, itemCurrency)}）。确定再次记录？</>
                 ) : (
-                  <>You already logged <B>{item!.merchant}</B> for RM {fmt(item!.amount)} on {dupDay}. Record it again?</>
+                  <>You already logged <B>{item!.merchant}</B> for {fmtMoney(item!.amount, itemCurrency)} on {dupDay}. Record it again?</>
                 )}
               </Text>
               <View style={styles.bannerBtns}>
@@ -392,9 +402,9 @@ export function CategorizeScreen({
               </View>
               <Text style={[styles.bannerText, { color: colorTheme.ink }]}>
                 {isZh ? (
-                  <>这看起来像是 <B>{settlementHit!.share.personName}</B> 偿还关于 <B>{settlementHit!.share.merchant}</B> 的账单（待收 RM {fmt(settlementHit!.share.outstanding)}）。{'\n'}这将抵消待收债务，不计入收入。</>
+                  <>这看起来像是 <B>{settlementHit!.share.personName}</B> 偿还关于 <B>{settlementHit!.share.merchant}</B> 的账单（待收 {fmtMoney(settlementHit!.share.outstanding, settlementHit!.share.currency ?? BASE_CURRENCY)}）。{'\n'}这将抵消待收债务，不计入收入。</>
                 ) : (
-                  <>This looks like <B>{settlementHit!.share.personName}</B> settling {settlementHit!.partial ? 'part of ' : ''}what they owe you for <B>{settlementHit!.share.merchant}</B> (RM {fmt(settlementHit!.share.outstanding)} outstanding).{'\n'}It clears the debt instead of counting as income.</>
+                  <>This looks like <B>{settlementHit!.share.personName}</B> settling {settlementHit!.partial ? 'part of ' : ''}what they owe you for <B>{settlementHit!.share.merchant}</B> ({fmtMoney(settlementHit!.share.outstanding, settlementHit!.share.currency ?? BASE_CURRENCY)} outstanding).{'\n'}It clears the debt instead of counting as income.</>
                 )}
               </Text>
               <View style={styles.bannerBtns}>
@@ -512,7 +522,7 @@ export function CategorizeScreen({
 }
 
 /** Tap the amount to edit it inline. */
-function AmountEditor({ value, income, onChange }: { value: number; income: boolean; onChange: (n: number) => void }) {
+function AmountEditor({ value, currency, income, onChange }: { value: number; currency: string; income: boolean; onChange: (n: number) => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const [editing, setEditing] = useState(false);
@@ -531,7 +541,7 @@ function AmountEditor({ value, income, onChange }: { value: number; income: bool
   if (editing) {
     return (
       <View style={styles.amountEditRow}>
-        <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>RM</Text>
+        <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
         <TextInput
           value={text}
           onChangeText={setText}

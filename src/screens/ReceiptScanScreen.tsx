@@ -10,17 +10,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddPersonModal } from '../components/AddPersonModal';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
+import { ReceiptItemModal } from '../components/ReceiptItemModal';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { activateCurrency, getActiveCurrencies } from '../db/currencyRepo';
 import { BASE_CURRENCY } from '../lib/currency';
 import { scanDocument } from '../lib/documentScanner';
-import { fmtMoney } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { llmErrorMessage } from '../llm';
 import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
 import { saveReceiptImage } from '../lib/receiptStorage';
 import { scanReceiptImage } from '../lib/scanReceipt';
-import { computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
+import { computeBillTotal, computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
@@ -119,6 +120,10 @@ export function ReceiptScanScreen({
   const [chargedText, setChargedText] = useState(initialDraft?.chargedText ?? '');
   const [picked, setPicked] = useState<string[]>(initialDraft?.picked ?? []);
   const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [itemModal, setItemModal] = useState<{ visible: boolean; item: ReceiptLine | null }>({
+    visible: false,
+    item: null,
+  });
   const [busy, setBusy] = useState(false);
   const [viewingPhoto, setViewingPhoto] = useState(false);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
@@ -288,6 +293,42 @@ export function ReceiptScanScreen({
   const removePerson = (id: string) => {
     setPicked((prev) => prev.filter((x) => x !== id));
     setLines((prev) => prev.map((l) => ({ ...l, assignedTo: l.assignedTo.filter((x) => x !== id) })));
+  };
+
+  const handleSaveItem = (itemData: { id?: string; label: string; amount: number }) => {
+    let nextLines: ReceiptLine[];
+    if (itemData.id) {
+      nextLines = lines.map((l) =>
+        l.id === itemData.id ? { ...l, label: itemData.label, amount: itemData.amount } : l
+      );
+    } else {
+      const newLine: ReceiptLine = {
+        id: `line_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        label: itemData.label,
+        amount: itemData.amount,
+        assignedTo: [],
+      };
+      nextLines = [...lines, newLine];
+    }
+    setLines(nextLines);
+    const newTotal = computeBillTotal(nextLines, surcharges);
+    setChargedText(newTotal.toFixed(2));
+  };
+
+  const handleDeleteItem = (id: string) => {
+    const nextLines = lines.filter((l) => l.id !== id);
+    setLines(nextLines);
+    const newTotal = computeBillTotal(nextLines, surcharges);
+    setChargedText(newTotal.toFixed(2));
+  };
+
+  const updateSurcharges = (updater: (s: Surcharges) => Surcharges) => {
+    setSurcharges((prev) => {
+      const next = updater(prev);
+      const newTotal = computeBillTotal(lines, next);
+      setChargedText(newTotal.toFixed(2));
+      return next;
+    });
   };
 
   const save = () => {
@@ -526,65 +567,117 @@ export function ReceiptScanScreen({
           </Card>
         )}
 
-        {lines.length > 0 && (
-            <>
-              <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>
-                {splitting ? 'What they ordered' : 'What I read'}
-              </Text>
-              <Card style={{ overflow: 'hidden' }}>
-                {lines.map((line, i) => {
-                  const everyone = line.assignedTo.length === participants.length;
-                  const receiptCurrency = receipt?.currency ?? BASE_CURRENCY;
-                  return (
-                    <View key={line.id} style={[styles.itemRow, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
-                      <View style={styles.itemHead}>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.label, { marginTop: 0, marginBottom: 0, color: colorTheme.ink2 }]}>
+            What they ordered
+          </Text>
+          <Pressable
+            onPress={() => setItemModal({ visible: true, item: null })}
+            style={[styles.addInlineBtn, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Add item"
+          >
+            <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
+            <Text style={[styles.addInlineText, { color: theme.onTint }]}>Add item</Text>
+          </Pressable>
+        </View>
+
+        {lines.length === 0 ? (
+          <Card style={[styles.emptyLinesCard, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
+            <Text style={[styles.emptyLinesText, { color: colorTheme.ink2 }]}>No items listed yet.</Text>
+            <Pressable
+              onPress={() => setItemModal({ visible: true, item: null })}
+              style={[styles.addItemRowBtn, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}
+              accessibilityRole="button"
+              accessibilityLabel="Add an item"
+            >
+              <Icon name="plus" size={15} color={theme.accent} stroke={2.4} />
+              <Text style={[styles.addItemRowText, { color: theme.onTint }]}>Add an item</Text>
+            </Pressable>
+          </Card>
+        ) : (
+          <>
+            <Card style={{ overflow: 'hidden' }}>
+              {lines.map((line, i) => {
+                const everyone = line.assignedTo.length === participants.length;
+                const receiptCurrency = receipt?.currency ?? BASE_CURRENCY;
+                return (
+                  <View key={line.id} style={[styles.itemRow, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
+                    <View style={styles.itemHead}>
+                      <Pressable
+                        onPress={() => setItemModal({ visible: true, item: line })}
+                        style={styles.itemLabelPressable}
+                        accessibilityLabel={`Edit ${line.label}`}
+                      >
                         <Text style={[styles.itemLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                           {line.label}
                         </Text>
+                        <Icon name="pencil" size={13} color={colorTheme.ink3} />
+                      </Pressable>
+                      <Pressable onPress={() => setItemModal({ visible: true, item: line })}>
                         <Text style={[styles.itemAmount, { color: colorTheme.ink }]}>{fmtMoney(line.amount, receiptCurrency)}</Text>
-                      </View>
-                      {splitting && (
-                      <View style={styles.avatarRow}>
-                        {participants.map((id) => {
-                          const on = line.assignedTo.includes(id);
-                          const name = id === SELF ? 'You' : nameById[id] ?? '?';
-                          return (
-                            <Pressable
-                              key={id}
-                              onPress={() => toggleAssign(line.id, id)}
-                              style={[
-                                styles.avatar,
-                                { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line },
-                                on && styles.avatarOn,
-                                on && { backgroundColor: theme.accent, borderColor: theme.accent },
-                              ]}
-                              accessibilityLabel={`${on ? 'Remove' : 'Add'} ${name} on ${line.label}`}
-                              accessibilityState={{ selected: on }}
-                            >
-                              <Text style={[styles.avatarText, { color: colorTheme.ink2 }, on && styles.avatarTextOn]}>
-                                {name.slice(0, id === SELF ? 3 : 1).toUpperCase()}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                        <Pressable onPress={() => shareWholeTable(line.id)} style={styles.allBtn} hitSlop={4}>
-                          <Text style={[styles.allText, { color: theme.accent }, everyone && { color: colorTheme.ink3 }]}>
-                            {everyone ? 'Clear' : 'Shared'}
-                          </Text>
-                        </Pressable>
-                      </View>
-                      )}
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleDeleteItem(line.id)}
+                        hitSlop={8}
+                        style={styles.deleteLineBtn}
+                        accessibilityLabel={`Delete ${line.label}`}
+                      >
+                        <Icon name="trash" size={15} color={colorTheme.ink3} />
+                      </Pressable>
                     </View>
-                  );
-                })}
-              </Card>
-              {splitting && result.unassigned.length > 0 && (
-                <Text style={[styles.unassigned, { color: colorTheme.amber }]}>
-                  {result.unassigned.length} item{result.unassigned.length === 1 ? '' : 's'} nobody has claimed
-                  yet, shared across the table for now.
-                </Text>
-              )}
-            </>
+                    {splitting && (
+                    <View style={styles.avatarRow}>
+                      {participants.map((id) => {
+                        const on = line.assignedTo.includes(id);
+                        const name = id === SELF ? 'You' : nameById[id] ?? '?';
+                        return (
+                          <Pressable
+                            key={id}
+                            onPress={() => toggleAssign(line.id, id)}
+                            style={[
+                              styles.avatar,
+                              { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line },
+                              on && styles.avatarOn,
+                              on && { backgroundColor: theme.accent, borderColor: theme.accent },
+                            ]}
+                            accessibilityLabel={`${on ? 'Remove' : 'Add'} ${name} on ${line.label}`}
+                            accessibilityState={{ selected: on }}
+                          >
+                            <Text style={[styles.avatarText, { color: colorTheme.ink2 }, on && styles.avatarTextOn]}>
+                              {name.slice(0, id === SELF ? 3 : 1).toUpperCase()}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                      <Pressable onPress={() => shareWholeTable(line.id)} style={styles.allBtn} hitSlop={4}>
+                        <Text style={[styles.allText, { color: theme.accent }, everyone && { color: colorTheme.ink3 }]}>
+                          {everyone ? 'Clear' : 'Shared'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    )}
+                  </View>
+                );
+              })}
+              <Pressable
+                onPress={() => setItemModal({ visible: true, item: null })}
+                style={[styles.addItemBottomRow, styles.divider, { borderTopColor: colorTheme.line2, backgroundColor: colorTheme.surface2 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Add another item"
+              >
+                <Icon name="plus" size={14} color={theme.accent} stroke={2.4} />
+                <Text style={[styles.addItemBottomText, { color: theme.accent }]}>Add an item</Text>
+              </Pressable>
+            </Card>
+            {splitting && result.unassigned.length > 0 && (
+              <Text style={[styles.unassigned, { color: colorTheme.amber }]}>
+                {result.unassigned.length} item{result.unassigned.length === 1 ? '' : 's'} nobody has claimed
+                yet, shared across the table for now.
+              </Text>
+            )}
+          </>
         )}
 
         {splitting && (
@@ -594,31 +687,32 @@ export function ReceiptScanScreen({
               <PctRow
                 label="Service charge"
                 value={surcharges.serviceChargePct}
-                onChange={(v) => setSurcharges((s) => ({ ...s, serviceChargePct: v }))}
+                onChange={(v) => updateSurcharges((s) => ({ ...s, serviceChargePct: v }))}
                 note="Applied to the items subtotal"
               />
               <View style={[styles.divider, { borderTopColor: colorTheme.line2 }]} />
               <PctRow
                 label="Service tax"
                 value={surcharges.taxPct}
-                onChange={(v) => setSurcharges((s) => ({ ...s, taxPct: v }))}
+                onChange={(v) => updateSurcharges((s) => ({ ...s, taxPct: v }))}
                 note="Applied after the service charge, the way the receipt does it"
               />
               <View style={[styles.divider, { borderTopColor: colorTheme.line2 }]} />
               <DiscountRow
                 discount={surcharges.discount ?? null}
-                onChange={(d) => setSurcharges((s) => ({ ...s, discount: d }))}
+                onChange={(d) => updateSurcharges((s) => ({ ...s, discount: d }))}
                 subtotal={itemsSubtotal}
+                currency={receipt?.currency ?? BASE_CURRENCY}
               />
             </Card>
           </>
         )}
 
-        {/* Always shown: the charge is the whole point of the scan, split or not. */}
-        <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>What your card was charged</Text>
+        {/* Always shown: the total is the whole point of the scan, split or not. */}
+        <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>Total</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>
-            {(receipt?.currency ?? BASE_CURRENCY) === 'MYR' ? 'RM' : (receipt?.currency ?? BASE_CURRENCY)}
+            {currencyPrefix(receipt?.currency ?? BASE_CURRENCY)}
           </Text>
           <TextInput
             value={chargedText}
@@ -670,6 +764,15 @@ export function ReceiptScanScreen({
       </View>
 
       <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
+
+      <ReceiptItemModal
+        visible={itemModal.visible}
+        item={itemModal.item}
+        currency={receipt?.currency ?? BASE_CURRENCY}
+        onClose={() => setItemModal({ visible: false, item: null })}
+        onSave={handleSaveItem}
+        onDelete={handleDeleteItem}
+      />
 
       <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
         <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
@@ -743,10 +846,13 @@ function DiscountRow({
   discount,
   onChange,
   subtotal,
+  currency,
 }: {
   discount: Discount | null;
   onChange: (d: Discount | null) => void;
   subtotal: number;
+  /** The receipt's own currency — a flat discount is denominated in it, not always ringgit. */
+  currency: string;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -806,8 +912,8 @@ function DiscountRow({
           style={[styles.pctInput, { color: colorTheme.ink }]}
           selectTextOnFocus
         />
-        <Pressable onPress={toggleUnit} hitSlop={6} accessibilityLabel="Switch between RM and percent">
-          <Text style={[styles.pctSign, { color: theme.accent }]}>{discount.unit === 'pct' ? '%' : 'RM'}</Text>
+        <Pressable onPress={toggleUnit} hitSlop={6} accessibilityLabel="Switch between a flat amount and a percentage">
+          <Text style={[styles.pctSign, { color: theme.accent }]}>{discount.unit === 'pct' ? '%' : currencyPrefix(currency)}</Text>
         </Pressable>
       </View>
       <Pressable onPress={() => onChange(null)} hitSlop={8} accessibilityLabel="Remove voucher or discount">
@@ -911,9 +1017,48 @@ const styles = StyleSheet.create({
 
   itemRow: { paddingHorizontal: 14, paddingVertical: 12, gap: 9 },
   divider: { borderTopWidth: 1 },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 22,
+    marginBottom: 9,
+  },
+  addInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  addInlineText: { fontFamily: uiFont(700), fontSize: 12 },
   itemHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  itemLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 14 },
+  itemLabelPressable: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  itemLabel: { flexShrink: 1, fontFamily: uiFont(600), fontSize: 14 },
   itemAmount: { fontFamily: numFont(700), fontSize: 14 },
+  deleteLineBtn: { paddingLeft: 4, paddingVertical: 2 },
+  emptyLinesCard: { padding: 18, alignItems: 'center', gap: 12, borderRadius: radius.md, borderWidth: 1 },
+  emptyLinesText: { fontFamily: uiFont(500), fontSize: 13 },
+  addItemRowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  addItemRowText: { fontFamily: uiFont(700), fontSize: 13 },
+  addItemBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+  },
+  addItemBottomText: { fontFamily: uiFont(700), fontSize: 13 },
   avatarRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
   avatar: {
     minWidth: 32,

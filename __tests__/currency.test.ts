@@ -20,6 +20,19 @@ describe('currency table', () => {
     }
   });
 
+  it('marks 3-decimal currencies like TND correctly', () => {
+    expect(decimalsFor('TND')).toBe(3);
+    expect(currencyMeta('TND')).toEqual({ code: 'TND', label: 'Tunisian Dinar', decimals: 3 });
+  });
+
+  it('supports INR, KZT, RUB, UZS, and PLN', () => {
+    expect(currencyMeta('INR')).toEqual({ code: 'INR', label: 'Indian Rupee', decimals: 2 });
+    expect(currencyMeta('KZT')).toEqual({ code: 'KZT', label: 'Kazakhstani Tenge', decimals: 2 });
+    expect(currencyMeta('RUB')).toEqual({ code: 'RUB', label: 'Russian Ruble', decimals: 2 });
+    expect(currencyMeta('UZS')).toEqual({ code: 'UZS', label: 'Uzbekistani Som', decimals: 2 });
+    expect(currencyMeta('PLN')).toEqual({ code: 'PLN', label: 'Polish Złoty', decimals: 2 });
+  });
+
   it('defaults an unknown code to 2 decimals rather than throwing', () => {
     expect(decimalsFor('ZZZ')).toBe(2);
     expect(currencyMeta('ZZZ')).toBeNull();
@@ -170,3 +183,25 @@ describe('MYR-only invisibility', () => {
     expect(isMultiCurrency(parseActiveCurrencies(null))).toBe(false);
   });
 });
+
+describe('normalizeCurrency', () => {
+  const { normalizeCurrency } = require('../src/lib/currency');
+
+  it('normalizes valid uppercase and lowercase codes', () => {
+    expect(normalizeCurrency('USD')).toBe('USD');
+    expect(normalizeCurrency('sgd ')).toBe('SGD');
+    expect(normalizeCurrency('cny')).toBe('CNY');
+  });
+
+  it('falls back to default currency when provided', () => {
+    expect(normalizeCurrency(null, 'SGD')).toBe('SGD');
+    expect(normalizeCurrency('INVALID', 'USD')).toBe('USD');
+    expect(normalizeCurrency(undefined, 'EUR')).toBe('EUR');
+  });
+
+  it('falls back to MYR when default currency is omitted', () => {
+    expect(normalizeCurrency(null)).toBe('MYR');
+    expect(normalizeCurrency('INVALID')).toBe('MYR');
+  });
+});
+

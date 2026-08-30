@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { Icon } from '../components/Icon';
 import { Amount, B, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
-import { fmt } from '../lib/format';
+import { fmtMoney } from '../lib/format';
+import { BASE_CURRENCY } from '../lib/currency';
 import { suggestForMerchant } from '../lib/recommend';
 import type { ExtractedTxn } from '../lib/types';
 import { getLLM, llmErrorMessage } from '../llm';
@@ -139,6 +140,10 @@ export function ExtractScreen({
   );
   const recognized = withSuggestions.filter((e) => e.suggestion).length;
   const total = items.reduce((s, it) => s + it.amount, 0);
+  // Only one currency in the batch means the sum is a real number the user can act on.
+  // A mixed batch has no honest single total, so the sentence simply omits it.
+  const currencies = new Set(items.map((it) => it.currency ?? BASE_CURRENCY));
+  const totalLabel = currencies.size === 1 ? `, ${fmtMoney(total, [...currencies][0])} total` : '';
 
   const translateY = scan.interpolate({ inputRange: [0, 1], outputRange: [0, PREVIEW_H - 28] });
 
@@ -173,7 +178,7 @@ export function ExtractScreen({
           {phase === 'result' && items.length > 0 && (
             <PipSays expr="happy">
               <BubbleText>
-                Got it. <B>{items.length} transaction{items.length > 1 ? 's' : ''}</B>, RM {fmt(total)} total.
+                Got it. <B>{items.length} transaction{items.length > 1 ? 's' : ''}</B>{totalLabel}.
                 {recognized > 0 ? (
                   <BubbleText>
                     {' '}I already recognise <B>{recognized}</B> of them.

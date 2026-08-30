@@ -68,4 +68,23 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       '2. Keep "I was on this bill too" checked unless you paid entirely for others.\n\n' +
       '3. Only your share counts as spending. The rest is tracked under "Owed to you" until settled.',
   },
+  owed_to_you: {
+    term: 'Owed to you',
+    short: 'Money friends owe you from shared bills, tracked as an asset rather than spending.',
+    body:
+      'When you pay for a group bill, only your portion counts as your personal spending. The rest is tracked here as an asset (a receivable) in your Net Worth.\n\n' +
+      'When someone pays you back, settling clears the debt and adds the cash to your account without recording duplicate income. If a debt will never be repaid, writing it off converts it into an expense.',
+  },
+  quick_add: {
+    term: 'Just type it',
+    short: 'Type transactions in plain text instead of filling out form fields.',
+    body:
+      'Type an amount and what it was for in plain text. Pip reads the amount, description, category, and date automatically.\n\n' +
+      'Examples:\n' +
+      '• lunch 9.2 (food expense of RM9.20)\n' +
+      '• coffee 15 yesterday (expense with custom date)\n' +
+      '• salary 5000 (logged as income)\n' +
+      '• lunch 12, grab 18 (multiple entries at once)',
+  },
 };
+

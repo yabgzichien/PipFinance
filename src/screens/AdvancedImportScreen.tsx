@@ -42,8 +42,10 @@ import {
 import { addAccount, listAccounts } from '../db/accountsRepo';
 import { addTransactions } from '../db/txnRepo';
 import { listFxRates } from '../db/fxRepo';
+import { activateCurrency, getEntryCurrency } from '../db/currencyRepo';
 import { DROP, type Account, type ExtractedTxn } from '../lib/types';
-import { deriveNative } from '../lib/currency';
+import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
+import { fmtMoney } from '../lib/format';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { merchantKey } from '../lib/normalize';
@@ -149,7 +151,7 @@ function AccountReviewList({
 
             {/* Balance */}
             <Text style={[styles.accBalance, { color: isAsset ? theme.accent : colorTheme.amber }]}>
-              {isAsset ? '+' : '−'}RM{acc.balance.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {isAsset ? '+' : '−'}{fmtMoney(acc.balance, acc.currency)}
             </Text>
           </Pressable>
         );
@@ -188,6 +190,7 @@ export function AdvancedImportScreen({
 
   const [phase, setPhase] = useState<Phase>('guide');
   const [jsonText, setJsonText] = useState('');
+  const [defaultCurrency, setDefaultCurrency] = useState<string>(BASE_CURRENCY);
   const [parsedTxns, setParsedTxns] = useState<ExtractedTxn[]>([]);
   const [parsedAccounts, setParsedAccounts] = useState<ParsedAccount[]>([]);
   const [parsedTransfers, setParsedTransfers] = useState<ParsedTransfer[]>([]);
@@ -202,7 +205,11 @@ export function AdvancedImportScreen({
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const prompt = buildPrompt();
+  React.useEffect(() => {
+    getEntryCurrency().then(setDefaultCurrency);
+  }, []);
+
+  const prompt = buildPrompt(defaultCurrency);
 
   // ── Copy prompt ──────────────────────────────────────────────────────────
   const copyPrompt = async () => {
@@ -253,7 +260,7 @@ export function AdvancedImportScreen({
       return;
     }
     try {
-      const { transactions, accounts, transfers, commitments } = parseJSON(trimmed);
+      const { transactions, accounts, transfers, commitments } = parseJSON(trimmed, defaultCurrency);
       if (transactions.length === 0 && accounts.length === 0 && transfers.length === 0 && commitments.length === 0) {
         setError('The JSON had no transactions or accounts. Check that you pasted the full reply.');
         setPhase('error');
@@ -263,6 +270,17 @@ export function AdvancedImportScreen({
       setParsedAccounts(accounts);
       setParsedTransfers(transfers);
       setParsedCommitments(commitments);
+
+      // Auto-activate all foreign currencies in the background so their FX rates are fetched/cached
+      const foreignCodes = new Set<string>();
+      for (const a of accounts) if (a.currency !== BASE_CURRENCY) foreignCodes.add(a.currency);
+      for (const t of transactions) if (t.currency && t.currency !== BASE_CURRENCY) foreignCodes.add(t.currency);
+      for (const tr of transfers) if (tr.currency && tr.currency !== BASE_CURRENCY) foreignCodes.add(tr.currency);
+      for (const c of commitments) if (c.currency && c.currency !== BASE_CURRENCY) foreignCodes.add(c.currency);
+      for (const code of foreignCodes) {
+        void activateCurrency(code);
+      }
+
       // If there are accounts to review, show that step first.
       if (accounts.length > 0) {
         setPhase('accountReview');
@@ -284,11 +302,21 @@ export function AdvancedImportScreen({
     setPhase('saving');
     let savedAcc = 0;
     try {
-      // 1. Commit the chosen accounts to the Net Worth DB.
+      // Ensure all foreign currencies are activated and rates cached before committing
       const toSave = parsedAccounts.filter((a) => a.include);
+      const foreignCodes = new Set<string>();
+      for (const a of toSave) if (a.currency !== BASE_CURRENCY) foreignCodes.add(a.currency);
+      for (const t of txns) if (t.currency && t.currency !== BASE_CURRENCY) foreignCodes.add(t.currency);
+      for (const tr of parsedTransfers) if (tr.currency && tr.currency !== BASE_CURRENCY) foreignCodes.add(tr.currency);
+      for (const c of parsedCommitments) if (c.currency && c.currency !== BASE_CURRENCY) foreignCodes.add(c.currency);
+      if (foreignCodes.size > 0) {
+        await Promise.all(Array.from(foreignCodes).map((code) => activateCurrency(code)));
+      }
+
+      // 1. Commit the chosen accounts to the Net Worth DB with their denominated currency.
       const newlyCreatedAccounts: Account[] = [];
       for (const acc of toSave) {
-        const createdAcc = await addAccount(acc.name, acc.kind, acc.cls, acc.balance, acc.asOf);
+        const createdAcc = await addAccount(acc.name, acc.kind, acc.cls, acc.balance, acc.asOf, null, acc.currency);
         newlyCreatedAccounts.push(createdAcc);
         savedAcc++;
         // A version-2 export carries cost basis (and units, if the account was a live-priced
@@ -307,10 +335,6 @@ export function AdvancedImportScreen({
 
       // 3. Update account balances with imported transactions if option enabled.
       if (updateAccountBalances) {
-        // Imported transactions and transfers are always MYR (this import format has no
-        // per-row currency; see ExtractedTxn.currency's contract). A matched target account,
-        // though, may be an existing foreign-denominated one (Task 9), so its balance link
-        // has to convert MYR into the account's own currency first.
         const rates = ratesFromCache(await listFxRates());
         const existingAccounts = await listAccounts();
         const allAccounts = [
@@ -334,15 +358,21 @@ export function AdvancedImportScreen({
 
           if (targetAccount) {
             const effect = defaultLinkEffect(targetAccount.kind, txn.type);
-            const linkAmount = deriveNative(txn.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+            let linkAmount: number;
+            if (targetAccount.currency === txn.currency) {
+              linkAmount = txn.amount;
+            } else {
+              const txnRate = rateFor(rates, txn.currency);
+              const myrAmount = txn.currency === BASE_CURRENCY ? txn.amount : round2(txn.amount * (txnRate ?? 1));
+              linkAmount = deriveNative(myrAmount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+            }
             await recordBalanceLink(targetAccount.id, linkAmount, effect, txn.date ?? today);
           }
         }
 
         // 3b. A transfer moves money too, but only the source side is inferrable from a name
         // match — a document names who it left, not reliably which account it landed in, so
-        // only the debit is applied. The full picture (target credited, holding cost/quantity
-        // moved) only exists for a transfer this app itself created via a DCA commitment tick.
+        // only the debit is applied.
         if (parsedTransfers.length > 0) {
           const existingAccounts2 = await listAccounts();
           const allAccounts2 = [
@@ -354,7 +384,14 @@ export function AdvancedImportScreen({
             const searchName = t.account.trim().toLowerCase();
             const targetAccount = allAccounts2.find((a) => a.name.trim().toLowerCase() === searchName);
             if (targetAccount) {
-              const linkAmount = deriveNative(t.amount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+              let linkAmount: number;
+              if (targetAccount.currency === t.currency) {
+                linkAmount = t.amount;
+              } else {
+                const tRate = rateFor(rates, t.currency);
+                const myrAmount = t.currency === BASE_CURRENCY ? t.amount : round2(t.amount * (tRate ?? 1));
+                linkAmount = deriveNative(myrAmount, targetAccount.currency, rateFor(rates, targetAccount.currency));
+              }
               await recordBalanceLink(targetAccount.id, linkAmount, 'subtract', t.date ?? today);
             }
           }
@@ -364,6 +401,7 @@ export function AdvancedImportScreen({
       // 4. Log transfers to the ledger (categoryId null, type 'transfer' — kept out of the
       // income/expense pipeline per lib/types.ts's TxnType, same as a DCA commitment tick).
       if (parsedTransfers.length > 0) {
+        const rates = ratesFromCache(await listFxRates());
         await addTransactions(
           parsedTransfers.map((t) => ({
             merchantRaw: t.description || 'Transfer',
@@ -373,6 +411,8 @@ export function AdvancedImportScreen({
             date: t.date,
             categoryId: null,
             source: 'imported' as const,
+            currency: t.currency ?? BASE_CURRENCY,
+            fxRate: t.currency && t.currency !== BASE_CURRENCY ? rateFor(rates, t.currency) : null,
           }))
         );
       }

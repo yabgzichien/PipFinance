@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton } from '../../components/ui';
 import { DEFAULT_EXPENSE_ID } from '../../data/categories';
+import { useLanguage } from '../../i18n';
 import * as haptics from '../../lib/haptics';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
@@ -17,6 +18,7 @@ import { numFont, radius, spacing, uiFont } from '../../theme';
 export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   const { categories, addCommitmentEntry } = useAppData();
   const expenseCats = useMemo(() => categories.filter((c) => c.kind === 'expense'), [categories]);
 
@@ -49,12 +51,12 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
 
   return (
     <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 }} keyboardShouldPersistTaps="handled">
-      <Eyebrow style={{ marginBottom: spacing.sm }}>A bill or subscription you pay every month</Eyebrow>
+      <Eyebrow style={{ marginBottom: spacing.sm }}>{t('wizardRecurringSubtitle')}</Eyebrow>
 
       <TextInput
         value={label}
         onChangeText={setLabel}
-        placeholder="e.g. Astro, gym membership"
+        placeholder={t('wizardRecurringPlaceholder')}
         placeholderTextColor={colorTheme.ink3}
         style={[styles.input, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2, color: colorTheme.ink }]}
       />
@@ -72,7 +74,7 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
           />
         </View>
         <View style={[styles.dueDayCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
-          <Text style={[styles.dueDayLabel, { color: colorTheme.ink2 }]}>Due day</Text>
+          <Text style={[styles.dueDayLabel, { color: colorTheme.ink2 }]}>{t('wizardDueDay')}</Text>
           <TextInput
             value={dueDayText}
             onChangeText={setDueDayText}
@@ -83,7 +85,7 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
         </View>
       </View>
 
-      <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>Category</Eyebrow>
+      <Eyebrow style={{ marginTop: spacing.lg, marginBottom: spacing.sm }}>{t('category')}</Eyebrow>
       <View style={styles.grid}>
         {expenseCats.map((c) => (
           <View key={c.id} style={styles.gridCell}>
@@ -102,14 +104,16 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
         >
           <Icon name="check" size={15} color={theme.accentInk} stroke={2.4} />
           <Text style={[styles.addedText, { color: theme.accentInk }]}>
-            {addedCount === 1 ? 'Added.' : `${addedCount} added.`} Add another, or continue.
+            {addedCount === 1
+              ? t('wizardAddedConfirmOne')
+              : t('wizardAddedConfirmMany', { count: addedCount })}
           </Text>
         </FadeIn>
       )}
 
       <View style={styles.footer}>
         <PrimaryButton onPress={() => void add()} disabled={!canAdd}>
-          <BtnLabel>{addedCount > 0 ? 'Add another' : 'Add'}</BtnLabel>
+          <BtnLabel>{addedCount > 0 ? t('wizardAddAnother') : t('wizardAddBtn')}</BtnLabel>
           <Icon name="plus" size={18} color="#fff" stroke={2.2} />
         </PrimaryButton>
         <Pressable
@@ -119,7 +123,9 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
           }}
           style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
         >
-          <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>{addedCount > 0 ? 'Continue' : 'Skip for now'}</Text>
+          <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
+            {addedCount > 0 ? t('wizardContinue') : t('wizardSkipForNow')}
+          </Text>
         </Pressable>
       </View>
     </ScrollView>

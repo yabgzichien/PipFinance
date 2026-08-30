@@ -115,6 +115,8 @@ export interface Account {
   /** The currency this account is denominated in. Balances are stored native and
    *  converted at read time against a live cached rate. Defaults to 'MYR'. */
   currency: string;
+  /** Optional interest rate / APR percentage for investment accounts/holdings. */
+  interestRate?: number | null;
 }
 
 /** A cached market price in MYR for a holding symbol. */

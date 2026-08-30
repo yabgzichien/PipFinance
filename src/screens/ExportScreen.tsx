@@ -33,6 +33,8 @@ import {
 import { notify } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { fmtMoney } from '../lib/format';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { colors, numFont, platformShadow, radius, uiFont } from '../theme';
@@ -65,7 +67,7 @@ export function ExportScreen({
   const theme = useAccent();
   const themeColors = useThemeColors();
   const { t, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, categories, accounts, balanceEntries, commitments, commitmentOccurrences } = useAppData();
+  const { transactions, categories, accounts, balanceEntries, commitments, commitmentOccurrences, markTaskDone } = useAppData();
   const commitmentExtra = useMemo(
     () => ({ commitments, occurrences: commitmentOccurrences }),
     [commitments, commitmentOccurrences]
@@ -164,6 +166,7 @@ export function ExportScreen({
 
   const verifiedName = 'Pip User';
 
+  const dc = useDisplayCurrency();
   const reportData = useMemo(() => {
     return buildFinancialReportBundle(
       transactions,
@@ -171,9 +174,11 @@ export function ExportScreen({
       accounts,
       balanceEntries,
       activePeriod,
-      verifiedName
+      verifiedName,
+      dc.rates,
+      dc.code
     );
-  }, [transactions, categories, accounts, balanceEntries, activePeriod, verifiedName]);
+  }, [transactions, categories, accounts, balanceEntries, activePeriod, verifiedName, dc.rates, dc.code]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -212,6 +217,7 @@ export function ExportScreen({
       const res = await saveOrDownloadExport(fileName, content, mime);
 
       if (res.success) {
+        void markTaskDone('export');
         if (selectedFormat === 'pdf' && Platform.OS === 'web') {
           const win = window.open('', '_blank');
           if (win) {
@@ -444,7 +450,7 @@ export function ExportScreen({
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
-              {isZh ? '月均收入：' : 'Mean Monthly: '}<Text style={{ fontFamily: uiFont(700), color: themeColors.ink }}>RM {reportData.statistics.meanMonthlyIncome.toFixed(0)}</Text>
+              {isZh ? '月均收入：' : 'Mean Monthly: '}<Text style={{ fontFamily: uiFont(700), color: themeColors.ink }}>{fmtMoney(dc.convert(reportData.statistics.meanMonthlyIncome), dc.code)}</Text>
             </Text>
             <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
               {isZh ? '储蓄率：' : 'Savings Rate: '}<Text style={{ fontFamily: uiFont(700), color: theme.accent }}>{reportData.incomeStatement.savingsRate}%</Text>

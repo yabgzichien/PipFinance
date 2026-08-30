@@ -7,6 +7,7 @@ import { BASE_CURRENCY, parseActiveCurrencies } from '../lib/currency';
 
 const ACTIVE_KEY = 'active_currencies';
 const ENTRY_KEY = 'entry_currency';
+const DISPLAY_KEY = 'display_currency';
 
 export async function getActiveCurrencies(): Promise<string[]> {
   return parseActiveCurrencies(await getMeta(ACTIVE_KEY));
@@ -17,7 +18,7 @@ export async function setActiveCurrencies(codes: string[]): Promise<void> {
 }
 
 export async function getEntryCurrency(): Promise<string> {
-  const stored = await getMeta(ENTRY_KEY);
+  const stored = (await getMeta(ENTRY_KEY)) || (await getMeta(DISPLAY_KEY));
   if (!stored) return BASE_CURRENCY;
   const active = await getActiveCurrencies();
   // A currency deactivated while it was the entry default falls back to ringgit rather
@@ -26,6 +27,23 @@ export async function getEntryCurrency(): Promise<string> {
 }
 
 export async function setEntryCurrency(code: string): Promise<void> {
+  await setMeta(ENTRY_KEY, code);
+}
+
+/**
+ * The currency headline totals render in. Falls back to MYR the same way entry currency
+ * does when the stored value is no longer active — a deactivated display currency must
+ * never leave a screen unable to render its total.
+ */
+export async function getDisplayCurrency(): Promise<string> {
+  const stored = await getMeta(DISPLAY_KEY);
+  if (!stored) return BASE_CURRENCY;
+  const active = await getActiveCurrencies();
+  return active.includes(stored) ? stored : BASE_CURRENCY;
+}
+
+export async function setDisplayCurrency(code: string): Promise<void> {
+  await setMeta(DISPLAY_KEY, code);
   await setMeta(ENTRY_KEY, code);
 }
 
@@ -56,6 +74,7 @@ export async function deactivateCurrency(code: string): Promise<void> {
   const active = await getActiveCurrencies();
   await setActiveCurrencies(active.filter((c) => c !== code));
   if ((await getMeta(ENTRY_KEY)) === code) await setEntryCurrency(BASE_CURRENCY);
+  if ((await getMeta(DISPLAY_KEY)) === code) await setDisplayCurrency(BASE_CURRENCY);
 }
 
 /**

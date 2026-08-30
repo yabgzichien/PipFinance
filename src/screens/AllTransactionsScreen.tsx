@@ -7,13 +7,15 @@ import { TransactionFilterModal } from '../components/TransactionFilterModal';
 import { Amount, Card, CatBadge, Eyebrow, IconButton, TopBar } from '../components/ui';
 import { txnMonthKey } from '../lib/budget';
 import { isValidIsoDate, monthLabel, shortDate } from '../lib/dates';
-import { fmt } from '../lib/format';
+import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
+import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
 import type { Category, Transaction } from '../lib/types';
 import type { AccentTheme } from '../state/accent';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { radius, shadowCard, uiFont, type StructuralColors } from '../theme';
@@ -51,6 +53,7 @@ interface OwedInfo {
  * are opaque and flush, so the group still reads as a single card.
  */
 const TxnRow = React.memo(function TxnRow({
+  dc,
   txn,
   cat,
   owed,
@@ -66,6 +69,7 @@ const TxnRow = React.memo(function TxnRow({
   txn: Transaction;
   cat: Category;
   owed: OwedInfo | undefined;
+  dc: DisplayCurrency;
   first: boolean;
   last: boolean;
   selectMode: boolean;
@@ -115,7 +119,9 @@ const TxnRow = React.memo(function TxnRow({
           <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
             <Icon name="gift" size={10} color={theme.accentInk} />
             <Text style={[styles.owedChipText, { color: theme.onTint }]}>
-              {isZh ? `待收 RM ${fmt(owed.owed)} · 共 RM ${fmt(owed.gross)}` : `RM ${fmt(owed.owed)} owed · split of RM ${fmt(owed.gross)}`}
+              {isZh
+                ? `待收 ${fmtMoney(dc.convert(owed.owed), dc.code)} · 共 ${fmtMoney(dc.convert(owed.gross), dc.code)}`
+                : `${fmtMoney(dc.convert(owed.owed), dc.code)} owed · split of ${fmtMoney(dc.convert(owed.gross), dc.code)}`}
             </Text>
           </View>
         )}
@@ -242,6 +248,7 @@ export function AllTransactionsScreen({
     setDateTo('');
   };
 
+  const dc = useDisplayCurrency();
   const totalSpent = useMemo(
     () => transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
     [transactions]
@@ -251,6 +258,7 @@ export function AllTransactionsScreen({
     [transactions]
   );
   const filterTotal = useMemo(() => shown.reduce((s, t) => s + t.amount, 0), [shown]);
+  const nativeTotals = useMemo(() => nativeTransactionTotalsByCurrency(shown), [shown]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -297,6 +305,7 @@ export function AllTransactionsScreen({
         txn={item}
         cat={catById[item.categoryId ?? 'other'] ?? fallback}
         owed={owedByTxn[item.id]}
+        dc={dc}
         first={index === 0}
         last={index === section.data.length - 1}
         selectMode={selectMode}
@@ -307,7 +316,7 @@ export function AllTransactionsScreen({
         onLongPress={onRowLongPress}
       />
     ),
-    [catById, owedByTxn, selectMode, selected, theme, colorTheme, onRowPress, onRowLongPress]
+    [catById, owedByTxn, dc.code, dc.rates, selectMode, selected, theme, colorTheme, onRowPress, onRowLongPress] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const renderSectionHeader = useCallback(
     ({ section }: { section: Section }) => (
@@ -321,7 +330,7 @@ export function AllTransactionsScreen({
     <>
       {advancedActive && !selectMode && (
         <Pressable onPress={clearAdvancedFilters} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Icon name="sliders" size={16} color={colorTheme.ink2} />
+          <Icon name="filter" size={16} color={colorTheme.ink2} />
           <Text style={[styles.filterText, { color: colorTheme.ink }]}>
             {[
               monthFilter.size > 0 ? (isZh ? `${monthFilter.size} 个月份` : `${monthFilter.size} month${monthFilter.size === 1 ? '' : 's'}`) : null,
@@ -342,7 +351,7 @@ export function AllTransactionsScreen({
         <Pressable onPress={onClearFilter} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           {filterCat && <CatBadge category={filterCat} size={28} rad={8} />}
           <Text style={[styles.filterText, { color: colorTheme.ink }]}>
-            {shown.length} {filterCat ? tCat(filterCat) : ''} · RM {filterTotal.toFixed(2)}
+            {shown.length} {filterCat ? tCat(filterCat) : ''} · {fmtMoney(dc.convert(filterTotal), dc.code)}
           </Text>
           <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
             <Icon name="x" size={12} color={colorTheme.ink2} />
@@ -354,16 +363,21 @@ export function AllTransactionsScreen({
       {shown.length > 0 && (
         <>
           {!filtered && !advancedActive && !query.trim() && (
-            <View style={styles.summary}>
-              <Card style={styles.summaryCard}>
-                <Eyebrow>{isZh ? '支出' : 'Spent'}</Eyebrow>
-                <Amount value={totalSpent} size={20} weight={700} />
-              </Card>
-              <Card style={styles.summaryCard}>
-                <Eyebrow>{isZh ? '收入' : 'Received'}</Eyebrow>
-                <Amount value={totalIncome} size={20} weight={700} color={theme.accent} />
-              </Card>
-            </View>
+            <>
+              <View style={styles.summary}>
+                <Card style={styles.summaryCard}>
+                  <Eyebrow>{isZh ? '支出' : 'Spent'}</Eyebrow>
+                  <Amount value={dc.convert(totalSpent)} currency={dc.code} size={20} weight={700} />
+                </Card>
+                <Card style={styles.summaryCard}>
+                  <Eyebrow>{isZh ? '收入' : 'Received'}</Eyebrow>
+                  <Amount value={dc.convert(totalIncome)} currency={dc.code} size={20} weight={700} color={theme.accent} />
+                </Card>
+              </View>
+              {Object.keys(nativeTotals).length > 1 && (
+                <Text style={[styles.breakdownText, { color: colorTheme.ink }]}>{formatCurrencyBreakdown(nativeTotals)}</Text>
+              )}
+            </>
           )}
 
           {owedTotal > 0 && !selectMode && (
@@ -371,7 +385,9 @@ export function AllTransactionsScreen({
               <Icon name="gift" size={18} color={theme.accent} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.owedTitle, { color: colorTheme.ink }]}>
-                  {isZh ? `待收回 RM ${fmt(owedTotal)}` : `RM ${fmt(owedTotal)} owed to you`}
+                  {isZh
+                    ? `待收回 ${fmtMoney(dc.convert(owedTotal), dc.code)}`
+                    : `${fmtMoney(dc.convert(owedTotal), dc.code)} owed to you`}
                 </Text>
                 <Text style={[styles.owedSub, { color: colorTheme.ink2 }]}>
                   {isZh ? `来自 ${openShares.length} 笔分摊账单` : `From ${openShares.length} shared ${openShares.length === 1 ? 'bill' : 'bills'}`}
@@ -410,7 +426,7 @@ export function AllTransactionsScreen({
             onBack={onBack}
             right={
               <View>
-                <IconButton name="sliders" onPress={() => setFilterOpen(true)} size={18} accessibilityLabel="Filter transactions" />
+                <IconButton name="filter" onPress={() => setFilterOpen(true)} size={18} accessibilityLabel="Filter transactions" />
                 {advancedActive && <View style={[styles.filterDot, { backgroundColor: theme.accent, borderColor: colorTheme.bg }]} />}
               </View>
             }
@@ -511,6 +527,7 @@ const styles = StyleSheet.create({
   clearText: { fontFamily: uiFont(600), fontSize: 12 },
   summary: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   summaryCard: { flex: 1, padding: 16, gap: 8 },
+  breakdownText: { fontSize: 13, fontFamily: uiFont(700), fontWeight: '700', marginTop: -6, marginBottom: 12, marginHorizontal: 2 },
   countLine: { fontFamily: uiFont(500), fontSize: 12.5, marginBottom: 10, marginLeft: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
   // The `Card` that used to wrap each month's rows, redrawn per row so the list can window.

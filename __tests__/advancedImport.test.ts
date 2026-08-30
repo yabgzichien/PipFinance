@@ -40,11 +40,13 @@ describe('AdvancedImport buildPrompt', () => {
     expect(prompt).toContain('already itemised');
   });
 
-  it('includes accounts and transaction section instructions', () => {
-    const prompt = buildPrompt();
+  it('includes accounts and transaction section instructions with default currency', () => {
+    const prompt = buildPrompt('SGD');
     expect(prompt).toContain('SECTION 1 — TRANSACTIONS');
     expect(prompt).toContain('SECTION 2 — ACCOUNT BALANCES');
     expect(prompt).toContain('REPLY FORMAT — ONLY a JSON code block');
+    expect(prompt).toContain('use "SGD" if not stated');
+    expect(prompt).toContain('"currency": "SGD"');
   });
 });
 
@@ -114,16 +116,25 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.accounts[0].include).toBe(true);
   });
 
-  it('parses JSON with explicit merchant description and category', () => {
+  it('parses JSON with explicit merchant description, category, and multi-currency codes', () => {
     const jsonStr = `\`\`\`json
 {
   "transactions": [
     {
       "date": "2026-05-12",
-      "description": "Village Grocer",
+      "description": "Trader Joe's",
       "amount": -120.30,
+      "currency": "USD",
       "category": "Food & Groceries",
-      "account": "Credit Card"
+      "account": "US Credit Card"
+    },
+    {
+      "date": "2026-05-13",
+      "description": "Tokyo Ramen",
+      "amount": -1500,
+      "currency": "JPY",
+      "category": "Dining",
+      "account": "Wise JPY"
     }
   ],
   "accounts": []
@@ -131,16 +142,26 @@ describe('AdvancedImport parseJSON', () => {
 \`\`\``;
 
     const result = parseJSON(jsonStr);
-    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions).toHaveLength(2);
     expect(result.transactions[0]).toEqual({
-      merchant: 'Village Grocer',
+      merchant: "Trader Joe's",
       amount: 120.3,
       type: 'expense',
       date: '2026-05-12',
       method: null,
       categoryHint: 'Food & Groceries',
-      account: 'Credit Card',
-      currency: 'MYR',
+      account: 'US Credit Card',
+      currency: 'USD',
+    });
+    expect(result.transactions[1]).toEqual({
+      merchant: 'Tokyo Ramen',
+      amount: 1500,
+      type: 'expense',
+      date: '2026-05-13',
+      method: null,
+      categoryHint: 'Dining',
+      account: 'Wise JPY',
+      currency: 'JPY',
     });
   });
 
@@ -184,15 +205,15 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.accounts[0].currency).toBe('CNY');
   });
 
-  it('falls back to MYR for a missing or unsupported account currency', () => {
+  it('falls back to default currency for a missing or unsupported account currency', () => {
     const result = parseJSON(JSON.stringify({
       accounts: [
         { name: 'No currency stated', type: 'Cash', balance: 100 },
         { name: 'Bogus code', type: 'Cash', balance: 100, currency: 'ZZZ' },
       ],
-    }));
-    expect(result.accounts[0].currency).toBe('MYR');
-    expect(result.accounts[1].currency).toBe('MYR');
+    }), 'SGD');
+    expect(result.accounts[0].currency).toBe('SGD');
+    expect(result.accounts[1].currency).toBe('SGD');
   });
 
   it('parses a quantity/cost pair on an account row (version 2)', () => {
@@ -204,11 +225,11 @@ describe('AdvancedImport parseJSON', () => {
 
   it('parses transfers as their own array, unsigned, separate from transactions', () => {
     const result = parseJSON(JSON.stringify({
-      transfers: [{ date: '2026-06-15', description: 'Stockbroker DCA', amount: 200, account: 'CIMB Bank' }],
+      transfers: [{ date: '2026-06-15', description: 'Stockbroker DCA', amount: 200, account: 'CIMB Bank', currency: 'USD' }],
     }));
     expect(result.transactions).toEqual([]);
     expect(result.transfers).toEqual([
-      { date: '2026-06-15', description: 'Stockbroker DCA', amount: 200, account: 'CIMB Bank' },
+      { date: '2026-06-15', description: 'Stockbroker DCA', amount: 200, account: 'CIMB Bank', currency: 'USD' },
     ]);
   });
 
@@ -217,21 +238,21 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.transfers[0].amount).toBe(50);
   });
 
-  it('parses a commitment with its occurrence history', () => {
+  it('parses a commitment with its occurrence history and currency', () => {
     const result = parseJSON(JSON.stringify({
       commitments: [{
-        label: 'Maxis Postpaid', kind: 'expense', amount: 89, dueDay: 5, category: 'Communications',
-        fromAccount: 'Touch \'n Go', toAccount: null, startMonth: '2026-06', endMonth: null,
-        occurrences: [{ dueDate: '2026-06-05', status: 'paid', paidOn: '2026-06-03', paidAmount: 89 }],
+        label: 'Netflix US', kind: 'expense', amount: 15.99, currency: 'USD', dueDay: 5, category: 'Communications',
+        fromAccount: 'Credit Card', toAccount: null, startMonth: '2026-06', endMonth: null,
+        occurrences: [{ dueDate: '2026-06-05', status: 'paid', paidOn: '2026-06-03', paidAmount: 15.99 }],
       }],
     }));
     expect(result.commitments).toHaveLength(1);
     expect(result.commitments[0]).toMatchObject({
-      label: 'Maxis Postpaid', kind: 'expense', amount: 89, dueDay: 5, category: 'Communications',
-      fromAccount: "Touch 'n Go", toAccount: null, startMonth: '2026-06', endMonth: null,
+      label: 'Netflix US', kind: 'expense', amount: 15.99, currency: 'USD', dueDay: 5, category: 'Communications',
+      fromAccount: 'Credit Card', toAccount: null, startMonth: '2026-06', endMonth: null,
     });
     expect(result.commitments[0].occurrences).toEqual([
-      { dueDate: '2026-06-05', status: 'paid', paidOn: '2026-06-03', paidAmount: 89 },
+      { dueDate: '2026-06-05', status: 'paid', paidOn: '2026-06-03', paidAmount: 15.99 },
     ]);
   });
 

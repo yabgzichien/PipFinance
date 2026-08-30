@@ -89,7 +89,7 @@ function AddFlowPhases({
   onAmountValidChange,
   onCategoryChosen,
 }: AddFlowProps) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection } = useAppData();
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection, markTaskDone } = useAppData();
   const colorTheme = useThemeColors();
   const { t } = useLanguage();
 
@@ -213,6 +213,8 @@ function AddFlowPhases({
       setPhase('attach');
       return;
     }
+
+    void markTaskDone('quickAdd');
 
     if (drafts.length === 1) {
       setQuickPrefill(drafts[0]);

@@ -6,6 +6,7 @@ import { useAccent } from '../state/accent';
 import { colors, platformShadow, uiFont } from '../theme';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
+import { TourAnchor } from './TourAnchor';
 
 export type NavTab = 'home' | 'activity' | 'networth' | 'settings';
 
@@ -30,6 +31,14 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
   ),
 };
 
+/** Tabs the guided tour spotlights directly (see App.tsx's TourStepKey). `home` and `add` are
+ *  reached other ways (the raised + button has its own anchor above), so they're absent here. */
+const TAB_TOUR_ANCHORS: Partial<Record<NavTab, string>> = {
+  activity: 'tour_activity_tab',
+  networth: 'tour_networth_tab',
+  settings: 'tour_settings_tab',
+};
+
 /** Persistent bottom tab bar for the tracker app. `badges` shows a count over a tab's icon.
  *
  *  `onAdd` mounts the raised centre button that opens the add-a-transaction flow. It lives here
@@ -41,11 +50,13 @@ export function BottomNav({
   onNavigate,
   onAdd,
   badges,
+  activeTourAnchor = null,
 }: {
   active: NavTab;
   onNavigate: (tab: NavTab) => void;
   onAdd?: () => void;
   badges?: Partial<Record<NavTab, number>>;
+  activeTourAnchor?: string | null;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -66,7 +77,7 @@ export function BottomNav({
     const tint = on ? theme.accent : colorTheme.ink3;
     const labelColor = on ? theme.accent : colorTheme.ink2;
     const badge = badges?.[key] ?? 0;
-    return (
+    const tab = (
       <Pressable
         key={key}
         onPress={() => onNavigate(key)}
@@ -89,6 +100,17 @@ export function BottomNav({
         <Text style={[styles.label, { color: labelColor, fontFamily: uiFont(on ? 700 : 500) }]}>{label}</Text>
       </Pressable>
     );
+    const anchorId = TAB_TOUR_ANCHORS[key];
+    if (anchorId) {
+      // `style` keeps this tab's flex:1 in effect for the brief window it's wrapped in a
+      // measurement View (see TourAnchor) — the Pressable inside keeps its own padding/gap.
+      return (
+        <TourAnchor key={key} id={anchorId} activeId={activeTourAnchor} style={{ flex: 1 }}>
+          {tab}
+        </TourAnchor>
+      );
+    }
+    return tab;
   };
 
   return (
@@ -96,22 +118,31 @@ export function BottomNav({
       {tabs.slice(0, 2).map(renderTab)}
       {onAdd && (
         <View style={styles.addSlot}>
-          <Pressable
-            onPress={onAdd}
-            style={({ pressed }) => [
-              styles.addBtn,
-              { borderColor: colorTheme.surface },
-              { backgroundColor: theme.accent, ...platformShadow(theme.accent, 0.34, 14, { width: 0, height: 6 }, 6) },
-              pressed && { transform: [{ scale: 0.94 }] },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={t('tabAdd')}
-          >
-            <Svg width={26} height={26} viewBox="0 0 24 24">
-              <Line x1={12} y1={5} x2={12} y2={19} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
-              <Line x1={5} y1={12} x2={19} y2={12} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
-            </Svg>
-          </Pressable>
+          {/* The lift lives on this wrapper rather than on the button itself: a TourAnchor's
+              measurement View auto-sizes to its child, and a negative top margin on that child
+              collapses into the wrapper's own box on web (standard CSS margin collapsing),
+              which reports a squashed, mispositioned rect. Keeping the button margin-free
+              inside TourAnchor keeps its measured rect matching what's actually on screen. */}
+          <View style={styles.addBtnLift}>
+            <TourAnchor id="tour_plus_btn" activeId={activeTourAnchor}>
+              <Pressable
+                onPress={onAdd}
+                style={({ pressed }) => [
+                  styles.addBtn,
+                  { borderColor: colorTheme.surface },
+                  { backgroundColor: theme.accent, ...platformShadow(theme.accent, 0.34, 14, { width: 0, height: 6 }, 6) },
+                  pressed && { transform: [{ scale: 0.94 }] },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={t('tabAdd')}
+              >
+                <Svg width={26} height={26} viewBox="0 0 24 24">
+                  <Line x1={12} y1={5} x2={12} y2={19} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
+                  <Line x1={5} y1={12} x2={19} y2={12} stroke={colors.onAccent} strokeWidth={2.4} strokeLinecap="round" />
+                </Svg>
+              </Pressable>
+            </TourAnchor>
+          </View>
           <Text style={[styles.label, styles.addLabel, { color: theme.accent }]}>{t('tabAdd')}</Text>
         </View>
       )}
@@ -129,15 +160,16 @@ const styles = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center', gap: 3, paddingVertical: 2 },
   label: { fontSize: 11 },
-  // The raised centre action. `marginTop` lifts the circle above the bar's top edge so it reads
-  // as the one thing on the bar that does something rather than a fifth destination; the surface
-  // ring keeps it legible where it overlaps the content behind.
+  // The raised centre action. `addBtnLift`'s marginTop lifts the circle above the bar's top
+  // edge so it reads as the one thing on the bar that does something rather than a fifth
+  // destination; the surface ring keeps it legible where it overlaps the content behind. The
+  // lift lives on this wrapper rather than on addBtn itself — see the comment where it's used.
   addSlot: { flex: 1, alignItems: 'center', paddingVertical: 2 },
+  addBtnLift: { marginTop: -26 },
   addBtn: {
     width: 54,
     height: 54,
     borderRadius: 999,
-    marginTop: -26,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 4,
