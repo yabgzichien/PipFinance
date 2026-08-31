@@ -1,11 +1,14 @@
 // src/components/GlossaryVisualGuide.tsx
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+// Exact 1:1 UI/UX interactive previews matching Pip's real components (SplitSheet, QuickAddField, AccountLinkField, CashflowStructure).
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
-import { radius, uiFont } from '../theme';
+import { colors, numFont, radius, shadowCard, shadowToggle, spacing, uiFont } from '../theme';
 import { Icon } from './Icon';
+import type { SplitMethod } from '../lib/types';
+import { fmtMoney } from '../lib/format';
 
 interface VisualProps {
   visualKey?: string;
@@ -16,354 +19,584 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
 
+  // Interactive state for Split Bill guide
+  const [splitMethod, setSplitMethod] = useState<SplitMethod>('shares');
+  const [includeSelf, setIncludeSelf] = useState(true);
+  const [alexShares, setAlexShares] = useState(2);
+  const [sarahShares, setSarahShares] = useState(1);
+  const [selfShares, setSelfShares] = useState(1);
+  const [activeChip, setActiveChip] = useState<'alex' | 'sarah' | 'maya'>('alex');
+
+  // Interactive state for Owed Settled preview
+  const [settledState, setSettledState] = useState<'pending' | 'settled' | 'written_off'>('pending');
+
+  // Interactive state for Card Direction preview
+  const [cardEffect, setCardEffect] = useState<'add' | 'subtract'>('add');
+
   if (!visualKey) return null;
 
+  const grossBill = 120;
+  const totalShares = (includeSelf ? selfShares : 0) + alexShares + sarahShares;
+  const perShare = grossBill / (totalShares || 1);
+  const ownExpense = includeSelf ? (splitMethod === 'equal' ? grossBill / 3 : perShare * selfShares) : 0;
+  const alexOwed = splitMethod === 'equal' ? grossBill / 3 : perShare * alexShares;
+  const sarahOwed = splitMethod === 'equal' ? grossBill / 3 : perShare * sarahShares;
+  const totalOwed = alexOwed + sarahOwed;
+
   switch (visualKey) {
-    case 'split_step_1':
+    case 'split_step_1': {
+      const METHODS: { key: SplitMethod; label: string; labelZh: string; hint: string; hintZh: string }[] = [
+        { key: 'equal', label: 'Equal', labelZh: '均摊', hint: 'Everyone pays the same', hintZh: '所有人平摊费用' },
+        { key: 'shares', label: 'Shares', labelZh: '份数', hint: 'Someone ate double', hintZh: '按人头份数分摊' },
+        { key: 'exact', label: 'Exact', labelZh: '指定金额', hint: 'Type what each person owes', hintZh: '输入每人应付具体金额' },
+      ];
+      const activeMethodObj = METHODS.find((m) => m.key === splitMethod) ?? METHODS[0];
+
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.badgeRow}>
-            <Text style={[styles.subtleBadge, { color: theme.accentInk, backgroundColor: theme.accentTint }]}>
-              {isZh ? '示例：总账单 RM120.00' : 'Example: Bill RM120.00'}
-            </Text>
-          </View>
-
-          {/* Mini Method Switcher */}
-          <View style={[styles.methodBar, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.methodPill, styles.methodPillActive, { backgroundColor: theme.accent }]}>
-              <Text style={styles.methodTextActive}>{isZh ? '均摊' : 'Equal'}</Text>
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Header */}
+          <View style={styles.sheetHeaderRow}>
+            <View>
+              <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
+                {isZh ? '分摊 RM120.00' : 'Split RM120.00'}
+              </Text>
+              <Text style={[styles.sheetSubtitle, { color: colorTheme.ink2 }]}>Din Tai Fung</Text>
             </View>
-            <View style={styles.methodPill}>
-              <Text style={[styles.methodText, { color: colorTheme.ink3 }]}>{isZh ? '份数' : 'Shares'}</Text>
-            </View>
-            <View style={styles.methodPill}>
-              <Text style={[styles.methodText, { color: colorTheme.ink3 }]}>{isZh ? '指定金额' : 'Exact'}</Text>
+            <View style={[styles.liveBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.liveBadgeText, { color: theme.accentInk }]}>{isZh ? '真实 UI 预览' : 'Live UI Preview'}</Text>
             </View>
           </View>
 
-          {/* Mini Friend Chips */}
-          <View style={styles.chipRow}>
-            <View style={[styles.miniChip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Icon name="check" size={11} color={theme.accent} stroke={2.6} />
-              <Text style={[styles.miniChipText, { color: theme.accentInk }]}>{isZh ? 'Alex (同行)' : 'Alex'}</Text>
-            </View>
-            <View style={[styles.miniChip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Icon name="check" size={11} color={theme.accent} stroke={2.6} />
-              <Text style={[styles.miniChipText, { color: theme.accentInk }]}>{isZh ? 'Sarah (同行)' : 'Sarah'}</Text>
-            </View>
-            <View style={[styles.miniChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Icon name="plus" size={11} color={colorTheme.ink3} stroke={2.2} />
-              <Text style={[styles.miniChipText, { color: colorTheme.ink3 }]}>{isZh ? '添加更多' : 'Add name'}</Text>
+          {/* Exact Segmented Toggle from SplitSheet.tsx */}
+          <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+            {METHODS.map((m) => {
+              const on = splitMethod === m.key;
+              return (
+                <Pressable
+                  key={m.key}
+                  onPress={() => setSplitMethod(m.key)}
+                  style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
+                >
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      { color: colorTheme.ink2 },
+                      on && styles.toggleTextOn,
+                      on && { color: colorTheme.ink },
+                    ]}
+                  >
+                    {isZh ? m.labelZh : m.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[styles.hint, { color: colorTheme.ink3 }]}>
+            {isZh ? activeMethodObj.hintZh : activeMethodObj.hint}
+          </Text>
+
+          {/* Who else was there label & chips */}
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '同行人员' : 'Who else was there'}</Text>
+          <View style={styles.chipWrap}>
+            <Pressable
+              onPress={() => setActiveChip('alex')}
+              style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+            >
+              <Icon name="check" size={13} color={theme.accent} stroke={2.4} />
+              <Text style={[styles.chipText, { color: theme.onTint }]}>Alex</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setActiveChip('sarah')}
+              style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+            >
+              <Icon name="check" size={13} color={theme.accent} stroke={2.4} />
+              <Text style={[styles.chipText, { color: theme.onTint }]}>Sarah</Text>
+            </Pressable>
+            <View style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
+              <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>{isZh ? '添加人员' : 'Add a name'}</Text>
             </View>
           </View>
         </View>
       );
+    }
 
-    case 'split_step_2':
+    case 'split_step_2': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          {/* Include Self Toggle */}
-          <View style={[styles.checkRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.miniCheckbox, { backgroundColor: theme.accent, borderColor: theme.accent }]}>
-              <Icon name="check" size={11} color="#ffffff" stroke={3} />
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Exact Participant Rows from SplitSheet.tsx */}
+          <View style={styles.list}>
+            {/* Alex Row */}
+            <View style={[styles.personRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+              <View style={[styles.avatar, { backgroundColor: theme.accentSoft }]}>
+                <Text style={[styles.avatarText, { color: theme.onTint }]}>A</Text>
+              </View>
+              <Text style={[styles.personName, { color: colorTheme.ink }]} numberOfLines={1}>
+                Alex
+              </Text>
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => setAlexShares((v) => Math.max(1, v - 1))}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>−</Text>
+                </Pressable>
+                <Text style={[styles.stepValue, { color: colorTheme.ink }]}>{alexShares}</Text>
+                <Pressable
+                  onPress={() => setAlexShares((v) => v + 1)}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>+</Text>
+                </Pressable>
+              </View>
+              <Text style={[styles.owed, { color: colorTheme.ink }]}>{fmtMoney(alexOwed, 'MYR')}</Text>
             </View>
-            <Text style={[styles.checkLabel, { color: colorTheme.ink }]}>
-              {isZh ? '我也参与了此账单 (计入个人份)' : 'I was on this bill too (My share included)'}
+
+            {/* Sarah Row */}
+            <View style={[styles.personRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+              <View style={[styles.avatar, { backgroundColor: theme.accentSoft }]}>
+                <Text style={[styles.avatarText, { color: theme.onTint }]}>S</Text>
+              </View>
+              <Text style={[styles.personName, { color: colorTheme.ink }]} numberOfLines={1}>
+                Sarah
+              </Text>
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => setSarahShares((v) => Math.max(1, v - 1))}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>−</Text>
+                </Pressable>
+                <Text style={[styles.stepValue, { color: colorTheme.ink }]}>{sarahShares}</Text>
+                <Pressable
+                  onPress={() => setSarahShares((v) => v + 1)}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>+</Text>
+                </Pressable>
+              </View>
+              <Text style={[styles.owed, { color: colorTheme.ink }]}>{fmtMoney(sarahOwed, 'MYR')}</Text>
+            </View>
+          </View>
+
+          {/* Exact I was on this bill too Checkbox from SplitSheet.tsx */}
+          <Pressable onPress={() => setIncludeSelf((v) => !v)} style={styles.selfRow}>
+            <View
+              style={[
+                styles.check,
+                { borderColor: colorTheme.line, backgroundColor: colorTheme.surface },
+                includeSelf && styles.checkOn,
+                includeSelf && { backgroundColor: theme.accent, borderColor: theme.accent },
+              ]}
+            >
+              {includeSelf && <Icon name="check" size={13} color={colors.onAccent} stroke={2.6} />}
+            </View>
+            <Text style={[styles.selfText, { color: colorTheme.ink }]}>
+              {isZh ? '我也参与了这笔账单' : 'I was on this bill too'}
+            </Text>
+            {includeSelf && (
+              <View style={styles.stepper}>
+                <Pressable
+                  onPress={() => setSelfShares((w) => Math.max(1, w - 1))}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>−</Text>
+                </Pressable>
+                <Text style={[styles.stepValue, { color: colorTheme.ink }]}>{selfShares}</Text>
+                <Pressable
+                  onPress={() => setSelfShares((w) => w + 1)}
+                  style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  hitSlop={4}
+                >
+                  <Text style={[styles.stepText, { color: colorTheme.ink2 }]}>+</Text>
+                </Pressable>
+              </View>
+            )}
+          </Pressable>
+        </View>
+      );
+    }
+
+    case 'split_step_3': {
+      return (
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Exact Summary Box from SplitSheet.tsx */}
+          <View style={[styles.summary, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabel, { color: colorTheme.ink }]}>{isZh ? '个人支出' : 'Your expense'}</Text>
+              <Text style={[styles.summaryValue, { color: colorTheme.ink }]}>{fmtMoney(ownExpense, 'MYR')}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={[styles.summaryLabelSoft, { color: colorTheme.ink2 }]}>{isZh ? '待收借款' : 'Owed to you'}</Text>
+              <Text style={[styles.summaryValueSoft, { color: theme.accent }]}>{fmtMoney(totalOwed, 'MYR')}</Text>
+            </View>
+            <Text style={[styles.summaryNote, { color: colorTheme.ink3 }]}>
+              {isZh
+                ? '仅将您个人承担的份额记为支出。其余部分将作为待收借款，待对方还款后结清。'
+                : 'Only your share is recorded as spending. The rest becomes money owed to you, and clears when they pay you back.'}
             </Text>
           </View>
 
-          {/* Mini Stepper Rows */}
-          <View style={styles.stepperWrap}>
-            <View style={[styles.stepperRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.stepperName, { color: colorTheme.ink }]}>{isZh ? '您 (1 份)' : 'You (1 share)'}</Text>
-              <Text style={[styles.stepperAmount, { color: theme.accentInk }]}>RM30.00</Text>
-            </View>
-            <View style={[styles.stepperRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.stepperName, { color: colorTheme.ink }]}>{isZh ? 'Alex (2 份)' : 'Alex (2 shares)'}</Text>
-              <View style={styles.stepperControls}>
-                <View style={[styles.stepBtnSmall, { backgroundColor: colorTheme.surface2 }]}>
-                  <Text style={[styles.stepBtnText, { color: colorTheme.ink2 }]}>−</Text>
-                </View>
-                <Text style={[styles.stepValueSmall, { color: colorTheme.ink }]}>2</Text>
-                <View style={[styles.stepBtnSmall, { backgroundColor: colorTheme.surface2 }]}>
-                  <Text style={[styles.stepBtnText, { color: colorTheme.ink2 }]}>+</Text>
-                </View>
-                <Text style={[styles.stepperAmount, { color: colorTheme.ink }]}>RM60.00</Text>
-              </View>
-            </View>
-            <View style={[styles.stepperRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.stepperName, { color: colorTheme.ink }]}>{isZh ? 'Sarah (1 份)' : 'Sarah (1 share)'}</Text>
-              <Text style={[styles.stepperAmount, { color: colorTheme.ink }]}>RM30.00</Text>
-            </View>
+          {/* Exact Primary Button from SplitSheet.tsx */}
+          <View style={[styles.mockPrimaryBtn, { backgroundColor: theme.accentInk }]}>
+            <Icon name="check" size={17} color="#ffffff" stroke={2.4} />
+            <Text style={styles.mockPrimaryBtnText}>{isZh ? '保存分账' : 'Save split'}</Text>
           </View>
         </View>
       );
+    }
 
-    case 'split_step_3':
+    case 'owed_step_1': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.splitResultHeader}>
-            <Text style={[styles.splitResultTotal, { color: colorTheme.ink }]}>
-              {isZh ? '总付款金额: RM120.00' : 'Total Paid: RM120.00'}
-            </Text>
-          </View>
-
-          <View style={styles.splitCardsRow}>
-            {/* Your Spend Card */}
-            <View style={[styles.resultBox, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <View style={styles.resultBoxHead}>
-                <Icon name="utensils" size={13} color={theme.accent} stroke={2.4} />
-                <Text style={[styles.resultBoxTitle, { color: theme.accentInk }]}>
-                  {isZh ? '个人支出' : 'Your Expense'}
-                </Text>
-              </View>
-              <Text style={[styles.resultBoxNumber, { color: theme.accentInk }]}>RM30.00</Text>
-              <Text style={[styles.resultBoxCaption, { color: theme.accentInk }]}>
-                {isZh ? '计入月度预算' : 'Counts in budget'}
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Exact Receivable Item Card from Net Worth */}
+          <View style={[styles.receivableCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={[styles.avatar, { backgroundColor: theme.accentSoft }]}>
+              <Text style={[styles.avatarText, { color: theme.onTint }]}>A</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.receivableName, { color: colorTheme.ink }]}>Alex</Text>
+              <Text style={[styles.receivableSub, { color: colorTheme.ink3 }]}>
+                {isZh ? '聚餐分摊 • 待还款' : 'Dinner split • Unsettled'}
               </Text>
             </View>
-
-            {/* Owed to You Card */}
-            <View style={[styles.resultBox, { backgroundColor: colorTheme.amberTint, borderColor: colorTheme.amberSoft }]}>
-              <View style={styles.resultBoxHead}>
-                <Icon name="wallet" size={13} color={colorTheme.amber} stroke={2.4} />
-                <Text style={[styles.resultBoxTitle, { color: colorTheme.amber }]}>
-                  {isZh ? '待收应收' : 'Owed to You'}
-                </Text>
+            <View style={styles.receivableRight}>
+              <Text style={[styles.receivableAmount, { color: theme.accent }]}>+RM60.00</Text>
+              <View style={[styles.assetBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+                <Text style={[styles.assetBadgeText, { color: theme.accentInk }]}>{isZh ? '净资产' : 'Net Worth'}</Text>
               </View>
-              <Text style={[styles.resultBoxNumber, { color: colorTheme.amber }]}>RM90.00</Text>
-              <Text style={[styles.resultBoxCaption, { color: colorTheme.amber }]}>
-                {isZh ? '计入净资产待结' : 'Asset in Net Worth'}
-              </Text>
             </View>
           </View>
-        </View>
-      );
-
-    case 'owed_step_1':
-      return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.flowRow}>
-            <View style={[styles.flowStep, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Icon name="receipt" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.flowLabel, { color: colorTheme.ink }]}>{isZh ? '代付账单' : 'Paid for Group'}</Text>
-              <Text style={[styles.flowSub, { color: colorTheme.ink3 }]}>RM120.00</Text>
-            </View>
-            <Icon name="arrowRight" size={14} color={colorTheme.ink3} stroke={2} />
-            <View style={[styles.flowStep, { backgroundColor: colorTheme.amberTint, borderColor: colorTheme.amberSoft }]}>
-              <Icon name="wallet" size={16} color={colorTheme.amber} stroke={2.2} />
-              <Text style={[styles.flowLabel, { color: colorTheme.amber }]}>{isZh ? '待收应收款' : 'Owed Asset'}</Text>
-              <Text style={[styles.flowSub, { color: colorTheme.amber }]}>+RM90.00</Text>
-            </View>
-          </View>
-          <Text style={[styles.noteText, { color: colorTheme.ink2 }]}>
+          <Text style={[styles.flowExplainer, { color: colorTheme.ink2 }]}>
             {isZh
-              ? '💡 朋友欠你的钱保留在净资产中，不会虚增单月支出。'
-              : '💡 Friend shares stay as assets in your Net Worth, preventing expense spikes.'}
+              ? '💡 代付的 RM60.00 不会虚增为个人支出，而是作为应收资产在净资产中安全跟踪。'
+              : '💡 The RM60.00 is tracked as an asset under Net Worth rather than an inflated personal expense.'}
           </Text>
         </View>
       );
+    }
 
-    case 'owed_step_2':
+    case 'owed_step_2': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.actionChoiceRow}>
-            <View style={[styles.choiceCard, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <View style={styles.choiceHeader}>
-                <Icon name="check" size={13} color={theme.accent} stroke={2.6} />
-                <Text style={[styles.choiceTitle, { color: theme.accentInk }]}>{isZh ? '还款 ➔ 结清' : 'Repaid ➔ Settle'}</Text>
-              </View>
-              <Text style={[styles.choiceDesc, { color: theme.accentInk }]}>
-                {isZh ? '冲销应收款，现金入账，无重复收入' : 'Clears debt, adds cash, no double income'}
-              </Text>
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          <View style={[styles.receivableCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={[styles.avatar, { backgroundColor: theme.accentSoft }]}>
+              <Text style={[styles.avatarText, { color: theme.onTint }]}>A</Text>
             </View>
-
-            <View style={[styles.choiceCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <View style={styles.choiceHeader}>
-                <Icon name="x" size={13} color={colorTheme.ink2} stroke={2.6} />
-                <Text style={[styles.choiceTitle, { color: colorTheme.ink }]}>{isZh ? '无法收回 ➔ 核销' : 'Unpaid ➔ Write off'}</Text>
-              </View>
-              <Text style={[styles.choiceDesc, { color: colorTheme.ink2 }]}>
-                {isZh ? '将无法追回的款项转为个人支出' : 'Converts uncollectible amount to expense'}
-              </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.receivableName, { color: colorTheme.ink }]}>Alex</Text>
+              <Text style={[styles.receivableSub, { color: colorTheme.ink3 }]}>RM60.00</Text>
             </View>
           </View>
+
+          {/* Interactive Settle / Write Off Buttons */}
+          <View style={styles.actionButtonsRow}>
+            <Pressable
+              onPress={() => setSettledState('settled')}
+              style={[
+                styles.actionBtn,
+                { backgroundColor: theme.accentTint, borderColor: theme.accentSoft },
+                settledState === 'settled' && { backgroundColor: theme.accentInk },
+              ]}
+            >
+              <Icon name="check" size={14} color={settledState === 'settled' ? '#ffffff' : theme.accent} stroke={2.4} />
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: settledState === 'settled' ? '#ffffff' : theme.accentInk },
+                ]}
+              >
+                {isZh ? '结清 (Settle)' : 'Settle'}
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setSettledState('written_off')}
+              style={[
+                styles.actionBtn,
+                { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line },
+                settledState === 'written_off' && { backgroundColor: colorTheme.red },
+              ]}
+            >
+              <Icon name="trash" size={14} color={settledState === 'written_off' ? '#ffffff' : colorTheme.red} />
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: settledState === 'written_off' ? '#ffffff' : colorTheme.ink2 },
+                ]}
+              >
+                {isZh ? '核销 (Write off)' : 'Write off'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {settledState === 'settled' ? (
+            <View style={[styles.statusFeedback, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.statusFeedbackText, { color: theme.accentInk }]}>
+                {isZh
+                  ? '✅ 结清成功：现金增加 RM60.00，应收款冲销，不产生虚假重复收入。'
+                  : '✅ Settled: RM60.00 cash deposited, debt cleared, zero duplicate income recorded.'}
+              </Text>
+            </View>
+          ) : settledState === 'written_off' ? (
+            <View style={[styles.statusFeedback, { backgroundColor: colorTheme.redTint, borderColor: colorTheme.redSoft }]}>
+              <Text style={[styles.statusFeedbackText, { color: colorTheme.red }]}>
+                {isZh
+                  ? '⚠️ 核销成功：无法收回的金额已转为当月个人支出。'
+                  : '⚠️ Written off: Uncollectible amount converted to personal expense.'}
+              </Text>
+            </View>
+          ) : (
+            <Text style={[styles.flowExplainer, { color: colorTheme.ink3 }]}>
+              {isZh ? '点击上方按钮体验“结清”或“核销”的处理效果' : 'Tap above to preview Settle or Write-off actions'}
+            </Text>
+          )}
         </View>
       );
+    }
 
     case 'quick_add_step_1':
-    case 'quick_add_step_2':
+    case 'quick_add_step_2': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={[styles.typingBox, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <Text style={[styles.typingPrefix, { color: theme.accent }]}>✍️</Text>
-            <Text style={[styles.typingText, { color: colorTheme.ink }]}>lunch 12, grab 18</Text>
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Exact QuickAddField input UI */}
+          <View style={styles.quickAddRow}>
+            <View style={[styles.inputContainer, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Text style={[styles.inputSampleText, { color: colorTheme.ink }]}>lunch 12, grab 18</Text>
+            </View>
+            <View style={[styles.quickAddSubmit, { backgroundColor: theme.accent }]}>
+              <Icon name="check" size={16} color="#ffffff" stroke={2.4} />
+            </View>
           </View>
 
-          <View style={styles.parsedItemsRow}>
-            <View style={[styles.parsedBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Icon name="utensils" size={12} color={theme.accent} stroke={2.4} />
-              <Text style={[styles.parsedBadgeText, { color: theme.accentInk }]}>
-                {isZh ? '午餐 RM12.00 (餐饮)' : 'Lunch RM12.00 (Food)'}
-              </Text>
+          {/* Exact Transaction Result Rows matching Pip's ledger */}
+          <View style={styles.quickParsedList}>
+            <View style={[styles.quickParsedItem, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <View style={[styles.catIconCircle, { backgroundColor: '#ffe9e0' }]}>
+                <Icon name="utensils" size={14} color="#d35400" stroke={2.2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.quickItemTitle, { color: colorTheme.ink }]}>{isZh ? '午餐' : 'Lunch'}</Text>
+                <Text style={[styles.quickItemSub, { color: colorTheme.ink3 }]}>{isZh ? '餐饮 • 今天' : 'Food & Dining • Today'}</Text>
+              </View>
+              <Text style={[styles.quickItemAmount, { color: colorTheme.ink }]}>-RM12.00</Text>
             </View>
-            <View style={[styles.parsedBadge, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Icon name="car" size={12} color={colorTheme.ink2} stroke={2.4} />
-              <Text style={[styles.parsedBadgeText, { color: colorTheme.ink2 }]}>
-                {isZh ? '打车 RM18.00 (交通)' : 'Grab RM18.00 (Transport)'}
-              </Text>
+
+            <View style={[styles.quickParsedItem, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <View style={[styles.catIconCircle, { backgroundColor: '#e2f4ea' }]}>
+                <Icon name="car" size={14} color="#1c7a4e" stroke={2.2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.quickItemTitle, { color: colorTheme.ink }]}>Grab</Text>
+                <Text style={[styles.quickItemSub, { color: colorTheme.ink3 }]}>{isZh ? '交通 • 今天' : 'Transport • Today'}</Text>
+              </View>
+              <Text style={[styles.quickItemAmount, { color: colorTheme.ink }]}>-RM18.00</Text>
             </View>
           </View>
         </View>
       );
+    }
 
-    case 'safe_income_visual':
+    case 'safe_income_visual': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Income Floor Chart matching CashflowStructure.tsx */}
+          <View style={styles.floorCardHead}>
+            <View style={[styles.shieldIconWrap, { backgroundColor: theme.accentSoft }]}>
+              <Icon name="shield" size={14} color={theme.accent} stroke={2.4} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.floorHeadTitle, { color: colorTheme.ink }]}>
+                {isZh ? '安全底线月收入' : 'Safe Monthly Income'}
+              </Text>
+              <Text style={[styles.floorHeadAmount, { color: theme.accentInk }]}>RM3,800</Text>
+            </View>
+          </View>
+
           <View style={styles.chartBarsWrap}>
             <View style={styles.barCol}>
-              <View style={[styles.bar, { height: 42, backgroundColor: theme.accentSoft }]} />
+              <View style={[styles.bar, { height: 46, backgroundColor: theme.accentSoft }]} />
               <Text style={[styles.barLabel, { color: colorTheme.ink3 }]}>M1</Text>
             </View>
             <View style={styles.barCol}>
-              <View style={[styles.bar, { height: 60, backgroundColor: theme.accentSoft }]} />
+              <View style={[styles.bar, { height: 64, backgroundColor: theme.accentSoft }]} />
               <Text style={[styles.barLabel, { color: colorTheme.ink3 }]}>M2</Text>
             </View>
             <View style={styles.barCol}>
-              <View style={[styles.bar, { height: 28, backgroundColor: theme.accent }]} />
-              <Text style={[styles.barLabel, { color: theme.accentInk, fontWeight: '700' }]}>M3</Text>
+              <View style={[styles.bar, { height: 32, backgroundColor: theme.accent }]} />
+              <Text style={[styles.barLabel, { color: theme.accentInk, fontFamily: uiFont(700) }]}>M3</Text>
             </View>
             <View style={styles.barCol}>
-              <View style={[styles.bar, { height: 52, backgroundColor: theme.accentSoft }]} />
+              <View style={[styles.bar, { height: 54, backgroundColor: theme.accentSoft }]} />
               <Text style={[styles.barLabel, { color: colorTheme.ink3 }]}>M4</Text>
             </View>
           </View>
 
-          <View style={[styles.floorLineCard, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-            <Icon name="shield" size={13} color={theme.accent} stroke={2.4} />
-            <Text style={[styles.floorLineText, { color: theme.accentInk }]}>
+          <View style={[styles.floorCallout, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+            <Text style={[styles.floorCalloutText, { color: theme.accentInk }]}>
               {isZh
-                ? '安全底线（取保守低月）➔ 预算不落空，好月份自动变储蓄'
-                : 'Safe Floor (Conservative low) ➔ Budget never fails, good months become savings'}
+                ? '以最低月份 RM3,800 制定支出计划，丰收月份自然转化为储蓄。'
+                : 'Plan your expenses against the RM3,800 floor; higher months automatically turn into savings.'}
             </Text>
           </View>
         </View>
       );
+    }
 
-    case 'committed_spend_visual':
+    case 'committed_spend_visual': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={[styles.tierCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.tierDot, { backgroundColor: colorTheme.red }]} />
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* 3-Tier Spend Hierarchy matching CashflowStructure.tsx */}
+          <View style={[styles.tierRowItem, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={[styles.tierColorBar, { backgroundColor: colorTheme.ink }]} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.tierTitle, { color: colorTheme.ink }]}>
-                {isZh ? '固定支出 (Committed)' : 'Committed (Fixed)'}
-              </Text>
+              <View style={styles.tierHead}>
+                <Text style={[styles.tierName, { color: colorTheme.ink }]}>
+                  {isZh ? '固定支出 (Committed)' : 'Committed (Fixed)'}
+                </Text>
+                <Text style={[styles.tierAmount, { color: colorTheme.ink }]}>35%</Text>
+              </View>
               <Text style={[styles.tierDesc, { color: colorTheme.ink3 }]}>
-                {isZh ? '房租、贷款分期（当月固定无法削减）' : 'Rent, loan instalments (Cannot cut this month)'}
+                {isZh ? '房租、贷款分期（锁死不可调减）' : 'Rent, loan instalments (Fixed)'}
               </Text>
             </View>
           </View>
 
-          <View style={[styles.tierCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.tierDot, { backgroundColor: colorTheme.amber }]} />
+          <View style={[styles.tierRowItem, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={[styles.tierColorBar, { backgroundColor: theme.accent }]} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.tierTitle, { color: colorTheme.ink }]}>
-                {isZh ? '刚性支出 (Essential)' : 'Essential (Elastic)'}
-              </Text>
+              <View style={styles.tierHead}>
+                <Text style={[styles.tierName, { color: colorTheme.ink }]}>
+                  {isZh ? '刚性支出 (Essential)' : 'Essential (Elastic)'}
+                </Text>
+                <Text style={[styles.tierAmount, { color: theme.accentInk }]}>40%</Text>
+              </View>
               <Text style={[styles.tierDesc, { color: colorTheme.ink3 }]}>
-                {isZh ? '基本伙食、日常交通（不可缺少但可压缩）' : 'Food, fuel (Necessary, but can compress)'}
+                {isZh ? '基本伙食、日常交通（可压缩不可省）' : 'Food, groceries (Compressible)'}
               </Text>
             </View>
           </View>
 
-          <View style={[styles.tierCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.tierDot, { backgroundColor: theme.accent }]} />
+          <View style={[styles.tierRowItem, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <View style={[styles.tierColorBar, { backgroundColor: '#3ab07a' }]} />
             <View style={{ flex: 1 }}>
-              <Text style={[styles.tierTitle, { color: colorTheme.ink }]}>
-                {isZh ? '灵活支出 (Flexible)' : 'Flexible (Discretionary)'}
-              </Text>
+              <View style={styles.tierHead}>
+                <Text style={[styles.tierName, { color: colorTheme.ink }]}>
+                  {isZh ? '灵活支出 (Flexible)' : 'Flexible (Discretionary)'}
+                </Text>
+                <Text style={[styles.tierAmount, { color: '#1c7a4e' }]}>25%</Text>
+              </View>
               <Text style={[styles.tierDesc, { color: colorTheme.ink3 }]}>
-                {isZh ? '餐饮聚会、休闲娱乐（紧缩月份可直接砍掉）' : 'Dining out, leisure (Redirectable anytime)'}
+                {isZh ? '聚餐娱乐、休闲购物（紧缩月可随时砍掉）' : 'Dining out, leisure (Redirectable)'}
               </Text>
             </View>
           </View>
         </View>
       );
+    }
 
-    case 'card_direction_visual':
+    case 'card_direction_visual': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.actionChoiceRow}>
-            <View style={[styles.choiceCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.choiceTitle, { color: colorTheme.ink }]}>
-                {isZh ? '💳 消费 (Adds to)' : '💳 Adds to debt'}
-              </Text>
-              <Text style={[styles.choiceDesc, { color: colorTheme.ink2 }]}>
-                {isZh ? '刷卡买东西 ➔ 欠款增加' : 'Card purchase ➔ Increases what you owe'}
-              </Text>
-            </View>
-            <View style={[styles.choiceCard, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Text style={[styles.choiceTitle, { color: theme.accentInk }]}>
-                {isZh ? '💵 还款 (Pays down)' : '💵 Pays down debt'}
-              </Text>
-              <Text style={[styles.choiceDesc, { color: theme.accentInk }]}>
-                {isZh ? '转账还账单 ➔ 欠款降低' : 'Bill payment ➔ Lowers card balance'}
-              </Text>
-            </View>
-          </View>
-        </View>
-      );
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          <Text style={[styles.cardAccountName, { color: colorTheme.ink }]}>Maybank Visa Platinum (Credit Card)</Text>
 
-    case 'net_worth_visual':
-      return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.equationWrap}>
-            <View style={[styles.equationPill, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Text style={[styles.equationText, { color: theme.accentInk }]}>
-                {isZh ? '资产 (现金/投资/待收款)' : 'Assets (Cash, Stocks, Owed)'}
+          {/* Exact Direction Toggle from AccountLinkField.tsx */}
+          <View style={[styles.effectRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+            <Pressable
+              onPress={() => setCardEffect('add')}
+              style={[styles.effectBtn, cardEffect === 'add' && { backgroundColor: theme.accentInk }]}
+            >
+              <Text
+                style={[
+                  styles.effectText,
+                  { color: colorTheme.ink2 },
+                  cardEffect === 'add' && styles.effectTextOn,
+                ]}
+              >
+                {isZh ? '计入 Maybank Visa' : 'Adds to Maybank Visa'}
               </Text>
-            </View>
-            <Text style={[styles.equationOp, { color: colorTheme.ink3 }]}>−</Text>
-            <View style={[styles.equationPill, { backgroundColor: colorTheme.redTint, borderColor: colorTheme.redSoft }]}>
-              <Text style={[styles.equationText, { color: colorTheme.red }]}>
-                {isZh ? '负债 (贷款/信用卡欠款)' : 'Liabilities (Loans, Cards)'}
+            </Pressable>
+            <Pressable
+              onPress={() => setCardEffect('subtract')}
+              style={[styles.effectBtn, cardEffect === 'subtract' && { backgroundColor: theme.accentInk }]}
+            >
+              <Text
+                style={[
+                  styles.effectText,
+                  { color: colorTheme.ink2 },
+                  cardEffect === 'subtract' && styles.effectTextOn,
+                ]}
+              >
+                {isZh ? '偿还 Maybank Visa' : 'Pays down Maybank Visa'}
               </Text>
-            </View>
-            <Text style={[styles.equationOp, { color: colorTheme.ink3 }]}>=</Text>
-            <View style={[styles.equationPill, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.equationText, { color: colorTheme.ink, fontWeight: '700' }]}>
-                {isZh ? '净资产 📈' : 'Net Worth 📈'}
-              </Text>
-            </View>
+            </Pressable>
           </View>
-        </View>
-      );
 
-    case 'net_cash_flow_visual':
+          <View style={[styles.statusFeedback, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+            <Text style={[styles.statusFeedbackText, { color: theme.accentInk }]}>
+              {cardEffect === 'add'
+                ? isZh
+                  ? '💳 刷卡消费：信用卡欠款（负债）增加。'
+                  : '💳 Card Purchase: Increases what you owe on the card.'
+                : isZh
+                ? '💵 还款转账：信用卡欠款降低，冲销负债。'
+                : '💵 Card Payment: Lowers your card balance & pays down debt.'}
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    case 'net_worth_visual': {
       return (
-        <View style={[styles.card, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <View style={styles.equationWrap}>
-            <View style={[styles.equationPill, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Text style={[styles.equationText, { color: theme.accentInk }]}>
-                {isZh ? '总收入 (+)' : 'Income (+)'}
-              </Text>
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          <View style={styles.eqBox}>
+            <View style={[styles.eqPill, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.eqTitle, { color: theme.accentInk }]}>{isZh ? '总资产' : 'Assets'}</Text>
+              <Text style={[styles.eqValue, { color: theme.accentInk }]}>RM52,000</Text>
             </View>
-            <Text style={[styles.equationOp, { color: colorTheme.ink3 }]}>−</Text>
-            <View style={[styles.equationPill, { backgroundColor: colorTheme.amberTint, borderColor: colorTheme.amberSoft }]}>
-              <Text style={[styles.equationText, { color: colorTheme.amber }]}>
-                {isZh ? '总支出 (−)' : 'Expenses (−)'}
-              </Text>
+            <Text style={[styles.eqOp, { color: colorTheme.ink3 }]}>−</Text>
+            <View style={[styles.eqPill, { backgroundColor: colorTheme.redTint, borderColor: colorTheme.redSoft }]}>
+              <Text style={[styles.eqTitle, { color: colorTheme.red }]}>{isZh ? '总负债' : 'Liabilities'}</Text>
+              <Text style={[styles.eqValue, { color: colorTheme.red }]}>RM14,000</Text>
             </View>
-            <Text style={[styles.equationOp, { color: colorTheme.ink3 }]}>=</Text>
-            <View style={[styles.equationPill, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-              <Text style={[styles.equationText, { color: colorTheme.ink, fontWeight: '700' }]}>
-                {isZh ? '净现金流 💰' : 'Net Cash Flow 💰'}
-              </Text>
+            <Text style={[styles.eqOp, { color: colorTheme.ink3 }]}>=</Text>
+            <View style={[styles.eqPill, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Text style={[styles.eqTitle, { color: colorTheme.ink }]}>{isZh ? '总净资产' : 'Net Worth'}</Text>
+              <Text style={[styles.eqValue, { color: colorTheme.ink }]}>RM38,000</Text>
             </View>
           </View>
         </View>
       );
+    }
+
+    case 'net_cash_flow_visual': {
+      return (
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          <View style={styles.eqBox}>
+            <View style={[styles.eqPill, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.eqTitle, { color: theme.accentInk }]}>{isZh ? '月收入' : 'Income'}</Text>
+              <Text style={[styles.eqValue, { color: theme.accentInk }]}>+RM5,500</Text>
+            </View>
+            <Text style={[styles.eqOp, { color: colorTheme.ink3 }]}>−</Text>
+            <View style={[styles.eqPill, { backgroundColor: colorTheme.amberTint, borderColor: colorTheme.amberSoft }]}>
+              <Text style={[styles.eqTitle, { color: colorTheme.amber }]}>{isZh ? '总支出' : 'Expenses'}</Text>
+              <Text style={[styles.eqValue, { color: colorTheme.amber }]}>-RM3,800</Text>
+            </View>
+            <Text style={[styles.eqOp, { color: colorTheme.ink3 }]}>=</Text>
+            <View style={[styles.eqPill, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Text style={[styles.eqTitle, { color: theme.accentInk }]}>{isZh ? '结余现金' : 'Net Flow'}</Text>
+              <Text style={[styles.eqValue, { color: theme.accentInk }]}>+RM1,700</Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
 
     default:
       return null;
@@ -371,263 +604,376 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderRadius: radius.sm,
+  appContainer: {
+    borderRadius: radius.md,
     borderWidth: 1,
-    padding: 12,
+    padding: 14,
     marginVertical: 10,
+    ...shadowCard,
   },
-  badgeRow: {
+  sheetHeaderRow: {
     flexDirection: 'row',
-    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  subtleBadge: {
+  sheetTitle: {
     fontFamily: uiFont(700),
-    fontSize: 11,
+    fontSize: 16,
+  },
+  sheetSubtitle: {
+    fontFamily: uiFont(500),
+    fontSize: 12,
+    marginTop: 1,
+  },
+  liveBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
-  },
-  methodBar: {
-    flexDirection: 'row',
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
-    padding: 2,
-    marginBottom: 8,
   },
-  methodPill: {
+  liveBadgeText: {
+    fontFamily: uiFont(700),
+    fontSize: 10,
+  },
+  toggle: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    padding: 3,
+    borderWidth: 1,
+  },
+  toggleBtn: {
     flex: 1,
-    paddingVertical: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 6,
+    paddingVertical: 7,
+    borderRadius: 999,
   },
-  methodPillActive: {},
-  methodText: {
+  toggleBtnOn: {
+    ...shadowToggle,
+  },
+  toggleText: {
     fontFamily: uiFont(600),
-    fontSize: 11.5,
+    fontSize: 12.5,
   },
-  methodTextActive: {
+  toggleTextOn: {
     fontFamily: uiFont(700),
-    fontSize: 11.5,
-    color: '#ffffff',
   },
-  chipRow: {
+  hint: {
+    fontFamily: uiFont(500),
+    fontSize: 11.5,
+    textAlign: 'center',
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  fieldLabel: {
+    fontFamily: uiFont(600),
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
   },
-  miniChip: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
   },
-  miniChipText: {
+  chipText: {
     fontFamily: uiFont(600),
-    fontSize: 11,
+    fontSize: 12,
   },
-  checkRow: {
+  addChip: {
+    borderStyle: 'dashed',
+  },
+  list: {
+    gap: 8,
+    marginBottom: 10,
+  },
+  personRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    padding: 8,
-    borderRadius: 8,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
   },
-  miniCheckbox: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
+  avatar: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontFamily: uiFont(700),
+    fontSize: 12,
+  },
+  personName: {
+    flex: 1,
+    fontFamily: uiFont(600),
+    fontSize: 13,
+  },
+  owed: {
+    fontFamily: numFont(700),
+    fontSize: 13.5,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  stepBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkLabel: {
-    fontFamily: uiFont(600),
-    fontSize: 11.5,
+  stepText: {
+    fontFamily: uiFont(700),
+    fontSize: 13,
+    lineHeight: 16,
+  },
+  stepValue: {
+    fontFamily: numFont(700),
+    fontSize: 13,
+    minWidth: 12,
+    textAlign: 'center',
+  },
+  selfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  check: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkOn: {},
+  selfText: {
     flex: 1,
+    fontFamily: uiFont(600),
+    fontSize: 12.5,
   },
-  stepperWrap: {
-    gap: 6,
+  summary: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 12,
+    gap: 5,
+    marginBottom: 10,
   },
-  stepperRow: {
+  summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
   },
-  stepperName: {
-    fontFamily: uiFont(600),
-    fontSize: 11.5,
-  },
-  stepperAmount: {
+  summaryLabel: {
     fontFamily: uiFont(700),
-    fontSize: 11.5,
-  },
-  stepperControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stepBtnSmall: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 14,
-  },
-  stepValueSmall: {
-    fontFamily: uiFont(700),
-    fontSize: 11.5,
-  },
-  splitResultHeader: {
-    marginBottom: 8,
-  },
-  splitResultTotal: {
-    fontFamily: uiFont(700),
-    fontSize: 12,
-  },
-  splitCardsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  resultBox: {
-    flex: 1,
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  resultBoxHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  resultBoxTitle: {
-    fontFamily: uiFont(700),
-    fontSize: 11,
-  },
-  resultBoxNumber: {
-    fontFamily: uiFont(800),
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  resultBoxCaption: {
-    fontFamily: uiFont(500),
-    fontSize: 10,
-  },
-  flowRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: 8,
-  },
-  flowStep: {
-    flex: 1,
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  flowLabel: {
-    fontFamily: uiFont(700),
-    fontSize: 11,
-    marginTop: 4,
-  },
-  flowSub: {
-    fontFamily: uiFont(600),
-    fontSize: 11,
-    marginTop: 2,
-  },
-  noteText: {
-    fontFamily: uiFont(500),
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  actionChoiceRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  choiceCard: {
-    flex: 1,
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  choiceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 4,
-  },
-  choiceTitle: {
-    fontFamily: uiFont(700),
-    fontSize: 11.5,
-    marginBottom: 2,
-  },
-  choiceDesc: {
-    fontFamily: uiFont(500),
-    fontSize: 10.5,
-    lineHeight: 14,
-  },
-  typingBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  typingPrefix: {
     fontSize: 13,
   },
-  typingText: {
+  summaryValue: {
+    fontFamily: numFont(700),
+    fontSize: 15,
+  },
+  summaryLabelSoft: {
+    fontFamily: uiFont(600),
+    fontSize: 12,
+  },
+  summaryValueSoft: {
+    fontFamily: numFont(600),
+    fontSize: 13,
+  },
+  summaryNote: {
+    fontFamily: uiFont(500),
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  mockPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 44,
+    borderRadius: 999,
+  },
+  mockPrimaryBtnText: {
+    fontFamily: uiFont(700),
+    fontSize: 14,
+    color: '#ffffff',
+  },
+  receivableCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 8,
+  },
+  receivableName: {
+    fontFamily: uiFont(700),
+    fontSize: 13.5,
+  },
+  receivableSub: {
+    fontFamily: uiFont(500),
+    fontSize: 11,
+    marginTop: 1,
+  },
+  receivableRight: {
+    alignItems: 'flex-end',
+  },
+  receivableAmount: {
+    fontFamily: numFont(700),
+    fontSize: 14,
+  },
+  assetBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    marginTop: 2,
+  },
+  assetBadgeText: {
+    fontFamily: uiFont(700),
+    fontSize: 9.5,
+  },
+  flowExplainer: {
+    fontFamily: uiFont(500),
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginVertical: 6,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  actionBtnText: {
     fontFamily: uiFont(700),
     fontSize: 12,
   },
-  parsedItemsRow: {
-    gap: 6,
-  },
-  parsedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
+  statusFeedback: {
+    padding: 8,
+    borderRadius: 8,
     borderWidth: 1,
+    marginTop: 6,
   },
-  parsedBadgeText: {
+  statusFeedbackText: {
     fontFamily: uiFont(600),
     fontSize: 11,
+    lineHeight: 15,
+  },
+  quickAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  inputContainer: {
+    flex: 1,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inputSampleText: {
+    fontFamily: uiFont(600),
+    fontSize: 13.5,
+  },
+  quickAddSubmit: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickParsedList: {
+    gap: 6,
+  },
+  quickParsedItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 8,
+  },
+  catIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickItemTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 12.5,
+  },
+  quickItemSub: {
+    fontFamily: uiFont(500),
+    fontSize: 10.5,
+  },
+  quickItemAmount: {
+    fontFamily: numFont(700),
+    fontSize: 13,
+  },
+  floorCardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  shieldIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floorHeadTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 12.5,
+  },
+  floorHeadAmount: {
+    fontFamily: numFont(800),
+    fontSize: 16,
   },
   chartBarsWrap: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
-    height: 70,
+    height: 64,
     paddingBottom: 4,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   barCol: {
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
   bar: {
     width: 22,
@@ -637,65 +983,101 @@ const styles = StyleSheet.create({
     fontFamily: uiFont(500),
     fontSize: 10,
   },
-  floorLineCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  floorCallout: {
     padding: 8,
     borderRadius: 8,
     borderWidth: 1,
   },
-  floorLineText: {
+  floorCalloutText: {
     fontFamily: uiFont(600),
-    fontSize: 10.5,
-    flex: 1,
+    fontSize: 11,
     lineHeight: 15,
   },
-  tierCard: {
+  tierRowItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    padding: 8,
-    borderRadius: 8,
+    alignItems: 'stretch',
+    borderRadius: radius.sm,
     borderWidth: 1,
+    overflow: 'hidden',
     marginBottom: 6,
+    paddingRight: 10,
+    paddingVertical: 6,
   },
-  tierDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 4,
+  tierColorBar: {
+    width: 4,
+    borderRadius: 2,
+    marginRight: 8,
   },
-  tierTitle: {
+  tierHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 1,
+  },
+  tierName: {
     fontFamily: uiFont(700),
-    fontSize: 11.5,
-    marginBottom: 2,
+    fontSize: 12,
+  },
+  tierAmount: {
+    fontFamily: numFont(700),
+    fontSize: 12,
   },
   tierDesc: {
     fontFamily: uiFont(500),
     fontSize: 10.5,
-    lineHeight: 14,
   },
-  equationWrap: {
+  cardAccountName: {
+    fontFamily: uiFont(700),
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  effectRow: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    padding: 3,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  effectBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  effectText: {
+    fontFamily: uiFont(600),
+    fontSize: 11.5,
+  },
+  effectTextOn: {
+    color: colors.onAccent,
+    fontFamily: uiFont(700),
+  },
+  eqBox: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
-  equationPill: {
+  eqPill: {
+    alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 5,
     borderRadius: 6,
     borderWidth: 1,
   },
-  equationText: {
+  eqTitle: {
     fontFamily: uiFont(600),
-    fontSize: 11,
+    fontSize: 10,
+    marginBottom: 1,
   },
-  equationOp: {
+  eqValue: {
+    fontFamily: numFont(700),
+    fontSize: 12,
+  },
+  eqOp: {
     fontFamily: uiFont(700),
     fontSize: 14,
-    paddingHorizontal: 2,
+    paddingHorizontal: 1,
   },
 });
