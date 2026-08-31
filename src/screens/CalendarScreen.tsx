@@ -6,7 +6,7 @@ import { fmtMoney } from '../lib/format';
 import type { Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { useDisplayCurrency } from '../state/useDisplayCurrency';
+import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { colors, numFont, platformShadow, shadowCard, uiFont } from '../theme';
@@ -70,7 +70,7 @@ interface MonthData {
   byDay: Record<string, DayData>;
 }
 
-function computeMonthData(transactions: Transaction[], year: number, month: number): MonthData {
+function computeMonthData(transactions: Transaction[], year: number, month: number, dc: DisplayCurrency): MonthData {
   const mk = monthKeyFrom({ year, month });
   let totalIncome = 0;
   let totalExpense = 0;
@@ -82,12 +82,13 @@ function computeMonthData(transactions: Transaction[], year: number, month: numb
     const dayStr = d; // full YYYY-MM-DD
     if (!byDay[dayStr]) byDay[dayStr] = { income: 0, expense: 0, net: 0, txns: [] };
     byDay[dayStr].txns.push(t);
+    const val = dc.convertTxn(t);
     if (t.type === 'income') {
-      byDay[dayStr].income += t.amount;
-      totalIncome += t.amount;
+      byDay[dayStr].income += val;
+      totalIncome += val;
     } else if (t.type === 'expense') {
-      byDay[dayStr].expense += t.amount;
-      totalExpense += t.amount;
+      byDay[dayStr].expense += val;
+      totalExpense += val;
     }
     byDay[dayStr].net = byDay[dayStr].income - byDay[dayStr].expense;
   }
@@ -164,7 +165,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
           <View style={[styles.summaryDot, { backgroundColor: theme.accent }]} />
           <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '收入' : 'INCOME'}</Text>
         </View>
-        <Text style={[styles.summaryAmount, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(income), dc.code)}</Text>
+        <Text style={[styles.summaryAmount, { color: colorTheme.ink }]}>{fmtMoney(income, dc.code)}</Text>
       </View>
       <View
         style={[
@@ -177,7 +178,7 @@ function SummaryCards({ income, expense }: { income: number; expense: number }) 
           <View style={[styles.summaryDot, { backgroundColor: colorTheme.red }]} />
           <Text style={[styles.summaryLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出' : 'EXPENSE'}</Text>
         </View>
-        <Text style={[styles.summaryAmount, { color: colorTheme.red }]}>{fmtMoney(dc.convert(expense), dc.code)}</Text>
+        <Text style={[styles.summaryAmount, { color: colorTheme.red }]}>{fmtMoney(expense, dc.code)}</Text>
       </View>
     </View>
   );
@@ -475,7 +476,7 @@ function DayTransactionList({
           <View style={[styles.dayNetRow, { backgroundColor: colorTheme.surface2 }]}>
             <Text style={[styles.dayNetLabel, { color: colorTheme.ink2 }]}>{isZh ? '结余' : 'Net'}</Text>
             <Text style={[styles.dayNetVal, { color: dayData.net >= 0 ? theme.accentInk : colorTheme.red }]}>
-              {dayData.net >= 0 ? '+' : '−'} {fmtMoney(dc.convert(Math.abs(dayData.net)), dc.code)}
+              {dayData.net >= 0 ? '+' : '−'} {fmtMoney(Math.abs(dayData.net), dc.code)}
             </Text>
           </View>
         </View>
@@ -498,6 +499,7 @@ export function CalendarScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const { formatMonthLabel, isZh } = useLanguage();
   const { transactions } = useAppData();
   const [viewMode, setViewMode] = useState<'month' | 'year'>('month');
@@ -516,8 +518,8 @@ export function CalendarScreen({
   const today = new Date();
 
   const monthData = useMemo(
-    () => computeMonthData(transactions, ym.year, ym.month),
-    [transactions, ym]
+    () => computeMonthData(transactions, ym.year, ym.month, dc),
+    [transactions, ym, dc]
   );
   const grid = useMemo(() => buildCalendarGrid(ym.year, ym.month), [ym]);
 

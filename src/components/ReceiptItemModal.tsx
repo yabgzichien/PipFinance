@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { round2 } from '../lib/currency';
 import { currencyPrefix } from '../lib/format';
 import type { ReceiptLine } from '../lib/split';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { numFont, radius, uiFont } from '../theme';
@@ -28,6 +29,7 @@ export function ReceiptItemModal({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
 
   const [label, setLabel] = useState('');
   const [amountText, setAmountText] = useState('');
@@ -78,18 +80,18 @@ export function ReceiptItemModal({
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom + 8 }]}>
           <View style={styles.head}>
             <Text style={[styles.title, { color: colorTheme.ink }]}>
-              {item ? 'Edit item' : 'Add an item'}
+              {item ? (isZh ? '编辑明细' : 'Edit item') : (isZh ? '添加明细' : 'Add an item')}
             </Text>
-            <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+            <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={isZh ? '关闭' : 'Close'}>
               <Icon name="x" size={20} color={colorTheme.ink2} />
             </Pressable>
           </View>
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Item name</Text>
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '项目名称' : 'Item name'}</Text>
           <TextInput
             value={label}
             onChangeText={setLabel}
-            placeholder="e.g. Chicken Rice"
+            placeholder={isZh ? '例如：海南鸡饭' : 'e.g. Chicken Rice'}
             placeholderTextColor={colorTheme.ink3}
             style={[
               styles.input,
@@ -100,7 +102,7 @@ export function ReceiptItemModal({
             returnKeyType="next"
           />
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 14 }]}>Price</Text>
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 14 }]}>{isZh ? '单价 / 金额' : 'Price'}</Text>
           <View
             style={[
               styles.amountRow,
@@ -124,14 +126,14 @@ export function ReceiptItemModal({
           <View style={{ marginTop: 18 }}>
             <PrimaryButton onPress={handleSave} disabled={!isValid} height={48}>
               <Icon name={item ? 'check' : 'plus'} size={18} color="#fff" stroke={2.2} />
-              <BtnLabel>{item ? 'Save changes' : 'Add item'}</BtnLabel>
+              <BtnLabel>{item ? (isZh ? '保存修改' : 'Save changes') : (isZh ? '添加明细' : 'Add item')}</BtnLabel>
             </PrimaryButton>
           </View>
 
           {item && onDelete && (
             <Pressable onPress={handleDelete} style={styles.deleteBtn} hitSlop={6}>
               <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={styles.deleteText}>Delete item</Text>
+              <Text style={styles.deleteText}>{isZh ? '删除项目' : 'Delete item'}</Text>
             </Pressable>
           )}
         </View>

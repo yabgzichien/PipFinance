@@ -1,4 +1,4 @@
-import { ratesFromCache, rateFor, isStale, staleLabel, FX_STALE_MS, toDisplay, type FxRate } from '../src/lib/fx';
+import { ratesFromCache, rateFor, isStale, staleLabel, FX_STALE_MS, toDisplay, txnToDisplay, type FxRate } from '../src/lib/fx';
 import { fetchRateMYR } from '../src/prices/fx';
 
 function rate(over: Partial<FxRate>): FxRate {
@@ -52,6 +52,18 @@ describe('toDisplay', () => {
 
   it('returns null rather than guessing when the rate is missing', () => {
     expect(toDisplay(100, 'CNY', {})).toBeNull();
+  });
+});
+
+describe('txnToDisplay', () => {
+  it('returns native amount directly when transaction currency matches display currency', () => {
+    const txn = { amount: 21.02, currency: 'TWD', nativeAmount: 145 };
+    expect(txnToDisplay(txn, 'TWD', { TWD: 0.14496 })).toBe(145);
+  });
+
+  it('falls back to converting MYR amount when transaction currency differs from display currency', () => {
+    const txn = { amount: 63, currency: 'MYR', nativeAmount: null };
+    expect(txnToDisplay(txn, 'CNY', { CNY: 0.63 })).toBe(100);
   });
 });
 

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { getMeta, setMeta } from '../db/metaRepo';
 import { useColorSchemeMode, useSetDarkSurfaces } from './colorScheme';
 import { ACCENT_PRESETS, DEFAULT_ACCENT_PRESET_ID, type AccentPreset } from './accentPresets';
+import { setDynamicAppIcon } from '../lib/appIcon';
 import { DARK_COLORS } from '../theme';
 
 export interface AccentTheme {
@@ -73,6 +74,10 @@ export function AccentProvider({ children }: { children: React.ReactNode }) {
     const preset = ACCENT_PRESETS.find((p) => p.id === presetId) ?? ACCENT_PRESETS[0];
     setDarkSurfaces(preset.darkSurfaces);
   }, [resolvedScheme, presetId, setDarkSurfaces]);
+
+  useEffect(() => {
+    void setDynamicAppIcon(presetId);
+  }, [presetId]);
 
   const setPresetId = (id: string) => {
     setPresetIdState(id);

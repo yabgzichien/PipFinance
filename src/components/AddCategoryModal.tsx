@@ -4,6 +4,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { catColorsForHue } from '../lib/catColors';
 import type { TxnType } from '../lib/types';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -30,6 +31,7 @@ export function AddCategoryModal({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { addCategory } = useAppData();
   const [name, setName] = useState('');
   const [icon, setIcon] = useState<string>('cart');
@@ -83,7 +85,9 @@ export function AddCategoryModal({
       >
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom }]}>
           <View style={styles.head}>
-            <Text style={[styles.title, { color: colorTheme.ink }]}>New {kind} category</Text>
+            <Text style={[styles.title, { color: colorTheme.ink }]}>
+              {isZh ? `新${kind === 'income' ? '收入' : '支出'}分类` : `New ${kind} category`}
+            </Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Icon name="x" size={20} color={colorTheme.ink2} />
             </Pressable>
@@ -94,7 +98,7 @@ export function AddCategoryModal({
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Category name"
+              placeholder={isZh ? '分类名称' : 'Category name'}
               placeholderTextColor={colorTheme.ink3}
               style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
               maxLength={22}
@@ -102,7 +106,7 @@ export function AddCategoryModal({
             />
           </View>
 
-          <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>Icon</Text>
+          <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{isZh ? '图标' : 'Icon'}</Text>
           <View style={styles.choiceWrap}>
             {iconChoices.map((ic) => {
               const on = ic === icon;
@@ -126,11 +130,11 @@ export function AddCategoryModal({
               ) : (
                 <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
               )}
-              <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>Gallery</Text>
+              <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>{isZh ? '相册' : 'Gallery'}</Text>
             </Pressable>
           </View>
 
-          <Text style={[styles.pickLabel, { color: colorTheme.ink2, marginTop: 14 }]}>Color</Text>
+          <Text style={[styles.pickLabel, { color: colorTheme.ink2, marginTop: 14 }]}>{isZh ? '颜色' : 'Color'}</Text>
           <View style={styles.choiceWrap}>
             {HUE_CHOICES.map((h) => {
               const on = h === hue;
@@ -145,7 +149,7 @@ export function AddCategoryModal({
           <View style={{ marginTop: 18 }}>
             <PrimaryButton onPress={submit} disabled={!name.trim() || busy} height={50}>
               <Icon name="plus" size={18} color="#fff" stroke={2.2} />
-              <BtnLabel>Create & select</BtnLabel>
+              <BtnLabel>{isZh ? '创建并选择' : 'Create & select'}</BtnLabel>
             </PrimaryButton>
           </View>
         </View>

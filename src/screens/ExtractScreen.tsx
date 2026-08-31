@@ -9,6 +9,7 @@ import { BASE_CURRENCY } from '../lib/currency';
 import { suggestForMerchant } from '../lib/recommend';
 import type { ExtractedTxn } from '../lib/types';
 import { getLLM, llmErrorMessage } from '../llm';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -44,6 +45,7 @@ export function ExtractScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh, tCat } = useLanguage();
   const { memory, catById, accounts, ensureDefaultAccount } = useAppData();
   const [phase, setPhase] = useState<Phase>(cachedItems ? 'result' : 'scanning');
   const [items, setItems] = useState<ExtractedTxn[]>(cachedItems ?? []);
@@ -143,7 +145,10 @@ export function ExtractScreen({
   // Only one currency in the batch means the sum is a real number the user can act on.
   // A mixed batch has no honest single total, so the sentence simply omits it.
   const currencies = new Set(items.map((it) => it.currency ?? BASE_CURRENCY));
-  const totalLabel = currencies.size === 1 ? `, ${fmtMoney(total, [...currencies][0])} total` : '';
+  const totalLabel =
+    currencies.size === 1
+      ? (isZh ? `，共计 ${fmtMoney(total, [...currencies][0])}` : `, ${fmtMoney(total, [...currencies][0])} total`)
+      : '';
 
   const translateY = scan.interpolate({ inputRange: [0, 1], outputRange: [0, PREVIEW_H - 28] });
 
@@ -155,18 +160,35 @@ export function ExtractScreen({
         contentContainerStyle={{ paddingTop: insets.top + 4, paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
       >
-        <TopBar title={phase === 'scanning' ? 'Reading…' : phase === 'error' ? 'Hmm' : 'Found it'} onBack={onBack} />
+        <TopBar
+          title={
+            phase === 'scanning'
+              ? (isZh ? '正在识别…' : 'Reading…')
+              : phase === 'error'
+              ? 'Hmm'
+              : (isZh ? '已找到' : 'Found it')
+          }
+          onBack={onBack}
+        />
 
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           {phase === 'scanning' && (
             <PipSays expr="think">
-              <BubbleText>Reading your screenshot{readingSecs > 0 ? ` (${readingSecs}s)` : '…'}</BubbleText>
+              <BubbleText>
+                {isZh
+                  ? `正在识别您的截图${readingSecs > 0 ? `（已用时 ${readingSecs} 秒）` : '…'}`
+                  : `Reading your screenshot${readingSecs > 0 ? ` (${readingSecs}s)` : '…'}`}
+              </BubbleText>
             </PipSays>
           )}
           {phase === 'found' && (
             <PipSays expr="happy">
               <BubbleText>
-                Found <B>{items.length} line{items.length === 1 ? '' : 's'}</B>…
+                {isZh ? (
+                  <>找到 <B>{items.length} 笔记录</B>…</>
+                ) : (
+                  <>Found <B>{items.length} line{items.length === 1 ? '' : 's'}</B>…</>
+                )}
               </BubbleText>
             </PipSays>
           )}
@@ -178,18 +200,31 @@ export function ExtractScreen({
           {phase === 'result' && items.length > 0 && (
             <PipSays expr="happy">
               <BubbleText>
-                Got it. <B>{items.length} transaction{items.length > 1 ? 's' : ''}</B>{totalLabel}.
-                {recognized > 0 ? (
-                  <BubbleText>
-                    {' '}I already recognise <B>{recognized}</B> of them.
-                  </BubbleText>
-                ) : null}
+                {isZh ? (
+                  <>
+                    识别完成。共 <B>{items.length} 笔账单</B>{totalLabel}。
+                    {recognized > 0 ? (
+                      <BubbleText>
+                        {' '}其中 <B>{recognized}</B> 笔我已匹配到对应分类。
+                      </BubbleText>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    Got it. <B>{items.length} transaction{items.length > 1 ? 's' : ''}</B>{totalLabel}.
+                    {recognized > 0 ? (
+                      <BubbleText>
+                        {' '}I already recognise <B>{recognized}</B> of them.
+                      </BubbleText>
+                    ) : null}
+                  </>
+                )}
               </BubbleText>
             </PipSays>
           )}
           {phase === 'result' && items.length === 0 && (
             <PipSays expr="curious">
-              <BubbleText>I couldn’t find any transactions in that image. Try a clearer screenshot.</BubbleText>
+              <BubbleText>{isZh ? '未能从该截图中识别出任何账单。请尝试更清晰的截图。' : 'I couldn’t find any transactions in that image. Try a clearer screenshot.'}</BubbleText>
             </PipSays>
           )}
         </View>
@@ -212,7 +247,7 @@ export function ExtractScreen({
 
         {phase === 'result' && items.length > 0 && (
           <View style={{ paddingHorizontal: 18, paddingTop: 20 }}>
-            <Eyebrow style={{ marginBottom: 10 }}>Extracted items</Eyebrow>
+            <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '提取的项目' : 'Extracted items'}</Eyebrow>
             <Card style={{ overflow: 'hidden' }}>
               {withSuggestions.map((e, i) => (
                 <View key={i} style={[styles.itemRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
@@ -226,10 +261,12 @@ export function ExtractScreen({
                     {e.suggestion && catById[e.suggestion] ? (
                       <View style={styles.likely}>
                         <Icon name="sparkles" size={11} color={theme.accentInk} />
-                        <Text style={[styles.likelyText, { color: theme.accentInk }]}>likely {catById[e.suggestion].label}</Text>
+                        <Text style={[styles.likelyText, { color: theme.accentInk }]}>
+                          {isZh ? `可能是 ${tCat(catById[e.suggestion])}` : `likely ${catById[e.suggestion].label}`}
+                        </Text>
                       </View>
                     ) : e.type === 'income' ? (
-                      <Text style={[styles.incomeTag, { color: theme.accent }]}>received</Text>
+                      <Text style={[styles.incomeTag, { color: theme.accent }]}>{isZh ? '收入' : 'received'}</Text>
                     ) : null}
                   </View>
                   <Amount value={e.amount} size={14} weight={600} color={e.type === 'income' ? theme.accent : colorTheme.ink} />
@@ -239,7 +276,9 @@ export function ExtractScreen({
                 </View>
               ))}
             </Card>
-            <Text style={[styles.removeHint, { color: colorTheme.ink2 }]}>Tap ✕ to skip a row you don’t want to record.</Text>
+            <Text style={[styles.removeHint, { color: colorTheme.ink2 }]}>
+              {isZh ? '点击 ✕ 可跳过不需要记录的行。' : 'Tap ✕ to skip a row you don’t want to record.'}
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -248,14 +287,14 @@ export function ExtractScreen({
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 }, { paddingBottom: insets.bottom + 16 }]}>
         {phase === 'result' && items.length > 0 && (
           <PrimaryButton onPress={() => onDone(items, linkId, elapsedMs)}>
-            <BtnLabel>Sort {items.length} item{items.length > 1 ? 's' : ''}</BtnLabel>
+            <BtnLabel>{isZh ? `分类 ${items.length} 笔账单` : `Sort ${items.length} item${items.length > 1 ? 's' : ''}`}</BtnLabel>
             <Icon name="arrowRight" size={19} color="#fff" />
           </PrimaryButton>
         )}
         {(phase === 'error' || (phase === 'result' && items.length === 0)) && (
           <PrimaryButton onPress={onBack}>
             <Icon name="image" size={19} color="#fff" />
-            <BtnLabel>Try another image</BtnLabel>
+            <BtnLabel>{isZh ? '尝试其他图片' : 'Try another image'}</BtnLabel>
           </PrimaryButton>
         )}
       </View>

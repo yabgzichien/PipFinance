@@ -48,6 +48,17 @@ export async function listReliefTags(ya: number): Promise<ReliefTag[]> {
   return rows.map(toReliefTag);
 }
 
+export async function listAllReliefTags(): Promise<ReliefTag[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<ReliefTagRow>(
+    `SELECT rt.* FROM relief_tags rt
+     JOIN transactions t ON t.id = rt.txn_id
+     WHERE t.currency = 'MYR'
+     ORDER BY rt.created_at DESC`
+  );
+  return rows.map(toReliefTag);
+}
+
 export async function getReliefTagsForTxn(txnId: string): Promise<ReliefTag[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<ReliefTagRow>(

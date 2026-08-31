@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { ExportSuccessModal } from '../components/ExportSuccessModal';
 import { Icon, type IconName } from '../components/Icon';
 import { Amount, Card, Eyebrow, IconButton, TopBar } from '../components/ui';
 import {
@@ -20,15 +21,26 @@ import {
   buildReportPeriod,
   type ReportPeriodType,
 } from '../lib/bookkeeping';
+import { getAdvice } from '../db/budgetRepo';
+import { listDeletedDefaultCategories } from '../db/categoriesRepo';
+import { getActiveCurrencies } from '../db/currencyRepo';
+import { getReliefMemoryMap, listAllReliefTags } from '../db/reliefRepo';
 import {
+  buildReceiptExportList,
   csvToHtmlTable,
   generateAdvancedImportJSON,
   generateCSV,
+  generateEwalletCSV,
+  generateEwalletPreviewHtml,
   generateExcelWorkbook,
   generateHTMLReport,
   generatePrintablePDFHtml,
+  generateReceiptsPreviewHtml,
+  generateReceiptsZip,
+  isEwalletTransaction,
   saveOrDownloadExport,
   type ExportFormat,
+  type FullExportExtra,
 } from '../lib/financialExport';
 import { notify } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
@@ -67,59 +79,83 @@ export function ExportScreen({
   const theme = useAccent();
   const themeColors = useThemeColors();
   const { t, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, categories, accounts, balanceEntries, commitments, commitmentOccurrences, markTaskDone } = useAppData();
-  const commitmentExtra = useMemo(
-    () => ({ commitments, occurrences: commitmentOccurrences }),
-    [commitments, commitmentOccurrences]
-  );
+  const {
+    transactions,
+    categories,
+    accounts,
+    balanceEntries,
+    commitments,
+    commitmentOccurrences,
+    people,
+    splits,
+    shares,
+    splitPayments,
+    expectedIncome,
+    allocations,
+    snapshots,
+    memory,
+    tasksDone,
+    onboardingComplete,
+    tutorialScanDone,
+    tutorialManualDone,
+    tutorialDismissed,
+    reminderCadence,
+    reminderHourOverride,
+    owedReminderEnabled,
+    commitmentReminderEnabled,
+    motionSetting,
+    soundEnabled,
+    markTaskDone,
+  } = useAppData();
 
-  const formatOptions: FormatOption[] = [
-    {
-      id: 'pdf',
-      title: isZh ? 'PDF 财务对账单' : 'PDF Financial Statement',
-      sub: isZh ? '标准双栏资产负债表、收支损益表与明细账目。' : 'Traditional 2-column Balance Sheet, Income Statement & itemized ledger.',
-      badge: isZh ? '正式损益表' : 'Formal P&L',
-      icon: 'receipt',
-      fileExt: 'pdf.html',
-      mimeType: 'text/html',
-    },
-    {
-      id: 'xlsx',
-      title: isZh ? 'Excel 工作簿 (.xlsx)' : 'Excel Workbook (.xlsx)',
-      sub: isZh ? '包含 4 个工作表：利润表、资产负债表、流水明细与月度趋势。' : '4 Sheets: Income Statement, Balance Sheet, Ledger, and Monthly Trends.',
-      badge: isZh ? '4个工作表' : '4 Sheets',
-      icon: 'table',
-      fileExt: 'xlsx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    },
-    {
-      id: 'html',
-      title: isZh ? '交互式 HTML 图表分析' : 'Interactive HTML Analytics',
-      sub: isZh ? '包含 SVG 现金流趋势图、分类支出甜甜圈图与净资产曲线。' : 'Visual report with SVG cash flow, category donut, and net worth charts.',
-      badge: isZh ? '可视化图表' : 'With Charts',
-      icon: 'trending',
-      fileExt: 'html',
-      mimeType: 'text/html',
-    },
-    {
-      id: 'csv',
-      title: isZh ? 'CSV 表格数据' : 'CSV Data Sheet',
-      sub: isZh ? '通用标准结构化会计表格，适配各类电子表格软件。' : 'Universal structured tabular accounting export for any spreadsheet.',
-      badge: isZh ? '通用格式' : 'Universal',
-      icon: 'file',
-      fileExt: 'csv',
-      mimeType: 'text/csv',
-    },
-    {
-      id: 'json',
-      title: isZh ? '高级导入 JSON' : 'Advanced Import JSON',
-      sub: isZh ? '与高级导入完全兼容的完整数据结构，可随时导出与重新导入。' : 'Same schema Advanced Import reads — copy or download, then re-import anytime.',
-      badge: isZh ? '可重新导入' : 'Re-importable',
-      icon: 'code',
-      fileExt: 'json',
-      mimeType: 'application/json',
-    },
-  ];
+  const getFullExportExtra = async (): Promise<FullExportExtra> => {
+    const [reliefTags, reliefMemory, deletedCats, activeCurrencies, advice] = await Promise.all([
+      listAllReliefTags().catch(() => []),
+      getReliefMemoryMap().catch(() => ({})),
+      listDeletedDefaultCategories().catch(() => []),
+      getActiveCurrencies().catch(() => ['MYR']),
+      getAdvice().catch(() => null),
+    ]);
+
+    return {
+      commitments,
+      occurrences: commitmentOccurrences,
+      balanceEntries,
+      people,
+      splits,
+      shares,
+      splitPayments,
+      budget: {
+        expectedIncome,
+        allocations,
+      },
+      budgetSnapshots: snapshots,
+      budgetAdvice: advice,
+      reliefTags,
+      reliefMemory,
+      merchantMemory: memory,
+      deletedDefaultCategories: deletedCats,
+      activeCurrencies,
+      preferences: {
+        settings: {
+          reminderCadence,
+          reminderHourOverride,
+          owedReminderEnabled,
+          commitmentReminderEnabled,
+          motionSetting,
+          soundEnabled,
+        },
+        tasks: {
+          tasksDone,
+          onboardingComplete,
+          tutorialScanDone,
+          tutorialManualDone,
+          tutorialDismissed,
+        },
+      },
+      allTransactions: periodType === 'all-time' ? transactions : reportData.transactions,
+    };
+  };
 
   const now = useMemo(() => new Date(), []);
   const curY = now.getFullYear();
@@ -136,6 +172,15 @@ export function ExportScreen({
   const [previewVisible, setPreviewVisible] = useState(false);
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewTitle, setPreviewTitle] = useState<string>('');
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [lastExport, setLastExport] = useState<{
+    fileName: string;
+    format: ExportFormat;
+    fileUri?: string;
+    fileSize?: number;
+    mimeType?: string;
+    rawContent?: string;
+  } | null>(null);
 
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
@@ -180,6 +225,83 @@ export function ExportScreen({
     );
   }, [transactions, categories, accounts, balanceEntries, activePeriod, verifiedName, dc.rates, dc.code]);
 
+  const periodReceipts = useMemo(() => {
+    return buildReceiptExportList(reportData.transactions, categories);
+  }, [reportData.transactions, categories]);
+
+  const periodEwalletTxns = useMemo(() => {
+    return reportData.transactions.filter((t) => isEwalletTransaction(t, accounts));
+  }, [reportData.transactions, accounts]);
+
+  const receiptsCount = periodReceipts.length;
+  const ewalletCount = periodEwalletTxns.length;
+
+  const formatOptions: FormatOption[] = [
+    {
+      id: 'pdf',
+      title: isZh ? 'PDF 财务对账单' : 'PDF Financial Statement',
+      sub: isZh ? '标准双栏资产负债表、收支损益表与明细账目。' : 'Traditional 2-column Balance Sheet, Income Statement & itemized ledger.',
+      badge: isZh ? '正式损益表' : 'Formal P&L',
+      icon: 'receipt',
+      fileExt: 'pdf.html',
+      mimeType: 'text/html',
+    },
+    {
+      id: 'xlsx',
+      title: isZh ? 'Excel 工作簿 (.xlsx)' : 'Excel Workbook (.xlsx)',
+      sub: isZh ? '包含利润表、资产负债表、流水明细、趋势及电子钱包流水。' : 'Multi-sheet workbook with P&L, Balance Sheet, Ledger, Trends & E-Wallets.',
+      badge: isZh ? '完整工作簿' : 'Full Workbook',
+      icon: 'table',
+      fileExt: 'xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    },
+    {
+      id: 'html',
+      title: isZh ? '交互式 HTML 图表分析' : 'Interactive HTML Analytics',
+      sub: isZh ? '包含 SVG 现金流趋势图、分类支出甜甜圈图与净资产曲线。' : 'Visual report with SVG cash flow, category donut, and net worth charts.',
+      badge: isZh ? '可视化图表' : 'With Charts',
+      icon: 'trending',
+      fileExt: 'html',
+      mimeType: 'text/html',
+    },
+    {
+      id: 'csv',
+      title: isZh ? 'CSV 表格数据' : 'CSV Data Sheet',
+      sub: isZh ? '通用标准结构化会计表格，适配各类电子表格软件。' : 'Universal structured tabular accounting export for any spreadsheet.',
+      badge: isZh ? '通用格式' : 'Universal',
+      icon: 'file',
+      fileExt: 'csv',
+      mimeType: 'text/csv',
+    },
+    {
+      id: 'json',
+      title: isZh ? '高级导入 JSON' : 'Advanced Import JSON',
+      sub: isZh ? '与高级导入完全兼容的完整数据结构，可随时导出与重新导入。' : 'Same schema Advanced Import reads — copy or download, then re-import anytime.',
+      badge: isZh ? '可重新导入' : 'Re-importable',
+      icon: 'code',
+      fileExt: 'json',
+      mimeType: 'application/json',
+    },
+    {
+      id: 'receipts',
+      title: isZh ? '消费小票与凭据归档 (.zip)' : 'Receipts & Evidence Archive (.zip)',
+      sub: isZh ? '打包导出所选周期内保存的所有小票照片、发票及审计清单。' : 'Bundles all saved receipt photos, e-invoices, and manifest for the period into a ZIP archive.',
+      badge: isZh ? `${receiptsCount} 张小票` : `${receiptsCount} receipts`,
+      icon: 'camera',
+      fileExt: 'zip',
+      mimeType: 'application/zip',
+    },
+    {
+      id: 'ewallet',
+      title: isZh ? '电子钱包交易流水 (.csv)' : 'E-Wallet Transaction History (.csv)',
+      sub: isZh ? '包含 Touch \'n Go、GrabPay、Boost、ShopeePay 等电子钱包的专属交易明细与渠道统计。' : 'Dedicated statement for Touch \'n Go, GrabPay, Boost, ShopeePay & DuitNow QR with provider breakdowns.',
+      badge: isZh ? `${ewalletCount} 笔钱包流水` : `${ewalletCount} e-wallet txns`,
+      icon: 'scan',
+      fileExt: 'csv',
+      mimeType: 'text/csv',
+    },
+  ];
+
   const handleExport = async () => {
     setExporting(true);
     try {
@@ -204,9 +326,19 @@ export function ExportScreen({
         ext = 'html';
         mime = 'text/html';
       } else if (selectedFormat === 'json') {
-        content = generateAdvancedImportJSON(reportData, commitmentExtra);
+        const fullExtra = await getFullExportExtra();
+        content = generateAdvancedImportJSON(reportData, fullExtra);
         ext = 'json';
         mime = 'application/json';
+      } else if (selectedFormat === 'receipts') {
+        const reliefTags = await listAllReliefTags().catch(() => []);
+        content = generateReceiptsZip(reportData, reportData.transactions, reliefTags);
+        ext = 'zip';
+        mime = 'application/zip';
+      } else if (selectedFormat === 'ewallet') {
+        content = generateEwalletCSV(reportData, periodEwalletTxns);
+        ext = 'csv';
+        mime = 'text/csv';
       } else {
         content = generatePrintablePDFHtml(reportData);
         ext = 'pdf.html';
@@ -214,10 +346,20 @@ export function ExportScreen({
       }
 
       const fileName = `${baseFileName}.${ext}`;
-      const res = await saveOrDownloadExport(fileName, content, mime);
+      const res = await saveOrDownloadExport(fileName, content, mime, { autoShare: true });
 
       if (res.success) {
         void markTaskDone('export');
+        setLastExport({
+          fileName,
+          format: selectedFormat,
+          fileUri: res.uri,
+          fileSize: res.fileSize,
+          mimeType: mime,
+          rawContent: typeof content === 'string' ? content : undefined,
+        });
+        setSuccessModalVisible(true);
+
         if (selectedFormat === 'pdf' && Platform.OS === 'web') {
           const win = window.open('', '_blank');
           if (win) {
@@ -226,8 +368,6 @@ export function ExportScreen({
             win.focus();
             setTimeout(() => win.print(), 350);
           }
-        } else {
-          notify(isZh ? '导出成功' : 'Export Successful', isZh ? `财务文件 ${fileName} 已生成并保存。` : `Financial file ${fileName} has been generated and saved.`);
         }
       } else {
         notify(isZh ? '导出错误' : 'Export Error', res.error || (isZh ? '无法保存导出文件。' : 'Unable to save export file.'));
@@ -251,9 +391,23 @@ export function ExportScreen({
       setPreviewTitle(`HTML Report Preview (${activePeriod.label})`);
       setPreviewVisible(true);
     } else if (selectedFormat === 'json') {
-      const jsonText = generateAdvancedImportJSON(reportData, commitmentExtra);
-      setPreviewContent(jsonText);
-      setPreviewTitle(`JSON Export Preview (${activePeriod.label})`);
+      getFullExportExtra().then((fullExtra) => {
+        const jsonText = generateAdvancedImportJSON(reportData, fullExtra);
+        setPreviewContent(jsonText);
+        setPreviewTitle(`JSON Export Preview (${activePeriod.label})`);
+        setPreviewVisible(true);
+      });
+    } else if (selectedFormat === 'receipts') {
+      listAllReliefTags().catch(() => []).then((reliefTags) => {
+        const receiptsHtml = generateReceiptsPreviewHtml(reportData, reportData.transactions, reliefTags);
+        setPreviewContent(receiptsHtml);
+        setPreviewTitle(isZh ? `消费小票与凭据预览 (${activePeriod.label})` : `Receipts Archive Preview (${activePeriod.label})`);
+        setPreviewVisible(true);
+      });
+    } else if (selectedFormat === 'ewallet') {
+      const ewalletHtml = generateEwalletPreviewHtml(reportData, periodEwalletTxns);
+      setPreviewContent(ewalletHtml);
+      setPreviewTitle(isZh ? `电子钱包流水预览 (${activePeriod.label})` : `E-Wallet History Preview (${activePeriod.label})`);
       setPreviewVisible(true);
     } else {
       const pdfHtml = generatePrintablePDFHtml(reportData);
@@ -267,7 +421,8 @@ export function ExportScreen({
   const handleCopyJSON = async () => {
     setCopyingJson(true);
     try {
-      const json = generateAdvancedImportJSON(reportData, commitmentExtra);
+      const fullExtra = await getFullExportExtra();
+      const json = generateAdvancedImportJSON(reportData, fullExtra);
       await Clipboard.setStringAsync(json);
       notify(isZh ? '已复制' : 'Copied', isZh ? '高级导入 JSON 已复制至剪贴板。' : 'Advanced Import JSON copied to clipboard. Paste it into Advanced Import to re-import.');
     } catch (err: any) {
@@ -646,6 +801,20 @@ export function ExportScreen({
           )}
         </View>
       </Modal>
+
+      {lastExport && (
+        <ExportSuccessModal
+          visible={successModalVisible}
+          onClose={() => setSuccessModalVisible(false)}
+          fileName={lastExport.fileName}
+          format={lastExport.format}
+          fileUri={lastExport.fileUri}
+          fileSize={lastExport.fileSize}
+          mimeType={lastExport.mimeType}
+          rawContent={lastExport.rawContent}
+          onPreview={handlePreview}
+        />
+      )}
     </View>
   );
 }

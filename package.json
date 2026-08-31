@@ -1,6 +1,6 @@
 {
   "name": "pip-expenses-tracker",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -40,6 +40,7 @@
     "expo-image-picker": "~17.0.11",
     "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
+    "expo-sharing": "~14.0.8",
     "expo-sqlite": "~16.0.10",
     "expo-status-bar": "~3.0.9",
     "fflate": "^0.8.3",

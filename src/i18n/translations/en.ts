@@ -43,12 +43,17 @@ export const en: Translations = {
 
   // Settings
   settingsTitle: 'Settings',
+  searchSettingsPlaceholder: 'Search settings...',
+  noSettingsFound: 'No settings match "{query}"',
+  noSettingsFoundSub: 'Try searching for theme, reminders, currency, export, or reset',
   appearance: 'Appearance',
   theme: 'Theme',
   themeLight: 'Light',
   themeDark: 'Dark',
   themeSystem: 'System',
   accentColor: 'Accent color',
+  appIcon: 'App icon',
+  appIconDesc: 'Icon updates automatically to match your accent',
   motionAndHaptics: 'Motion and haptics',
   motionFull: 'Full',
   motionReduced: 'Reduced',

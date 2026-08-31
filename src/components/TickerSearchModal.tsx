@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TickerResult } from '../lib/prices';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, uiFont } from '../theme';
@@ -27,6 +28,7 @@ export function TickerSearchModal({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<TickerResult[]>([]);
   const [busy, setBusy] = useState(false);
@@ -96,7 +98,9 @@ export function TickerSearchModal({
               </Pressable>
             ))}
             {!busy && query.trim().length >= 2 && results.length === 0 && (
-              <Text style={[styles.empty, { color: colorTheme.ink2 }]}>No matches for “{query.trim()}”.</Text>
+              <Text style={[styles.empty, { color: colorTheme.ink2 }]}>
+                {isZh ? `未找到与“${query.trim()}”匹配的结果。` : `No matches for “${query.trim()}”.`}
+              </Text>
             )}
           </ScrollView>
         </View>

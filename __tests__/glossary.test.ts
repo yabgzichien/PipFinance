@@ -25,6 +25,11 @@ describe('GLOSSARY', () => {
     expect(splitBill.body).toContain('Equal, Shares, or Exact');
     expect(splitBill.body).toContain('I was on this bill too');
     expect(splitBill.body).toContain('Owed to you');
+    expect(splitBill.steps).toBeDefined();
+    expect(splitBill.steps?.length).toBe(3);
+    expect(splitBill.steps?.[0].visualKey).toBe('split_step_1');
+    expect(splitBill.steps?.[1].visualKey).toBe('split_step_2');
+    expect(splitBill.steps?.[2].visualKey).toBe('split_step_3');
   });
 
   it('contains owed_to_you explaining receivables, settling, and write-offs', () => {
@@ -35,6 +40,8 @@ describe('GLOSSARY', () => {
     expect(owed.body).toContain('Net Worth');
     expect(owed.body).toContain('settling');
     expect(owed.body).toContain('writing it off');
+    expect(owed.steps).toBeDefined();
+    expect(owed.steps?.length).toBe(2);
   });
 
   it('contains quick_add explaining natural text input with examples', () => {
@@ -44,5 +51,19 @@ describe('GLOSSARY', () => {
     expect(quickAdd.short).toContain('plain text');
     expect(quickAdd.body).toContain('Examples:');
     expect(quickAdd.body).toContain('lunch 9.2');
+    expect(quickAdd.steps).toBeDefined();
+    expect(quickAdd.steps?.length).toBe(2);
+  });
+
+  it('validates all steps when defined have non-empty titles and descriptions', () => {
+    for (const [key, entry] of Object.entries(GLOSSARY)) {
+      if (entry.steps) {
+        expect(entry.steps.length).toBeGreaterThan(0);
+        for (const step of entry.steps) {
+          expect(step.title.trim().length).toBeGreaterThan(0);
+          expect(step.desc.trim().length).toBeGreaterThan(0);
+        }
+      }
+    }
   });
 });

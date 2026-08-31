@@ -33,18 +33,18 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
     const cur = currentMonthKey();
     return transactions.filter((t) => t.type === kind && txnMonthKey(t) === cur);
   }, [transactions, kind]);
-  const total = useMemo(() => monthTxns.reduce((s, t) => s + t.amount, 0), [monthTxns]);
+  const total = useMemo(() => monthTxns.reduce((s, t) => s + dc.convertTxn(t), 0), [monthTxns, dc]);
 
   const breakdown = useMemo(() => {
     const byCat: Record<string, number> = {};
     for (const t of monthTxns) {
       const id = t.categoryId ?? (kind === 'income' ? 'income' : 'other');
-      byCat[id] = (byCat[id] ?? 0) + t.amount;
+      byCat[id] = (byCat[id] ?? 0) + dc.convertTxn(t);
     }
     return Object.entries(byCat)
       .map(([catId, amt]) => ({ catId, amt }))
       .sort((a, b) => b.amt - a.amt);
-  }, [monthTxns, kind]);
+  }, [monthTxns, kind, dc]);
 
   const pieData = breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid }));
 
@@ -106,7 +106,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                 <Text style={[styles.pieEyebrow, { color: colorTheme.ink2 }]}>
                   {isZh ? `${new Date().getMonth() + 1}月` : monthName()}
                 </Text>
-                <Amount value={dc.convert(total)} currency={dc.code} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
+                <Amount value={total} currency={dc.code} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
               </View>
             </View>
 
@@ -117,7 +117,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
               {breakdown.map((b, i) => {
                 const cat = catById[b.catId] ?? fallback;
                 const pctNum = total > 0 ? Math.round((b.amt / total) * 100) : 0;
-                const amountText = fmtMoney(dc.convert(b.amt), dc.code);
+                const amountText = fmtMoney(b.amt, dc.code);
                 const primary = mode === 'amount' ? amountText : `${pctNum}%`;
                 const secondary = mode === 'amount' ? `${pctNum}%` : amountText;
                 return (

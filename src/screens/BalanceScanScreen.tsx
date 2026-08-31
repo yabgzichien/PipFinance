@@ -18,6 +18,7 @@ import { notify } from '../lib/platformAlert';
 import { searchCrypto, resolveCryptoTickers } from '../prices';
 import type { TickerResult } from '../lib/prices';
 import type { Account, AccountKind } from '../lib/types';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -38,6 +39,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { accounts, accountValues, addAccount, addHolding, setBalance } = useAppData();
   const [phase, setPhase] = useState<Phase>('pick');
   const [error, setError] = useState('');
@@ -70,7 +72,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const handle = async (res: ImagePicker.ImagePickerResult) => {
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
-    if (!a.base64) { notify('Hmm', "That image couldn't be read."); return; }
+    if (!a.base64) { notify('Hmm', isZh ? '无法读取该图片。' : "That image couldn't be read."); return; }
     await run(a.base64, a.mimeType ?? 'image/jpeg');
   };
 
@@ -78,7 +80,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
     if (busy) return; setBusy(true);
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) { notify('Permission needed', 'Allow photo access to pick a screenshot.'); return; }
+      if (!perm.granted) { notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相册以选取截图。' : 'Allow photo access to pick a screenshot.'); return; }
       await handle(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.7 }));
     } finally { setBusy(false); }
   };
@@ -86,7 +88,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
     if (busy) return; setBusy(true);
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) { notify('Permission needed', 'Allow camera access to snap a screenshot.'); return; }
+      if (!perm.granted) { notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相机以拍摄截图。' : 'Allow camera access to snap a screenshot.'); return; }
       await handle(await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 }));
     } finally { setBusy(false); }
   };
@@ -106,14 +108,18 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
       const snap = await llm.extractSnapshot({ parts: [{ kind: 'binary', base64, mimeType: mime }] });
 
       if (snap.kind === 'unknown') {
-        setError("I couldn't tell what this screenshot shows. Try a clearer screenshot of a bank/e-wallet balance, a loan statement, or a crypto wallet.");
+        setError(
+          isZh
+            ? '无法识别该截图内容。请尝试截取更清晰的银行/电子钱包余额、贷款账单或加密钱包截图。'
+            : "I couldn't tell what this screenshot shows. Try a clearer screenshot of a bank/e-wallet balance, a loan statement, or a crypto wallet."
+        );
         setPhase('error');
         return;
       }
 
       if (snap.kind === 'holdings') {
         if (snap.holdings.length === 0) {
-          setError("I couldn't find any coin holdings in that screenshot.");
+          setError(isZh ? '在该截图中未能找到任何持仓币种。' : "I couldn't find any coin holdings in that screenshot.");
           setPhase('error');
           return;
         }
@@ -153,7 +159,11 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
       await addHolding(r.coin!.name, 'crypto', r.coin!.id, r.coin!.ticker, q, null);
       n++;
     }
-    setDoneMsg(`Added ${n} holding${n === 1 ? '' : 's'}. Pull to refresh on the Net Worth screen for live prices.`);
+    setDoneMsg(
+      isZh
+        ? `已添加 ${n} 项持仓。在净资产界面下拉即可刷新最新实时行情。`
+        : `Added ${n} holding${n === 1 ? '' : 's'}. Pull to refresh on the Net Worth screen for live prices.`
+    );
     setPhase('done');
   };
 
@@ -167,20 +177,32 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const doReplace = async () => {
     if (!selectedAccount || amount <= 0) return;
     await setBalance(selectedAccount.id, Math.round(amount * 100) / 100, todayISO());
-    setDoneMsg(`Updated ${selectedAccount.name}'s balance to ${fmtMoney(amount, selectedCurrency)}.`);
+    setDoneMsg(
+      isZh
+        ? `已将 ${selectedAccount.name} 的余额更新为 ${fmtMoney(amount, selectedCurrency)}。`
+        : `Updated ${selectedAccount.name}'s balance to ${fmtMoney(amount, selectedCurrency)}.`
+    );
     setPhase('done');
   };
   const doAddInto = async () => {
     if (!selectedAccount || amount <= 0) return;
     const next = Math.round((currentVal + amount) * 100) / 100;
     await setBalance(selectedAccount.id, next, todayISO());
-    setDoneMsg(`Added ${fmtMoney(amount, selectedCurrency)} to ${selectedAccount.name}. New balance ${fmtMoney(next, selectedCurrency)}.`);
+    setDoneMsg(
+      isZh
+        ? `已向 ${selectedAccount.name} 添加 ${fmtMoney(amount, selectedCurrency)}。最新余额为 ${fmtMoney(next, selectedCurrency)}。`
+        : `Added ${fmtMoney(amount, selectedCurrency)} to ${selectedAccount.name}. New balance ${fmtMoney(next, selectedCurrency)}.`
+    );
     setPhase('done');
   };
   const doCreate = async () => {
     if (!newName.trim() || amount <= 0) return;
     await addAccount(newName.trim(), detectedKind, newCls, Math.round(amount * 100) / 100, todayISO(), null, entryCurrency);
-    setDoneMsg(`Added ${newName.trim()} with an opening balance of ${fmtMoney(amount, entryCurrency)}.`);
+    setDoneMsg(
+      isZh
+        ? `已添加账户 ${newName.trim()}，初始余额为 ${fmtMoney(amount, entryCurrency)}。`
+        : `Added ${newName.trim()} with an opening balance of ${fmtMoney(amount, entryCurrency)}.`
+    );
     setPhase('done');
   };
 
@@ -190,66 +212,78 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Scan Balance" onBack={onClose} />
+        <TopBar title={isZh ? '扫描余额' : 'Scan Balance'} onBack={onClose} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 110 }} keyboardShouldPersistTaps="handled">
         {phase === 'pick' && (
           <>
             <PipSays expr="curious">
-              <BubbleText>Snap or pick a screenshot of a <B>bank account, e-wallet, loan statement, or crypto wallet</B>. I'll read it and figure out what to do with it.</BubbleText>
+              <BubbleText>
+                {isZh ? (
+                  <>拍摄或选取<B>银行账户、电子钱包、贷款账单或加密钱包</B>的截图。我会自动识别并为您处理。</>
+                ) : (
+                  <>Snap or pick a screenshot of a <B>bank account, e-wallet, loan statement, or crypto wallet</B>. I'll read it and figure out what to do with it.</>
+                )}
+              </BubbleText>
             </PipSays>
             <View style={{ gap: 14, marginTop: 22 }}>
-              <SourceButton icon="camera" title="Take a photo" sub="Point at your balance" onPress={takePhoto} disabled={busy} />
-              <SourceButton icon="gallery" title="Choose from gallery" sub="Pick an existing screenshot" onPress={pickGallery} disabled={busy} />
+              <SourceButton icon="camera" title={isZh ? '拍照' : 'Take a photo'} sub={isZh ? '对准账户余额' : 'Point at your balance'} onPress={takePhoto} disabled={busy} />
+              <SourceButton icon="gallery" title={isZh ? '从相册选取' : 'Choose from gallery'} sub={isZh ? '选取已有的截图' : 'Pick an existing screenshot'} onPress={pickGallery} disabled={busy} />
             </View>
           </>
         )}
 
         {phase === 'scanning' && (
           <>
-            <PipSays expr="think"><BubbleText>Reading the screenshot…</BubbleText></PipSays>
+            <PipSays expr="think"><BubbleText>{isZh ? '正在识别截图…' : 'Reading the screenshot…'}</BubbleText></PipSays>
             <Card style={styles.busy}><ActivityIndicator color={theme.accent} /></Card>
           </>
         )}
 
         {phase === 'needprovider' && (
           <>
-            <PipSays expr="curious"><BubbleText>Scanning isn't available right now. Try again in a moment.</BubbleText></PipSays>
-            <View style={{ marginTop: 22 }}><PrimaryButton onPress={onClose}><Icon name="chevronLeft" size={18} color="#fff" /><BtnLabel>Go back</BtnLabel></PrimaryButton></View>
+            <PipSays expr="curious"><BubbleText>{isZh ? '当前扫描功能暂不可用，请稍后重试。' : "Scanning isn't available right now. Try again in a moment."}</BubbleText></PipSays>
+            <View style={{ marginTop: 22 }}><PrimaryButton onPress={onClose}><Icon name="chevronLeft" size={18} color="#fff" /><BtnLabel>{isZh ? '返回' : 'Go back'}</BtnLabel></PrimaryButton></View>
           </>
         )}
 
         {phase === 'error' && (
           <>
             <PipSays expr="curious"><BubbleText>{error}</BubbleText></PipSays>
-            <View style={{ marginTop: 22 }}><PrimaryButton onPress={() => setPhase('pick')}><Icon name="image" size={18} color="#fff" /><BtnLabel>Try another screenshot</BtnLabel></PrimaryButton></View>
+            <View style={{ marginTop: 22 }}><PrimaryButton onPress={() => setPhase('pick')}><Icon name="image" size={18} color="#fff" /><BtnLabel>{isZh ? '尝试其他截图' : 'Try another screenshot'}</BtnLabel></PrimaryButton></View>
           </>
         )}
 
         {phase === 'balance' && (
           <>
-            <PipSays expr="happy"><BubbleText>Here's what I found.</BubbleText></PipSays>
+            <PipSays expr="happy"><BubbleText>{isZh ? '以下是识别到的内容。' : "Here's what I found."}</BubbleText></PipSays>
 
             <Card style={{ marginTop: 16, padding: 16 }}>
               <View style={styles.detectedRow}>
                 <InstitutionBadge inst={institution} fallbackText={rawProvider} size={44} />
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.detectedName, { color: colorTheme.ink }]} numberOfLines={1}>{institution?.name ?? rawProvider ?? 'Unrecognized provider'}</Text>
-                  <Text style={[styles.detectedSub, { color: colorTheme.ink2 }]}>{institution ? (institution.kind === 'bank' ? 'Bank' : 'E-Wallet') : 'Not in our bank list. Type a name below'}</Text>
+                  <Text style={[styles.detectedName, { color: colorTheme.ink }]} numberOfLines={1}>
+                    {institution?.name ?? rawProvider ?? (isZh ? '未识别的机构' : 'Unrecognized provider')}
+                  </Text>
+                  <Text style={[styles.detectedSub, { color: colorTheme.ink2 }]}>
+                    {institution
+                      ? (institution.kind === 'bank' ? (isZh ? '银行' : 'Bank') : (isZh ? '电子钱包' : 'E-Wallet'))
+                      : (isZh ? '不在银行列表中，请在下方输入名称' : 'Not in our bank list. Type a name below')}
+                  </Text>
                 </View>
               </View>
 
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>Amount</Text>
+              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>{isZh ? '金额' : 'Amount'}</Text>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{entryCurrency === 'MYR' ? 'RM' : entryCurrency}</Text>
                 <TextInput value={amountText} onChangeText={setAmountText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} autoFocus={amount === 0} />
               </View>
-              {amount === 0 && <Text style={[styles.hint, { color: colorTheme.ink2 }]}>I couldn't read a clear amount. Enter it to continue.</Text>}
+              {amount === 0 && <Text style={[styles.hint, { color: colorTheme.ink2 }]}>{isZh ? '未能清晰识别出金额，请输入以继续。' : "I couldn't read a clear amount. Enter it to continue."}</Text>}
             </Card>
 
             {!forceCreate && matches.length > 1 && !selectedMatchId && (
               <Card style={{ marginTop: 14, overflow: 'hidden' }}>
-                <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>Which account?</Text>
+                <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '选择对应账户' : 'Which account?'}</Text>
                 {matches.map((m, i) => (
                   <Pressable key={m.id} onPress={() => setSelectedMatchId(m.id)} style={[styles.matchRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
                     <Text style={[styles.matchName, { color: colorTheme.ink }]} numberOfLines={1}>{m.name}</Text>
@@ -263,25 +297,27 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
               <View style={{ marginTop: 18, gap: 10 }}>
                 <PrimaryButton onPress={doReplace} disabled={amount <= 0}>
                   <Icon name="check" size={18} color="#fff" stroke={2.4} />
-                  <BtnLabel>Replace {selectedAccount.name}'s balance</BtnLabel>
+                  <BtnLabel>{isZh ? `替换 ${selectedAccount.name} 的余额` : `Replace ${selectedAccount.name}'s balance`}</BtnLabel>
                 </PrimaryButton>
                 <SecondaryButton onPress={doAddInto} disabled={amount <= 0} icon="plus">
-                  Add to {selectedAccount.name}'s balance ({fmtMoney(currentVal, selectedCurrency)} + {fmtMoney(amount, selectedCurrency)})
+                  {isZh
+                    ? `累加到 ${selectedAccount.name} 的余额（${fmtMoney(currentVal, selectedCurrency)} + ${fmtMoney(amount, selectedCurrency)}）`
+                    : `Add to ${selectedAccount.name}'s balance (${fmtMoney(currentVal, selectedCurrency)} + ${fmtMoney(amount, selectedCurrency)})`}
                 </SecondaryButton>
                 <Pressable onPress={() => setForceCreate(true)} hitSlop={6} style={styles.linkBtn}>
-                  <Text style={[styles.linkText, { color: theme.accent }]}>Not this account? Add as a new account instead</Text>
+                  <Text style={[styles.linkText, { color: theme.accent }]}>{isZh ? '不是此账户？新建一个独立账户' : 'Not this account? Add as a new account instead'}</Text>
                 </Pressable>
               </View>
             )}
 
             {showingCreate && (
               <Card style={{ marginTop: 14, padding: 16 }}>
-                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Name</Text>
-                <TextInput value={newName} onChangeText={setNewName} placeholder="Account name" placeholderTextColor={colorTheme.ink3} style={[styles.textInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]} />
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '账户名称' : 'Name'}</Text>
+                <TextInput value={newName} onChangeText={setNewName} placeholder={isZh ? '账户名称' : 'Account name'} placeholderTextColor={colorTheme.ink3} style={[styles.textInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]} />
 
                 {detectedKind === 'liability' && (
                   <>
-                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>Type</Text>
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>{isZh ? '类别' : 'Type'}</Text>
                     <View style={styles.classGrid}>
                       {classesFor('liability').map((c) => {
                         const on = newCls === c.id;
@@ -302,12 +338,12 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
                 <View style={{ marginTop: 18 }}>
                   <PrimaryButton onPress={doCreate} disabled={!newName.trim() || amount <= 0}>
                     <Icon name="plus" size={18} color="#fff" stroke={2.4} />
-                    <BtnLabel>Add account</BtnLabel>
+                    <BtnLabel>{isZh ? '添加账户' : 'Add account'}</BtnLabel>
                   </PrimaryButton>
                 </View>
                 {matches.length > 0 && (
                   <Pressable onPress={() => { setForceCreate(false); if (!selectedMatchId && matches.length === 1) setSelectedMatchId(matches[0].id); }} hitSlop={6} style={styles.linkBtn}>
-                    <Text style={[styles.linkText, { color: theme.accent }]}>Use an existing account instead</Text>
+                    <Text style={[styles.linkText, { color: theme.accent }]}>{isZh ? '改用现有账户' : 'Use an existing account instead'}</Text>
                   </Pressable>
                 )}
               </Card>
@@ -317,7 +353,15 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
 
         {phase === 'holdings' && (
           <>
-            <PipSays expr="happy"><BubbleText>Found <B>{rows.length}</B> coin{rows.length === 1 ? '' : 's'}. Check each match and amount, then add them.</BubbleText></PipSays>
+            <PipSays expr="happy">
+              <BubbleText>
+                {isZh ? (
+                  <>找到 <B>{rows.length}</B> 个币种。请核对匹配项与数量，然后添加。</>
+                ) : (
+                  <>Found <B>{rows.length}</B> coin{rows.length === 1 ? '' : 's'}. Check each match and amount, then add them.</>
+                )}
+              </BubbleText>
+            </PipSays>
             <Card style={{ overflow: 'hidden', marginTop: 16 }}>
               {rows.map((r, i) => (
                 <View key={r.key} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
@@ -327,7 +371,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Pressable onPress={() => setSearchKey(r.key)}>
                       <Text style={[styles.coinName, { color: colorTheme.ink }, !r.coin && { color: RED }]} numberOfLines={1}>
-                        {r.coin ? r.coin.name : `No match for ${r.ticker} · tap to search`}
+                        {r.coin ? r.coin.name : (isZh ? `未匹配到 ${r.ticker} · 点击搜索` : `No match for ${r.ticker} · tap to search`)}
                       </Text>
                     </Pressable>
                     <View style={styles.qtyRow}>
@@ -339,14 +383,16 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
                 </View>
               ))}
             </Card>
-            <Text style={[styles.hint, { color: colorTheme.ink2 }]}>Tap a coin to change the matched ticker. Values update live once added.</Text>
+            <Text style={[styles.hint, { color: colorTheme.ink2 }]}>
+              {isZh ? '点击币种可修改匹配代码。添加后行情将实时更新。' : 'Tap a coin to change the matched ticker. Values update live once added.'}
+            </Text>
           </>
         )}
 
         {phase === 'done' && (
           <>
             <PipSays expr="happy"><BubbleText>{doneMsg}</BubbleText></PipSays>
-            <View style={{ marginTop: 22 }}><PrimaryButton onPress={onClose}><Icon name="check" size={18} color="#fff" stroke={2.4} /><BtnLabel>Done</BtnLabel></PrimaryButton></View>
+            <View style={{ marginTop: 22 }}><PrimaryButton onPress={onClose}><Icon name="check" size={18} color="#fff" stroke={2.4} /><BtnLabel>{isZh ? '完成' : 'Done'}</BtnLabel></PrimaryButton></View>
           </>
         )}
       </ScrollView>
@@ -355,14 +401,14 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
         <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
           <PrimaryButton onPress={confirmHoldings} disabled={importable.length === 0}>
             <Icon name="check" size={19} color="#fff" stroke={2.4} />
-            <BtnLabel>Add {importable.length} holding{importable.length === 1 ? '' : 's'}</BtnLabel>
+            <BtnLabel>{isZh ? `添加 ${importable.length} 项持仓` : `Add ${importable.length} holding${importable.length === 1 ? '' : 's'}`}</BtnLabel>
           </PrimaryButton>
         </View>
       )}
 
       <TickerSearchModal
         visible={searchKey != null}
-        title="Match coin"
+        title={isZh ? '匹配币种' : 'Match coin'}
         placeholder="BTC, ETH, SOL…"
         search={searchCrypto}
         onPick={(coin) => { if (searchKey != null) patch(searchKey, { coin, ticker: coin.ticker }); setSearchKey(null); }}

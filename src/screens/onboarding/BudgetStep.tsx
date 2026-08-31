@@ -28,7 +28,7 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
-  const { t, tCat } = useLanguage();
+  const { t, tCat, isZh } = useLanguage();
   const { categories, saveBudget, deleteCategory, updateCategoryLabel, updateCategoryIcon } = useAppData();
   const expenseCats = useMemo(() => categories.filter((c) => c.kind === 'expense'), [categories]);
 
@@ -84,7 +84,12 @@ export function BudgetStep({ onNext, onSkip }: { onNext: () => void; onSkip: () 
         });
       } catch (e) {
         if (e instanceof NoFallbackCategoryError) {
-          notify('Add another category first', `"${label}" is your only ${e.kind} category, so there's nowhere to move its transactions. Add another category, then delete this one.`);
+          notify(
+            isZh ? '请先添加其他分类' : 'Add another category first',
+            isZh
+              ? `“${label}”是您唯一的${e.kind === 'income' ? '收入' : '支出'}分类。请先添加新分类后再删除。`
+              : `"${label}" is your only ${e.kind} category, so there's nowhere to move its transactions. Add another category, then delete this one.`
+          );
           return;
         }
         throw e;

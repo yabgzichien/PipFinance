@@ -43,12 +43,17 @@ export const zh: Translations = {
 
   // Settings
   settingsTitle: '设置',
+  searchSettingsPlaceholder: '搜索设置项...',
+  noSettingsFound: '未找到与“{query}”相关的设置',
+  noSettingsFoundSub: '可尝试搜索主题、提醒、货币、导出或重置',
   appearance: '外观与偏好',
   theme: '主题模式',
   themeLight: '浅色',
   themeDark: '深色',
   themeSystem: '跟随系统',
   accentColor: '主题强调色',
+  appIcon: '应用图标',
+  appIconDesc: '图标会自动同步您选择的强调色',
   motionAndHaptics: '动画与触感反馈',
   motionFull: '完整',
   motionReduced: '减弱',

@@ -43,12 +43,17 @@ export interface Translations {
 
   // Settings
   settingsTitle: string;
+  searchSettingsPlaceholder: string;
+  noSettingsFound: string;
+  noSettingsFoundSub: string;
   appearance: string;
   theme: string;
   themeLight: string;
   themeDark: string;
   themeSystem: string;
   accentColor: string;
+  appIcon: string;
+  appIconDesc: string;
   motionAndHaptics: string;
   motionFull: string;
   motionReduced: string;

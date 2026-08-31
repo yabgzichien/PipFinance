@@ -275,4 +275,122 @@ describe('AdvancedImport parseJSON', () => {
     expect(result.commitments[0].dueDay).toBe(31);
     expect(result.commitments[0].kind).toBe('expense');
   });
+
+  it('parses version 3 full payload with all entities and history', () => {
+    const v3Payload = {
+      version: 3,
+      categories: [
+        { id: 'cat_custom', label: 'Hobbies', icon: 'gamepad', hue: 280, kind: 'expense', isDefault: false },
+      ],
+      deletedDefaultCategories: ['gifts', 'shopping'],
+      accounts: [
+        {
+          name: 'High Yield Savings',
+          cls: 'cash',
+          kind: 'asset',
+          balance: 10000,
+          currency: 'MYR',
+          interestRate: 3.8,
+          icon: 'vault',
+          asOf: '2026-06-30',
+          history: [
+            { asOf: '2026-05-31', value: 9500 },
+            { asOf: '2026-06-30', value: 10000 },
+          ],
+        },
+      ],
+      transactions: [
+        {
+          id: 'txn_101',
+          date: '2026-06-15',
+          description: 'Team Lunch',
+          amount: -60,
+          currency: 'MYR',
+          category: 'Food',
+          remark: 'Shared meal',
+          source: 'manual',
+        },
+      ],
+      people: [{ id: 'p_1', name: 'Bob' }],
+      splits: [
+        {
+          txnId: 'txn_101',
+          gross: 120,
+          ownShare: 60,
+          method: 'equal',
+          currency: 'MYR',
+          shares: [
+            {
+              personName: 'Bob',
+              owed: 60,
+              paid: 60,
+              status: 'settled',
+              payments: [{ amount: 60, paidOn: '2026-06-16', evidence: 'cash' }],
+            },
+          ],
+        },
+      ],
+      budget: {
+        expectedIncome: 7000,
+        allocations: { Food: 1200, Hobbies: 400 },
+        snapshots: {
+          '2026-05': { income: 6800, allocations: { Food: 1100 } },
+        },
+        advice: { hash: 'adv_hash', text: 'On track with your savings.' },
+      },
+      taxRelief: {
+        tags: [
+          {
+            txnId: 'txn_101',
+            code: 'LIFESTYLE',
+            ya: 2026,
+            amount: 60,
+            origin: 'manual',
+          },
+        ],
+        memory: { 'team-lunch': 'LIFESTYLE' },
+      },
+      merchantMemory: { 'team-lunch': 'Food' },
+      preferences: {
+        activeCurrencies: ['MYR', 'USD', 'EUR'],
+        settings: { reminderCadence: 'daily', soundEnabled: false },
+      },
+    };
+
+    const res = parseJSON(JSON.stringify(v3Payload));
+
+    expect(res.version).toBe(3);
+    expect(res.categories).toHaveLength(1);
+    expect(res.categories![0]).toMatchObject({ id: 'cat_custom', label: 'Hobbies' });
+    expect(res.deletedDefaultCategories).toEqual(['gifts', 'shopping']);
+    expect(res.accounts[0]).toMatchObject({
+      name: 'High Yield Savings',
+      interestRate: 3.8,
+      icon: 'vault',
+    });
+    expect(res.accounts[0].history).toEqual([
+      { asOf: '2026-05-31', value: 9500 },
+      { asOf: '2026-06-30', value: 10000 },
+    ]);
+    expect(res.transactions[0]).toMatchObject({
+      id: 'txn_101',
+      merchant: 'Team Lunch',
+      amount: 60,
+      remark: 'Shared meal',
+      source: 'manual',
+    });
+    expect(res.people).toEqual([{ id: 'p_1', name: 'Bob' }]);
+    expect(res.splits).toHaveLength(1);
+    expect(res.splits![0].shares[0].payments).toEqual([
+      expect.objectContaining({ amount: 60, paidOn: '2026-06-16', evidence: 'declared' }),
+    ]);
+    expect(res.budget?.expectedIncome).toBe(7000);
+    expect(res.budget?.allocations.Hobbies).toBe(400);
+    expect(res.budget?.snapshots?.['2026-05'].income).toBe(6800);
+    expect(res.budget?.advice?.text).toBe('On track with your savings.');
+    expect(res.taxRelief?.tags[0]).toMatchObject({ code: 'LIFESTYLE', ya: 2026, amount: 60 });
+    expect(res.taxRelief?.memory['team-lunch']).toBe('LIFESTYLE');
+    expect(res.merchantMemory?.['team-lunch']).toBe('Food');
+    expect(res.preferences?.activeCurrencies).toEqual(['MYR', 'USD', 'EUR']);
+  });
 });

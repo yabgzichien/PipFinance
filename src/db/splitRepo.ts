@@ -285,3 +285,71 @@ export async function writeOffShare(shareId: string, writtenOffTxnId: string): P
     shareId
   );
 }
+
+export async function importParsedSplit(
+  txnId: string,
+  gross: number,
+  ownShare: number,
+  method: SplitMethod,
+  currency: string,
+  fxRate: number | null,
+  shares: {
+    personId: string;
+    owed: number;
+    paid: number;
+    status: ShareStatus;
+    writtenOffTxnId: string | null;
+    payments?: {
+      amount: number;
+      paidOn: string;
+      evidence: PaymentEvidence;
+      matchedMerchant?: string | null;
+      accountId?: string | null;
+    }[];
+  }[]
+): Promise<void> {
+  const db = await getDb();
+  const splitId = genId();
+  const now = new Date().toISOString();
+  await db.withTransactionAsync(async () => {
+    await deleteSplitRows(db, [txnId]);
+    await db.runAsync(
+      'INSERT INTO splits (id, txn_id, gross, own_share, method, created_at, currency, fx_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      splitId,
+      txnId,
+      gross,
+      ownShare,
+      method,
+      now,
+      currency,
+      fxRate
+    );
+    for (const sh of shares) {
+      const shareId = genId();
+      await db.runAsync(
+        'INSERT INTO split_shares (id, split_id, person_id, owed, paid, status, written_off_txn_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        shareId,
+        splitId,
+        sh.personId,
+        sh.owed,
+        sh.paid,
+        sh.status,
+        sh.writtenOffTxnId ?? null,
+        now
+      );
+      for (const pm of sh.payments ?? []) {
+        await db.runAsync(
+          'INSERT INTO split_payments (id, share_id, amount, paid_on, evidence, matched_merchant, account_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          genId(),
+          shareId,
+          pm.amount,
+          pm.paidOn,
+          pm.evidence,
+          pm.matchedMerchant ?? null,
+          pm.accountId ?? null,
+          now
+        );
+      }
+    }
+  });
+}

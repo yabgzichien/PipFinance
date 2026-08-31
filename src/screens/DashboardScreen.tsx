@@ -116,7 +116,6 @@ export function DashboardScreen({
     streakStartLabel,
     streakPaused,
     streakCelebrationToken,
-    tutorialComplete,
     tasksDone,
     pendingTaskCelebrations,
     clearTaskCelebrations,
@@ -249,37 +248,45 @@ export function DashboardScreen({
     if (commitmentsDue.overdue) {
       return {
         icon: 'clock' as IconName,
-        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
-        sub: 'Something is overdue. Tap to catch up.',
+        title: isZh
+          ? `${commitmentsDue.count} 笔账单 · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`
+          : `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
+        sub: isZh ? '有账单已逾期。点击前往处理。' : 'Something is overdue. Tap to catch up.',
         onPress: onOpenCommitments,
       };
     }
     if (owed.overdue) {
       return {
         icon: 'gift' as IconName,
-        title: `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
-        sub: `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`,
+        title: isZh ? `待收回 ${fmtMoney(dc.convert(owed.total), dc.code)}` : `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
+        sub: isZh
+          ? `${owed.oldestName} 已欠款 ${owed.oldestDays} 天。建议提醒一下。`
+          : `${owed.oldestName} has owed you for ${owed.oldestDays} days. Worth a nudge.`,
         onPress: onOpenOwed,
       };
     }
     if (commitmentsDue.count > 0) {
       return {
         icon: 'clock' as IconName,
-        title: `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
-        sub: 'Due this month. Tap to tick off.',
+        title: isZh
+          ? `${commitmentsDue.count} 笔账单 · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`
+          : `${commitmentsDue.count} ${commitmentsDue.count === 1 ? 'bill' : 'bills'} · ${fmtMoney(dc.convert(commitmentsDue.total), dc.code)}`,
+        sub: isZh ? '本月待付。点击前往打勾。' : 'Due this month. Tap to tick off.',
         onPress: onOpenCommitments,
       };
     }
     if (owed.total > 0) {
       return {
         icon: 'gift' as IconName,
-        title: `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
-        sub: `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`,
+        title: isZh ? `待收回 ${fmtMoney(dc.convert(owed.total), dc.code)}` : `${fmtMoney(dc.convert(owed.total), dc.code)} owed to you`,
+        sub: isZh
+          ? `来自 ${owed.count} 笔分摊账单。点击前往结清。`
+          : `From ${owed.count} shared ${owed.count === 1 ? 'bill' : 'bills'}. Tap to settle up.`,
         onPress: onOpenOwed,
       };
     }
     return null;
-  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed, dc.code, dc.rates, isZh]);
 
   const empty = transactions.length === 0;
 
@@ -357,7 +364,7 @@ export function DashboardScreen({
         </View>
 
         {empty ? (
-          tutorialComplete && <EmptyState />
+          <EmptyState />
         ) : (
           <>
             {/* 1 — Streak, kept at the top: the habit loop is the first thing a returning user
@@ -459,7 +466,7 @@ export function DashboardScreen({
 
         {/* Empty state: nothing to explore yet, so the one thing to do gets a full-width CTA on
             top of the bottom-nav button. */}
-        {empty && tutorialComplete && (
+        {empty && (
           <View style={{ paddingHorizontal: spacing.base, marginTop: spacing.md }}>
             <PrimaryButton onPress={onScan} height={54}>
               <Icon name="plus" size={21} color="#fff" stroke={2.4} />
@@ -1250,12 +1257,17 @@ function NetWorthSparkline({ values, color }: { values: number[]; color: string 
 
 function EmptyState() {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <Card style={{ marginHorizontal: spacing.base, marginTop: spacing.sm, padding: 24, alignItems: 'center' }}>
       <Pip size={88} nerdy float propellerHat />
-      <Title style={{ marginTop: spacing.md }}>No spending yet</Title>
+      <Title style={{ marginTop: spacing.md }}>{isZh ? '暂无支出记录' : 'No spending yet'}</Title>
       <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
-        Tap <Body weight={700}>Add</Body> to scan one receipt, or a whole statement at once. I’ll read the lines and you file them.
+        {isZh ? (
+          <>点击 <Body weight={700}>添加</Body> 扫描单张小票或整张对账单。我会识别账单明细，由您归类入账。</>
+        ) : (
+          <>Tap <Body weight={700}>Add</Body> to scan one receipt, or a whole statement at once. I’ll read the lines and you file them.</>
+        )}
       </Body>
     </Card>
   );

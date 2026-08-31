@@ -13,7 +13,7 @@ export type IconName =
   | 'chevronDown' | 'scan' | 'trending' | 'clock' | 'arrowRight' | 'search' | 'gallery' | 'wallet'
   | 'trash' | 'sliders' | 'gear' | 'alert' | 'pencil' | 'gift' | 'return' | 'percent'
   | 'home' | 'scale' | 'signal' | 'book' | 'shield' | 'store' | 'download' | 'file' | 'table'
-  | 'copy' | 'upload' | 'code' | 'pin' | 'chart' | 'filter';
+  | 'copy' | 'upload' | 'code' | 'pin' | 'chart' | 'filter' | 'share' | 'folder';
 
 type RenderFn = (stroke: string, sw: number) => React.ReactNode;
 
@@ -338,6 +338,20 @@ const ICONS: Record<IconName, RenderFn> = {
       <Path d="M18 20V10" />
       <Path d="M12 20V4" />
       <Path d="M6 20V14" />
+    </G>
+  ),
+  share: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Circle cx={18} cy={5} r={3} />
+      <Circle cx={6} cy={12} r={3} />
+      <Circle cx={18} cy={19} r={3} />
+      <Line x1={8.6} y1={13.5} x2={15.4} y2={17.5} />
+      <Line x1={15.4} y1={6.5} x2={8.6} y2={10.5} />
+    </G>
+  ),
+  folder: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     </G>
   ),
 };

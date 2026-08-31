@@ -1,7 +1,16 @@
+export interface GlossaryStep {
+  title: string;
+  desc: string;
+  badge?: string;
+  visualKey?: string;
+}
+
 export interface GlossaryEntry {
   term: string;
   short: string;
   body: string;
+  steps?: GlossaryStep[];
+  visualKey?: string;
 }
 
 /** Glossary content for InfoButton/GlossaryModal, mirroring LenderConsole's GLOSSARY shape
@@ -11,11 +20,29 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Safe monthly income',
     short: 'A conservative floor to budget against when your earnings swing month to month.',
     body: 'Taken from the lower end of your recent months, not the average, because a budget built on the average fails in every month you earn less than that. Planning against the floor turns a good month into savings instead of turning a bad month into a shortfall.',
+    visualKey: 'safe_income_visual',
+    steps: [
+      {
+        badge: 'Income Floor',
+        title: 'Base budget on the floor',
+        desc: 'Pip takes the conservative low end of your earnings rather than an average, protecting your budget in lower-earning months.',
+        visualKey: 'safe_income_visual',
+      },
+    ],
   },
   net_cash_flow: {
     term: 'Net cash flow',
     short: 'What is left after expenses are subtracted from income, over a period.',
     body: 'A positive number means you are taking in more than you spend. Watching this trend over time matters more than any single month.',
+    visualKey: 'net_cash_flow_visual',
+    steps: [
+      {
+        badge: 'Cash Flow',
+        title: 'Income minus expenses',
+        desc: 'Positive cash flow builds your savings cushion over time, showing real financial progress.',
+        visualKey: 'net_cash_flow_visual',
+      },
+    ],
   },
   where_it_goes: {
     term: 'Spending breakdown',
@@ -26,6 +53,15 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Net worth',
     short: 'Everything you own minus everything you owe.',
     body: 'Assets (cash, savings, investments) minus liabilities (loans, credit cards). Watching it rise over time is a clearer picture of financial health than any single month of cash flow.',
+    visualKey: 'net_worth_visual',
+    steps: [
+      {
+        badge: 'Net Worth',
+        title: 'Assets minus liabilities',
+        desc: 'Sum of your bank accounts, investments, and receivables minus all credit cards and loans.',
+        visualKey: 'net_worth_visual',
+      },
+    ],
   },
   unallocated: {
     term: 'Unallocated',
@@ -41,6 +77,15 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Income floor',
     short: 'The monthly income that held up, rather than the one an average implies.',
     body: 'Your monthly income totals are ranked and a low one is taken as the floor, so it is a level you actually reached in most months rather than a midpoint between good and bad ones. An average can be dragged around by a single unusual month; the floor is what you can rely on being there.',
+    visualKey: 'safe_income_visual',
+    steps: [
+      {
+        badge: 'Floor vs Average',
+        title: 'Consistent earnings baseline',
+        desc: 'Ranked monthly income yields a reliable floor you actually met in lean months, avoiding shortfall.',
+        visualKey: 'safe_income_visual',
+      },
+    ],
   },
   committed_spend: {
     term: 'Committed, essential & flexible',
@@ -49,6 +94,15 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       'Committed: recurring outflows at a steady amount, like rent or an instalment. Fixed; cannot be cut this month.\n\n' +
       'Essential: necessary spending that still moves, like food or fuel. Can compress, but never disappears.\n\n' +
       'Flexible: everything else. The part you could genuinely redirect if a month came in weak.',
+    visualKey: 'committed_spend_visual',
+    steps: [
+      {
+        badge: '3-Tier System',
+        title: 'Three levels of control',
+        desc: 'Committed (fixed bills like rent), Essential (elastic basics like food), and Flexible (discretionary spending).',
+        visualKey: 'committed_spend_visual',
+      },
+    ],
   },
   learned_merchants: {
     term: 'Learned merchants',
@@ -59,6 +113,15 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Pays down / Adds to',
     short: 'Whether this transaction lowers or raises what you owe on this card or loan.',
     body: 'Most spending on a card adds to what you owe, so pick "Adds to". If this entry is actually a payment toward the balance, like clearing a bill, pick "Pays down" instead. Pip picks a starting guess for you based on expense or income, so you only need to change it when the guess is wrong.',
+    visualKey: 'card_direction_visual',
+    steps: [
+      {
+        badge: 'Card Flow',
+        title: 'Purchases vs repayments',
+        desc: 'Pick "Adds to" for everyday card purchases (debt increases), and "Pays down" when making a card payment (debt decreases).',
+        visualKey: 'card_direction_visual',
+      },
+    ],
   },
   split_bill: {
     term: 'Split bill',
@@ -67,6 +130,27 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       '1. Choose Equal, Shares, or Exact amounts, and add who was there.\n\n' +
       '2. Keep "I was on this bill too" checked unless you paid entirely for others.\n\n' +
       '3. Only your share counts as spending. The rest is tracked under "Owed to you" until settled.',
+    visualKey: 'split_step_1',
+    steps: [
+      {
+        badge: 'Step 1 of 3',
+        title: 'Pick mode & add friends',
+        desc: 'Choose Equal, Shares, or Exact amounts, then tap or add friend names who shared the bill.',
+        visualKey: 'split_step_1',
+      },
+      {
+        badge: 'Step 2 of 3',
+        title: 'Set portions & your share',
+        desc: 'Adjust individual share weights with +/-. Keep "I was on this bill too" checked unless you paid 100% for others.',
+        visualKey: 'split_step_2',
+      },
+      {
+        badge: 'Step 3 of 3',
+        title: 'Your spend vs Owed to you',
+        desc: 'Only your personal portion is logged as spending. Friends\' portions become "Owed to you" receivables in your Net Worth.',
+        visualKey: 'split_step_3',
+      },
+    ],
   },
   owed_to_you: {
     term: 'Owed to you',
@@ -74,6 +158,21 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     body:
       'When you pay for a group bill, only your portion counts as your personal spending. The rest is tracked here as an asset (a receivable) in your Net Worth.\n\n' +
       'When someone pays you back, settling clears the debt and adds the cash to your account without recording duplicate income. If a debt will never be repaid, writing it off converts it into an expense.',
+    visualKey: 'owed_step_1',
+    steps: [
+      {
+        badge: 'Step 1 of 2',
+        title: 'Track receivables as assets',
+        desc: 'Shared bill portions are tracked as money owed to you in Net Worth, preventing inflated single-month expenses.',
+        visualKey: 'owed_step_1',
+      },
+      {
+        badge: 'Step 2 of 2',
+        title: 'Settle or write off',
+        desc: 'Tap "Settle" when repaid to deposit cash without duplicate income. Tap "Write off" to convert uncollectible amounts into an expense.',
+        visualKey: 'owed_step_2',
+      },
+    ],
   },
   quick_add: {
     term: 'Just type it',
@@ -85,6 +184,21 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       '• coffee 15 yesterday (expense with custom date)\n' +
       '• salary 5000 (logged as income)\n' +
       '• lunch 12, grab 18 (multiple entries at once)',
+    visualKey: 'quick_add_step_1',
+    steps: [
+      {
+        badge: 'Step 1 of 2',
+        title: 'Type naturally in plain text',
+        desc: 'Type amount and description like "lunch 9.2" or "coffee 15 yesterday". Pip parses amount, category, and date.',
+        visualKey: 'quick_add_step_1',
+      },
+      {
+        badge: 'Step 2 of 2',
+        title: 'Batch multiple items with commas',
+        desc: 'Record multiple transactions at once using commas (e.g. "lunch 12, grab 18") for lightning-fast entry.',
+        visualKey: 'quick_add_step_2',
+      },
+    ],
   },
 };
 

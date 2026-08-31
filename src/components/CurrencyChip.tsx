@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { Icon } from './Icon';
 
@@ -27,6 +28,7 @@ export function CurrencyChip({
   const [open, setOpen] = useState(false);
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
 
   if (active.length <= 1) return null;
 
@@ -51,7 +53,7 @@ export function CurrencyChip({
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={styles.menuWrap} pointerEvents="box-none">
           <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
-            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>Currency</Text>
+            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>{isZh ? '选择货币' : 'Currency'}</Text>
             <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
               {active.map((code) => {
                 const selected = code === value;

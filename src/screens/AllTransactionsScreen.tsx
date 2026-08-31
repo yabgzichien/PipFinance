@@ -250,14 +250,17 @@ export function AllTransactionsScreen({
 
   const dc = useDisplayCurrency();
   const totalSpent = useMemo(
-    () => transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
-    [transactions]
+    () => transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + dc.convertTxn(t), 0),
+    [transactions, dc]
   );
   const totalIncome = useMemo(
-    () => transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
-    [transactions]
+    () => transactions.filter((t) => t.type === 'income').reduce((s, t) => s + dc.convertTxn(t), 0),
+    [transactions, dc]
   );
-  const filterTotal = useMemo(() => shown.reduce((s, t) => s + t.amount, 0), [shown]);
+  const filterTotal = useMemo(
+    () => shown.reduce((s, t) => s + dc.convertTxn(t), 0),
+    [shown, dc]
+  );
   const nativeTotals = useMemo(() => nativeTransactionTotalsByCurrency(shown), [shown]);
 
   const toggleSelect = (id: string) => {
@@ -351,7 +354,7 @@ export function AllTransactionsScreen({
         <Pressable onPress={onClearFilter} style={[styles.filterChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           {filterCat && <CatBadge category={filterCat} size={28} rad={8} />}
           <Text style={[styles.filterText, { color: colorTheme.ink }]}>
-            {shown.length} {filterCat ? tCat(filterCat) : ''} · {fmtMoney(dc.convert(filterTotal), dc.code)}
+            {shown.length} {filterCat ? tCat(filterCat) : ''} · {fmtMoney(filterTotal, dc.code)}
           </Text>
           <View style={[styles.clearPill, { backgroundColor: colorTheme.surface2 }]}>
             <Icon name="x" size={12} color={colorTheme.ink2} />
@@ -367,11 +370,11 @@ export function AllTransactionsScreen({
               <View style={styles.summary}>
                 <Card style={styles.summaryCard}>
                   <Eyebrow>{isZh ? '支出' : 'Spent'}</Eyebrow>
-                  <Amount value={dc.convert(totalSpent)} currency={dc.code} size={20} weight={700} />
+                  <Amount value={totalSpent} currency={dc.code} size={20} weight={700} />
                 </Card>
                 <Card style={styles.summaryCard}>
                   <Eyebrow>{isZh ? '收入' : 'Received'}</Eyebrow>
-                  <Amount value={dc.convert(totalIncome)} currency={dc.code} size={20} weight={700} color={theme.accent} />
+                  <Amount value={totalIncome} currency={dc.code} size={20} weight={700} color={theme.accent} />
                 </Card>
               </View>
               {Object.keys(nativeTotals).length > 1 && (

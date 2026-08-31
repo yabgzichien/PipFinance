@@ -51,6 +51,8 @@ import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
 import { syncStreakWidget } from './src/widget/syncStreakWidget';
+import { syncQuickRecordWidget } from './src/widget/syncQuickRecordWidget';
+import type { TxnType } from './src/lib/types';
 import { backTargetFor, type Screen } from './src/lib/screenNav';
 import { EXPLORE_TASKS, type ExploreTaskId } from './src/lib/tasks';
 import { platformShadow, uiFont } from './src/theme';
@@ -230,6 +232,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [exportMonth, setExportMonth] = useState<string | undefined>(undefined);
   const [exportOrigin, setExportOrigin] = useState<Screen>('settings');
   const [addTutorialMode, setAddTutorialMode] = useState<'scan' | 'manual' | undefined>(undefined);
+  const [addInitialType, setAddInitialType] = useState<TxnType | undefined>(undefined);
   const [addPhase, setAddPhase] = useState<AddFlowPhase>('attach');
   const [tourStep, setTourStep] = useState<TourStepKey>(() => (!tutorialComplete ? 'plus' : 'done'));
   // Gates the manual-amount tour step's Next button: App doesn't own the amount field, so
@@ -511,6 +514,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       setTourStep('scan_explain');
     }
     setAddTutorialMode(undefined);
+    setAddInitialType(undefined);
     setScreen('add');
   };
 
@@ -540,6 +544,19 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     const handleUrl = (url: string | null) => {
       if (!url) return;
       if (url.startsWith('pip://add') || url.endsWith('/add')) {
+        const isIncome = url.includes('type=income') || url.includes('/income');
+        const isExpense = url.includes('type=expense') || url.includes('/expense');
+        if (isIncome) {
+          setAddTutorialMode(undefined);
+          setAddInitialType('income');
+          setAddPhase('manual');
+        } else if (isExpense) {
+          setAddTutorialMode(undefined);
+          setAddInitialType('expense');
+          setAddPhase('manual');
+        } else {
+          setAddInitialType(undefined);
+        }
         setScreen('add');
       } else if (url.startsWith('pip://dashboard') || url.endsWith('/home')) {
         setScreen('home');
@@ -551,11 +568,12 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     return () => urlSub.remove();
   }, []);
 
-  // Sync widget when app resumes from background
+  // Sync widgets when app resumes from background
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         syncStreakWidget().catch(() => {});
+        syncQuickRecordWidget().catch(() => {});
       }
     });
     return () => appStateSub.remove();
@@ -634,6 +652,9 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       )}
       {screen === 'add' && (
         <AddFlow
+          key={addInitialType ? `add:${addInitialType}` : 'add:default'}
+          initialPhase={addInitialType ? 'manual' : undefined}
+          initialType={addInitialType}
           tutorialMode={addTutorialMode}
           activeTourAnchor={activeAnchorId}
           onPhaseChange={handleAddPhaseChange}
@@ -641,6 +662,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onCategoryChosen={handleCategoryChosen}
           onClose={() => {
             setAddTutorialMode(undefined);
+            setAddInitialType(undefined);
             if (tourStep === 'scan_explain' || tourStep === 'manual_btn') {
               setTourStep('plus');
             } else if (tourStep === 'manual_add_expense') {

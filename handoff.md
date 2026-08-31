@@ -73,3 +73,10 @@ npm run audit:type
 ### Style Conventions
 - **No em dashes in user-facing copy**: Keep copy concise and clear.
 - **Luminance-separated colors**: Ensure all charts and UI elements pass contrast audits.
+
+---
+
+## 5. Live Operations & On-Chain Activity
+
+- **Live Trade Executed**: `0x22955CE01D82B786207a8934430D13a0921822a8`
+

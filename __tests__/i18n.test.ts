@@ -65,16 +65,35 @@ describe('Glossary Localization', () => {
   it('contains Chinese translations for all glossary entries defined in English GLOSSARY', () => {
     const glossaryKeys = Object.keys(GLOSSARY);
     for (const key of glossaryKeys) {
+      const enEntry = GLOSSARY[key];
       const zhEntry = ZH_GLOSSARY[key];
       expect(zhEntry).toBeDefined();
       expect(zhEntry?.term.length).toBeGreaterThan(0);
       expect(zhEntry?.short.length).toBeGreaterThan(0);
       expect(zhEntry?.body.length).toBeGreaterThan(0);
+
+      if (enEntry.steps) {
+        expect(zhEntry?.steps).toBeDefined();
+        expect(zhEntry?.steps?.length).toBe(enEntry.steps.length);
+        zhEntry?.steps?.forEach((step, idx) => {
+          expect(step.title.length).toBeGreaterThan(0);
+          expect(step.desc.length).toBeGreaterThan(0);
+          expect(step.visualKey).toBe(enEntry.steps?.[idx].visualKey);
+        });
+      }
     }
   });
 
   it('returns English glossary when language is en', () => {
     const entry = getGlossaryEntry('net_worth', 'en');
     expect(entry).toEqual(GLOSSARY['net_worth']);
+  });
+
+  it('returns Chinese glossary with steps for split_bill when language is zh', () => {
+    const entry = getGlossaryEntry('split_bill', 'zh');
+    expect(entry).toBeDefined();
+    expect(entry?.term).toBe('分摊账单');
+    expect(entry?.steps?.length).toBe(3);
+    expect(entry?.steps?.[0].title).toBe('选择分摊模式与同行人员');
   });
 });

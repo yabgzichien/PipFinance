@@ -11,6 +11,7 @@ import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { deleteReceiptImage } from '../lib/receiptStorage';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -30,6 +31,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh, tCat } = useLanguage();
   const {
     categories,
     accounts,
@@ -179,17 +181,23 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     onClose();
   };
 
+  const currentCat = categories.find((c) => c.id === (cat ?? txn.categoryId));
   const currentCatLabel =
-    categories.find((c) => c.id === (cat ?? txn.categoryId))?.label ??
-    (txn.type === 'income' ? 'Income' : txn.type === 'transfer' ? 'Transfer' : 'Expense');
+    (currentCat ? tCat(currentCat) : null) ??
+    (txn.type === 'income' ? (isZh ? '收入' : 'Income') : txn.type === 'transfer' ? (isZh ? '转账' : 'Transfer') : (isZh ? '支出' : 'Expense'));
 
   const confirmDelete = () => {
     const label = txn.merchantRaw || currentCatLabel;
-    confirmAction('Delete transaction?', `Remove “${label}”? This can’t be undone.`, 'Delete', async () => {
-      await removeTransaction(txn.id);
-      if (txn.receiptUri) deleteReceiptImage(txn.receiptUri);
-      onClose();
-    });
+    confirmAction(
+      isZh ? '删除账单？' : 'Delete transaction?',
+      isZh ? `确定删除“${label}”吗？此操作无法撤销。` : `Remove “${label}”? This can’t be undone.`,
+      isZh ? '删除' : 'Delete',
+      async () => {
+        await removeTransaction(txn.id);
+        if (txn.receiptUri) deleteReceiptImage(txn.receiptUri);
+        onClose();
+      }
+    );
   };
 
   return (
@@ -218,8 +226,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             >
               <RNImage source={{ uri: txn.receiptUri }} style={[styles.receiptThumb, { borderColor: colorTheme.line }]} />
               <View style={{ flex: 1 }}>
-                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>Receipt photo</Text>
-                <Text style={[styles.splitSub, { color: colorTheme.ink2 }]}>Tap to view</Text>
+                <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{isZh ? '小票照片' : 'Receipt photo'}</Text>
+                <Text style={[styles.splitSub, { color: colorTheme.ink2 }]}>{isZh ? '点击查看' : 'Tap to view'}</Text>
               </View>
               <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
             </Pressable>
@@ -230,7 +238,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           {type === 'transfer' ? (
             <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
               <View style={[styles.toggleBtn, styles.toggleBtnOn, { backgroundColor: colorTheme.surface }]}>
-                <Text style={[styles.toggleText, styles.toggleTextOn, { color: colorTheme.ink }]}>Transfer</Text>
+                <Text style={[styles.toggleText, styles.toggleTextOn, { color: colorTheme.ink }]}>{isZh ? '转账' : 'Transfer'}</Text>
               </View>
             </View>
           ) : (
@@ -251,7 +259,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
                         on && { color: colorTheme.ink },
                       ]}
                     >
-                      {k === 'expense' ? 'Expense' : 'Income'}
+                      {k === 'expense' ? (isZh ? '支出' : 'Expense') : (isZh ? '收入' : 'Income')}
                     </Text>
                   </Pressable>
                 );
@@ -259,7 +267,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             </View>
           )}
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{split ? 'Your share' : 'Amount'}</Text>
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{split ? (isZh ? '个人承担' : 'Your share') : (isZh ? '金额' : 'Amount')}</Text>
           <View style={styles.amountRow}>
             <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyLabel}</Text>
             <TextInput
@@ -278,13 +286,15 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </View>
           {!!split && (
             <Text style={[styles.lockNote, { color: colorTheme.ink3 }]}>
-              {fmtMoney(split.gross, txn.currency)} left your account. Change the split below to adjust this.
+              {isZh
+                ? `已从账户扣除 ${fmtMoney(split.gross, txn.currency)}。在下方修改分账以调整此金额。`
+                : `${fmtMoney(split.gross, txn.currency)} left your account. Change the split below to adjust this.`}
             </Text>
           )}
 
           {type !== 'transfer' && (
             <>
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>Category</Text>
+              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '分类' : 'Category'}</Text>
               <View style={styles.grid}>
                 {visible.map((c) => (
                   <View key={c.id} style={styles.gridCell}>
@@ -295,14 +305,14 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
                   <View style={styles.gridCell}>
                     <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
                       <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-                      <Text style={[styles.addChipText, { color: theme.accent }]}>New category</Text>
+                      <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
                     </Pressable>
                   </View>
                 )}
               </View>
               {grid.length > 4 && (
                 <Pressable onPress={() => setExpanded((e) => !e)} style={styles.moreBtn} hitSlop={6}>
-                  <Text style={[styles.moreText, { color: theme.accent }]}>{expanded ? 'Show less' : `Show all ${grid.length}`}</Text>
+                  <Text style={[styles.moreText, { color: theme.accent }]}>{expanded ? (isZh ? '收起' : 'Show less') : (isZh ? `显示全部 ${grid.length} 个` : `Show all ${grid.length}`)}</Text>
                   <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}>
                     <Icon name="chevronDown" size={16} color={theme.accent} />
                   </View>
@@ -311,11 +321,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             </>
           )}
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>Remark (optional)</Text>
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Text>
           <TextInput
             value={remark}
             onChangeText={setRemark}
-            placeholder="e.g. Lunch with a supplier"
+            placeholder={isZh ? '例如：与供应商共进午餐' : 'e.g. Lunch with a supplier'}
             placeholderTextColor={colorTheme.ink3}
             style={[styles.remarkInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
             multiline
@@ -330,15 +340,15 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
               <Icon name="gift" size={18} color={theme.accent} />
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{split ? 'Split with friends' : 'Split with friends'}</Text>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{isZh ? '与朋友分摊' : 'Split with friends'}</Text>
                   <InfoButton entry="split_bill" />
                 </View>
                 <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
                   {split
                     ? stillOwed > 0
-                      ? `${splitNames} owe you ${fmtMoney(stillOwed, txn.currency)}`
-                      : `${splitNames} settled up`
-                    : 'Record only your share and track what you are owed'}
+                      ? (isZh ? `${splitNames} 欠你 ${fmtMoney(stillOwed, txn.currency)}` : `${splitNames} owe you ${fmtMoney(stillOwed, txn.currency)}`)
+                      : (isZh ? `${splitNames} 已结清` : `${splitNames} settled up`)
+                    : (isZh ? '仅记录您的个人份额，并追踪待收借款' : 'Record only your share and track what you are owed')}
                 </Text>
               </View>
               <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
@@ -346,19 +356,19 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           )}
 
           <View style={{ marginTop: 18 }}>
-            <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} label="Link to account (optional)" />
+            <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} label={isZh ? '关联账户（选填）' : 'Link to account (optional)'} />
           </View>
 
           <View style={{ marginTop: 20 }}>
             <PrimaryButton onPress={save} height={52} disabled={!linkConvertible}>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
-              <BtnLabel>Save changes</BtnLabel>
+              <BtnLabel>{isZh ? '保存修改' : 'Save changes'}</BtnLabel>
             </PrimaryButton>
           </View>
 
           <Pressable onPress={confirmDelete} style={styles.deleteBtn} hitSlop={6}>
             <Icon name="trash" size={17} color="#b3261e" />
-            <Text style={styles.deleteText}>Delete transaction</Text>
+            <Text style={styles.deleteText}>{isZh ? '删除账单' : 'Delete transaction'}</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>

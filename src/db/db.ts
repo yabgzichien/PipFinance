@@ -7,7 +7,12 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 /** Open the database once, run migrations + seed, and cache the promise. */
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
-  if (!dbPromise) dbPromise = init();
+  if (!dbPromise) {
+    dbPromise = init().catch((err) => {
+      dbPromise = null;
+      throw err;
+    });
+  }
   return dbPromise;
 }
 

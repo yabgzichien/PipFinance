@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
 import { ReliefTagEditSheet } from '../components/ReliefTagEditSheet';
+import { ExportSuccessModal } from '../components/ExportSuccessModal';
 import { Body, Caption, Card, Eyebrow, ProgressTrack, TopBar } from '../components/ui';
 import { computeUsage, evidenceState, isRequestable, reliefEligibility, yaForDate, type ReliefUsage } from '../lib/relief';
 import { RELIEF_SCHEDULES, scheduleForYA, type ReliefLine } from '../lib/reliefSchedule';
@@ -51,6 +52,14 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const [manualSearch, setManualSearch] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingZip, setExportingZip] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [taxExportResult, setTaxExportResult] = useState<{
+    fileName: string;
+    format: 'pdf' | 'zip';
+    fileUri?: string;
+    fileSize?: number;
+    mimeType?: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,9 +153,21 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
               setExportingPdf(true);
               try {
                 try {
+                  const fileName = `tax-relief-statement-${ya}.pdf`;
                   const bytes = await buildAuditPackPdf(ya, schedule, tags, transactions);
-                  const result = await saveOrDownloadExport(`tax-relief-statement-${ya}.pdf`, bytes, 'application/pdf');
-                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成报税表。' : 'Could not build the tax relief statement.'));
+                  const result = await saveOrDownloadExport(fileName, bytes, 'application/pdf', { autoShare: true });
+                  if (result.success) {
+                    setTaxExportResult({
+                      fileName,
+                      format: 'pdf',
+                      fileUri: result.uri,
+                      fileSize: result.fileSize,
+                      mimeType: 'application/pdf',
+                    });
+                    setSuccessModalVisible(true);
+                  } else {
+                    notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成报税表。' : 'Could not build the tax relief statement.'));
+                  }
                 } catch {
                   notify(isZh ? '导出失败' : 'Export failed', isZh ? '生成报税表时出现问题。' : 'Something went wrong building the tax relief statement.');
                 }
@@ -168,9 +189,21 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
               setExportingZip(true);
               try {
                 try {
+                  const fileName = `tax-relief-evidence-${ya}.zip`;
                   const bytes = await buildEvidenceZip(ya, schedule, tags, transactions);
-                  const result = await saveOrDownloadExport(`tax-relief-evidence-${ya}.zip`, bytes, 'application/zip');
-                  if (!result.success) notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成小票证据包。' : 'Could not package receipt evidence.'));
+                  const result = await saveOrDownloadExport(fileName, bytes, 'application/zip', { autoShare: true });
+                  if (result.success) {
+                    setTaxExportResult({
+                      fileName,
+                      format: 'zip',
+                      fileUri: result.uri,
+                      fileSize: result.fileSize,
+                      mimeType: 'application/zip',
+                    });
+                    setSuccessModalVisible(true);
+                  } else {
+                    notify(isZh ? '导出失败' : 'Export failed', result.error ?? (isZh ? '无法生成小票证据包。' : 'Could not package receipt evidence.'));
+                  }
                 } catch {
                   notify(isZh ? '导出失败' : 'Export failed', isZh ? '打包小票证据时出现问题。' : 'Something went wrong packaging receipt evidence.');
                 }
@@ -377,6 +410,18 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
           schedule={schedule}
           onPick={(id, code) => updateCommitmentEntry(id, { reliefCode: code })}
           onClose={() => setMappingCommitments(false)}
+        />
+      )}
+
+      {taxExportResult && (
+        <ExportSuccessModal
+          visible={successModalVisible}
+          onClose={() => setSuccessModalVisible(false)}
+          fileName={taxExportResult.fileName}
+          format={taxExportResult.format}
+          fileUri={taxExportResult.fileUri}
+          fileSize={taxExportResult.fileSize}
+          mimeType={taxExportResult.mimeType}
         />
       )}
     </View>

@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { CLASS_BY_ID, type LinkEffect } from '../lib/networth';
 import type { Account } from '../lib/types';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useGlossary } from '../state/glossary';
@@ -34,7 +35,7 @@ export function AccountLinkField({
   effect,
   onSelect,
   onEffect,
-  label = 'Account',
+  label,
   required = false,
 }: {
   accounts: Account[];
@@ -49,6 +50,8 @@ export function AccountLinkField({
   const [creating, setCreating] = useState(false);
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  const displayLabel = label ?? (isZh ? '账户' : 'Account');
   const active = accounts.filter((a) => !a.archived);
   if (active.length === 0) return null;
   const sel = active.find((a) => a.id === selectedId) ?? null;
@@ -60,7 +63,7 @@ export function AccountLinkField({
 
   return (
     <View>
-      <Text style={[styles.label, { color: colorTheme.ink2 }]}>{label}</Text>
+      <Text style={[styles.label, { color: colorTheme.ink2 }]}>{displayLabel}</Text>
 
       <Pressable onPress={() => setOpen(true)} style={[styles.trigger, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
         {sel ? (
@@ -74,7 +77,7 @@ export function AccountLinkField({
           ]}
           numberOfLines={1}
         >
-          {sel ? sel.name : required ? 'Select account' : 'None'}
+          {sel ? sel.name : required ? (isZh ? '选择账户' : 'Select account') : (isZh ? '无' : 'None')}
         </Text>
         <Icon name="chevronDown" size={18} color={colorTheme.ink3} />
       </Pressable>
@@ -82,7 +85,7 @@ export function AccountLinkField({
       {sel && effect && onEffect && sel.kind === 'liability' && (
         <>
           <View style={styles.effectLabelRow}>
-            <Text style={[styles.effectLabel, { color: colorTheme.ink3 }]}>Direction</Text>
+            <Text style={[styles.effectLabel, { color: colorTheme.ink3 }]}>{isZh ? '变动方向' : 'Direction'}</Text>
             <InfoButton entry="card_direction" />
           </View>
           <View style={[styles.effectRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
@@ -91,7 +94,9 @@ export function AccountLinkField({
               return (
                 <Pressable key={e} onPress={() => onEffect(e)} style={[styles.effectBtn, on && { backgroundColor: theme.accentInk }]}>
                   <Text style={[styles.effectText, { color: colorTheme.ink2 }, on && styles.effectTextOn]}>
-                    {e === 'subtract' ? `Pays down ${sel.name}` : `Adds to ${sel.name}`}
+                    {e === 'subtract'
+                      ? (isZh ? `偿还 ${sel.name}` : `Pays down ${sel.name}`)
+                      : (isZh ? `计入 ${sel.name}` : `Adds to ${sel.name}`)}
                   </Text>
                 </Pressable>
               );
@@ -104,9 +109,9 @@ export function AccountLinkField({
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={styles.menuWrap} pointerEvents="box-none">
           <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
-            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>Account</Text>
+            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>{isZh ? '账户' : 'Account'}</Text>
             <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
-              {!required && <Option label="None" active={!selectedId} onPress={() => choose(null)} />}
+              {!required && <Option label={isZh ? '无' : 'None'} active={!selectedId} onPress={() => choose(null)} />}
               {active.map((a) => (
                 <Option
                   key={a.id}
@@ -126,7 +131,7 @@ export function AccountLinkField({
               style={styles.option}
             >
               <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.optionText, { color: theme.accent }]}>Create new account</Text>
+              <Text style={[styles.optionText, { color: theme.accent }]}>{isZh ? '创建新账户' : 'Create new account'}</Text>
             </Pressable>
           </View>
         </View>

@@ -23,6 +23,7 @@ import { saveReceiptImage } from '../lib/receiptStorage';
 import { scanReceiptImage } from '../lib/scanReceipt';
 import { computeBillTotal, computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
+import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -104,6 +105,7 @@ export function ReceiptScanScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { people, addPerson } = useAppData();
 
   const [phase, setPhase] = useState<Phase>(cachedReceipt ? 'assign' : initialImage ? 'reading' : 'capture');
@@ -218,7 +220,7 @@ export function ReceiptScanScreen({
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
     if (!a.base64) {
-      notify('Hmm', "That photo couldn't be read. Try another one.");
+      notify('Hmm', isZh ? '无法读取该照片，请尝试其他照片。' : "That photo couldn't be read. Try another one.");
       return;
     }
     read({ uri: a.uri, base64: a.base64, mime: a.mimeType ?? 'image/jpeg' });
@@ -240,7 +242,7 @@ export function ReceiptScanScreen({
       }
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) {
-        notify('Permission needed', 'Allow camera access to photograph the receipt.');
+        notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相机以拍摄小票。' : 'Allow camera access to photograph the receipt.');
         return;
       }
       handleResult(await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 }));
@@ -255,7 +257,7 @@ export function ReceiptScanScreen({
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        notify('Permission needed', 'Allow photo access to pick the receipt.');
+        notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相册以选取小票。' : 'Allow photo access to pick the receipt.');
         return;
       }
       handleResult(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.7 }));
@@ -362,7 +364,7 @@ export function ReceiptScanScreen({
     return (
       <View style={[styles.root, { backgroundColor: colorTheme.bg }, styles.center]}>
         <PipSays expr="think">
-          <BubbleText>Reading the receipt line by line… this takes a few seconds.</BubbleText>
+          <BubbleText>{isZh ? '正在逐行识别小票… 请稍候几秒。' : 'Reading the receipt line by line… this takes a few seconds.'}</BubbleText>
         </PipSays>
         <ActivityIndicator color={theme.accent} style={{ marginTop: 22 }} />
       </View>
@@ -373,13 +375,19 @@ export function ReceiptScanScreen({
     return (
       <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
         <View style={{ paddingTop: insets.top + 4 }}>
-          <TopBar title="Scan a receipt" onBack={onBack} />
+          <TopBar title={isZh ? '扫描消费小票' : 'Scan a receipt'} onBack={onBack} />
         </View>
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }}>
           <PipSays expr="curious">
             <BubbleText>
-              Photograph the <B>paper receipt</B> and I’ll read each item. Paid for other people too?
-              Tap who ate what instead of doing mental arithmetic at the table.
+              {isZh ? (
+                <>拍摄<B>纸质小票</B>，我会自动识别各项明细。为其他人买单了？直接勾选各自点了什么，无需在餐桌上费心心算。</>
+              ) : (
+                <>
+                  Photograph the <B>paper receipt</B> and I’ll read each item. Paid for other people too?
+                  Tap who ate what instead of doing mental arithmetic at the table.
+                </>
+              )}
             </BubbleText>
           </PipSays>
 
@@ -391,14 +399,15 @@ export function ReceiptScanScreen({
           )}
 
           <View style={{ gap: 14, marginTop: 18 }}>
-            <SourceRow icon="camera" title="Take a photo" sub="Point at the itemised receipt" onPress={takePhoto} disabled={busy} />
-            <SourceRow icon="gallery" title="Choose from gallery" sub="Pick a photo you already took" onPress={pickFromLibrary} disabled={busy} />
-            <SourceRow icon="pencil" title="No receipt? Split a total" sub="Type the amount and divide it by hand" onPress={onManualInstead} disabled={busy} />
+            <SourceRow icon="camera" title={isZh ? '拍照' : 'Take a photo'} sub={isZh ? '对准明细小票' : 'Point at the itemised receipt'} onPress={takePhoto} disabled={busy} />
+            <SourceRow icon="gallery" title={isZh ? '从相册选取' : 'Choose from gallery'} sub={isZh ? '选择已拍好的照片' : 'Pick a photo you already took'} onPress={pickFromLibrary} disabled={busy} />
+            <SourceRow icon="pencil" title={isZh ? '没有小票？分摊总额' : 'No receipt? Split a total'} sub={isZh ? '输入金额并手动分摊' : 'Type the amount and divide it by hand'} onPress={onManualInstead} disabled={busy} />
           </View>
 
           <Text style={[styles.hint, { color: colorTheme.ink3 }]}>
-            The photo is read once and never stored. If you split it, only your own share is recorded as
-            spending.
+            {isZh
+              ? '照片仅读取一次且绝不存储。如果进行分摊，仅将您自己承担的份额记录为支出。'
+              : 'The photo is read once and never stored. If you split it, only your own share is recorded as spending.'}
           </Text>
         </ScrollView>
       </View>
@@ -411,7 +420,7 @@ export function ReceiptScanScreen({
         {/* Back means "this wasn't a receipt after all" when the hub supplied the image, so it
             returns to the kind question rather than to a capture screen the user never used. */}
         <TopBar
-          title={receipt?.merchant ?? 'Assign the items'}
+          title={receipt?.merchant ?? (isZh ? '分配明细' : 'Assign the items')}
           onBack={() => (initialImage ? onBack() : setPhase('capture'))}
         />
       </View>
@@ -431,12 +440,20 @@ export function ReceiptScanScreen({
         <PipSays expr={lines.length === 0 ? 'curious' : 'happy'}>
           <BubbleText>
             {lines.length === 0 ? (
-              <>I couldn’t make out any items. Check the total below, and add anyone you split it with.</>
+              isZh ? (
+                <>未能识别出明细项目。请核对下方总额，并添加与您分摊的人员。</>
+              ) : (
+                <>I couldn’t make out any items. Check the total below, and add anyone you split it with.</>
+              )
             ) : (
-              <>
-                I read <B>{lines.length} items</B>. Save it as yours, or add who was at the table and tap each
-                item onto whoever ordered it.
-              </>
+              isZh ? (
+                <>已识别 <B>{lines.length} 项明细</B>。可保存为您个人支出，或添加同行人员并分配各自的点单项目。</>
+              ) : (
+                <>
+                  I read <B>{lines.length} items</B>. Save it as yours, or add who was at the table and tap each
+                  item onto whoever ordered it.
+                </>
+              )
             )}
           </BubbleText>
         </PipSays>
@@ -451,8 +468,8 @@ export function ReceiptScanScreen({
           >
             <Image source={{ uri: pickedImage.uri }} style={[styles.receiptThumb, { borderColor: colorTheme.line }]} />
             <View style={styles.keepInfo}>
-              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>Receipt photo</Text>
-              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>Tap to view the full photo</Text>
+              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>{isZh ? '小票照片' : 'Receipt photo'}</Text>
+              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>{isZh ? '点击查看完整照片' : 'Tap to view the full photo'}</Text>
             </View>
             <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
           </Pressable>
@@ -463,8 +480,8 @@ export function ReceiptScanScreen({
         {Platform.OS !== 'web' && (
           <View style={[styles.keepRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
             <View style={styles.keepInfo}>
-              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>Keep this receipt photo</Text>
-              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>View it later from the transaction</Text>
+              <Text style={[styles.keepTitle, { color: colorTheme.ink }]}>{isZh ? '保留小票照片' : 'Keep this receipt photo'}</Text>
+              <Text style={[styles.keepSub, { color: colorTheme.ink2 }]}>{isZh ? '日后可在交易详情中查看' : 'View it later from the transaction'}</Text>
             </View>
             <Switch
               value={keepPhoto}
@@ -473,14 +490,14 @@ export function ReceiptScanScreen({
               thumbColor="#ffffff"
               ios_backgroundColor={colorTheme.line2}
               accessibilityRole="switch"
-              accessibilityLabel="Keep this receipt photo"
+              accessibilityLabel={isZh ? '保留小票照片' : 'Keep this receipt photo'}
               accessibilityState={{ checked: keepPhoto }}
             />
           </View>
         )}
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <Text style={[styles.label, { marginBottom: 0, color: colorTheme.ink2 }]}>Who was at the table (optional)</Text>
+          <Text style={[styles.label, { marginBottom: 0, color: colorTheme.ink2 }]}>{isZh ? '同行人员（选填）' : 'Who was at the table (optional)'}</Text>
           <InfoButton entry="split_bill" />
         </View>
         <View style={styles.chipWrap}>
@@ -492,7 +509,7 @@ export function ReceiptScanScreen({
           ))}
           <Pressable onPress={() => setAddPersonOpen(true)} style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
             <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
-            <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>Add a name</Text>
+            <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>{isZh ? '添加人员' : 'Add a name'}</Text>
           </Pressable>
         </View>
 
@@ -500,18 +517,18 @@ export function ReceiptScanScreen({
           <View style={styles.tableRow}>
             {picked.map((id) => (
               <Pressable key={id} onPress={() => removePerson(id)} style={[styles.tableChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.tableChipText, { color: colorTheme.ink }]}>{nameById[id] ?? 'Someone'}</Text>
+                <Text style={[styles.tableChipText, { color: colorTheme.ink }]}>{nameById[id] ?? (isZh ? '某人' : 'Someone')}</Text>
                 <Icon name="x" size={12} color={colorTheme.ink3} />
               </Pressable>
             ))}
             <View style={[styles.tableChip, styles.tableChipSelf, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Text style={[styles.tableChipText, { color: colorTheme.ink }]}>You</Text>
+              <Text style={[styles.tableChipText, { color: colorTheme.ink }]}>{isZh ? '你' : 'You'}</Text>
             </View>
           </View>
         )}
 
         {picked.length === 0 && (
-          <Text style={[styles.empty, { color: colorTheme.ink3 }]}>Paid for it alone? Leave this empty and just check the total.</Text>
+          <Text style={[styles.empty, { color: colorTheme.ink3 }]}>{isZh ? '独自买单？留空即可，核对下方总额。' : 'Paid for it alone? Leave this empty and just check the total.'}</Text>
         )}
 
         {receipt && receipt.currency !== BASE_CURRENCY && !activeCurrencies.includes(receipt.currency) && (
@@ -527,10 +544,10 @@ export function ReceiptScanScreen({
           >
             <View style={{ flex: 1 }}>
               <Text style={[styles.itemLabel, { color: colorTheme.ink }]}>
-                Detected {receipt.currency} receipt
+                {isZh ? `检测到 ${receipt.currency} 小票` : `Detected ${receipt.currency} receipt`}
               </Text>
               <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
-                Add {receipt.currency} to convert and track this receipt.
+                {isZh ? `启用 ${receipt.currency} 以换算并记录此小票。` : `Add ${receipt.currency} to convert and track this receipt.`}
               </Text>
             </View>
             <Pressable
@@ -540,7 +557,7 @@ export function ReceiptScanScreen({
                 try {
                   const ok = await activateCurrency(receipt.currency);
                   if (!ok) {
-                    notify(`Couldn't fetch the ${receipt.currency} rate.`, "Try again when you're online.");
+                    notify(isZh ? `无法获取 ${receipt.currency} 汇率。` : `Couldn't fetch the ${receipt.currency} rate.`, isZh ? '请在联网后重试。' : "Try again when you're online.");
                     return;
                   }
                   const nextActive = await getActiveCurrencies();
@@ -556,12 +573,12 @@ export function ReceiptScanScreen({
                 activatingCode === receipt.currency && { opacity: 0.7 },
               ]}
               accessibilityRole="button"
-              accessibilityLabel={`Add ${receipt.currency}`}
+              accessibilityLabel={isZh ? `添加 ${receipt.currency}` : `Add ${receipt.currency}`}
             >
               {activatingCode === receipt.currency ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.addCurrencyBtnText}>Add {receipt.currency}</Text>
+                <Text style={styles.addCurrencyBtnText}>{isZh ? `启用 ${receipt.currency}` : `Add ${receipt.currency}`}</Text>
               )}
             </Pressable>
           </Card>
@@ -569,31 +586,31 @@ export function ReceiptScanScreen({
 
         <View style={styles.sectionHeaderRow}>
           <Text style={[styles.label, { marginTop: 0, marginBottom: 0, color: colorTheme.ink2 }]}>
-            What they ordered
+            {isZh ? '点单明细' : 'What they ordered'}
           </Text>
           <Pressable
             onPress={() => setItemModal({ visible: true, item: null })}
             style={[styles.addInlineBtn, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
             hitSlop={6}
             accessibilityRole="button"
-            accessibilityLabel="Add item"
+            accessibilityLabel={isZh ? '添加明细' : 'Add item'}
           >
             <Icon name="plus" size={13} color={theme.accent} stroke={2.4} />
-            <Text style={[styles.addInlineText, { color: theme.onTint }]}>Add item</Text>
+            <Text style={[styles.addInlineText, { color: theme.onTint }]}>{isZh ? '添加明细' : 'Add item'}</Text>
           </Pressable>
         </View>
 
         {lines.length === 0 ? (
           <Card style={[styles.emptyLinesCard, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
-            <Text style={[styles.emptyLinesText, { color: colorTheme.ink2 }]}>No items listed yet.</Text>
+            <Text style={[styles.emptyLinesText, { color: colorTheme.ink2 }]}>{isZh ? '暂无明细。' : 'No items listed yet.'}</Text>
             <Pressable
               onPress={() => setItemModal({ visible: true, item: null })}
               style={[styles.addItemRowBtn, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}
               accessibilityRole="button"
-              accessibilityLabel="Add an item"
+              accessibilityLabel={isZh ? '添加一项明细' : 'Add an item'}
             >
               <Icon name="plus" size={15} color={theme.accent} stroke={2.4} />
-              <Text style={[styles.addItemRowText, { color: theme.onTint }]}>Add an item</Text>
+              <Text style={[styles.addItemRowText, { color: theme.onTint }]}>{isZh ? '添加一项明细' : 'Add an item'}</Text>
             </Pressable>
           </Card>
         ) : (
@@ -608,7 +625,7 @@ export function ReceiptScanScreen({
                       <Pressable
                         onPress={() => setItemModal({ visible: true, item: line })}
                         style={styles.itemLabelPressable}
-                        accessibilityLabel={`Edit ${line.label}`}
+                        accessibilityLabel={isZh ? `编辑 ${line.label}` : `Edit ${line.label}`}
                       >
                         <Text style={[styles.itemLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                           {line.label}
@@ -622,7 +639,7 @@ export function ReceiptScanScreen({
                         onPress={() => handleDeleteItem(line.id)}
                         hitSlop={8}
                         style={styles.deleteLineBtn}
-                        accessibilityLabel={`Delete ${line.label}`}
+                        accessibilityLabel={isZh ? `删除 ${line.label}` : `Delete ${line.label}`}
                       >
                         <Icon name="trash" size={15} color={colorTheme.ink3} />
                       </Pressable>
@@ -631,7 +648,7 @@ export function ReceiptScanScreen({
                     <View style={styles.avatarRow}>
                       {participants.map((id) => {
                         const on = line.assignedTo.includes(id);
-                        const name = id === SELF ? 'You' : nameById[id] ?? '?';
+                        const name = id === SELF ? (isZh ? '你' : 'You') : nameById[id] ?? '?';
                         return (
                           <Pressable
                             key={id}
@@ -642,7 +659,7 @@ export function ReceiptScanScreen({
                               on && styles.avatarOn,
                               on && { backgroundColor: theme.accent, borderColor: theme.accent },
                             ]}
-                            accessibilityLabel={`${on ? 'Remove' : 'Add'} ${name} on ${line.label}`}
+                            accessibilityLabel={isZh ? `${on ? '取消分配' : '分配给'} ${name}：${line.label}` : `${on ? 'Remove' : 'Add'} ${name} on ${line.label}`}
                             accessibilityState={{ selected: on }}
                           >
                             <Text style={[styles.avatarText, { color: colorTheme.ink2 }, on && styles.avatarTextOn]}>
@@ -653,7 +670,7 @@ export function ReceiptScanScreen({
                       })}
                       <Pressable onPress={() => shareWholeTable(line.id)} style={styles.allBtn} hitSlop={4}>
                         <Text style={[styles.allText, { color: theme.accent }, everyone && { color: colorTheme.ink3 }]}>
-                          {everyone ? 'Clear' : 'Shared'}
+                          {everyone ? (isZh ? '清除' : 'Clear') : (isZh ? '均摊' : 'Shared')}
                         </Text>
                       </Pressable>
                     </View>
@@ -665,16 +682,17 @@ export function ReceiptScanScreen({
                 onPress={() => setItemModal({ visible: true, item: null })}
                 style={[styles.addItemBottomRow, styles.divider, { borderTopColor: colorTheme.line2, backgroundColor: colorTheme.surface2 }]}
                 accessibilityRole="button"
-                accessibilityLabel="Add another item"
+                accessibilityLabel={isZh ? '添加另一项明细' : 'Add another item'}
               >
                 <Icon name="plus" size={14} color={theme.accent} stroke={2.4} />
-                <Text style={[styles.addItemBottomText, { color: theme.accent }]}>Add an item</Text>
+                <Text style={[styles.addItemBottomText, { color: theme.accent }]}>{isZh ? '添加一项明细' : 'Add an item'}</Text>
               </Pressable>
             </Card>
             {splitting && result.unassigned.length > 0 && (
               <Text style={[styles.unassigned, { color: colorTheme.amber }]}>
-                {result.unassigned.length} item{result.unassigned.length === 1 ? '' : 's'} nobody has claimed
-                yet, shared across the table for now.
+                {isZh
+                  ? `还有 ${result.unassigned.length} 项未分配，目前由全员均摊。`
+                  : `${result.unassigned.length} item${result.unassigned.length === 1 ? '' : 's'} nobody has claimed yet, shared across the table for now.`}
               </Text>
             )}
           </>
@@ -682,20 +700,22 @@ export function ReceiptScanScreen({
 
         {splitting && (
           <>
-            <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>On top of the items</Text>
+            <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>{isZh ? '附加费用与折扣' : 'On top of the items'}</Text>
             <Card style={{ padding: 4 }}>
               <PctRow
-                label="Service charge"
+                label={isZh ? '服务费' : 'Service charge'}
                 value={surcharges.serviceChargePct}
                 onChange={(v) => updateSurcharges((s) => ({ ...s, serviceChargePct: v }))}
-                note="Applied to the items subtotal"
+                note={isZh ? '按明细小计计算' : 'Applied to the items subtotal'}
+                isZh={isZh}
               />
               <View style={[styles.divider, { borderTopColor: colorTheme.line2 }]} />
               <PctRow
-                label="Service tax"
+                label={isZh ? '服务税' : 'Service tax'}
                 value={surcharges.taxPct}
                 onChange={(v) => updateSurcharges((s) => ({ ...s, taxPct: v }))}
-                note="Applied after the service charge, the way the receipt does it"
+                note={isZh ? '在计入服务费后计算（按小票规则）' : 'Applied after the service charge, the way the receipt does it'}
+                isZh={isZh}
               />
               <View style={[styles.divider, { borderTopColor: colorTheme.line2 }]} />
               <DiscountRow
@@ -703,13 +723,14 @@ export function ReceiptScanScreen({
                 onChange={(d) => updateSurcharges((s) => ({ ...s, discount: d }))}
                 subtotal={itemsSubtotal}
                 currency={receipt?.currency ?? BASE_CURRENCY}
+                isZh={isZh}
               />
             </Card>
           </>
         )}
 
         {/* Always shown: the total is the whole point of the scan, split or not. */}
-        <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>Total</Text>
+        <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>{isZh ? '实付总额' : 'Total'}</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>
             {currencyPrefix(receipt?.currency ?? BASE_CURRENCY)}
@@ -727,9 +748,11 @@ export function ReceiptScanScreen({
           <>
             {Math.abs(result.difference) >= 0.01 && (
               <Text style={[styles.diffNote, { color: colorTheme.ink2 }]}>
-                The receipt adds up to {fmtMoney(result.computedTotal, receipt?.currency ?? BASE_CURRENCY)}, so {fmtMoney(Math.abs(result.difference), receipt?.currency ?? BASE_CURRENCY)}{' '}
-                {result.difference > 0 ? 'more was charged' : 'less was charged'}. That is shared across the
-                table so the split matches your bank exactly.
+                {isZh ? (
+                  `小票明细合计为 ${fmtMoney(result.computedTotal, receipt?.currency ?? BASE_CURRENCY)}，实付${result.difference > 0 ? '多出' : '少付'} ${fmtMoney(Math.abs(result.difference), receipt?.currency ?? BASE_CURRENCY)}。差额已均摊给全员，以确保分摊总额与银行扣款完全一致。`
+                ) : (
+                  `The receipt adds up to ${fmtMoney(result.computedTotal, receipt?.currency ?? BASE_CURRENCY)}, so ${fmtMoney(Math.abs(result.difference), receipt?.currency ?? BASE_CURRENCY)} ${result.difference > 0 ? 'more was charged' : 'less was charged'}. That is shared across the table so the split matches your bank exactly.`
+                )}
               </Text>
             )}
 
@@ -737,7 +760,7 @@ export function ReceiptScanScreen({
               {participants.map((id) => (
                 <View key={id} style={styles.summaryRow}>
                   <Text style={[styles.summaryName, { color: colorTheme.ink2 }, id === SELF && [styles.summaryNameSelf, { color: colorTheme.ink }]]}>
-                    {id === SELF ? 'You (your expense)' : nameById[id] ?? 'Someone'}
+                    {id === SELF ? (isZh ? '你（个人承担）' : 'You (your expense)') : nameById[id] ?? (isZh ? '某人' : 'Someone')}
                   </Text>
                   <Text style={[styles.summaryValue, { color: theme.accent }, id === SELF && [styles.summaryValueSelf, { color: colorTheme.ink }]]}>
                     {fmtMoney(owedByPerson[id] ?? 0, receipt?.currency ?? BASE_CURRENCY)}
@@ -748,8 +771,9 @@ export function ReceiptScanScreen({
 
             {negative && (
               <Text style={styles.error}>
-                That charge is lower than what people ordered, so someone ends up owing a negative amount.
-                Check the total.
+                {isZh
+                  ? '实付金额低于点单总额，导致有人应付金额为负数。请核对总额。'
+                  : 'That charge is lower than what people ordered, so someone ends up owing a negative amount. Check the total.'}
               </Text>
             )}
           </>
@@ -759,7 +783,7 @@ export function ReceiptScanScreen({
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16, backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 }]}>
         <PrimaryButton onPress={save} disabled={!canSave}>
           <Icon name="check" size={19} color="#fff" stroke={2.4} />
-          <BtnLabel>{splitting ? 'Use this split' : 'Use this receipt'}</BtnLabel>
+          <BtnLabel>{splitting ? (isZh ? '使用此分账' : 'Use this split') : (isZh ? '使用此小票' : 'Use this receipt')}</BtnLabel>
         </PrimaryButton>
       </View>
 
@@ -792,11 +816,13 @@ function PctRow({
   value,
   onChange,
   note,
+  isZh,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
   note: string;
+  isZh?: boolean;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -827,12 +853,12 @@ function PctRow({
           <Text style={[styles.pctSign, { color: colorTheme.ink2 }]}>%</Text>
         </View>
       ) : (
-        <Pressable onPress={() => onChange(label === 'Service tax' ? 6 : 10)} style={[styles.pctAdd, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]} hitSlop={4}>
-          <Text style={[styles.pctAddText, { color: theme.onTint }]}>Add</Text>
+        <Pressable onPress={() => onChange(label === 'Service tax' || label === '服务税' ? 6 : 10)} style={[styles.pctAdd, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]} hitSlop={4}>
+          <Text style={[styles.pctAddText, { color: theme.onTint }]}>{isZh ? '添加' : 'Add'}</Text>
         </Pressable>
       )}
       {on && (
-        <Pressable onPress={() => onChange(0)} hitSlop={8} accessibilityLabel={`Remove ${label}`}>
+        <Pressable onPress={() => onChange(0)} hitSlop={8} accessibilityLabel={isZh ? `移除 ${label}` : `Remove ${label}`}>
           <Icon name="x" size={15} color={colorTheme.ink3} />
         </Pressable>
       )}
@@ -847,12 +873,14 @@ function DiscountRow({
   onChange,
   subtotal,
   currency,
+  isZh,
 }: {
   discount: Discount | null;
   onChange: (d: Discount | null) => void;
   subtotal: number;
   /** The receipt's own currency — a flat discount is denominated in it, not always ringgit. */
   currency: string;
+  isZh?: boolean;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -864,15 +892,15 @@ function DiscountRow({
     return (
       <View style={styles.pctRow}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>Voucher / discount</Text>
-          <Text style={[styles.pctNote, { color: colorTheme.ink2 }]}>Subtracted from the bill</Text>
+          <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>{isZh ? '优惠券 / 折扣' : 'Voucher / discount'}</Text>
+          <Text style={[styles.pctNote, { color: colorTheme.ink2 }]}>{isZh ? '从账单总额中扣减' : 'Subtracted from the bill'}</Text>
         </View>
         <Pressable
           onPress={() => onChange({ unit: 'amount', value: 0, timing: 'before' })}
           style={[styles.pctAdd, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
           hitSlop={4}
         >
-          <Text style={[styles.pctAddText, { color: theme.onTint }]}>Add</Text>
+          <Text style={[styles.pctAddText, { color: theme.onTint }]}>{isZh ? '添加' : 'Add'}</Text>
         </Pressable>
       </View>
     );
@@ -893,10 +921,12 @@ function DiscountRow({
   return (
     <View style={styles.pctRow}>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>Voucher / discount</Text>
+        <Text style={[styles.pctLabel, { color: colorTheme.ink }]}>{isZh ? '优惠券 / 折扣' : 'Voucher / discount'}</Text>
         <Pressable onPress={toggleTiming} hitSlop={4}>
           <Text style={[styles.pctNote, { color: theme.accent }]}>
-            {discount.timing === 'before' ? 'Applied before service charge & tax' : 'Applied to the final total'}
+            {discount.timing === 'before'
+              ? (isZh ? '在计算服务费和税前扣减' : 'Applied before service charge & tax')
+              : (isZh ? '在最终总额中扣减' : 'Applied to the final total')}
           </Text>
         </Pressable>
       </View>
@@ -912,11 +942,11 @@ function DiscountRow({
           style={[styles.pctInput, { color: colorTheme.ink }]}
           selectTextOnFocus
         />
-        <Pressable onPress={toggleUnit} hitSlop={6} accessibilityLabel="Switch between a flat amount and a percentage">
+        <Pressable onPress={toggleUnit} hitSlop={6} accessibilityLabel={isZh ? '切换固定金额与百分比' : 'Switch between a flat amount and a percentage'}>
           <Text style={[styles.pctSign, { color: theme.accent }]}>{discount.unit === 'pct' ? '%' : currencyPrefix(currency)}</Text>
         </Pressable>
       </View>
-      <Pressable onPress={() => onChange(null)} hitSlop={8} accessibilityLabel="Remove voucher or discount">
+      <Pressable onPress={() => onChange(null)} hitSlop={8} accessibilityLabel={isZh ? '移除优惠券或折扣' : 'Remove voucher or discount'}>
         <Icon name="x" size={15} color={colorTheme.ink3} />
       </Pressable>
     </View>

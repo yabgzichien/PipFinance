@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { listFxRates } from '../db/fxRepo';
 import { getDisplayCurrency } from '../db/currencyRepo';
-import { ratesFromCache, toDisplay } from '../lib/fx';
+import { ratesFromCache, toDisplay, txnToDisplay } from '../lib/fx';
 import { BASE_CURRENCY } from '../lib/currency';
 
 export interface DisplayCurrency {
@@ -18,6 +18,8 @@ export interface DisplayCurrency {
    *  currency's rate is unavailable (should not happen in practice: display currency can
    *  only be set to an already-active currency, which guarantees a cached rate). */
   convert: (amountMyr: number) => number;
+  /** Project a transaction into `code`, preserving native amounts when currency matches. */
+  convertTxn: (txn: { amount: number; currency: string; nativeAmount?: number | null }) => number;
 }
 
 export function useDisplayCurrency(): DisplayCurrency {
@@ -37,5 +39,7 @@ export function useDisplayCurrency(): DisplayCurrency {
   }, []);
 
   const convert = (amountMyr: number): number => toDisplay(amountMyr, code, rates) ?? amountMyr;
-  return { code, rates, convert };
+  const convertTxn = (txn: { amount: number; currency: string; nativeAmount?: number | null }): number =>
+    txnToDisplay(txn, code, rates);
+  return { code, rates, convert, convertTxn };
 }

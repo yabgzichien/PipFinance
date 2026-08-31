@@ -75,6 +75,7 @@ import {
 } from '../lib/streak';
 import { monthLabel } from '../lib/dates';
 import { syncStreakWidget } from '../widget/syncStreakWidget';
+import { syncQuickRecordWidget } from '../widget/syncQuickRecordWidget';
 import {
   addCommitment as dbAddCommitment,
   archiveCommitment as dbArchiveCommitment,
@@ -629,17 +630,44 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshAll()
-      .catch((e) => console.warn('Failed to load app data', e))
-      .finally(() => setReady(true));
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
+
+    const init = async () => {
+      try {
+        await refreshAll();
+        if (alive) setReady(true);
+      } catch (e) {
+        console.warn('Failed to load app data', e);
+        attempts += 1;
+        if (alive && attempts < MAX_ATTEMPTS) {
+          const delay = Math.min(1000, 200 * Math.pow(1.5, attempts - 1));
+          timer = setTimeout(init, delay);
+        } else if (alive) {
+          // If retries are exhausted, set ready so the app does not hang forever on splash,
+          // having given transient cold-start database locks multiple chances to clear.
+          setReady(true);
+        }
+      }
+    };
+
+    void init();
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
   }, [refreshAll]);
 
   // Lightweight, App.tsx-level badge count for the Settings "Tax relief" row: refreshed on
   // boot only, not kept in sync with every tag mutation made inside TaxScreen.tsx (which
   // manages its own `tags` state, reloaded after every change there). See taxRequestableCount.
   useEffect(() => {
-    listReliefTags(yaForDate(todayKey())).then(setReliefTags);
-  }, []);
+    if (!ready) return;
+    listReliefTags(yaForDate(todayKey())).then(setReliefTags).catch(() => {});
+  }, [ready]);
 
   // The home-screen widget shows a streak count and seven dots and nothing else. Fixing a typo
   // in a remark changes neither, so the payload is compared before anything crosses the native
@@ -655,6 +683,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     if (lastWidgetPayload.current === payload) return;
     lastWidgetPayload.current = payload;
     syncStreakWidget(transactions).catch(() => {});
+    syncQuickRecordWidget(transactions).catch(() => {});
   }, [ready, transactions]);
 
   // Spend a banked freeze the moment it's actually needed (docs/ui-engagement-plan.md Step 4).

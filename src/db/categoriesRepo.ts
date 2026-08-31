@@ -140,3 +140,9 @@ export async function deleteCategory(id: string): Promise<void> {
     }
   });
 }
+
+export async function listDeletedDefaultCategories(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string }>('SELECT id FROM deleted_default_categories');
+  return rows.map((r) => r.id);
+}

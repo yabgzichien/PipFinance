@@ -28,6 +28,14 @@ export interface ExtractedTxn {
   /** MYR per 1 unit of `currency`, frozen at entry time. Only meaningful when `currency` is
    *  foreign; matches `NewTxn.fxRate`. */
   fxRate?: number | null;
+  /** Optional persistent ID when round-tripping from full JSON backup. */
+  id?: string | null;
+  /** Optional transaction provenance. */
+  source?: TxnSource | null;
+  /** Optional native amount if different from converted MYR amount. */
+  nativeAmount?: number | null;
+  /** Optional creation timestamp. */
+  createdAt?: string | null;
 }
 
 /** A category. `id` is a stable slug (also used as the memory value). `kind`

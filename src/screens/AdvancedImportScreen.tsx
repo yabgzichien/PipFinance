@@ -39,7 +39,12 @@ import {
   PrimaryButton,
   TopBar,
 } from '../components/ui';
-import { addAccount, listAccounts } from '../db/accountsRepo';
+import { addAccount, listAccounts, updateAccount, updateHoldingCost, updateHoldingQuantity, upsertDailyBalanceEntry } from '../db/accountsRepo';
+import { addCategory, listCategories } from '../db/categoriesRepo';
+import { setExpectedIncome, setAllocations, upsertSnapshot, setAdvice } from '../db/budgetRepo';
+import { addReliefTag, upsertReliefMemory } from '../db/reliefRepo';
+import { findOrCreatePerson, importParsedSplit, listPeople } from '../db/splitRepo';
+import { upsertMemory } from '../db/memoryRepo';
 import { addTransactions } from '../db/txnRepo';
 import { listFxRates } from '../db/fxRepo';
 import { activateCurrency, getEntryCurrency } from '../db/currencyRepo';
@@ -50,7 +55,20 @@ import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { merchantKey } from '../lib/normalize';
 import { defaultLinkEffect } from '../lib/networth';
-import { buildPrompt, parseJSON, type ParsedAccount, type ParsedCommitment, type ParsedTransfer, type ParseResult } from '../lib/advancedImport';
+import {
+  buildPrompt,
+  parseJSON,
+  type ParsedAccount,
+  type ParsedAppPreferences,
+  type ParsedBudget,
+  type ParsedCategory,
+  type ParsedCommitment,
+  type ParsedPerson,
+  type ParsedSplit,
+  type ParsedTaxRelief,
+  type ParsedTransfer,
+  type ParseResult,
+} from '../lib/advancedImport';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -195,6 +213,14 @@ export function AdvancedImportScreen({
   const [parsedAccounts, setParsedAccounts] = useState<ParsedAccount[]>([]);
   const [parsedTransfers, setParsedTransfers] = useState<ParsedTransfer[]>([]);
   const [parsedCommitments, setParsedCommitments] = useState<ParsedCommitment[]>([]);
+  const [parsedCategories, setParsedCategories] = useState<ParsedCategory[]>([]);
+  const [parsedDeletedCats, setParsedDeletedCats] = useState<string[]>([]);
+  const [parsedPeople, setParsedPeople] = useState<ParsedPerson[]>([]);
+  const [parsedSplits, setParsedSplits] = useState<ParsedSplit[]>([]);
+  const [parsedBudget, setParsedBudget] = useState<ParsedBudget | null>(null);
+  const [parsedTaxRelief, setParsedTaxRelief] = useState<ParsedTaxRelief | null>(null);
+  const [parsedMerchantMemory, setParsedMerchantMemory] = useState<Record<string, string>>({});
+  const [parsedPreferences, setParsedPreferences] = useState<ParsedAppPreferences | null>(null);
   const [updateAccountBalances, setUpdateAccountBalances] = useState(true);
   const [error, setError] = useState('');
   const [txnCount, setTxnCount] = useState(0);
@@ -202,6 +228,7 @@ export function AdvancedImportScreen({
   const [accCount, setAccCount] = useState(0);
   const [transferCount, setTransferCount] = useState(0);
   const [commitmentCount, setCommitmentCount] = useState(0);
+  const [splitCount, setSplitCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -260,8 +287,31 @@ export function AdvancedImportScreen({
       return;
     }
     try {
-      const { transactions, accounts, transfers, commitments } = parseJSON(trimmed, defaultCurrency);
-      if (transactions.length === 0 && accounts.length === 0 && transfers.length === 0 && commitments.length === 0) {
+      const {
+        transactions,
+        accounts,
+        transfers,
+        commitments,
+        categories: pCats,
+        deletedDefaultCategories: pDelCats,
+        people: pPeople,
+        splits: pSplits,
+        budget: pBudget,
+        taxRelief: pRelief,
+        merchantMemory: pMemory,
+        preferences: pPrefs,
+      } = parseJSON(trimmed, defaultCurrency);
+
+      if (
+        transactions.length === 0 &&
+        accounts.length === 0 &&
+        transfers.length === 0 &&
+        commitments.length === 0 &&
+        (!pCats || pCats.length === 0) &&
+        (!pSplits || pSplits.length === 0) &&
+        !pBudget &&
+        !pRelief
+      ) {
         setError('The JSON had no transactions or accounts. Check that you pasted the full reply.');
         setPhase('error');
         return;
@@ -270,6 +320,14 @@ export function AdvancedImportScreen({
       setParsedAccounts(accounts);
       setParsedTransfers(transfers);
       setParsedCommitments(commitments);
+      setParsedCategories(pCats ?? []);
+      setParsedDeletedCats(pDelCats ?? []);
+      setParsedPeople(pPeople ?? []);
+      setParsedSplits(pSplits ?? []);
+      setParsedBudget(pBudget ?? null);
+      setParsedTaxRelief(pRelief ?? null);
+      setParsedMerchantMemory(pMemory ?? {});
+      setParsedPreferences(pPrefs ?? null);
 
       // Auto-activate all foreign currencies in the background so their FX rates are fetched/cached
       const foreignCodes = new Set<string>();
@@ -277,6 +335,9 @@ export function AdvancedImportScreen({
       for (const t of transactions) if (t.currency && t.currency !== BASE_CURRENCY) foreignCodes.add(t.currency);
       for (const tr of transfers) if (tr.currency && tr.currency !== BASE_CURRENCY) foreignCodes.add(tr.currency);
       for (const c of commitments) if (c.currency && c.currency !== BASE_CURRENCY) foreignCodes.add(c.currency);
+      if (pPrefs?.activeCurrencies) {
+        for (const code of pPrefs.activeCurrencies) if (code !== BASE_CURRENCY) foreignCodes.add(code);
+      }
       for (const code of foreignCodes) {
         void activateCurrency(code);
       }
@@ -309,22 +370,62 @@ export function AdvancedImportScreen({
       for (const t of txns) if (t.currency && t.currency !== BASE_CURRENCY) foreignCodes.add(t.currency);
       for (const tr of parsedTransfers) if (tr.currency && tr.currency !== BASE_CURRENCY) foreignCodes.add(tr.currency);
       for (const c of parsedCommitments) if (c.currency && c.currency !== BASE_CURRENCY) foreignCodes.add(c.currency);
+      if (parsedPreferences?.activeCurrencies) {
+        for (const code of parsedPreferences.activeCurrencies) if (code !== BASE_CURRENCY) foreignCodes.add(code);
+      }
       if (foreignCodes.size > 0) {
         await Promise.all(Array.from(foreignCodes).map((code) => activateCurrency(code)));
       }
 
-      // 1. Commit the chosen accounts to the Net Worth DB with their denominated currency.
+      // 0. Commit custom categories if any
+      if (parsedCategories.length > 0) {
+        const existingCats = await listCategories();
+        const existingCatIds = new Set(existingCats.map((c) => c.id));
+        for (const cat of parsedCategories) {
+          if (!existingCatIds.has(cat.id)) {
+            try {
+              await addCategory(cat.label, cat.icon, cat.hue, cat.kind);
+            } catch {}
+          }
+        }
+      }
+
+      // 1. Commit the chosen accounts to the Net Worth DB with their denominated currency and balance history.
+      const existingAccountsOnBoot = await listAccounts();
+      const existingAccByName = new Map(existingAccountsOnBoot.map((a) => [a.name.trim().toLowerCase(), a]));
       const newlyCreatedAccounts: Account[] = [];
+
       for (const acc of toSave) {
-        const createdAcc = await addAccount(acc.name, acc.kind, acc.cls, acc.balance, acc.asOf, null, acc.currency);
-        newlyCreatedAccounts.push(createdAcc);
-        savedAcc++;
-        // A version-2 export carries cost basis (and units, if the account was a live-priced
-        // holding). Cosmetic until the account also gets a symbol back in Net Worth — see
-        // isHolding() in lib/prices.ts, which requires both — but the invested amount survives
-        // the round trip either way.
-        if (acc.cost != null) await setHoldingCost(createdAcc.id, acc.cost);
-        if (acc.quantity != null) await updateHoldingQuantity(createdAcc.id, acc.quantity);
+        const searchName = acc.name.trim().toLowerCase();
+        let targetAcc = existingAccByName.get(searchName);
+
+        if (!targetAcc) {
+          targetAcc = await addAccount(acc.name, acc.kind, acc.cls, acc.balance, acc.asOf, acc.icon, acc.currency, acc.interestRate);
+          newlyCreatedAccounts.push(targetAcc);
+          savedAcc++;
+        } else {
+          await updateAccount(targetAcc.id, {
+            name: acc.name,
+            cls: acc.cls,
+            icon: acc.icon,
+            interestRate: acc.interestRate,
+            sub: acc.sub,
+            symbol: acc.symbol,
+            ticker: acc.ticker,
+            quantity: acc.quantity,
+            cost: acc.cost,
+          });
+        }
+
+        if (acc.cost != null) await setHoldingCost(targetAcc.id, acc.cost);
+        if (acc.quantity != null) await updateHoldingQuantity(targetAcc.id, acc.quantity);
+
+        // If history is present, import all balance entries for this account
+        if (acc.history && acc.history.length > 0) {
+          for (const h of acc.history) {
+            await upsertDailyBalanceEntry(targetAcc.id, h.value, h.asOf);
+          }
+        }
       }
 
       // 2. Commit transactions via the store.
@@ -370,9 +471,7 @@ export function AdvancedImportScreen({
           }
         }
 
-        // 3b. A transfer moves money too, but only the source side is inferrable from a name
-        // match — a document names who it left, not reliably which account it landed in, so
-        // only the debit is applied.
+        // 3b. A transfer moves money too.
         if (parsedTransfers.length > 0) {
           const existingAccounts2 = await listAccounts();
           const allAccounts2 = [
@@ -398,8 +497,7 @@ export function AdvancedImportScreen({
         }
       }
 
-      // 4. Log transfers to the ledger (categoryId null, type 'transfer' — kept out of the
-      // income/expense pipeline per lib/types.ts's TxnType, same as a DCA commitment tick).
+      // 4. Log transfers to the ledger.
       if (parsedTransfers.length > 0) {
         const rates = ratesFromCache(await listFxRates());
         await addTransactions(
@@ -418,12 +516,113 @@ export function AdvancedImportScreen({
       }
       setTransferCount(parsedTransfers.length);
 
-      // 5. Recurring commitments, with their full occurrence history so the on-time record
-      // survives the device change this import usually represents.
+      // 5. Recurring commitments.
       if (parsedCommitments.length > 0) {
         await importParsedCommitments(parsedCommitments);
       }
       setCommitmentCount(parsedCommitments.length);
+
+      // 6. People & Splits
+      if (parsedPeople.length > 0) {
+        for (const p of parsedPeople) {
+          await findOrCreatePerson(p.name);
+        }
+      }
+      if (parsedSplits.length > 0) {
+        const currentPeople = await listPeople();
+        const personByName = new Map(currentPeople.map((p) => [p.name.trim().toLowerCase(), p.id]));
+        const personById = new Map(currentPeople.map((p) => [p.id, p.id]));
+
+        let sCount = 0;
+        for (const s of parsedSplits) {
+          let targetTxnId: string | null = null;
+          if (s.txnId) {
+            const match = created.find((t) => t.id === s.txnId);
+            if (match) targetTxnId = match.id;
+          }
+          if (!targetTxnId && created.length > 0) {
+            const match = created.find((t) => Math.abs(t.amount - s.ownShare) < 0.01 && t.currency === s.currency);
+            if (match) targetTxnId = match.id;
+          }
+          if (targetTxnId) {
+            const mappedShares = s.shares.map((sh) => {
+              let pId = sh.personId ? personById.get(sh.personId) : null;
+              if (!pId && sh.personName) {
+                pId = personByName.get(sh.personName.trim().toLowerCase()) ?? null;
+              }
+              return {
+                personId: pId ?? (currentPeople[0]?.id ?? 'unknown'),
+                owed: sh.owed,
+                paid: sh.paid,
+                status: sh.status,
+                writtenOffTxnId: sh.writtenOffTxnId ?? null,
+                payments: sh.payments,
+              };
+            });
+            await importParsedSplit(targetTxnId, s.gross, s.ownShare, s.method, s.currency, s.fxRate ?? null, mappedShares);
+            sCount++;
+          }
+        }
+        setSplitCount(sCount);
+      }
+
+      // 7. Budget, Allocations, Snapshots, Advice
+      if (parsedBudget) {
+        if (parsedBudget.expectedIncome > 0) {
+          await setExpectedIncome(parsedBudget.expectedIncome);
+        }
+        if (Object.keys(parsedBudget.allocations).length > 0) {
+          await setAllocations(parsedBudget.allocations);
+        }
+        if (parsedBudget.snapshots) {
+          for (const [m, snap] of Object.entries(parsedBudget.snapshots)) {
+            await upsertSnapshot(m, snap.income, snap.allocations);
+          }
+        }
+        if (parsedBudget.advice) {
+          await setAdvice(parsedBudget.advice.hash, parsedBudget.advice.text);
+        }
+      }
+
+      // 8. Tax Relief Tags & Memory
+      if (parsedTaxRelief) {
+        if (parsedTaxRelief.memory) {
+          for (const [k, v] of Object.entries(parsedTaxRelief.memory)) {
+            await upsertReliefMemory(k, v);
+          }
+        }
+        if (parsedTaxRelief.tags && parsedTaxRelief.tags.length > 0) {
+          for (const tag of parsedTaxRelief.tags) {
+            let targetTxnId: string | null = null;
+            if (tag.txnId) {
+              const match = created.find((t) => t.id === tag.txnId);
+              if (match) targetTxnId = match.id;
+            }
+            if (!targetTxnId && created.length > 0) {
+              const match = created.find((t) => Math.abs(t.amount - tag.amount) < 0.01);
+              if (match) targetTxnId = match.id;
+            }
+            if (targetTxnId) {
+              try {
+                await addReliefTag({
+                  txnId: targetTxnId,
+                  code: tag.code,
+                  ya: tag.ya,
+                  amount: tag.amount,
+                  origin: tag.origin,
+                });
+              } catch {}
+            }
+          }
+        }
+      }
+
+      // 9. Merchant Memory
+      if (parsedMerchantMemory && Object.keys(parsedMerchantMemory).length > 0) {
+        for (const [k, v] of Object.entries(parsedMerchantMemory)) {
+          await upsertMemory(k, v);
+        }
+      }
 
       // Refresh so Net Worth screen picks up new accounts and balance entries.
       await refreshAll();
@@ -481,6 +680,7 @@ export function AdvancedImportScreen({
                 {accCount > 0 && <> Added <B>{accCount} account{accCount === 1 ? '' : 's'}</B> to Net Worth.</>}
                 {transferCount > 0 && <> Logged <B>{transferCount} transfer{transferCount === 1 ? '' : 's'}</B>.</>}
                 {commitmentCount > 0 && <> Set up <B>{commitmentCount} recurring commitment{commitmentCount === 1 ? '' : 's'}</B>.</>}
+                {splitCount > 0 && <> Restored <B>{splitCount} bill split{splitCount === 1 ? '' : 's'}</B>.</>}
               </>
             ) : phase === 'accountReview' ? (
               <>

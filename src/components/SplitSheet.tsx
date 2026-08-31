@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fmtMoney } from '../lib/format';
 import { computeSplit, sharesFromSplit, validateSplit, type Participant } from '../lib/split';
 import type { SplitDraft, SplitMethod } from '../lib/types';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -13,10 +14,10 @@ import { Icon } from './Icon';
 import { InfoButton } from './InfoButton';
 import { BtnLabel, PrimaryButton } from './ui';
 
-const METHODS: { key: SplitMethod; label: string; hint: string }[] = [
-  { key: 'equal', label: 'Equal', hint: 'Everyone pays the same' },
-  { key: 'shares', label: 'Shares', hint: 'Someone ate double' },
-  { key: 'exact', label: 'Exact', hint: 'Type what each person owes' },
+const METHODS: { key: SplitMethod; label: string; hint: string; labelZh: string; hintZh: string }[] = [
+  { key: 'equal', label: 'Equal', hint: 'Everyone pays the same', labelZh: '均摊', hintZh: '所有人平摊费用' },
+  { key: 'shares', label: 'Shares', hint: 'Someone ate double', labelZh: '份数', hintZh: '按人头份数分摊' },
+  { key: 'exact', label: 'Exact', hint: 'Type what each person owes', labelZh: '指定金额', hintZh: '输入每人应付具体金额' },
 ];
 
 /**
@@ -51,6 +52,7 @@ export function SplitSheet({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const { people, addPerson } = useAppData();
 
   const [method, setMethod] = useState<SplitMethod>('equal');
@@ -151,7 +153,9 @@ export function SplitSheet({
         <View style={styles.head}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.title, { color: colorTheme.ink }]}>Split {fmtMoney(gross, currency)}</Text>
+              <Text style={[styles.title, { color: colorTheme.ink }]}>
+                {isZh ? `分摊 ${fmtMoney(gross, currency)}` : `Split ${fmtMoney(gross, currency)}`}
+              </Text>
               <InfoButton entry="split_bill" />
             </View>
             {!!merchant && (
@@ -160,7 +164,7 @@ export function SplitSheet({
               </Text>
             )}
           </View>
-          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={isZh ? '关闭' : 'Close'}>
             <Icon name="x" size={20} color={colorTheme.ink2} />
           </Pressable>
         </View>
@@ -177,14 +181,18 @@ export function SplitSheet({
                   accessibilityRole="tab"
                   accessibilityState={{ selected: on }}
                 >
-                  <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: colorTheme.ink }]}>{m.label}</Text>
+                  <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && styles.toggleTextOn, on && { color: colorTheme.ink }]}>
+                    {isZh ? m.labelZh : m.label}
+                  </Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={[styles.hint, { color: colorTheme.ink3 }]}>{METHODS.find((m) => m.key === method)?.hint}</Text>
+          <Text style={[styles.hint, { color: colorTheme.ink3 }]}>
+            {isZh ? METHODS.find((m) => m.key === method)?.hintZh : METHODS.find((m) => m.key === method)?.hint}
+          </Text>
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Who else was there</Text>
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '同行人员' : 'Who else was there'}</Text>
           <View style={styles.chipWrap}>
             {unpicked.map((p) => (
               <Pressable key={p.id} onPress={() => toggle(p.id)} style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
@@ -194,12 +202,14 @@ export function SplitSheet({
             ))}
             <Pressable onPress={() => setAddPersonOpen(true)} style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
               <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
-              <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>Add a name</Text>
+              <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>{isZh ? '添加人员' : 'Add a name'}</Text>
             </Pressable>
           </View>
 
           {picked.length === 0 ? (
-            <Text style={[styles.empty, { color: colorTheme.ink3 }]}>Nobody added yet. Tap a name above, or type a new one.</Text>
+            <Text style={[styles.empty, { color: colorTheme.ink3 }]}>
+              {isZh ? '尚未添加同行人员。点击上方人员或新建人员。' : 'Nobody added yet. Tap a name above, or type a new one.'}
+            </Text>
           ) : (
             <View style={styles.list}>
               {picked.map((id) => (
@@ -208,7 +218,7 @@ export function SplitSheet({
                     <Text style={[styles.avatarText, { color: theme.onTint }]}>{(nameById[id] ?? '?').slice(0, 1).toUpperCase()}</Text>
                   </View>
                   <Text style={[styles.personName, { color: colorTheme.ink }]} numberOfLines={1}>
-                    {nameById[id] ?? 'Someone'}
+                    {nameById[id] ?? (isZh ? '某人' : 'Someone')}
                   </Text>
 
                   {method === 'shares' && (
@@ -253,7 +263,7 @@ export function SplitSheet({
             <View style={[styles.check, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }, includeSelf && styles.checkOn, includeSelf && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
               {includeSelf && <Icon name="check" size={13} color={colors.onAccent} stroke={2.6} />}
             </View>
-            <Text style={[styles.selfText, { color: colorTheme.ink }]}>I was on this bill too</Text>
+            <Text style={[styles.selfText, { color: colorTheme.ink }]}>{isZh ? '我也参与了这笔账单' : 'I was on this bill too'}</Text>
             {includeSelf && method === 'shares' && (
               <View style={styles.stepper}>
                 <Pressable onPress={() => setSelfWeight((w) => Math.max(1, w - 1))} style={[styles.stepBtn, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]} hitSlop={4}>
@@ -269,18 +279,19 @@ export function SplitSheet({
 
           <View style={[styles.summary, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabel, { color: colorTheme.ink }]}>Your expense</Text>
+              <Text style={[styles.summaryLabel, { color: colorTheme.ink }]}>{isZh ? '个人支出' : 'Your expense'}</Text>
               <Text style={[styles.summaryValue, { color: colorTheme.ink }]}>{fmtMoney(result.ownShare, currency)}</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={[styles.summaryLabelSoft, { color: colorTheme.ink2 }]}>Owed to you</Text>
+              <Text style={[styles.summaryLabelSoft, { color: colorTheme.ink2 }]}>{isZh ? '待收借款' : 'Owed to you'}</Text>
               <Text style={[styles.summaryValueSoft, { color: theme.accent }]}>
                 {fmtMoney(result.shares.reduce((s, x) => s + x.owed, 0), currency)}
               </Text>
             </View>
             <Text style={[styles.summaryNote, { color: colorTheme.ink3 }]}>
-              Only your share is recorded as spending. The rest becomes money owed to you, and clears when
-              they pay you back.
+              {isZh
+                ? '仅将您个人承担的份额记为支出。其余部分将作为待收借款，待对方还款后结清。'
+                : 'Only your share is recorded as spending. The rest becomes money owed to you, and clears when they pay you back.'}
             </Text>
           </View>
 
@@ -289,14 +300,14 @@ export function SplitSheet({
           <View style={{ marginTop: 16 }}>
             <PrimaryButton onPress={apply} height={52} disabled={!!error}>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
-              <BtnLabel>Save split</BtnLabel>
+              <BtnLabel>{isZh ? '保存分账' : 'Save split'}</BtnLabel>
             </PrimaryButton>
           </View>
 
           {!!onRemove && (
             <Pressable onPress={onRemove} style={styles.removeBtn} hitSlop={6}>
               <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={styles.removeText}>Remove split</Text>
+              <Text style={styles.removeText}>{isZh ? '取消分账' : 'Remove split'}</Text>
             </Pressable>
           )}
         </ScrollView>

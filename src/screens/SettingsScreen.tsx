@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
+import { Pip } from '../components/Pip';
 import { Card, Eyebrow, TopBar } from '../components/ui';
 import { getActiveCurrencies } from '../db/currencyRepo';
 import { clearMemory } from '../db/memoryRepo';
@@ -10,6 +11,7 @@ import { getProvider, llmErrorMessage } from '../llm';
 import { isMultiCurrency } from '../lib/currency';
 import { fmtMoney } from '../lib/format';
 import { confirmAction, notify } from '../lib/platformAlert';
+import { filterSettings } from '../lib/settingsSearch';
 import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
 import * as sound from '../lib/sound';
@@ -29,10 +31,11 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
-  const { t, formatCadence, formatMotion } = useLanguage();
+  const { t, formatCadence, formatMotion, isZh } = useLanguage();
   const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     loadSettings().then(setSettings);
@@ -84,274 +87,414 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     );
   }
 
+  const { matchingKeys, isSearching, matchingSections } = filterSettings(search, {
+    data_currencies: activeCurrencies,
+  });
+
+  const hasVisibleAppearanceCard =
+    matchingKeys.has('theme') ||
+    matchingKeys.has('language') ||
+    matchingKeys.has('accent') ||
+    matchingKeys.has('motion') ||
+    matchingKeys.has('sounds') ||
+    matchingKeys.has('streak');
+
+  const hasVisibleRemindersCard =
+    Platform.OS !== 'web' &&
+    (matchingKeys.has('reminder_spending') ||
+      matchingKeys.has('reminder_owed') ||
+      matchingKeys.has('reminder_commitments'));
+
+  const hasVisibleAiCard =
+    __DEV__ &&
+    (matchingKeys.has('ai_groq') || matchingKeys.has('ai_gemini'));
+
+  const hasVisibleDataCard =
+    (Boolean(onOpenCommitments) && matchingKeys.has('data_commitments')) ||
+    (Boolean(onOpenTax) && matchingKeys.has('data_tax')) ||
+    (Boolean(onOpenCategories) && matchingKeys.has('data_categories')) ||
+    (Boolean(onOpenCurrencySettings) && matchingKeys.has('data_currencies')) ||
+    (Boolean(onAdvancedImport) && matchingKeys.has('data_import')) ||
+    (Boolean(onOpenExport) && matchingKeys.has('data_export')) ||
+    matchingKeys.has('data_tutorial');
+
+  const hasVisibleDangerCard =
+    matchingKeys.has('danger_reset_all') || matchingKeys.has('danger_reset_setup');
+
+  const hasAnyVisibleSetting =
+    hasVisibleAppearanceCard ||
+    hasVisibleRemindersCard ||
+    hasVisibleAiCard ||
+    (matchingSections.has('learning') && matchingKeys.has('learning')) ||
+    (matchingSections.has('budget') && matchingKeys.has('budget')) ||
+    hasVisibleDataCard ||
+    hasVisibleDangerCard;
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={t('settingsTitle')} onBack={onBack} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
-        <Eyebrow style={{ marginBottom: 10 }}>{t('appearance')}</Eyebrow>
-        <Card style={{ padding: 16 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('theme')}</Text>
-          <ThemeModePicker />
-        </Card>
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('language')}</Text>
-          <LanguagePicker />
-        </Card>
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('accentColor')}</Text>
-          <AccentColorPicker />
-        </Card>
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
-          <MotionSettingPicker />
-        </Card>
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('sounds')}</Text>
-          <SoundPicker />
-        </Card>
-        <Card style={{ padding: 16, marginTop: 12 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('streak')}</Text>
-          <StreakPausePicker />
-        </Card>
+        {/* Search bar */}
+        <View style={[styles.searchRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
+          <Icon name="search" size={16} color={colorTheme.ink3} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder={t('searchSettingsPlaceholder')}
+            placeholderTextColor={colorTheme.ink3}
+            style={[styles.searchInput, { color: colorTheme.ink }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <Pressable onPress={() => setSearch('')} hitSlop={8} accessibilityLabel={t('clear')}>
+              <Icon name="x" size={15} color={colorTheme.ink3} />
+            </Pressable>
+          )}
+        </View>
+
+        {isSearching && !hasAnyVisibleSetting && (
+          <View style={styles.emptyWrap}>
+            <Pip size={60} expr="curious" />
+            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
+              {t('noSettingsFound', { query: search.trim() })}
+            </Text>
+            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+              {t('noSettingsFoundSub')}
+            </Text>
+            <Pressable
+              onPress={() => setSearch('')}
+              style={({ pressed }) => [
+                styles.clearSearchBtn,
+                { backgroundColor: theme.accentTint, borderColor: theme.accentSoft },
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Icon name="x" size={15} color={theme.accent} />
+              <Text style={[styles.clearSearchBtnText, { color: theme.accent }]}>{t('clear')}</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {matchingSections.has('appearance') && hasVisibleAppearanceCard && (
+          <>
+            <Eyebrow style={{ marginBottom: 10 }}>{t('appearance')}</Eyebrow>
+            <View style={{ gap: 12 }}>
+              {matchingKeys.has('theme') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('theme')}</Text>
+                  <ThemeModePicker />
+                </Card>
+              )}
+              {matchingKeys.has('language') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('language')}</Text>
+                  <LanguagePicker />
+                </Card>
+              )}
+              {matchingKeys.has('accent') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('accentColor')}</Text>
+                  <AccentColorPicker />
+                </Card>
+              )}
+              {matchingKeys.has('motion') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
+                  <MotionSettingPicker />
+                </Card>
+              )}
+              {matchingKeys.has('sounds') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('sounds')}</Text>
+                  <SoundPicker />
+                </Card>
+              )}
+              {matchingKeys.has('streak') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('streak')}</Text>
+                  <StreakPausePicker />
+                </Card>
+              )}
+            </View>
+          </>
+        )}
 
         {/* Hidden on web rather than disabled: expo-notifications has no web support, and a
             control that silently does nothing is worse than one that is not offered. */}
-        {Platform.OS !== 'web' && (
+        {Platform.OS !== 'web' && matchingSections.has('reminders') && hasVisibleRemindersCard && (
           <>
             <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('reminders')}</Eyebrow>
-            <Card style={{ padding: 16 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('logSpendingReminder')}</Text>
-              <LogReminderPicker />
-              <ReminderHourOverridePicker />
-            </Card>
-            <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('chaseOwedReminder')}</Text>
-              <OwedReminderPicker />
-            </Card>
-            <Card style={{ padding: 16, marginTop: 12 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('recurringBillsReminder')}</Text>
-              <CommitmentReminderPicker />
-            </Card>
+            <View style={{ gap: 12 }}>
+              {matchingKeys.has('reminder_spending') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('logSpendingReminder')}</Text>
+                  <LogReminderPicker />
+                  <ReminderHourOverridePicker />
+                </Card>
+              )}
+              {matchingKeys.has('reminder_owed') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('chaseOwedReminder')}</Text>
+                  <OwedReminderPicker />
+                </Card>
+              )}
+              {matchingKeys.has('reminder_commitments') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('recurringBillsReminder')}</Text>
+                  <CommitmentReminderPicker />
+                </Card>
+              )}
+            </View>
           </>
         )}
 
         {/* Provider/API-key rows are a dev-ops concern, not a judge-facing one (UI/UX
             P3.18): visible locally (__DEV__), stripped from the shipped judge build. */}
-        {__DEV__ && (
+        {__DEV__ && matchingSections.has('ai') && hasVisibleAiCard && (
           <>
             <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>AI providers</Eyebrow>
-
-            <ProviderCard
-              settings={settings}
-              role="general"
-              icon="sparkles"
-              name="Groq · primary"
-              model={settings.groqModel}
-              apiKey={settings.groqKey}
-            />
-
-            <View style={{ height: 14 }} />
-
-            <ProviderCard
-              settings={settings}
-              role="docs"
-              icon="receipt"
-              name="Gemini · fallback"
-              model={settings.geminiModel}
-              apiKey={settings.geminiKey}
-            />
+            <View style={{ gap: 14 }}>
+              {matchingKeys.has('ai_groq') && (
+                <ProviderCard
+                  settings={settings}
+                  role="general"
+                  icon="sparkles"
+                  name="Groq · primary"
+                  model={settings.groqModel}
+                  apiKey={settings.groqKey}
+                />
+              )}
+              {matchingKeys.has('ai_gemini') && (
+                <ProviderCard
+                  settings={settings}
+                  role="docs"
+                  icon="receipt"
+                  name="Gemini · fallback"
+                  model={settings.geminiModel}
+                  apiKey={settings.geminiKey}
+                />
+              )}
+            </View>
           </>
         )}
 
-        <View style={[styles.eyebrowRow, { marginTop: 26, marginBottom: 10 }]}>
-          <Eyebrow>{t('learning')}</Eyebrow>
-          <InfoButton entry="learned_merchants" />
-        </View>
-        <Card style={{ padding: 16 }}>
-          <View style={styles.providerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>
-                {t('learnedMerchantsCount', { count: learnedCount })}
-              </Text>
+        {matchingSections.has('learning') && matchingKeys.has('learning') && (
+          <>
+            <View style={[styles.eyebrowRow, { marginTop: 26, marginBottom: 10 }]}>
+              <Eyebrow>{t('learning')}</Eyebrow>
+              <InfoButton entry="learned_merchants" />
             </View>
-            <Pressable onPress={resetLearned} disabled={learnedCount === 0} style={styles.resetBtn}>
-              <Icon name="trash" size={16} color={learnedCount === 0 ? colorTheme.ink3 : '#b3261e'} />
-              <Text style={[styles.resetText, { color: learnedCount === 0 ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
-            </Pressable>
-          </View>
-        </Card>
-
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('budget')}</Eyebrow>
-        <Card style={{ padding: 16 }}>
-          <View style={styles.providerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>
-                {hasBudget
-                  ? t('budgetSummary', { income: fmtMoney(dc.convert(expectedIncome), dc.code), count: allocationCount })
-                  : t('noBudgetSet')}
-              </Text>
-            </View>
-            <Pressable onPress={resetBudgetConfirm} disabled={!hasBudget} style={styles.resetBtn}>
-              <Icon name="trash" size={16} color={!hasBudget ? colorTheme.ink3 : '#b3261e'} />
-              <Text style={[styles.resetText, { color: !hasBudget ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
-            </Pressable>
-          </View>
-        </Card>
-
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('data')}</Eyebrow>
-        {onOpenCommitments && (
-          <Pressable
-            onPress={onOpenCommitments}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="clock" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('recurringBillsInvestments')}</Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
-
-        {onOpenTax && (
-          <Pressable
-            onPress={onOpenTax}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="receipt" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('taxRelief')}</Text>
-            </View>
-            {taxRequestableCount > 0 && (
-              <View style={[styles.countBadge, { backgroundColor: theme.accent }]}>
-                <Text style={styles.countBadgeText}>{taxRequestableCount}</Text>
+            <Card style={{ padding: 16 }}>
+              <View style={styles.providerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink }]}>
+                    {t('learnedMerchantsCount', { count: learnedCount })}
+                  </Text>
+                </View>
+                <Pressable onPress={resetLearned} disabled={learnedCount === 0} style={styles.resetBtn}>
+                  <Icon name="trash" size={16} color={learnedCount === 0 ? colorTheme.ink3 : '#b3261e'} />
+                  <Text style={[styles.resetText, { color: learnedCount === 0 ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
+                </Pressable>
               </View>
-            )}
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
+            </Card>
+          </>
         )}
 
-        {onOpenCategories && (
-          <Pressable
-            onPress={onOpenCategories}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="sliders" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('categories')}</Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
+        {matchingSections.has('budget') && matchingKeys.has('budget') && (
+          <>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('budget')}</Eyebrow>
+            <Card style={{ padding: 16 }}>
+              <View style={styles.providerRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink }]}>
+                    {hasBudget
+                      ? t('budgetSummary', { income: fmtMoney(dc.convert(expectedIncome), dc.code), count: allocationCount })
+                      : t('noBudgetSet')}
+                  </Text>
+                </View>
+                <Pressable onPress={resetBudgetConfirm} disabled={!hasBudget} style={styles.resetBtn}>
+                  <Icon name="trash" size={16} color={!hasBudget ? colorTheme.ink3 : '#b3261e'} />
+                  <Text style={[styles.resetText, { color: !hasBudget ? colorTheme.ink3 : '#b3261e' }]}>{t('reset')}</Text>
+                </Pressable>
+              </View>
+            </Card>
+          </>
         )}
 
-        {onOpenCurrencySettings && (
-          <Pressable
-            onPress={onOpenCurrencySettings}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="wallet" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('currencies')}</Text>
-              <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
-                {isMultiCurrency(activeCurrencies) ? activeCurrencies.join(', ') : 'MYR only'}
-              </Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
+        {matchingSections.has('data') && hasVisibleDataCard && (
+          <>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('data')}</Eyebrow>
+            <View style={{ gap: 12 }}>
+              {onOpenCommitments && matchingKeys.has('data_commitments') && (
+                <Pressable
+                  onPress={onOpenCommitments}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="clock" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('recurringBillsInvestments')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
 
-        {onAdvancedImport && (
-          <Pressable
-            onPress={onAdvancedImport}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="sparkles" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('advancedImport')}</Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
+              {onOpenTax && matchingKeys.has('data_tax') && (
+                <Pressable
+                  onPress={onOpenTax}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="receipt" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('taxRelief')}</Text>
+                  </View>
+                  {taxRequestableCount > 0 && (
+                    <View style={[styles.countBadge, { backgroundColor: theme.accent }]}>
+                      <Text style={styles.countBadgeText}>{taxRequestableCount}</Text>
+                    </View>
+                  )}
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
 
-        {onOpenExport && (
-          <Pressable
-            onPress={onOpenExport}
-            style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { marginTop: 12, opacity: pressed ? 0.9 : 1 }]}
-          >
-            <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="download" size={16} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('financialReportsExport')}</Text>
-            </View>
-            <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-          </Pressable>
-        )}
+              {onOpenCategories && matchingKeys.has('data_categories') && (
+                <Pressable
+                  onPress={onOpenCategories}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="sliders" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('categories')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
 
-        <Pressable
-          onPress={async () => {
-            await resetTutorial();
-            notify(t('tutorialTitle'), t('tutorialReplayedToast'));
-          }}
-          style={({ pressed }) => [
-            styles.providerRow,
-            styles.migrateRow,
-            { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
-            { marginTop: 12, opacity: pressed ? 0.9 : 1 },
-          ]}
-        >
-          <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-            <Icon name="sparkles" size={16} color={theme.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('replayTutorial')}</Text>
-          </View>
-          <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
-        </Pressable>
+              {onOpenCurrencySettings && matchingKeys.has('data_currencies') && (
+                <Pressable
+                  onPress={onOpenCurrencySettings}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="wallet" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('currencies')}</Text>
+                    <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
+                      {isMultiCurrency(activeCurrencies) ? activeCurrencies.join(', ') : (isZh ? '仅限 MYR' : 'MYR only')}
+                    </Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+
+              {onAdvancedImport && matchingKeys.has('data_import') && (
+                <Pressable
+                  onPress={onAdvancedImport}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="sparkles" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('advancedImport')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+
+              {onOpenExport && matchingKeys.has('data_export') && (
+                <Pressable
+                  onPress={onOpenExport}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="download" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('financialReportsExport')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+
+              {matchingKeys.has('data_tutorial') && (
+                <Pressable
+                  onPress={async () => {
+                    await resetTutorial();
+                    notify(t('tutorialTitle'), t('tutorialReplayedToast'));
+                  }}
+                  style={({ pressed }) => [
+                    styles.providerRow,
+                    styles.migrateRow,
+                    { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="sparkles" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('replayTutorial')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+            </View>
+          </>
+        )}
 
         {/* Distinct "danger zone" treatment  this is the one irreversible action on this
             screen, so it shouldn't look like every other settings row. */}
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10, color: '#b3261e' }}>{t('dangerZone')}</Eyebrow>
-        <Card style={[{ padding: 16 }, styles.dangerCard]}>
-          <View style={styles.providerRow}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Icon name="alert" size={13} color="#b3261e" />
-                <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetAllData')}</Text>
-              </View>
-            </View>
-            <Pressable onPress={resetAllConfirm} style={styles.resetBtn}>
-              <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
-            </Pressable>
-          </View>
-        </Card>
+        {matchingSections.has('danger') && hasVisibleDangerCard && (
+          <>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10, color: '#b3261e' }}>{t('dangerZone')}</Eyebrow>
+            <View style={{ gap: 10 }}>
+              {matchingKeys.has('danger_reset_all') && (
+                <Card style={[{ padding: 16 }, styles.dangerCard]}>
+                  <View style={styles.providerRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Icon name="alert" size={13} color="#b3261e" />
+                        <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetAllData')}</Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={resetAllConfirm} style={styles.resetBtn}>
+                      <Icon name="trash" size={16} color="#b3261e" />
+                      <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
+                    </Pressable>
+                  </View>
+                </Card>
+              )}
 
-        <Card style={[{ padding: 16, marginTop: 10 }, styles.dangerCard]}>
-          <View style={styles.providerRow}>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Icon name="alert" size={13} color="#b3261e" />
-                <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetToSetup')}</Text>
-              </View>
+              {matchingKeys.has('danger_reset_setup') && (
+                <Card style={[{ padding: 16, marginTop: 10 }, styles.dangerCard]}>
+                  <View style={styles.providerRow}>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Icon name="alert" size={13} color="#b3261e" />
+                        <Text style={[styles.providerName, { color: '#b3261e' }]}>{t('resetToSetup')}</Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={resetToOnboardingConfirm} style={styles.resetBtn}>
+                      <Icon name="trash" size={16} color="#b3261e" />
+                      <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
+                    </Pressable>
+                  </View>
+                </Card>
+              )}
             </View>
-            <Pressable onPress={resetToOnboardingConfirm} style={styles.resetBtn}>
-              <Icon name="trash" size={16} color="#b3261e" />
-              <Text style={[styles.resetText, { color: '#b3261e' }]}>{t('reset')}</Text>
-            </Pressable>
-          </View>
-        </Card>
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -364,11 +507,11 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
  * something the phone will never do, so a refusal leaves the setting where it was and says why.
  * Turning one off never asks: you can always opt out.
  */
-async function withPermission(turningOn: boolean, apply: () => Promise<void>): Promise<void> {
+async function withPermission(turningOn: boolean, apply: () => Promise<void>, isZh?: boolean): Promise<void> {
   if (turningOn && !(await ensurePermission())) {
     notify(
-      'Notifications are off',
-      'Your phone is blocking notifications for Pip. Turn them on in your device settings and then try again.'
+      isZh ? '通知已被关闭' : 'Notifications are off',
+      isZh ? '您的设备已禁止 Pip 发送通知。请在系统设置中开启后重试。' : 'Your phone is blocking notifications for Pip. Turn them on in your device settings and then try again.'
     );
     return;
   }
@@ -407,7 +550,7 @@ function LogReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { reminderCadence, setReminderCadence } = useAppData();
-  const { formatCadence } = useLanguage();
+  const { formatCadence, isZh } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {REMINDER_CADENCES.map((cadence) => {
@@ -415,7 +558,7 @@ function LogReminderPicker() {
         return (
           <Pressable
             key={cadence}
-            onPress={() => withPermission(cadence !== 'off', () => setReminderCadence(cadence))}
+            onPress={() => withPermission(cadence !== 'off', () => setReminderCadence(cadence), isZh)}
             style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
             accessibilityRole="radio"
             accessibilityState={{ selected: on }}
@@ -476,7 +619,7 @@ function OwedReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { owedReminderEnabled, setOwedReminderEnabled } = useAppData();
-  const { t } = useLanguage();
+  const { t, isZh } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((value) => {
@@ -484,7 +627,7 @@ function OwedReminderPicker() {
         return (
           <Pressable
             key={String(value)}
-            onPress={() => withPermission(value, () => setOwedReminderEnabled(value))}
+            onPress={() => withPermission(value, () => setOwedReminderEnabled(value), isZh)}
             style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
             accessibilityRole="radio"
             accessibilityState={{ selected: on }}
@@ -504,7 +647,7 @@ function CommitmentReminderPicker() {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { commitmentReminderEnabled, setCommitmentReminderEnabled } = useAppData();
-  const { t } = useLanguage();
+  const { t, isZh } = useLanguage();
   return (
     <View style={[styles.modeToggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
       {[false, true].map((value) => {
@@ -512,7 +655,7 @@ function CommitmentReminderPicker() {
         return (
           <Pressable
             key={String(value)}
-            onPress={() => withPermission(value, () => setCommitmentReminderEnabled(value))}
+            onPress={() => withPermission(value, () => setCommitmentReminderEnabled(value), isZh)}
             style={[styles.modeBtn, on && { backgroundColor: theme.accentInk }]}
             accessibilityRole="radio"
             accessibilityState={{ selected: on }}
@@ -643,28 +786,48 @@ function SoundPicker() {
   );
 }
 
-/** Row of preset swatches for picking the app's accent color, same visual pattern as the
- *  category-color picker in AddCategoryModal (tap a circle, checkmark on the active one). */
+/** Row of preset swatches for picking the app's accent color, plus live app icon preview */
 function AccentColorPicker() {
   const colorTheme = useThemeColors();
   const { presetId, setPresetId, presets } = useAccentPreset();
+  const { t } = useLanguage();
+  const activePreset = presets.find((p) => p.id === presetId) ?? presets[0];
+
   return (
-    <View style={styles.swatchWrap}>
-      {presets.map((preset) => {
-        const on = preset.id === presetId;
-        return (
-          <Pressable
-            key={preset.id}
-            onPress={() => setPresetId(preset.id)}
-            style={[styles.swatch, { backgroundColor: preset.theme.light.accent }, on && { borderColor: colorTheme.ink, borderWidth: 2.5 }]}
-            accessibilityRole="radio"
-            accessibilityLabel={preset.name}
-            accessibilityState={{ selected: on }}
-          >
-            {on && <Icon name="check" size={15} color="#fff" stroke={2.6} />}
-          </Pressable>
-        );
-      })}
+    <View style={{ gap: 14 }}>
+      <View style={[styles.iconPreviewCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+        <View style={[styles.iconSquircle, { backgroundColor: activePreset.theme.light.accent }]}>
+          <View style={{ transform: [{ translateY: 3 }] }}>
+            <Pip size={38} />
+          </View>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center' }}>
+          <Text style={[styles.iconPreviewTitle, { color: colorTheme.ink }]}>
+            {t('appIcon')}: {activePreset.name}
+          </Text>
+          <Text style={[styles.iconPreviewSub, { color: colorTheme.ink2 }]}>
+            {t('appIconDesc')}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.swatchWrap}>
+        {presets.map((preset) => {
+          const on = preset.id === presetId;
+          return (
+            <Pressable
+              key={preset.id}
+              onPress={() => setPresetId(preset.id)}
+              style={[styles.swatch, { backgroundColor: preset.theme.light.accent }, on && { borderColor: colorTheme.ink, borderWidth: 2.5 }]}
+              accessibilityRole="radio"
+              accessibilityLabel={preset.name}
+              accessibilityState={{ selected: on }}
+            >
+              {on && <Icon name="check" size={15} color="#fff" stroke={2.6} />}
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -812,4 +975,72 @@ const styles = StyleSheet.create({
   /* accent color picker */
   swatchWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   swatch: { width: 38, height: 38, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  iconPreviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  iconSquircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  iconPreviewTitle: { fontFamily: uiFont(700), fontSize: 14 },
+  iconPreviewSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 1 },
+
+  /* search */
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: uiFont(600),
+    fontSize: 14,
+    padding: 0,
+  },
+  emptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  emptyTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  emptySub: {
+    fontFamily: uiFont(500),
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  clearSearchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 6,
+  },
+  clearSearchBtnText: {
+    fontFamily: uiFont(600),
+    fontSize: 13.5,
+  },
 });

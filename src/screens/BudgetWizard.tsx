@@ -8,6 +8,7 @@ import { Amount, BtnLabel, Card, CatBadge, Eyebrow, Label, PrimaryButton, Progre
 import { allocatedTotal, averageMonthlySpend, leftover } from '../lib/budget';
 import { currencyPrefix, fmtMoney } from '../lib/format';
 import { baselineExplanation, computeIncomeBaseline } from '../lib/incomeBaseline';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
@@ -20,6 +21,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
+  const { isZh, tCat } = useLanguage();
   const {
     transactions,
     categories,
@@ -88,7 +90,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + spacing.xs }}>
         <TopBar
-          title={hasBudget ? 'Edit budget' : 'Set up budget'}
+          title={hasBudget ? (isZh ? '编辑预算' : 'Edit budget') : (isZh ? '预算设置' : 'Set up budget')}
           onBack={goBack}
         />
       </View>
@@ -99,7 +101,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         showsVerticalScrollIndicator={false}
       >
         {/* Income section */}
-        <Eyebrow style={{ marginBottom: spacing.sm }}>Expected monthly income</Eyebrow>
+        <Eyebrow style={{ marginBottom: spacing.sm }}>{isZh ? '预计月收入' : 'Expected monthly income'}</Eyebrow>
         <Card style={styles.incomeCard}>
           <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
           <TextInput
@@ -114,14 +116,18 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         {income6.months > 0 && (
           <Label weight={500} color={colorTheme.ink2} style={{ marginTop: spacing.xs, marginLeft: spacing.xs }}>
             {income6.irregular
-              ? `Your income swings between ${fmtMoney(dc.convert(income6.low), dc.code)} and ${fmtMoney(dc.convert(income6.high), dc.code)}, so Pip suggests planning against ${fmtMoney(dc.convert(income6.baseline), dc.code)}. ${baselineExplanation(income6)}`
-              : `Your recent average is ${fmtMoney(dc.convert(income6.average), dc.code)}.`}
+              ? (isZh
+                  ? `您的收入在 ${fmtMoney(dc.convert(income6.low), dc.code)} 到 ${fmtMoney(dc.convert(income6.high), dc.code)} 之间波动，Pip 建议以 ${fmtMoney(dc.convert(income6.baseline), dc.code)} 制定预算。`
+                  : `Your income swings between ${fmtMoney(dc.convert(income6.low), dc.code)} and ${fmtMoney(dc.convert(income6.high), dc.code)}, so Pip suggests planning against ${fmtMoney(dc.convert(income6.baseline), dc.code)}. ${baselineExplanation(income6)}`)
+              : (isZh
+                  ? `您近期的月均收入为 ${fmtMoney(dc.convert(income6.average), dc.code)}。`
+                  : `Your recent average is ${fmtMoney(dc.convert(income6.average), dc.code)}.`)}
           </Label>
         )}
 
         {/* Expenses category allocations */}
         <View style={[styles.sectionHeader, { marginTop: spacing.lg, marginBottom: spacing.sm }]}>
-          <Eyebrow>Category expenses budget</Eyebrow>
+          <Eyebrow>{isZh ? '支出分类预算' : 'Category expenses budget'}</Eyebrow>
           <Pressable
             onPress={autoFill}
             style={({ pressed }) => [
@@ -130,7 +136,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
             ]}
           >
             <Icon name="sparkles" size={13} color={theme.accent} />
-            <Text style={[styles.autoFillText, { color: theme.accent }]}>Auto-fill from history</Text>
+            <Text style={[styles.autoFillText, { color: theme.accent }]}>{isZh ? '根据历史自动填入' : 'Auto-fill from history'}</Text>
           </Pressable>
         </View>
 
@@ -139,7 +145,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
             <CatBadge category={c} size={36} />
             <View style={{ flex: 1 }}>
               <Text style={[styles.allocLabel, { color: colorTheme.ink }]} numberOfLines={1}>
-                {c.label}
+                {tCat(c)}
               </Text>
             </View>
             <View style={[styles.allocInputWrap, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
@@ -164,7 +170,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
           ]}
         >
           <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-          <Text style={[styles.addRowText, { color: theme.accent }]}>New category</Text>
+          <Text style={[styles.addRowText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
         </Pressable>
       </ScrollView>
 
@@ -173,10 +179,15 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         <View style={{ marginBottom: spacing.sm }}>
           <View style={styles.summary}>
             <Text style={[styles.summaryText, { color: colorTheme.ink2 }]}>
-              Allocated <Amount value={dc.convert(total)} currency={dc.code} size={13} weight={700} /> of <Amount value={dc.convert(income)} currency={dc.code} size={13} weight={700} />
+              {isZh ? '已分配 ' : 'Allocated '}
+              <Amount value={dc.convert(total)} currency={dc.code} size={13} weight={700} />
+              {isZh ? ' / ' : ' of '}
+              <Amount value={dc.convert(income)} currency={dc.code} size={13} weight={700} />
             </Text>
             <Text style={[styles.summaryText, { color: left < 0 ? '#c5402f' : theme.accentInk }]}>
-              {left < 0 ? `Over by ${fmtMoney(dc.convert(-left), dc.code)}` : `${fmtMoney(dc.convert(left), dc.code)} left`}
+              {left < 0
+                ? (isZh ? `超支 ${fmtMoney(dc.convert(-left), dc.code)}` : `Over by ${fmtMoney(dc.convert(-left), dc.code)}`)
+                : (isZh ? `剩余 ${fmtMoney(dc.convert(left), dc.code)}` : `${fmtMoney(dc.convert(left), dc.code)} left`)}
             </Text>
           </View>
           <View style={{ marginTop: spacing.xs }}>
@@ -185,7 +196,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         </View>
         <PrimaryButton onPress={finish} height={50}>
           <Icon name="check" size={19} color="#fff" stroke={2.4} />
-          <BtnLabel>Save budget</BtnLabel>
+          <BtnLabel>{isZh ? '保存预算' : 'Save budget'}</BtnLabel>
         </PrimaryButton>
       </View>
 

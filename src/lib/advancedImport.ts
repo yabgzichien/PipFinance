@@ -85,31 +85,48 @@ REPLY FORMAT — ONLY a JSON code block, no other text:
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface LLMTxn {
+  id?: unknown;
   date?: unknown;
   description?: unknown;
   amount?: unknown;
   currency?: unknown;
   category?: unknown;
   account?: unknown;
+  remark?: unknown;
+  source?: unknown;
+  nativeAmount?: unknown;
+  fxRate?: unknown;
+  createdAt?: unknown;
 }
 
 interface LLMAccount {
   name?: unknown;
   type?: unknown;
+  cls?: unknown;
+  kind?: unknown;
   balance?: unknown;
   currency?: unknown;
   as_of?: unknown;
   notes?: unknown;
   quantity?: unknown;
   cost?: unknown;
+  interestRate?: unknown;
+  sub?: unknown;
+  symbol?: unknown;
+  ticker?: unknown;
+  icon?: unknown;
+  archived?: unknown;
+  history?: unknown;
 }
 
 interface LLMTransfer {
+  id?: unknown;
   date?: unknown;
   description?: unknown;
   amount?: unknown;
   currency?: unknown;
   account?: unknown;
+  createdAt?: unknown;
 }
 
 interface LLMOccurrence {
@@ -120,6 +137,7 @@ interface LLMOccurrence {
 }
 
 interface LLMCommitment {
+  id?: unknown;
   label?: unknown;
   kind?: unknown;
   amount?: unknown;
@@ -130,7 +148,89 @@ interface LLMCommitment {
   toAccount?: unknown;
   startMonth?: unknown;
   endMonth?: unknown;
+  reliefCode?: unknown;
+  archived?: unknown;
   occurrences?: LLMOccurrence[];
+}
+
+interface LLMCategory {
+  id?: unknown;
+  label?: unknown;
+  icon?: unknown;
+  hue?: unknown;
+  kind?: unknown;
+  isDefault?: unknown;
+}
+
+interface LLMPerson {
+  id?: unknown;
+  name?: unknown;
+  createdAt?: unknown;
+}
+
+interface LLMSplitPayment {
+  id?: unknown;
+  amount?: unknown;
+  paidOn?: unknown;
+  evidence?: unknown;
+  matchedMerchant?: unknown;
+  accountId?: unknown;
+  createdAt?: unknown;
+}
+
+interface LLMSplitShare {
+  id?: unknown;
+  personId?: unknown;
+  personName?: unknown;
+  person?: unknown;
+  owed?: unknown;
+  paid?: unknown;
+  status?: unknown;
+  writtenOffTxnId?: unknown;
+  createdAt?: unknown;
+  payments?: LLMSplitPayment[];
+}
+
+interface LLMSplit {
+  id?: unknown;
+  txnId?: unknown;
+  gross?: unknown;
+  ownShare?: unknown;
+  method?: unknown;
+  currency?: unknown;
+  fxRate?: unknown;
+  createdAt?: unknown;
+  shares?: LLMSplitShare[];
+}
+
+interface LLMBudget {
+  expectedIncome?: unknown;
+  allocations?: unknown;
+  snapshots?: unknown;
+  advice?: unknown;
+}
+
+interface LLMTaxReliefTag {
+  id?: unknown;
+  txnId?: unknown;
+  code?: unknown;
+  ya?: unknown;
+  amount?: unknown;
+  origin?: unknown;
+  createdAt?: unknown;
+}
+
+interface LLMTaxRelief {
+  tags?: LLMTaxReliefTag[];
+  memory?: unknown;
+}
+
+interface LLMPreferences {
+  activeCurrencies?: unknown;
+  settings?: unknown;
+  streak?: unknown;
+  tasks?: unknown;
+  autoFill?: unknown;
 }
 
 interface LLMOutput {
@@ -139,6 +239,28 @@ interface LLMOutput {
   transfers?: LLMTransfer[];
   accounts?: LLMAccount[];
   commitments?: LLMCommitment[];
+  categories?: LLMCategory[];
+  deletedDefaultCategories?: string[];
+  people?: LLMPerson[];
+  splits?: LLMSplit[];
+  budget?: LLMBudget;
+  taxRelief?: LLMTaxRelief;
+  merchantMemory?: Record<string, string>;
+  preferences?: LLMPreferences;
+}
+
+export interface ParsedCategory {
+  id: string;
+  label: string;
+  icon: string;
+  hue: number;
+  kind: 'expense' | 'income';
+  isDefault: boolean;
+}
+
+export interface ParsedAccountHistory {
+  asOf: string;
+  value: number;
 }
 
 // Parsed account ready to commit to the DB.
@@ -159,6 +281,13 @@ export interface ParsedAccount {
    *  lib/prices.ts, which requires both. */
   quantity: number | null;
   cost: number | null;
+  interestRate?: number | null;
+  sub?: string | null;
+  symbol?: string | null;
+  ticker?: string | null;
+  icon?: string | null;
+  archived?: boolean;
+  history?: ParsedAccountHistory[];
 }
 
 /** A DCA/transfer contribution: neither income nor an expense (see TxnType in lib/types.ts),
@@ -194,6 +323,76 @@ export interface ParsedCommitment {
   occurrences: ParsedCommitmentOccurrence[];
 }
 
+export interface ParsedPerson {
+  id: string;
+  name: string;
+  createdAt?: string;
+}
+
+export interface ParsedSplitPayment {
+  id?: string;
+  amount: number;
+  paidOn: string;
+  evidence: 'matched' | 'declared';
+  matchedMerchant?: string | null;
+  accountId?: string | null;
+  createdAt?: string;
+}
+
+export interface ParsedSplitShare {
+  id?: string;
+  personId?: string;
+  personName?: string | null;
+  owed: number;
+  paid: number;
+  status: 'open' | 'settled' | 'written_off';
+  writtenOffTxnId?: string | null;
+  createdAt?: string;
+  payments?: ParsedSplitPayment[];
+}
+
+export interface ParsedSplit {
+  id?: string;
+  txnId?: string;
+  gross: number;
+  ownShare: number;
+  method: 'equal' | 'shares' | 'exact' | 'itemized';
+  currency: string;
+  fxRate?: number | null;
+  createdAt?: string;
+  shares: ParsedSplitShare[];
+}
+
+export interface ParsedBudget {
+  expectedIncome: number;
+  allocations: Record<string, number>;
+  snapshots?: Record<string, { income: number; allocations: Record<string, number> }>;
+  advice?: { hash: string; text: string } | null;
+}
+
+export interface ParsedTaxReliefTag {
+  id?: string;
+  txnId?: string;
+  code: string;
+  ya: number;
+  amount: number;
+  origin: 'auto' | 'commitment' | 'manual';
+  createdAt?: string;
+}
+
+export interface ParsedTaxRelief {
+  tags: ParsedTaxReliefTag[];
+  memory: Record<string, string>;
+}
+
+export interface ParsedAppPreferences {
+  activeCurrencies?: string[];
+  settings?: Record<string, unknown>;
+  streak?: Record<string, unknown>;
+  tasks?: Record<string, unknown>;
+  autoFill?: Record<string, unknown>;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPE → cls mapping
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,10 +422,19 @@ export function resolveClsId(rawType: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ParseResult {
+  version?: number;
   transactions: ExtractedTxn[];
   accounts: ParsedAccount[];
   transfers: ParsedTransfer[];
   commitments: ParsedCommitment[];
+  categories?: ParsedCategory[];
+  deletedDefaultCategories?: string[];
+  people?: ParsedPerson[];
+  splits?: ParsedSplit[];
+  budget?: ParsedBudget | null;
+  taxRelief?: ParsedTaxRelief | null;
+  merchantMemory?: Record<string, string>;
+  preferences?: ParsedAppPreferences | null;
 }
 
 const OCCURRENCE_STATUSES = new Set(['scheduled', 'paid', 'late', 'skipped']);
@@ -242,6 +450,7 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
   const parsed: unknown = JSON.parse(stripped);
   if (typeof parsed !== 'object' || parsed === null) throw new Error('Not a JSON object.');
   const obj = parsed as LLMOutput;
+  const version = typeof obj.version === 'number' ? obj.version : undefined;
 
   // ── Transactions ──
   const txnRows = Array.isArray(obj.transactions) ? obj.transactions : [];
@@ -264,7 +473,14 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
         ? r.account.trim()
         : null;
     const currency = normalizeCurrency(r.currency, defaultCurrency);
-    return { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency };
+    const item: ExtractedTxn = { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency };
+    if (typeof r.remark === 'string' && r.remark.trim()) item.remark = r.remark.trim();
+    if (typeof r.source === 'string') item.source = r.source as any;
+    if (typeof r.id === 'string' && r.id.trim()) item.id = r.id.trim();
+    if (typeof r.nativeAmount === 'number' && Number.isFinite(r.nativeAmount)) item.nativeAmount = r.nativeAmount;
+    if (typeof r.fxRate === 'number' && Number.isFinite(r.fxRate)) item.fxRate = r.fxRate;
+    if (typeof r.createdAt === 'string' && r.createdAt.trim()) item.createdAt = r.createdAt.trim();
+    return item;
   });
 
   // ── Accounts ──
@@ -273,8 +489,13 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
   const accounts: ParsedAccount[] = accRows.map((r): ParsedAccount => {
     const name =
       typeof r.name === 'string' && r.name.trim() ? r.name.trim() : 'Unnamed Account';
-    const clsId = typeof r.type === 'string' ? resolveClsId(r.type) : 'cash';
+    const clsId = typeof r.cls === 'string' && r.cls.trim()
+      ? r.cls.trim()
+      : typeof r.type === 'string' ? resolveClsId(r.type) : 'cash';
     const meta = ACCOUNT_CLASSES.find((c) => c.id === clsId) ?? ACCOUNT_CLASSES[0];
+    const kind = r.kind === 'liability' || clsId === 'credit_card' || clsId === 'credit_cards' || clsId === 'loans' || clsId === 'personal' || clsId === 'mortgage' || clsId === 'car'
+      ? 'liability'
+      : (r.kind === 'asset' ? 'asset' : meta.kind);
     const balance = Math.abs(
       typeof r.balance === 'number' ? r.balance : Number(r.balance ?? 0)
     );
@@ -284,12 +505,32 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
       typeof r.notes === 'string' && r.notes.trim() ? r.notes.trim() : null;
     const quantity = typeof r.quantity === 'number' && Number.isFinite(r.quantity) ? r.quantity : null;
     const cost = typeof r.cost === 'number' && Number.isFinite(r.cost) ? r.cost : null;
+    const interestRate = typeof r.interestRate === 'number' && Number.isFinite(r.interestRate) ? r.interestRate : null;
+    const sub = typeof r.sub === 'string' && r.sub.trim() ? r.sub.trim() : null;
+    const symbol = typeof r.symbol === 'string' && r.symbol.trim() ? r.symbol.trim() : null;
+    const ticker = typeof r.ticker === 'string' && r.ticker.trim() ? r.ticker.trim() : null;
+    const icon = typeof r.icon === 'string' && r.icon.trim() ? r.icon.trim() : null;
+    const archived = Boolean(r.archived);
     const currency = normalizeCurrency(r.currency, defaultCurrency);
+
+    const rawHistory = Array.isArray(r.history) ? r.history : [];
+    const history: ParsedAccountHistory[] = rawHistory
+      .map((h: any): ParsedAccountHistory | null => {
+        if (!h || typeof h !== 'object') return null;
+        const hDate = typeof h.asOf === 'string' && ISO_DATE_ONLY.test(h.asOf.trim())
+          ? h.asOf.trim()
+          : (typeof h.as_of === 'string' && ISO_DATE_ONLY.test(h.as_of.trim()) ? h.as_of.trim() : null);
+        if (!hDate) return null;
+        const val = typeof h.value === 'number' ? h.value : Number(h.value ?? 0);
+        return { asOf: hDate, value: Math.abs(val) };
+      })
+      .filter((h): h is ParsedAccountHistory => h !== null);
+
     return {
       name,
       cls: clsId,
       clsLabel: meta.label,
-      kind: meta.kind,
+      kind,
       balance,
       currency,
       asOf,
@@ -297,6 +538,13 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
       include: true,
       quantity,
       cost,
+      interestRate,
+      sub,
+      symbol,
+      ticker,
+      icon,
+      archived,
+      history: history.length > 0 ? history : undefined,
     };
   });
 
@@ -350,5 +598,191 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
     })
     .filter((c): c is ParsedCommitment => c !== null);
 
-  return { transactions, accounts, transfers, commitments };
+  // ── Categories (version 3) ──
+  const catRows = Array.isArray(obj.categories) ? obj.categories : [];
+  const categories: ParsedCategory[] = catRows
+    .map((c): ParsedCategory | null => {
+      const id = typeof c.id === 'string' && c.id.trim() ? c.id.trim() : '';
+      const label = typeof c.label === 'string' && c.label.trim() ? c.label.trim() : '';
+      if (!id || !label) return null;
+      return {
+        id,
+        label,
+        icon: typeof c.icon === 'string' ? c.icon : 'grid',
+        hue: typeof c.hue === 'number' ? c.hue : 200,
+        kind: c.kind === 'income' ? 'income' : 'expense',
+        isDefault: Boolean(c.isDefault),
+      };
+    })
+    .filter((c): c is ParsedCategory => c !== null);
+
+  const deletedDefaultCategories = Array.isArray(obj.deletedDefaultCategories)
+    ? obj.deletedDefaultCategories.filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
+    : undefined;
+
+  // ── People (version 3) ──
+  const peopleRows = Array.isArray(obj.people) ? obj.people : [];
+  const people: ParsedPerson[] = peopleRows
+    .map((p): ParsedPerson | null => {
+      const name = typeof p.name === 'string' && p.name.trim() ? p.name.trim() : '';
+      if (!name) return null;
+      return {
+        id: typeof p.id === 'string' && p.id.trim() ? p.id.trim() : name.toLowerCase(),
+        name,
+        createdAt: typeof p.createdAt === 'string' ? p.createdAt : undefined,
+      };
+    })
+    .filter((p): p is ParsedPerson => p !== null);
+
+  // ── Splits (version 3) ──
+  const splitRows = Array.isArray(obj.splits) ? obj.splits : [];
+  const splits: ParsedSplit[] = splitRows
+    .map((s): ParsedSplit | null => {
+      const gross = Math.abs(typeof s.gross === 'number' ? s.gross : Number(s.gross ?? 0));
+      const ownShare = Math.abs(typeof s.ownShare === 'number' ? s.ownShare : Number(s.ownShare ?? 0));
+      const method = typeof s.method === 'string' ? (s.method as any) : 'equal';
+      const currency = normalizeCurrency(s.currency, defaultCurrency);
+      const fxRate = typeof s.fxRate === 'number' && Number.isFinite(s.fxRate) ? s.fxRate : null;
+      const sharesRaw = Array.isArray(s.shares) ? s.shares : [];
+      const shares: ParsedSplitShare[] = sharesRaw.map((sh): ParsedSplitShare => {
+        const owed = Math.abs(typeof sh.owed === 'number' ? sh.owed : Number(sh.owed ?? 0));
+        const paid = Math.abs(typeof sh.paid === 'number' ? sh.paid : Number(sh.paid ?? 0));
+        const status = sh.status === 'settled' || sh.status === 'written_off' ? sh.status : 'open';
+        const paymentsRaw = Array.isArray(sh.payments) ? sh.payments : [];
+        const payments: ParsedSplitPayment[] = paymentsRaw.map((pm): ParsedSplitPayment => ({
+          id: typeof pm.id === 'string' ? pm.id : undefined,
+          amount: Math.abs(typeof pm.amount === 'number' ? pm.amount : Number(pm.amount ?? 0)),
+          paidOn: typeof pm.paidOn === 'string' && ISO_DATE_ONLY.test(pm.paidOn.trim()) ? pm.paidOn.trim() : todayISO(),
+          evidence: pm.evidence === 'matched' ? 'matched' : 'declared',
+          matchedMerchant: typeof pm.matchedMerchant === 'string' ? pm.matchedMerchant : null,
+          accountId: typeof pm.accountId === 'string' ? pm.accountId : null,
+          createdAt: typeof pm.createdAt === 'string' ? pm.createdAt : undefined,
+        }));
+        return {
+          id: typeof sh.id === 'string' ? sh.id : undefined,
+          personId: typeof sh.personId === 'string' ? sh.personId : undefined,
+          personName: typeof sh.personName === 'string' ? sh.personName : (typeof sh.person === 'string' ? sh.person : null),
+          owed,
+          paid,
+          status,
+          writtenOffTxnId: typeof sh.writtenOffTxnId === 'string' ? sh.writtenOffTxnId : null,
+          createdAt: typeof sh.createdAt === 'string' ? sh.createdAt : undefined,
+          payments,
+        };
+      });
+      return {
+        id: typeof s.id === 'string' ? s.id : undefined,
+        txnId: typeof s.txnId === 'string' ? s.txnId : undefined,
+        gross,
+        ownShare,
+        method,
+        currency,
+        fxRate,
+        createdAt: typeof s.createdAt === 'string' ? s.createdAt : undefined,
+        shares,
+      };
+    })
+    .filter((s): s is ParsedSplit => s !== null);
+
+  // ── Budget (version 3) ──
+  let budget: ParsedBudget | null = null;
+  if (obj.budget && typeof obj.budget === 'object') {
+    const b = obj.budget;
+    const expectedIncome = typeof b.expectedIncome === 'number' ? b.expectedIncome : Number(b.expectedIncome ?? 0);
+    const allocations: Record<string, number> = {};
+    if (b.allocations && typeof b.allocations === 'object') {
+      for (const [k, v] of Object.entries(b.allocations)) {
+        const amt = typeof v === 'number' ? v : Number(v ?? 0);
+        if (amt > 0) allocations[k] = amt;
+      }
+    }
+    const snapshots: Record<string, { income: number; allocations: Record<string, number> }> = {};
+    if (b.snapshots && typeof b.snapshots === 'object') {
+      for (const [m, snap] of Object.entries(b.snapshots as Record<string, any>)) {
+        if (snap && typeof snap === 'object') {
+          const sInc = typeof snap.income === 'number' ? snap.income : Number(snap.income ?? 0);
+          const sAlloc: Record<string, number> = {};
+          if (snap.allocations && typeof snap.allocations === 'object') {
+            for (const [sk, sv] of Object.entries(snap.allocations)) {
+              const sAmt = typeof sv === 'number' ? sv : Number(sv ?? 0);
+              if (sAmt > 0) sAlloc[sk] = sAmt;
+            }
+          }
+          snapshots[m] = { income: sInc, allocations: sAlloc };
+        }
+      }
+    }
+    const advice = b.advice && typeof b.advice === 'object' && typeof (b.advice as any).hash === 'string' && typeof (b.advice as any).text === 'string'
+      ? { hash: (b.advice as any).hash, text: (b.advice as any).text }
+      : null;
+    budget = { expectedIncome, allocations, snapshots, advice };
+  }
+
+  // ── Tax Relief (version 3) ──
+  let taxRelief: ParsedTaxRelief | null = null;
+  if (obj.taxRelief && typeof obj.taxRelief === 'object') {
+    const rawTags = Array.isArray(obj.taxRelief.tags) ? obj.taxRelief.tags : [];
+    const tags: ParsedTaxReliefTag[] = rawTags
+      .map((t): ParsedTaxReliefTag | null => {
+        const code = typeof t.code === 'string' ? t.code.trim() : '';
+        const ya = typeof t.ya === 'number' ? t.ya : Number(t.ya ?? NaN);
+        const amount = typeof t.amount === 'number' ? t.amount : Number(t.amount ?? 0);
+        if (!code || !Number.isFinite(ya)) return null;
+        return {
+          id: typeof t.id === 'string' ? t.id : undefined,
+          txnId: typeof t.txnId === 'string' ? t.txnId : undefined,
+          code,
+          ya,
+          amount: Math.abs(amount),
+          origin: t.origin === 'manual' || t.origin === 'commitment' ? t.origin : 'auto',
+          createdAt: typeof t.createdAt === 'string' ? t.createdAt : undefined,
+        };
+      })
+      .filter((t): t is ParsedTaxReliefTag => t !== null);
+
+    const memory: Record<string, string> = {};
+    if (obj.taxRelief.memory && typeof obj.taxRelief.memory === 'object') {
+      for (const [k, v] of Object.entries(obj.taxRelief.memory as Record<string, string>)) {
+        if (typeof v === 'string') memory[k] = v;
+      }
+    }
+    taxRelief = { tags, memory };
+  }
+
+  // ── Merchant Memory (version 3) ──
+  const merchantMemory: Record<string, string> = {};
+  if (obj.merchantMemory && typeof obj.merchantMemory === 'object') {
+    for (const [k, v] of Object.entries(obj.merchantMemory)) {
+      if (typeof v === 'string') merchantMemory[k] = v;
+    }
+  }
+
+  // ── Preferences (version 3) ──
+  let preferences: ParsedAppPreferences | null = null;
+  if (obj.preferences && typeof obj.preferences === 'object') {
+    const p = obj.preferences;
+    preferences = {
+      activeCurrencies: Array.isArray(p.activeCurrencies) ? p.activeCurrencies.filter((c): c is string => typeof c === 'string') : undefined,
+      settings: p.settings && typeof p.settings === 'object' ? (p.settings as Record<string, unknown>) : undefined,
+      streak: p.streak && typeof p.streak === 'object' ? (p.streak as Record<string, unknown>) : undefined,
+      tasks: p.tasks && typeof p.tasks === 'object' ? (p.tasks as Record<string, unknown>) : undefined,
+      autoFill: p.autoFill && typeof p.autoFill === 'object' ? (p.autoFill as Record<string, unknown>) : undefined,
+    };
+  }
+
+  return {
+    version,
+    transactions,
+    accounts,
+    transfers,
+    commitments,
+    categories: categories.length > 0 ? categories : undefined,
+    deletedDefaultCategories,
+    people: people.length > 0 ? people : undefined,
+    splits: splits.length > 0 ? splits : undefined,
+    budget,
+    taxRelief,
+    merchantMemory: Object.keys(merchantMemory).length > 0 ? merchantMemory : undefined,
+    preferences,
+  };
 }

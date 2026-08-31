@@ -1,16 +1,18 @@
-// src/lib/financialExport.ts
-// Financial document export generators: Excel (.xlsx), CSV, Standalone Interactive HTML Report,
-// and Printable PDF HTML. Multi-platform safe (Web and Mobile).
 import * as XLSX from 'xlsx';
 import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import { strToU8, zipSync } from 'fflate';
 import { toDisplay } from './fx';
 import { currencyPrefix } from './format';
 import { formatCurrencyBreakdown } from './format';
 import { nativeTransactionTotalsByCurrency, type FinancialReportData, type MonthlyTrendItem } from './bookkeeping';
+import { matchInstitution } from './institutions';
+import { readImageBytes } from './taxExport';
 import type { Commitment, CommitmentOccurrence } from './commitments';
+import type { Account, Category, ReliefTag, Transaction } from './types';
 
-export type ExportFormat = 'xlsx' | 'csv' | 'html' | 'pdf' | 'json';
+export type ExportFormat = 'xlsx' | 'csv' | 'html' | 'pdf' | 'json' | 'receipts' | 'ewallet';
 
 /** Format a number into standard currency string (e.g. RM 1,234.56 or SGD 1,234.56). */
 export function formatCurrency(amount: number, code: string = 'MYR', rates?: Record<string, number>): string {
@@ -191,6 +193,42 @@ export function generateExcelWorkbook(data: FinancialReportData): Uint8Array {
     { wch: 24 },
   ];
   XLSX.utils.book_append_sheet(wb, wsStats, 'Trends & Statistics');
+
+  // --- OPTIONAL SHEET 5: E-Wallet History ---
+  const ewalletTxns = data.transactions.filter((t) => isEwalletTransaction(t, data.accounts));
+  if (ewalletTxns.length > 0) {
+    const ewRows: (string | number)[][] = [
+      ['Date', 'E-Wallet Provider', 'Type', 'Category', 'Merchant / Payee', 'Amount (MYR)', 'Direction', 'Source', 'Remark'],
+    ];
+    for (const t of ewalletTxns) {
+      const provider = getEwalletProviderName(t, data.accounts);
+      const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Expense');
+      ewRows.push([
+        t.date || 'N/A',
+        provider,
+        t.type.toUpperCase(),
+        catName,
+        t.merchantRaw || t.merchantKey || 'N/A',
+        Math.abs(t.amount),
+        t.type === 'income' ? 'IN (+)' : 'OUT (-)',
+        t.source,
+        t.remark || '',
+      ]);
+    }
+    const wsEW = XLSX.utils.aoa_to_sheet(ewRows);
+    wsEW['!cols'] = [
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 12 },
+      { wch: 24 },
+      { wch: 32 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 35 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsEW, 'E-Wallet History');
+  }
 
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Uint8Array(out);
@@ -382,25 +420,35 @@ export function csvToHtmlTable(csvText: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 2b. ADVANCED IMPORT JSON EXPORT
-// Same shape the Advanced Import screen's parseJSON() reads back (see
-// src/lib/advancedImport.ts), so an exported file can be re-imported as-is —
-// into this account or shared with someone else's.
-//
-// version 2 adds: a top-level `version` stamp (absent reads as 1), `quantity`/`cost` on
-// account rows (a holding's cost basis previously vanished on round trip), a separate
-// `transfers` array (a DCA contribution is neither income nor expense — see lib/types.ts's
-// TxnType — and folding it into `transactions`, which encodes direction by sign, would import
-// it back as income on an older build), and a `commitments` array carrying each recurring
-// bill/DCA's full occurrence history, so the on-time record survives a device change.
-// parseJSON's whitelist projection means every one of these is backward-compatible for free:
-// an old build simply never reads the new keys.
+// 2b. ADVANCED IMPORT JSON EXPORT (Version 3)
+// Full user data export (excluding raw image binaries/URIs) compatible with
+// Advanced Import parseJSON().
 // ---------------------------------------------------------------------------
 
 export interface CommitmentExportExtra {
-  commitments: Commitment[];
-  occurrences: CommitmentOccurrence[];
+  commitments?: Commitment[];
+  occurrences?: CommitmentOccurrence[];
+  balanceEntries?: import('./types').BalanceEntry[];
+  people?: import('./types').Person[];
+  splits?: import('./types').Split[];
+  shares?: import('./types').SplitShare[];
+  splitPayments?: import('./types').SplitPayment[];
+  budget?: {
+    expectedIncome: number;
+    allocations: Record<string, number>;
+  };
+  budgetSnapshots?: Record<string, { income: number; allocations: Record<string, number> }>;
+  budgetAdvice?: { hash: string; text: string } | null;
+  reliefTags?: import('./types').ReliefTag[];
+  reliefMemory?: Record<string, string>;
+  merchantMemory?: import('./types').MemoryMap;
+  deletedDefaultCategories?: string[];
+  activeCurrencies?: string[];
+  preferences?: Record<string, unknown>;
+  allTransactions?: import('./types').Transaction[];
 }
+
+export type FullExportExtra = CommitmentExportExtra;
 
 export function generateAdvancedImportJSON(data: FinancialReportData, extra?: CommitmentExportExtra): string {
   const catMap = new Map<string, string>();
@@ -408,26 +456,46 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
   const accountMetaById = new Map(data.accounts.map((a) => [a.id, a]));
   const accountNameById = new Map(data.accounts.map((a) => [a.id, a.name]));
 
-  const transactions = data.transactions
+  const txnsToUse = extra?.allTransactions ?? data.transactions;
+
+  const transactions = txnsToUse
     .filter((t) => t.type !== 'transfer')
     .map((t) => ({
+      id: t.id,
       date: t.date || null,
       description: t.merchantRaw || t.merchantKey || null,
       amount: Math.round((t.type === 'income' ? Math.abs(t.amount) : -Math.abs(t.amount)) * 100) / 100,
       currency: t.currency ?? 'MYR',
       category: (t.categoryId ? catMap.get(t.categoryId) : null) || '?',
       account: null as string | null,
+      remark: t.remark ?? null,
+      source: t.source ?? 'manual',
+      nativeAmount: t.nativeAmount ?? null,
+      fxRate: t.fxRate ?? null,
+      createdAt: t.createdAt,
     }));
 
-  const transfers = data.transactions
+  const transfers = txnsToUse
     .filter((t) => t.type === 'transfer')
     .map((t) => ({
+      id: t.id,
       date: t.date || null,
       description: t.merchantRaw || t.merchantKey || null,
       amount: Math.round(Math.abs(t.amount) * 100) / 100,
       currency: t.currency ?? 'MYR',
       account: null as string | null,
+      createdAt: t.createdAt,
     }));
+
+  const entriesByAccountId = new Map<string, { asOf: string; value: number }[]>();
+  for (const entry of extra?.balanceEntries ?? []) {
+    const list = entriesByAccountId.get(entry.accountId) ?? [];
+    list.push({ asOf: entry.asOf, value: entry.value });
+    entriesByAccountId.set(entry.accountId, list);
+  }
+  for (const list of entriesByAccountId.values()) {
+    list.sort((a, b) => a.asOf.localeCompare(b.asOf));
+  }
 
   // "Owed to me" is a managed receivable balance kept by the split-bill engine,
   // not a real account — re-importing it would create a bogus Cash account.
@@ -435,22 +503,44 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     .filter((g) => g.cls !== 'receivable')
     .flatMap((g) => g.items.map((item) => {
       const meta = accountMetaById.get(item.accountId);
+      const history = entriesByAccountId.get(item.accountId) ?? [
+        { asOf: data.balanceSheet.asOfDate, value: Math.abs(item.nativeValue) },
+      ];
       // `balance` and `currency` must agree. `item.value` is MYR-converted, so pairing it
       // with the account's own currency code would re-import a foreign account inflated by
       // its exchange rate; `nativeValue` is the figure that currency actually denominates.
       return {
         name: item.name,
         type: g.clsLabel,
+        cls: meta?.cls ?? undefined,
+        kind: meta?.kind ?? (g.cls === 'credit_cards' || g.cls === 'loans' ? 'liability' : 'asset'),
         balance: Math.abs(item.nativeValue),
         currency: item.currency,
         as_of: data.balanceSheet.asOfDate,
         notes: item.ticker || item.symbol || null,
         quantity: meta?.quantity ?? null,
         cost: meta?.cost ?? null,
+        interestRate: meta?.interestRate ?? null,
+        sub: meta?.sub ?? null,
+        symbol: meta?.symbol ?? null,
+        ticker: meta?.ticker ?? null,
+        icon: meta?.icon ?? null,
+        archived: meta?.archived ?? false,
+        history,
       };
     }));
 
+  const categories = data.categories.map((c) => ({
+    id: c.id,
+    label: c.label,
+    icon: c.icon,
+    hue: c.hue,
+    kind: c.kind,
+    isDefault: c.isDefault,
+  }));
+
   const commitments = (extra?.commitments ?? []).map((c) => ({
+    id: c.id,
     label: c.label,
     kind: c.kind,
     amount: c.amount,
@@ -461,24 +551,132 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     toAccount: c.toAccountId ? accountNameById.get(c.toAccountId) ?? null : null,
     startMonth: c.startMonth,
     endMonth: c.endMonth,
+    reliefCode: c.reliefCode ?? null,
+    archived: c.archived ?? false,
     occurrences: (extra?.occurrences ?? [])
       .filter((o) => o.commitmentId === c.id)
-      .map((o) => ({ dueDate: o.dueDate, status: o.status, paidOn: o.paidOn, paidAmount: o.paidAmount })),
+      .map((o) => ({
+        dueDate: o.dueDate,
+        month: o.month,
+        amount: o.amount,
+        status: o.status,
+        paidOn: o.paidOn,
+        paidAmount: o.paidAmount,
+        unitsAdded: o.unitsAdded ?? null,
+        priceMYR: o.priceMYR ?? null,
+        fxRate: o.fxRate ?? null,
+      })),
   }));
 
+  const personById = new Map((extra?.people ?? []).map((p) => [p.id, p]));
+  const sharesBySplitId = new Map<string, import('./types').SplitShare[]>();
+  for (const s of extra?.shares ?? []) {
+    const list = sharesBySplitId.get(s.splitId) ?? [];
+    list.push(s);
+    sharesBySplitId.set(s.splitId, list);
+  }
+  const paymentsByShareId = new Map<string, import('./types').SplitPayment[]>();
+  for (const p of extra?.splitPayments ?? []) {
+    const list = paymentsByShareId.get(p.shareId) ?? [];
+    list.push(p);
+    paymentsByShareId.set(p.shareId, list);
+  }
+
+  const people = (extra?.people ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    createdAt: p.createdAt,
+  }));
+
+  const splits = (extra?.splits ?? []).map((s) => ({
+    id: s.id,
+    txnId: s.txnId,
+    gross: s.gross,
+    ownShare: s.ownShare,
+    method: s.method,
+    currency: s.currency ?? 'MYR',
+    fxRate: s.fxRate ?? null,
+    createdAt: s.createdAt,
+    shares: (sharesBySplitId.get(s.id) ?? []).map((sh) => ({
+      id: sh.id,
+      personId: sh.personId,
+      personName: personById.get(sh.personId)?.name ?? null,
+      owed: sh.owed,
+      paid: sh.paid,
+      status: sh.status,
+      writtenOffTxnId: sh.writtenOffTxnId,
+      createdAt: sh.createdAt,
+      payments: (paymentsByShareId.get(sh.id) ?? []).map((pm) => ({
+        id: pm.id,
+        amount: pm.amount,
+        paidOn: pm.paidOn,
+        evidence: pm.evidence,
+        matchedMerchant: pm.matchedMerchant,
+        accountId: pm.accountId,
+        createdAt: pm.createdAt,
+      })),
+    })),
+  }));
+
+  const budget = extra?.budget
+    ? {
+        expectedIncome: extra.budget.expectedIncome,
+        allocations: extra.budget.allocations,
+        snapshots: extra.budgetSnapshots ?? {},
+        advice: extra.budgetAdvice ?? null,
+      }
+    : undefined;
+
+  const hasReliefTags = (extra?.reliefTags?.length ?? 0) > 0;
+  const hasReliefMemory = Object.keys(extra?.reliefMemory ?? {}).length > 0;
+  const taxRelief = hasReliefTags || hasReliefMemory
+    ? {
+        tags: (extra?.reliefTags ?? []).map((t) => ({
+          id: t.id,
+          txnId: t.txnId,
+          code: t.code,
+          ya: t.ya,
+          amount: t.amount,
+          origin: t.origin,
+          createdAt: t.createdAt,
+        })),
+        memory: extra?.reliefMemory ?? {},
+      }
+    : undefined;
+
+  const merchantMemory = extra?.merchantMemory && Object.keys(extra.merchantMemory).length > 0
+    ? extra.merchantMemory
+    : undefined;
+
+  const preferences = extra?.preferences || extra?.activeCurrencies
+    ? {
+        activeCurrencies: extra.activeCurrencies,
+        ...extra.preferences,
+      }
+    : undefined;
+
   const payload = {
-    version: 2,
+    version: 3,
     statement: {
       issuer: data.userName,
       period: {
-        start: data.period.startDate || (data.transactions[data.transactions.length - 1]?.date ?? data.balanceSheet.asOfDate),
+        start: data.period.startDate || (txnsToUse[txnsToUse.length - 1]?.date ?? data.balanceSheet.asOfDate),
         end: data.period.endDate || data.balanceSheet.asOfDate,
       },
+      exportedAt: new Date().toISOString(),
     },
+    categories,
+    deletedDefaultCategories: extra?.deletedDefaultCategories && extra.deletedDefaultCategories.length > 0 ? extra.deletedDefaultCategories : undefined,
+    accounts,
     transactions,
     transfers,
-    accounts,
     commitments,
+    people: people.length > 0 ? people : undefined,
+    splits: splits.length > 0 ? splits : undefined,
+    budget,
+    taxRelief,
+    merchantMemory,
+    preferences,
   };
 
   return JSON.stringify(payload, null, 2);
@@ -1400,14 +1598,684 @@ function escapeHtml(str: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 6. CROSS-PLATFORM FILE SAVE / DOWNLOAD DISPATCHER
+// 6. E-WALLET TRANSACTION HISTORY & PROVIDER BREAKDOWN GENERATOR
 // ---------------------------------------------------------------------------
+
+/**
+ * Deterministically identify whether a transaction originated from or represents
+ * an e-wallet / payment app transaction (Touch 'n Go, GrabPay, Boost, ShopeePay, BigPay, MAE, DuitNow QR, etc.).
+ */
+export function isEwalletTransaction(t: Transaction, accounts?: Account[]): boolean {
+  if (accounts && accounts.length > 0) {
+    const matchedAccount = accounts.find((a) => a.id === (t as any).accountId);
+    if (matchedAccount) {
+      if (matchedAccount.cls === 'ewallet') return true;
+      const inst = matchInstitution(matchedAccount.name);
+      if (inst && inst.kind === 'ewallet') return true;
+    }
+  }
+
+  const mRaw = (t.merchantRaw || '').toLowerCase();
+  const mKey = (t.merchantKey || '').toLowerCase();
+  const remark = (t.remark || '').toLowerCase();
+
+  const instMatch = matchInstitution(t.merchantRaw) || matchInstitution(t.merchantKey);
+  if (instMatch && instMatch.kind === 'ewallet') return true;
+
+  const ewalletKeywords = [
+    'tng',
+    'touch n go',
+    "touch 'n go",
+    'touch & go',
+    'grabpay',
+    'grab',
+    'boost',
+    'shopeepay',
+    'shopee pay',
+    'bigpay',
+    'big pay',
+    'mae by maybank2u',
+    'mae',
+    'setel',
+    'duitnow qr',
+    'duitnow',
+    'qr pay',
+    'qr payment',
+    'e-wallet',
+    'ewallet',
+    'wallet reload',
+    'e-money',
+  ];
+
+  for (const kw of ewalletKeywords) {
+    if (mRaw.includes(kw) || mKey.includes(kw) || remark.includes(kw)) {
+      return true;
+    }
+  }
+
+  if (t.source === 'extracted' && (mRaw.includes('qr') || mRaw.includes('pay') || mRaw.includes('transfer') || remark.includes('qr'))) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Resolves the display name of the E-Wallet provider for a transaction.
+ */
+export function getEwalletProviderName(t: Transaction, accounts?: Account[]): string {
+  if (accounts && accounts.length > 0) {
+    const matchedAccount = accounts.find((a) => a.id === (t as any).accountId);
+    if (matchedAccount) {
+      const inst = matchInstitution(matchedAccount.name);
+      if (inst && inst.kind === 'ewallet') return inst.name;
+    }
+  }
+
+  const instMatch = matchInstitution(t.merchantRaw) || matchInstitution(t.merchantKey);
+  if (instMatch && instMatch.kind === 'ewallet') return instMatch.name;
+
+  const text = `${t.merchantRaw || ''} ${t.merchantKey || ''} ${t.remark || ''}`.toLowerCase();
+
+  if (text.includes('tng') || text.includes("touch 'n go") || text.includes('touch n go') || text.includes('touch & go')) {
+    return "Touch 'n Go eWallet";
+  }
+  if (text.includes('grabpay') || text.includes('grab')) {
+    return 'GrabPay';
+  }
+  if (text.includes('boost')) {
+    return 'Boost';
+  }
+  if (text.includes('shopeepay') || text.includes('shopee pay')) {
+    return 'ShopeePay';
+  }
+  if (text.includes('bigpay') || text.includes('big pay')) {
+    return 'BigPay';
+  }
+  if (text.includes('mae')) {
+    return 'MAE by Maybank2u';
+  }
+  if (text.includes('setel')) {
+    return 'Setel';
+  }
+  if (text.includes('duitnow qr') || text.includes('duitnow') || text.includes('qr pay') || text.includes('qr payment')) {
+    return 'DuitNow QR';
+  }
+
+  return 'E-Wallet';
+}
+
+/**
+ * Generate a dedicated, provider-itemized E-Wallet History CSV export.
+ */
+export function generateEwalletCSV(
+  data: FinancialReportData,
+  ewalletTxns?: Transaction[]
+): string {
+  const txns = ewalletTxns ?? data.transactions.filter((t) => isEwalletTransaction(t, data.accounts));
+  const catMap = new Map<string, string>();
+  for (const c of data.categories) catMap.set(c.id, c.label);
+
+  const lines: string[] = [];
+
+  // Metadata Header
+  lines.push(`${csvEscape('E-WALLET TRANSACTION HISTORY & PROVIDER STATEMENT')}`);
+  lines.push(`${csvEscape('Name')},${csvEscape(data.userName)}`);
+  lines.push(`${csvEscape('Period')},${csvEscape(data.period.label)}`);
+  lines.push(`${csvEscape('Generated At')},${csvEscape(data.generatedAt)}`);
+  lines.push(`${csvEscape('Total E-Wallet Transactions')},${txns.length}`);
+  lines.push('');
+
+  // Provider Summaries
+  const providerStats = new Map<string, { count: number; spent: number; received: number }>();
+  for (const t of txns) {
+    const provider = getEwalletProviderName(t, data.accounts);
+    const existing = providerStats.get(provider) || { count: 0, spent: 0, received: 0 };
+    existing.count += 1;
+    if (t.type === 'income') {
+      existing.received += Math.abs(t.amount);
+    } else {
+      existing.spent += Math.abs(t.amount);
+    }
+    providerStats.set(provider, existing);
+  }
+
+  let totalSpent = 0;
+  let totalReceived = 0;
+  for (const s of providerStats.values()) {
+    totalSpent += s.spent;
+    totalReceived += s.received;
+  }
+
+  lines.push(`${csvEscape('=== E-WALLET PROVIDER BREAKDOWN ===')}`);
+  lines.push(
+    `${csvEscape('E-Wallet Provider')},${csvEscape('Txn Count')},${csvEscape('Total Spent (MYR)')},${csvEscape('Total Received (MYR)')},${csvEscape('Net Outflow (MYR)')}`
+  );
+  for (const [provider, stats] of providerStats.entries()) {
+    const net = stats.spent - stats.received;
+    lines.push(
+      `${csvEscape(provider)},${stats.count},${stats.spent.toFixed(2)},${stats.received.toFixed(2)},${net.toFixed(2)}`
+    );
+  }
+  lines.push(
+    `${csvEscape('TOTAL')},${txns.length},${totalSpent.toFixed(2)},${totalReceived.toFixed(2)},${(totalSpent - totalReceived).toFixed(2)}`
+  );
+  lines.push('');
+
+  // Itemized Transactions
+  lines.push(`${csvEscape('=== ITEMIZED E-WALLET TRANSACTIONS ===')}`);
+  lines.push(
+    [
+      csvEscape('Date'),
+      csvEscape('E-Wallet / Platform'),
+      csvEscape('Type'),
+      csvEscape('Category'),
+      csvEscape('Merchant / Payee'),
+      csvEscape('Amount (MYR)'),
+      csvEscape('Direction'),
+      csvEscape('Source'),
+      csvEscape('Remark / Notes'),
+    ].join(',')
+  );
+
+  for (const t of txns) {
+    const provider = getEwalletProviderName(t, data.accounts);
+    const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Expense');
+    lines.push(
+      [
+        csvEscape(t.date || 'N/A'),
+        csvEscape(provider),
+        csvEscape(t.type.toUpperCase()),
+        csvEscape(catName),
+        csvEscape(t.merchantRaw || t.merchantKey || 'N/A'),
+        Math.abs(t.amount).toFixed(2),
+        csvEscape(t.type === 'income' ? 'IN (+)' : 'OUT (-)'),
+        csvEscape(t.source),
+        csvEscape(t.remark || ''),
+      ].join(',')
+    );
+  }
+
+  return '\uFEFF' + lines.join('\n');
+}
+
+/**
+ * Generate an interactive HTML report preview for E-Wallet transactions.
+ */
+export function generateEwalletPreviewHtml(
+  data: FinancialReportData,
+  ewalletTxns?: Transaction[]
+): string {
+  const txns = ewalletTxns ?? data.transactions.filter((t) => isEwalletTransaction(t, data.accounts));
+  const catMap = new Map<string, string>();
+  for (const c of data.categories) catMap.set(c.id, c.label);
+
+  const providerStats = new Map<string, { count: number; spent: number; received: number }>();
+  for (const t of txns) {
+    const provider = getEwalletProviderName(t, data.accounts);
+    const existing = providerStats.get(provider) || { count: 0, spent: 0, received: 0 };
+    existing.count += 1;
+    if (t.type === 'income') {
+      existing.received += Math.abs(t.amount);
+    } else {
+      existing.spent += Math.abs(t.amount);
+    }
+    providerStats.set(provider, existing);
+  }
+
+  let totalSpent = 0;
+  let totalReceived = 0;
+  for (const s of providerStats.values()) {
+    totalSpent += s.spent;
+    totalReceived += s.received;
+  }
+
+  const providerCardsHtml = Array.from(providerStats.entries())
+    .map(([provider, stats]) => {
+      return `
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; min-width: 160px; flex: 1;">
+          <div style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 4px;">${escapeHtml(provider)}</div>
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">${stats.count} transactions</div>
+          <div style="font-size: 14px; font-weight: 700; color: #b3261e;">Spent: RM ${stats.spent.toFixed(2)}</div>
+          ${stats.received > 0 ? `<div style="font-size: 12px; font-weight: 600; color: #15803d; margin-top: 2px;">Received: RM ${stats.received.toFixed(2)}</div>` : ''}
+        </div>
+      `;
+    })
+    .join('');
+
+  const rowsHtml = txns
+    .map((t, idx) => {
+      const provider = getEwalletProviderName(t, data.accounts);
+      const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Expense');
+      const isInc = t.type === 'income';
+      return `
+        <tr style="background: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'}; border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 10px 12px; font-size: 12px; color: #64748b;">${escapeHtml(t.date || '-')}</td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 600; color: #0284c7;">
+            <span style="background: #e0f2fe; padding: 2px 6px; border-radius: 4px;">${escapeHtml(provider)}</span>
+          </td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 600; color: #1e293b;">${escapeHtml(t.merchantRaw || t.merchantKey || 'E-Wallet Txn')}</td>
+          <td style="padding: 10px 12px; font-size: 12px; color: #475569;">${escapeHtml(catName)}</td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 700; text-align: right; color: ${isInc ? '#15803d' : '#1e293b'};">
+            ${isInc ? '+' : '-'}RM ${Math.abs(t.amount).toFixed(2)}
+          </td>
+          <td style="padding: 10px 12px; font-size: 11px; color: #64748b;">${escapeHtml(t.remark || t.source)}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>E-Wallet History Statement</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; color: #0f172a; background: #ffffff; }
+          .header { margin-bottom: 20px; border-bottom: 2px solid #0284c7; padding-bottom: 12px; }
+          .title { font-size: 18px; font-weight: 800; color: #0f172a; }
+          .subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
+          .grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; text-align: left; }
+          th { background: #f1f5f9; padding: 10px 12px; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="title">E-Wallet Transaction History Statement</div>
+          <div class="subtitle">Period: <strong>${escapeHtml(data.period.label)}</strong> | Generated: ${escapeHtml(data.generatedAt.slice(0, 10))} | Name: ${escapeHtml(data.userName)}</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; flex: 1;">
+            <div style="font-size: 11px; color: #166534; font-weight: 700; text-transform: uppercase;">Total E-Wallet Outflow</div>
+            <div style="font-size: 18px; font-weight: 800; color: #15803d; margin-top: 4px;">RM ${totalSpent.toFixed(2)}</div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; flex: 1;">
+            <div style="font-size: 11px; color: #475569; font-weight: 700; text-transform: uppercase;">Total E-Wallet Transactions</div>
+            <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 4px;">${txns.length} txns</div>
+          </div>
+        </div>
+
+        <h3 style="font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; text-transform: uppercase;">Provider Breakdown</h3>
+        <div class="grid">
+          ${providerCardsHtml || '<div style="color: #94a3b8; font-size: 12px;">No e-wallet transactions found in this period.</div>'}
+        </div>
+
+        <h3 style="font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; text-transform: uppercase;">Itemized E-Wallet Ledger</h3>
+        <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Provider</th>
+                <th>Merchant / Payee</th>
+                <th>Category</th>
+                <th style="text-align: right;">Amount</th>
+                <th>Remark / Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || '<tr><td colspan="6" style="padding: 24px; text-align: center; color: #94a3b8;">No e-wallet transactions found in this period.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// 7. RECEIPTS & INVOICES EVIDENCE ARCHIVE (.ZIP) GENERATOR
+// ---------------------------------------------------------------------------
+
+export interface ReceiptExportItem {
+  id: string;
+  date: string;
+  merchant: string;
+  amount: number;
+  currency: string;
+  category: string;
+  remark: string;
+  fileName: string;
+  imageUri: string;
+}
+
+/**
+ * Builds a structured list of receipt images and evidence metadata for transactions in the period.
+ */
+export function buildReceiptExportList(
+  periodTransactions: Transaction[],
+  categories: Category[],
+  reliefTags?: ReliefTag[]
+): ReceiptExportItem[] {
+  const catMap = new Map<string, string>();
+  for (const c of categories) catMap.set(c.id, c.label);
+
+  const items: ReceiptExportItem[] = [];
+  const seenUris = new Set<string>();
+
+  for (const t of periodTransactions) {
+    if (t.receiptUri && !seenUris.has(t.receiptUri)) {
+      seenUris.add(t.receiptUri);
+      const datePrefix = t.date ? t.date.replace(/-/g, '') : 'nodate';
+      const merchantPrefix = (t.merchantRaw || 'receipt')
+        .replace(/[^a-zA-Z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 30);
+      const amtStr = `RM${Math.abs(t.amount).toFixed(2).replace('.', '_')}`;
+      const ext = t.receiptUri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+      const fileName = `${datePrefix}_${merchantPrefix}_${amtStr}.${ext}`;
+      const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || 'General';
+
+      items.push({
+        id: t.id,
+        date: t.date || 'unknown',
+        merchant: t.merchantRaw || 'Receipt',
+        amount: Math.abs(t.amount),
+        currency: t.currency || 'MYR',
+        category: catName,
+        remark: t.remark || '',
+        fileName,
+        imageUri: t.receiptUri,
+      });
+    }
+  }
+
+  if (reliefTags && reliefTags.length > 0) {
+    for (const tag of reliefTags) {
+      const txn = periodTransactions.find((x) => x.id === tag.txnId);
+      if (tag.certImageUri && !seenUris.has(tag.certImageUri)) {
+        seenUris.add(tag.certImageUri);
+        const datePrefix = txn?.date ? txn.date.replace(/-/g, '') : 'nodate';
+        const merchantPrefix = (txn?.merchantRaw || 'cert')
+          .replace(/[^a-zA-Z0-9]/g, '_')
+          .replace(/_+/g, '_')
+          .slice(0, 30);
+        const ext = tag.certImageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+        items.push({
+          id: tag.id,
+          date: txn?.date || 'unknown',
+          merchant: txn?.merchantRaw || `Tax Relief ${tag.code}`,
+          amount: tag.amount,
+          currency: 'MYR',
+          category: `Tax Relief (${tag.code})`,
+          remark: 'Medical / Certification Document',
+          fileName: `${datePrefix}_${merchantPrefix}_cert.${ext}`,
+          imageUri: tag.certImageUri,
+        });
+      }
+      if (tag.einvoiceImageUri && !seenUris.has(tag.einvoiceImageUri)) {
+        seenUris.add(tag.einvoiceImageUri);
+        const datePrefix = txn?.date ? txn.date.replace(/-/g, '') : 'nodate';
+        const merchantPrefix = (txn?.merchantRaw || 'einvoice')
+          .replace(/[^a-zA-Z0-9]/g, '_')
+          .replace(/_+/g, '_')
+          .slice(0, 30);
+        const ext = tag.einvoiceImageUri.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+        items.push({
+          id: tag.id,
+          date: txn?.date || 'unknown',
+          merchant: txn?.merchantRaw || `e-Invoice ${tag.code}`,
+          amount: tag.amount,
+          currency: 'MYR',
+          category: `Tax Relief (${tag.code})`,
+          remark: 'Official e-Invoice',
+          fileName: `${datePrefix}_${merchantPrefix}_einvoice.${ext}`,
+          imageUri: tag.einvoiceImageUri,
+        });
+      }
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Packages all attached receipt photos, medical certifications, and e-invoices
+ * for the selected reporting period into an organized ZIP archive with manifests.
+ */
+export function generateReceiptsZip(
+  data: FinancialReportData,
+  periodTransactions: Transaction[],
+  reliefTags?: ReliefTag[]
+): Uint8Array {
+  const items = buildReceiptExportList(periodTransactions, data.categories, reliefTags);
+  const zipEntries: Record<string, Uint8Array> = {};
+
+  const manifestRows: string[] = [
+    'Index,Date,Merchant,Amount (MYR),Currency,Category,Remark,Image File Name,Attached',
+  ];
+
+  let attachedCount = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const bytes = readImageBytes(item.imageUri);
+    const hasImage = bytes !== null && bytes.length > 0;
+    if (hasImage) {
+      zipEntries[`receipts/${item.fileName}`] = bytes;
+      attachedCount += 1;
+    }
+    manifestRows.push(
+      [
+        i + 1,
+        csvEscape(item.date),
+        csvEscape(item.merchant),
+        item.amount.toFixed(2),
+        csvEscape(item.currency),
+        csvEscape(item.category),
+        csvEscape(item.remark),
+        csvEscape(item.fileName),
+        hasImage ? 'Yes' : 'Missing File',
+      ].join(',')
+    );
+  }
+
+  // 1. Add receipts_manifest.csv
+  zipEntries['receipts_manifest.csv'] = strToU8('\uFEFF' + manifestRows.join('\n'));
+
+  // 2. Add MANIFEST.json
+  const manifestJson = {
+    application: 'Pip Finance',
+    exportType: 'Receipts & Evidence Archive',
+    userName: data.userName,
+    period: data.period.label,
+    exportedAt: data.generatedAt,
+    receiptCount: items.length,
+    attachedFilesCount: attachedCount,
+    totalReceiptValueMYR: items.reduce((sum, item) => sum + item.amount, 0),
+    items: items.map((m) => ({
+      date: m.date,
+      merchant: m.merchant,
+      amount: m.amount,
+      currency: m.currency,
+      category: m.category,
+      remark: m.remark,
+      fileName: m.fileName,
+      attached: zipEntries[`receipts/${m.fileName}`] !== undefined,
+    })),
+  };
+  zipEntries['MANIFEST.json'] = strToU8(JSON.stringify(manifestJson, null, 2));
+
+  // 3. Add README.txt
+  const totalValue = items.reduce((sum, item) => sum + item.amount, 0);
+  const readmeText = [
+    '================================================================================',
+    'PIP FINANCE - RECEIPTS & EVIDENCE ARCHIVE',
+    `Export Period: ${data.period.label}`,
+    `Generated At:  ${data.generatedAt}`,
+    `User:          ${data.userName}`,
+    '================================================================================',
+    '',
+    `Total Receipts Found:  ${items.length}`,
+    `Attached Image Files:  ${attachedCount}`,
+    `Total Receipt Value:   RM ${totalValue.toFixed(2)}`,
+    '',
+    'CONTENTS:',
+    '1. receipts/               Folder containing original receipt photos and documents',
+    '2. receipts_manifest.csv   Spreadsheet containing complete itemized metadata',
+    '3. MANIFEST.json           Structured machine-readable index for audit ingestion',
+    '4. README.txt              This summary file',
+    '',
+    'ITEMIZED LIST:',
+    ...items.map(
+      (m, idx) =>
+        `${idx + 1}. [${m.date}] ${m.merchant} - RM ${m.amount.toFixed(2)} (${m.category}) -> receipts/${m.fileName}`
+    ),
+    '',
+    '================================================================================',
+    'Generated by Pip Finance (https://pipfinance.app) - Offline-first personal bookkeeping',
+  ].join('\n');
+
+  zipEntries['README.txt'] = strToU8(readmeText);
+
+  return zipSync(zipEntries);
+}
+
+/**
+ * Generate an interactive HTML report preview for Receipts & Evidence.
+ */
+export function generateReceiptsPreviewHtml(
+  data: FinancialReportData,
+  periodTransactions: Transaction[],
+  reliefTags?: ReliefTag[]
+): string {
+  const items = buildReceiptExportList(periodTransactions, data.categories, reliefTags);
+  const totalVal = items.reduce((s, it) => s + it.amount, 0);
+
+  const rowsHtml = items
+    .map((item, idx) => {
+      return `
+        <tr style="background: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'}; border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 10px 12px; font-size: 12px; color: #64748b;">${escapeHtml(item.date)}</td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 700; color: #0f172a;">${escapeHtml(item.merchant)}</td>
+          <td style="padding: 10px 12px; font-size: 12px; color: #0284c7;">
+            <span style="background: #e0f2fe; padding: 2px 6px; border-radius: 4px;">${escapeHtml(item.category)}</span>
+          </td>
+          <td style="padding: 10px 12px; font-size: 12px; font-weight: 700; text-align: right; color: #0f172a;">RM ${item.amount.toFixed(2)}</td>
+          <td style="padding: 10px 12px; font-size: 11px; font-family: monospace; color: #475569;">receipts/${escapeHtml(item.fileName)}</td>
+          <td style="padding: 10px 12px; font-size: 11px; color: #64748b;">${escapeHtml(item.remark || '-')}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Receipts Archive Preview</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; color: #0f172a; background: #ffffff; }
+          .header { margin-bottom: 20px; border-bottom: 2px solid #0891b2; padding-bottom: 12px; }
+          .title { font-size: 18px; font-weight: 800; color: #0f172a; }
+          .subtitle { font-size: 12px; color: #64748b; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; text-align: left; margin-top: 16px; }
+          th { background: #f1f5f9; padding: 10px 12px; font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="title">Receipts & Invoices Archive (.zip) Preview</div>
+          <div class="subtitle">Period: <strong>${escapeHtml(data.period.label)}</strong> | Name: ${escapeHtml(data.userName)}</div>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <div style="background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 8px; padding: 12px 16px; flex: 1;">
+            <div style="font-size: 11px; color: #0e7490; font-weight: 700; text-transform: uppercase;">Total Receipts Value</div>
+            <div style="font-size: 18px; font-weight: 800; color: #0891b2; margin-top: 4px;">RM ${totalVal.toFixed(2)}</div>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; flex: 1;">
+            <div style="font-size: 11px; color: #475569; font-weight: 700; text-transform: uppercase;">Receipt Photos in Archive</div>
+            <div style="font-size: 18px; font-weight: 800; color: #0f172a; margin-top: 4px;">${items.length} files</div>
+          </div>
+        </div>
+
+        <h3 style="font-size: 13px; font-weight: 700; color: #334155; margin-bottom: 8px; text-transform: uppercase;">Packaged Receipts & Documents</h3>
+        <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th style="text-align: right;">Amount</th>
+                <th>Archived File Name</th>
+                <th>Remark / Document</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || '<tr><td colspan="6" style="padding: 24px; text-align: center; color: #94a3b8;">No receipt photos found in this period.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// 8. CROSS-PLATFORM FILE SAVE / DOWNLOAD DISPATCHER & SHARING
+// ---------------------------------------------------------------------------
+
+function computeByteSize(content: string | Uint8Array): number {
+  if (typeof content === 'string') {
+    try {
+      if (typeof TextEncoder !== 'undefined') {
+        return new TextEncoder().encode(content).length;
+      }
+    } catch {}
+    return content.length;
+  }
+  return content.byteLength;
+}
+
+export interface SaveExportResult {
+  success: boolean;
+  uri?: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  error?: string;
+}
+
+/**
+ * Open native system share dialog so the user can save to Files / Downloads,
+ * send via AirDrop / QuickShare / Drive, or open in another application.
+ */
+export async function shareExportFile(
+  uri: string,
+  mimeType?: string,
+  dialogTitle?: string
+): Promise<boolean> {
+  try {
+    if (Platform.OS === 'web') return false;
+    const isAvailable = await Sharing.isAvailableAsync().catch(() => false);
+    if (!isAvailable) return false;
+    await Sharing.shareAsync(uri, {
+      mimeType,
+      dialogTitle: dialogTitle || 'Save or Share Financial File',
+      UTI: mimeType,
+    });
+    return true;
+  } catch (err) {
+    console.warn('Error sharing export file:', err);
+    return false;
+  }
+}
 
 export async function saveOrDownloadExport(
   fileName: string,
   content: string | Uint8Array,
-  mimeType: string
-): Promise<{ success: boolean; uri?: string; error?: string }> {
+  mimeType: string,
+  options?: { autoShare?: boolean; dialogTitle?: string }
+): Promise<SaveExportResult> {
+  const fileSize = computeByteSize(content);
   try {
     if (Platform.OS === 'web') {
       const blob = new Blob([content as any], { type: mimeType });
@@ -1419,18 +2287,51 @@ export async function saveOrDownloadExport(
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      return { success: true };
+      return { success: true, fileName, mimeType, fileSize };
     } else {
-      // Mobile / Native using expo-file-system modern File API
-      const file = new File(Paths.cache, fileName);
-      if (typeof content === 'string') {
+      // Mobile / Native: write to app document directory (durable) or cache
+      let uri = `file://${fileName}`;
+      try {
+        let targetDir = Paths.document;
+        try {
+          if (!targetDir) targetDir = Paths.cache;
+        } catch {
+          targetDir = Paths.cache;
+        }
+        const file = new File(targetDir, fileName);
         file.write(content);
-      } else {
-        file.write(content);
+        uri = file.uri;
+      } catch {
+        // Fallback for test / headless environments
+        try {
+          const fs = require('fs');
+          const path = require('path');
+          const os = require('os');
+          const outPath = path.join(os.tmpdir(), fileName);
+          fs.writeFileSync(outPath, content);
+          uri = `file://${outPath}`;
+        } catch {}
       }
-      return { success: true, uri: file.uri };
+
+      if (options?.autoShare) {
+        await shareExportFile(uri, mimeType, options.dialogTitle);
+      }
+
+      return {
+        success: true,
+        uri,
+        fileName,
+        mimeType,
+        fileSize,
+      };
     }
   } catch (err: any) {
-    return { success: false, error: err?.message || 'Failed to save export file' };
+    return {
+      success: false,
+      error: err?.message || 'Failed to save export file',
+      fileName,
+      mimeType,
+      fileSize,
+    };
   }
 }

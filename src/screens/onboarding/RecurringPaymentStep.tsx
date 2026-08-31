@@ -9,15 +9,18 @@ import { FadeIn } from '../../components/Motion';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton } from '../../components/ui';
 import { DEFAULT_EXPENSE_ID } from '../../data/categories';
 import { useLanguage } from '../../i18n';
+import { currencyPrefix } from '../../lib/format';
 import * as haptics from '../../lib/haptics';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
+import { useDisplayCurrency } from '../../state/useDisplayCurrency';
 import { useAppData } from '../../state/store';
 import { numFont, radius, spacing, uiFont } from '../../theme';
 
 export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   const { t } = useLanguage();
   const { categories, addCommitmentEntry } = useAppData();
   const expenseCats = useMemo(() => categories.filter((c) => c.kind === 'expense'), [categories]);
@@ -38,7 +41,7 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
     haptics.commit();
     setBusy(true);
     try {
-      await addCommitmentEntry({ label: label.trim(), kind: 'expense', amount, dueDay, categoryId });
+      await addCommitmentEntry({ label: label.trim(), kind: 'expense', amount, dueDay, categoryId, currency: dc.code });
       setAddedCount((n) => n + 1);
       setLabel('');
       setAmountText('');
@@ -63,7 +66,7 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
 
       <View style={styles.row2}>
         <View style={[styles.amountCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(dc.code)}</Text>
           <TextInput
             value={amountText}
             onChangeText={setAmountText}

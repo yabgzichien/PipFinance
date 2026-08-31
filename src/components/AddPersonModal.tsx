@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLanguage } from '../i18n';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, uiFont } from '../theme';
 import { Icon } from './Icon';
@@ -19,6 +20,7 @@ export function AddPersonModal({
 }) {
   const insets = useSafeAreaInsets();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -49,7 +51,7 @@ export function AddPersonModal({
       >
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom }]}>
           <View style={styles.head}>
-            <Text style={[styles.title, { color: colorTheme.ink }]}>Add a name</Text>
+            <Text style={[styles.title, { color: colorTheme.ink }]}>{isZh ? '添加人员' : 'Add a name'}</Text>
             <Pressable onPress={onClose} hitSlop={8}>
               <Icon name="x" size={20} color={colorTheme.ink2} />
             </Pressable>
@@ -58,7 +60,7 @@ export function AddPersonModal({
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="Friend's name"
+            placeholder={isZh ? '人员姓名 / 称呼' : "Friend's name"}
             placeholderTextColor={colorTheme.ink3}
             style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
             autoCapitalize="words"
@@ -70,7 +72,7 @@ export function AddPersonModal({
           <View style={{ marginTop: 16 }}>
             <PrimaryButton onPress={submit} disabled={!name.trim() || busy} height={50}>
               <Icon name="plus" size={18} color="#fff" stroke={2.2} />
-              <BtnLabel>Add</BtnLabel>
+              <BtnLabel>{isZh ? '添加' : 'Add'}</BtnLabel>
             </PrimaryButton>
           </View>
         </View>

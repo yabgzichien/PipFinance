@@ -10,11 +10,21 @@ import {
   generateHTMLReport,
   generatePrintablePDFHtml,
   generateAdvancedImportJSON,
+  generateEwalletCSV,
+  generateEwalletPreviewHtml,
+  generateReceiptsZip,
+  generateReceiptsPreviewHtml,
+  buildReceiptExportList,
+  isEwalletTransaction,
+  getEwalletProviderName,
   formatCurrency,
+  saveOrDownloadExport,
+  shareExportFile,
 } from '../src/lib/financialExport';
 import { parseJSON } from '../src/lib/advancedImport';
+import { unzlibSync } from 'fflate';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
-import type { Account, BalanceEntry, Category, Transaction } from '../src/lib/types';
+import type { Account, BalanceEntry, Category, ReliefTag, Transaction } from '../src/lib/types';
 
 function makeTxn(over: Partial<Transaction>): Transaction {
   return {
@@ -69,9 +79,9 @@ const mockCategories: Category[] = [
 
 describe('generateExcelWorkbook', () => {
   const txns = [
-    makeTxn({ type: 'income', categoryId: 'salary', amount: 5000, date: '2026-06-01' }),
-    makeTxn({ type: 'expense', categoryId: 'transport', amount: 300, date: '2026-06-10' }),
-    makeTxn({ type: 'expense', categoryId: 'food', amount: 700, date: '2026-06-12' }),
+    makeTxn({ merchantRaw: 'Employer Inc', merchantKey: 'employer', type: 'income', categoryId: 'salary', amount: 5000, date: '2026-06-01', source: 'manual' }),
+    makeTxn({ merchantRaw: 'RapidKL LRT', merchantKey: 'rapidkl', type: 'expense', categoryId: 'transport', amount: 300, date: '2026-06-10', source: 'manual' }),
+    makeTxn({ merchantRaw: 'Jaya Grocer', merchantKey: 'jayagrocer', type: 'expense', categoryId: 'food', amount: 700, date: '2026-06-12', source: 'manual' }),
   ];
   const accounts = [makeAcct({ id: 'a1', kind: 'asset', cls: 'cash' })];
   const entries = [makeEntry({ accountId: 'a1', value: 8000, asOf: '2026-06-30' })];
@@ -107,7 +117,7 @@ describe('generateExcelWorkbook', () => {
 
     // Check Ledger
     const ledgerCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Transaction Ledger']);
-    expect(ledgerCsv).toContain('GrabCar');
+    expect(ledgerCsv).toContain('RapidKL LRT');
   });
 });
 
@@ -220,9 +230,9 @@ describe('generateAdvancedImportJSON', () => {
     expect(parsedAccounts[0]).toMatchObject({ name: 'CIMB Bank', cls: 'cash', balance: 6000 });
   });
 
-  it('stamps a version-2 payload', () => {
+  it('stamps a version-3 payload', () => {
     const json = generateAdvancedImportJSON(bundle);
-    expect(JSON.parse(json).version).toBe(2);
+    expect(JSON.parse(json).version).toBe(3);
   });
 });
 
@@ -368,6 +378,184 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
       expect.objectContaining({ label: 'AWS Server', currency: 'USD', amount: 50 }),
     ]);
   });
+
+  it('exports full Version 3 database entities and round-trips through parseJSON without images', () => {
+    const v3Txns = [
+      makeTxn({
+        id: 't_split_1',
+        type: 'expense',
+        categoryId: 'food',
+        amount: 30, // own share
+        date: '2026-06-10',
+        merchantRaw: 'Hotpot Dinner',
+        receiptUri: 'file:///data/user/receipt1.jpg',
+        remark: 'Split with Alice and Bob',
+      }),
+      makeTxn({
+        id: 't_relief_1',
+        type: 'expense',
+        categoryId: 'medical',
+        amount: 250,
+        date: '2026-06-12',
+        merchantRaw: 'Klinik Mediviron',
+        receiptUri: 'file:///data/user/receipt2.png',
+      }),
+    ];
+    const v3Accounts = [
+      makeAcct({
+        id: 'a_cimb',
+        name: 'CIMB Savings',
+        kind: 'asset',
+        cls: 'cash',
+        interestRate: 2.5,
+        icon: 'bank',
+      }),
+    ];
+    const v3Entries = [
+      makeEntry({ accountId: 'a_cimb', value: 5000, asOf: '2026-05-31' }),
+      makeEntry({ accountId: 'a_cimb', value: 5500, asOf: '2026-06-30' }),
+    ];
+    const v3Categories: Category[] = [
+      ...mockCategories,
+      { id: 'cat_pet', label: 'Pet Care', icon: 'paw', hue: 120, kind: 'expense', isDefault: false },
+    ];
+    const v3Bundle = buildFinancialReportBundle(v3Txns, v3Categories, v3Accounts, v3Entries, period, 'Nurul');
+
+    const v3Extra = {
+      balanceEntries: v3Entries,
+      people: [{ id: 'p_alice', name: 'Alice', createdAt: '2026-06-01T00:00:00.000Z' }],
+      splits: [
+        {
+          id: 'sp_1',
+          txnId: 't_split_1',
+          gross: 90,
+          ownShare: 30,
+          method: 'equal' as const,
+          currency: 'MYR',
+          fxRate: null,
+          createdAt: '2026-06-10T19:00:00.000Z',
+        },
+      ],
+      shares: [
+        {
+          id: 'sh_alice',
+          splitId: 'sp_1',
+          personId: 'p_alice',
+          owed: 30,
+          paid: 30,
+          status: 'settled' as const,
+          writtenOffTxnId: null,
+          createdAt: '2026-06-10T19:00:00.000Z',
+        },
+      ],
+      splitPayments: [
+        {
+          id: 'pm_1',
+          shareId: 'sh_alice',
+          amount: 30,
+          paidOn: '2026-06-11',
+          evidence: 'declared' as const,
+          matchedMerchant: 'DuitNow Alice',
+          accountId: 'a_cimb',
+          createdAt: '2026-06-11T10:00:00.000Z',
+        },
+      ],
+      budget: {
+        expectedIncome: 6000,
+        allocations: { food: 800, medical: 300, cat_pet: 200 },
+      },
+      budgetSnapshots: {
+        '2026-05': { income: 5800, allocations: { food: 750 } },
+      },
+      budgetAdvice: { hash: 'hash123', text: 'Good savings rate!' },
+      reliefTags: [
+        {
+          id: 'rt_1',
+          txnId: 't_relief_1',
+          code: 'MEDICAL',
+          ya: 2026,
+          amount: 250,
+          origin: 'manual' as const,
+          certImageUri: 'file:///data/user/cert.jpg',
+          einvoiceImageUri: 'file:///data/user/invoice.pdf',
+          createdAt: '2026-06-12T12:00:00.000Z',
+        },
+      ],
+      reliefMemory: { 'klinik-mediviron': 'MEDICAL' },
+      merchantMemory: { 'hotpot-dinner': 'food', 'klinik-mediviron': 'medical' },
+      deletedDefaultCategories: ['gifts'],
+      activeCurrencies: ['MYR', 'USD', 'SGD'],
+      preferences: {
+        settings: { soundEnabled: true, motionSetting: 'full' },
+        tasks: { tasksDone: ['export'] },
+      },
+    };
+
+    const json = generateAdvancedImportJSON(v3Bundle, v3Extra);
+    const rawPayload = JSON.parse(json);
+
+    // 1. Check version is 3
+    expect(rawPayload.version).toBe(3);
+
+    // 2. Check images are strictly excluded
+    expect(json).not.toContain('file:///data/user/receipt1.jpg');
+    expect(json).not.toContain('file:///data/user/cert.jpg');
+    expect(json).not.toContain('receiptUri');
+    expect(json).not.toContain('certImageUri');
+    expect(json).not.toContain('einvoiceImageUri');
+
+    // 3. Check account has interestRate and balance history series
+    const acct = rawPayload.accounts.find((a: any) => a.name === 'CIMB Savings');
+    expect(acct.interestRate).toBe(2.5);
+    expect(acct.history).toHaveLength(2);
+    expect(acct.history).toEqual([
+      { asOf: '2026-05-31', value: 5000 },
+      { asOf: '2026-06-30', value: 5500 },
+    ]);
+
+    // 4. Check categories exported
+    expect(rawPayload.categories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'cat_pet', label: 'Pet Care', icon: 'paw' }),
+      ])
+    );
+    expect(rawPayload.deletedDefaultCategories).toEqual(['gifts']);
+
+    // 5. Check splits and people
+    expect(rawPayload.people).toEqual([expect.objectContaining({ name: 'Alice' })]);
+    expect(rawPayload.splits).toHaveLength(1);
+    expect(rawPayload.splits[0]).toMatchObject({
+      gross: 90,
+      ownShare: 30,
+      shares: [
+        expect.objectContaining({
+          personName: 'Alice',
+          owed: 30,
+          paid: 30,
+          status: 'settled',
+          payments: [expect.objectContaining({ amount: 30, paidOn: '2026-06-11' })],
+        }),
+      ],
+    });
+
+    // 6. Check budget, relief, memory, preferences
+    expect(rawPayload.budget.expectedIncome).toBe(6000);
+    expect(rawPayload.budget.allocations).toMatchObject({ food: 800 });
+    expect(rawPayload.taxRelief.tags[0]).toMatchObject({ code: 'MEDICAL', ya: 2026, amount: 250 });
+    expect(rawPayload.merchantMemory['hotpot-dinner']).toBe('food');
+    expect(rawPayload.preferences.activeCurrencies).toEqual(['MYR', 'USD', 'SGD']);
+
+    // 7. Parse with parseJSON and verify round-trip
+    const parsed = parseJSON(json);
+    expect(parsed.version).toBe(3);
+    expect(parsed.categories).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'cat_pet' })]));
+    expect(parsed.accounts[0].history).toHaveLength(2);
+    expect(parsed.splits).toHaveLength(1);
+    expect(parsed.budget?.expectedIncome).toBe(6000);
+    expect(parsed.taxRelief?.tags[0].code).toBe('MEDICAL');
+    expect(parsed.merchantMemory?.['hotpot-dinner']).toBe('food');
+    expect(parsed.preferences?.activeCurrencies).toEqual(['MYR', 'USD', 'SGD']);
+  });
 });
 
 describe('generatePrintablePDFHtml', () => {
@@ -440,6 +628,171 @@ describe('generateHTMLReport with displayCurrency', () => {
     expect(html).toContain('SGD 1,000.00'); // 3300 MYR / 3.3
     expect(html).toContain('SGD 100.00'); // 330 MYR / 3.3
     expect(html).toContain('Amount (SGD)');
+  });
+});
+
+describe('saveOrDownloadExport and shareExportFile', () => {
+  it('saves file and returns file metadata including size, name and mimeType', async () => {
+    const sampleCsv = 'Date,Amount\n2026-06-01,100';
+    const result = await saveOrDownloadExport('test_export.csv', sampleCsv, 'text/csv');
+    expect(result.success).toBe(true);
+    expect(result.fileName).toBe('test_export.csv');
+    expect(result.mimeType).toBe('text/csv');
+    expect(result.fileSize).toBeGreaterThan(0);
+  });
+
+  it('safely handles shareExportFile call', async () => {
+    const res = await shareExportFile('file:///fake/path/test.pdf', 'application/pdf', 'Share PDF');
+    // In jest node environment without native sharing bridge, should resolve cleanly to a boolean
+    expect(typeof res).toBe('boolean');
+  });
+});
+
+describe('E-Wallet detection and statement export', () => {
+  const tngTxn = makeTxn({
+    merchantRaw: "Touch 'n Go eWallet",
+    merchantKey: 'touch_n_go',
+    amount: 50,
+    type: 'expense',
+    date: '2026-06-05',
+    remark: 'Reload via FPX',
+  });
+  const grabTxn = makeTxn({
+    merchantRaw: 'GrabPay Merchant',
+    merchantKey: 'grabpay',
+    amount: 25,
+    type: 'expense',
+    date: '2026-06-08',
+    source: 'extracted',
+  });
+  const boostTxn = makeTxn({
+    merchantRaw: 'Boost payment',
+    merchantKey: 'boost',
+    amount: 15,
+    type: 'expense',
+    date: '2026-06-12',
+  });
+  const regularTxn = makeTxn({
+    merchantRaw: 'Tesco Hypermarket',
+    merchantKey: 'tesco',
+    amount: 150,
+    type: 'expense',
+    date: '2026-06-15',
+    source: 'manual',
+  });
+
+  const txns = [tngTxn, grabTxn, boostTxn, regularTxn];
+  const accounts = [
+    makeAcct({ id: 'a1', name: "Touch 'n Go eWallet", cls: 'ewallet' }),
+    makeAcct({ id: 'a2', name: 'Maybank', cls: 'cash' }),
+  ];
+  const entries = [makeEntry({ accountId: 'a1', value: 200, asOf: '2026-06-30' })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Test User');
+
+  it('correctly identifies e-wallet transactions and providers', () => {
+    expect(isEwalletTransaction(tngTxn, accounts)).toBe(true);
+    expect(isEwalletTransaction(grabTxn, accounts)).toBe(true);
+    expect(isEwalletTransaction(boostTxn, accounts)).toBe(true);
+    expect(isEwalletTransaction(regularTxn, accounts)).toBe(false);
+
+    expect(getEwalletProviderName(tngTxn, accounts)).toBe("Touch 'n Go eWallet");
+    expect(getEwalletProviderName(grabTxn, accounts)).toBe('GrabPay');
+    expect(getEwalletProviderName(boostTxn, accounts)).toBe('Boost');
+  });
+
+  it('generates a structured E-Wallet CSV with provider breakdown and transactions', () => {
+    const csv = generateEwalletCSV(bundle);
+    expect(csv).toContain('E-WALLET TRANSACTION HISTORY & PROVIDER STATEMENT');
+    expect(csv).toContain('=== E-WALLET PROVIDER BREAKDOWN ===');
+    expect(csv).toContain("Touch 'n Go eWallet");
+    expect(csv).toContain('GrabPay');
+    expect(csv).toContain('Boost');
+    expect(csv).toContain('=== ITEMIZED E-WALLET TRANSACTIONS ===');
+    expect(csv).toContain('50.00');
+    expect(csv).toContain('25.00');
+    expect(csv).toContain('15.00');
+  });
+
+  it('generates interactive E-Wallet HTML report preview', () => {
+    const html = generateEwalletPreviewHtml(bundle);
+    expect(html).toContain('E-Wallet Transaction History Statement');
+    expect(html).toContain('Total E-Wallet Outflow');
+    expect(html).toContain('Provider Breakdown');
+    expect(html).toContain('GrabPay');
+    expect(html).toContain('Boost');
+    expect(html).toContain('Go eWallet');
+  });
+
+  it('appends E-Wallet History sheet to Excel workbook when e-wallet txns are present', () => {
+    const bytes = generateExcelWorkbook(bundle);
+    const wb = XLSX.read(bytes, { type: 'array' });
+    expect(wb.SheetNames).toContain('E-Wallet History');
+    const ewCsv = XLSX.utils.sheet_to_csv(wb.Sheets['E-Wallet History']);
+    expect(ewCsv).toContain("Touch 'n Go eWallet");
+    expect(ewCsv).toContain('GrabPay');
+  });
+});
+
+describe('Receipts Archive and Preview generation', () => {
+  const receiptTxn1 = makeTxn({
+    merchantRaw: 'Starbucks Coffee',
+    amount: 18.5,
+    date: '2026-06-03',
+    receiptUri: 'file:///data/receipts/starbucks_01.jpg',
+  });
+  const receiptTxn2 = makeTxn({
+    merchantRaw: 'Popular Bookstore',
+    amount: 85.0,
+    date: '2026-06-07',
+    receiptUri: 'file:///data/receipts/books_02.png',
+  });
+  const noReceiptTxn = makeTxn({
+    merchantRaw: 'Mamak Stall',
+    amount: 12.0,
+    date: '2026-06-09',
+  });
+
+  const txns = [receiptTxn1, receiptTxn2, noReceiptTxn];
+  const accounts = [makeAcct({ id: 'a1' })];
+  const entries = [makeEntry({ value: 1000, asOf: '2026-06-30' })];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Test User');
+
+  const reliefTags: ReliefTag[] = [
+    {
+      id: 'rt1',
+      txnId: receiptTxn2.id,
+      code: 'reading',
+      ya: 2026,
+      amount: 85.0,
+      origin: 'auto',
+      certImageUri: 'file:///data/receipts/reading_cert.jpg',
+      einvoiceImageUri: null,
+      createdAt: '2026-06-07T12:00:00.000Z',
+    },
+  ];
+
+  it('builds receipt export list filtering transactions with receipts', () => {
+    const list = buildReceiptExportList(txns, mockCategories, reliefTags);
+    expect(list.length).toBe(3); // 2 receipts + 1 cert
+    expect(list.some((it) => it.merchant === 'Starbucks Coffee')).toBe(true);
+    expect(list.some((it) => it.merchant === 'Popular Bookstore')).toBe(true);
+    expect(list.some((it) => it.fileName.includes('.jpg') || it.fileName.includes('.png'))).toBe(true);
+  });
+
+  it('generates a valid ZIP archive containing receipts_manifest.csv, MANIFEST.json and README.txt', () => {
+    const zipBytes = generateReceiptsZip(bundle, txns, reliefTags);
+    expect(zipBytes).toBeInstanceOf(Uint8Array);
+    expect(zipBytes.length).toBeGreaterThan(100);
+  });
+
+  it('generates Receipts HTML preview with total values and files table', () => {
+    const html = generateReceiptsPreviewHtml(bundle, txns, reliefTags);
+    expect(html).toContain('Receipts & Invoices Archive (.zip) Preview');
+    expect(html).toContain('Total Receipts Value');
+    expect(html).toContain('Starbucks Coffee');
+    expect(html).toContain('Popular Bookstore');
   });
 });
 

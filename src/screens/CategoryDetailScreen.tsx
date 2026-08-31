@@ -135,7 +135,7 @@ export function CategoryDetailScreen({
       .filter((t) => (t.categoryId ?? 'other') === activeId && txnMonthKey(t) === monthKey)
       .sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt));
   }, [transactions, activeId, monthKey]);
-  const total = useMemo(() => items.reduce((s, t) => s + t.amount, 0), [items]);
+  const total = useMemo(() => items.reduce((s, t) => s + dc.convertTxn(t), 0), [items, dc]);
 
   // "vs last month" — the same shape as `items`/`total`, shifted one month back, so it works
   // for income categories too (lib/recap.ts's comparisons are expense-only by design).
@@ -144,7 +144,7 @@ export function CategoryDetailScreen({
     () => transactions.filter((t) => (t.categoryId ?? 'other') === activeId && txnMonthKey(t) === prevMonthKey),
     [transactions, activeId, prevMonthKey]
   );
-  const prevTotal = useMemo(() => prevItems.reduce((s, t) => s + t.amount, 0), [prevItems]);
+  const prevTotal = useMemo(() => prevItems.reduce((s, t) => s + dc.convertTxn(t), 0), [prevItems, dc]);
   const showCompare = prevItems.length > 0;
 
   const openEditMeta = () => {
@@ -331,7 +331,7 @@ export function CategoryDetailScreen({
             <View style={styles.heroTop}>
               <CatBadge category={cat} size={48} />
               <View style={{ flex: 1 }}>
-                <Amount value={dc.convert(total)} currency={dc.code} size={typeScale.display} weight={700} />
+                <Amount value={total} currency={dc.code} size={typeScale.display} weight={700} />
                 <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
                   {isZh
                     ? `${formatMonthLabel(monthKey, true)} 共 ${items.length} 笔交易`
@@ -339,7 +339,7 @@ export function CategoryDetailScreen({
                 </Caption>
                 {showCompare && (
                   <Caption color={colorTheme.ink3} style={{ marginTop: spacing.xs }}>
-                    {isZh ? `上月 · ${fmtMoney(dc.convert(prevTotal), dc.code)}` : `Last month · ${fmtMoney(dc.convert(prevTotal), dc.code)}`}
+                    {isZh ? `上月 · ${fmtMoney(prevTotal, dc.code)}` : `Last month · ${fmtMoney(prevTotal, dc.code)}`}
                   </Caption>
                 )}
               </View>

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Pip } from './Pip';
 import { PrimaryButton, BtnLabel } from './ui';
 import { useThemeColors } from '../state/colorScheme';
+import { useLanguage } from '../i18n';
 import { uiFont } from '../theme';
 
 type Props = {
@@ -54,9 +55,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
  *  in these small function components instead. */
 function CompactFallback({ title, message }: { title?: string; message?: string }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={[styles.compact, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface2 }]}>
-      <Text style={[styles.compactText, { color: colorTheme.ink }]}>{title ?? "Couldn't render this"}</Text>
+      <Text style={[styles.compactText, { color: colorTheme.ink }]}>{title ?? (isZh ? '无法渲染此组件' : "Couldn't render this")}</Text>
       {message && <Text style={[styles.compactSub, { color: colorTheme.ink2 }]}>{message}</Text>}
     </View>
   );
@@ -64,15 +66,16 @@ function CompactFallback({ title, message }: { title?: string; message?: string 
 
 function FullFallback({ title, message, onReset }: { title?: string; message?: string; onReset: () => void }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
     <View style={[styles.full, { backgroundColor: colorTheme.bg }]}>
       <Pip size={72} expr="curious" />
-      <Text style={[styles.title, { color: colorTheme.ink }]}>{title ?? 'Something went wrong'}</Text>
+      <Text style={[styles.title, { color: colorTheme.ink }]}>{title ?? (isZh ? '出错了' : 'Something went wrong')}</Text>
       <Text style={[styles.message, { color: colorTheme.ink2 }]}>
-        {message ?? "This screen hit a snag. Your data is safe. Try again, and if it keeps happening, restart the app."}
+        {message ?? (isZh ? '当前页面遇到问题。您的数据安全无虞。请重试，如果问题持续存在，请重启应用。' : "This screen hit a snag. Your data is safe. Try again, and if it keeps happening, restart the app.")}
       </Text>
       <PrimaryButton onPress={onReset} height={48}>
-        <BtnLabel>Try again</BtnLabel>
+        <BtnLabel>{isZh ? '重试' : 'Try again'}</BtnLabel>
       </PrimaryButton>
     </View>
   );

@@ -17,7 +17,7 @@ import { resolveQuickAdd } from '../lib/quickAdd';
 import type { QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
 import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
-import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource } from '../lib/types';
+import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource, type TxnType } from '../lib/types';
 import { useAppData, type NewLearned } from '../state/store';
 import { useBackHandler } from '../state/useBackHandler';
 import { useThemeColors } from '../state/colorScheme';
@@ -57,6 +57,7 @@ export type AddFlowPhase = Phase;
 type AddFlowProps = {
   onClose: () => void;
   initialPhase?: Phase;
+  initialType?: TxnType;
   tutorialMode?: 'scan' | 'manual';
   activeTourAnchor?: string | null;
   onPhaseChange?: (phase: Phase) => void;
@@ -83,6 +84,7 @@ export function AddFlow(props: AddFlowProps) {
 function AddFlowPhases({
   onClose,
   initialPhase,
+  initialType,
   tutorialMode,
   activeTourAnchor = null,
   onPhaseChange,
@@ -94,7 +96,7 @@ function AddFlowPhases({
   const { t } = useLanguage();
 
   const [phase, setPhase] = useState<Phase>(
-    initialPhase ?? (tutorialMode === 'manual' ? 'manual' : 'attach')
+    initialPhase ?? (tutorialMode === 'manual' || initialType ? 'manual' : 'attach')
   );
 
   useEffect(() => {
@@ -464,7 +466,7 @@ function AddFlowPhases({
         initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : quickPrefill?.label ?? null}
         initialAmount={phase === 'split' ? receiptResult?.charged ?? null : quickPrefill?.amount ?? null}
         initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : quickPrefill?.currency ?? null}
-        initialType={quickPrefill?.type ?? null}
+        initialType={quickPrefill?.type ?? initialType ?? null}
         initialDate={quickPrefill?.date ?? null}
         initialCategoryId={quickPrefill?.categoryId ?? null}
         initialSplit={phase === 'split' ? receiptResult?.draft ?? null : null}
