@@ -127,25 +127,34 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     term: 'Split bill',
     short: 'Divide a shared bill so only your share counts as spending.',
     body:
-      '1. Choose Equal, Shares, or Exact amounts, and add who was there.\n\n' +
-      '2. Keep "I was on this bill too" checked unless you paid entirely for others.\n\n' +
-      '3. Only your share counts as spending. The rest is tracked under "Owed to you" until settled.',
-    visualKey: 'split_step_1',
+      'Receipt Scanning (Itemized):\n' +
+      '• Add who was at the table, then tap their initials under each dish to assign who ordered it. Tap "Shared" to split an item evenly. Tax and tips are automatically prorated.\n\n' +
+      'Manual Bill Splitting:\n' +
+      '• Choose Equal, Shares, or Exact amounts, and adjust individual weights.\n\n' +
+      'Ledger Impact:\n' +
+      '• Only your portion counts as your personal spending. Friends\' portions are tracked as "Owed to you" assets in your Net Worth until settled.',
+    visualKey: 'split_receipt_step',
     steps: [
       {
-        badge: 'Step 1 of 3',
+        badge: 'Receipt Split',
+        title: 'Itemized receipt assignment',
+        desc: 'Add table friends, then tap their initials on each dish to assign who ordered it. Tap "Shared" to split evenly.',
+        visualKey: 'split_receipt_step',
+      },
+      {
+        badge: 'Manual Split',
         title: 'Pick mode & add friends',
         desc: 'Choose Equal, Shares, or Exact amounts, then tap or add friend names who shared the bill.',
         visualKey: 'split_step_1',
       },
       {
-        badge: 'Step 2 of 3',
+        badge: 'Portions & Self',
         title: 'Set portions & your share',
         desc: 'Adjust individual share weights with +/-. Keep "I was on this bill too" checked unless you paid 100% for others.',
         visualKey: 'split_step_2',
       },
       {
-        badge: 'Step 3 of 3',
+        badge: 'Expense vs Owed',
         title: 'Your spend vs Owed to you',
         desc: 'Only your personal portion is logged as spending. Friends\' portions become "Owed to you" receivables in your Net Worth.',
         visualKey: 'split_step_3',

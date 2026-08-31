@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
 import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
+import { cleanCalcInput, evaluateExpression } from '../lib/calc';
 import { decimalsFor } from '../lib/currencies';
 import { todayISO } from '../lib/duplicates';
 import { listFxRates } from '../db/fxRepo';
@@ -125,6 +126,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   // out of scope for v1), so this is read-only context, not a control.
   const decimals = decimalsFor(txn.currency);
   const currencyLabel = currencyPrefix(txn.currency);
+  const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
 
   // The linked account's balance is native to ITS OWN currency (Task 9). No conversion (and
   // so no rate) is needed when the row's currency already matches the account's, or the
@@ -148,7 +150,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   };
 
   const save = async () => {
-    const n = parseFloat(amountText.replace(/[^0-9.]/g, ''));
+    const n = calc.result;
     // `txn.amount` is the MYR column; the field (and everything below) works in the row's own
     // currency, which is `nativeAmount` for a foreign row.
     const nativeCurrent = txn.nativeAmount ?? txn.amount;
@@ -156,7 +158,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // letting it drift would leave `gross` and the shares reconciling against nothing.
     const amount = split
       ? nativeCurrent
-      : Number.isFinite(n) && n >= 0
+      : n != null && Number.isFinite(n) && n >= 0
         ? round2(n)
         : nativeCurrent;
     const categoryId = type === 'transfer' ? null : cat ?? (type === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID);
@@ -272,8 +274,18 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyLabel}</Text>
             <TextInput
               value={amountText}
-              onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
-              keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
+              onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
+              onBlur={() => {
+                if (!split && calc.isExpression && calc.result != null && calc.result > 0) {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
+                }
+              }}
+              onSubmitEditing={() => {
+                if (!split && calc.isExpression && calc.result != null && calc.result > 0) {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
+                }
+              }}
+              keyboardType="numbers-and-punctuation"
               selectTextOnFocus
               editable={!split}
               style={[
@@ -283,6 +295,19 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
                 !!split && { backgroundColor: colorTheme.surface2, color: colorTheme.ink2 },
               ]}
             />
+            {!split && calc.isExpression && calc.result != null && calc.result > 0 && (
+              <Pressable
+                onPress={() => {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result!)) : calc.result!.toFixed(decimals));
+                }}
+                hitSlop={8}
+                style={[styles.calcBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+              >
+                <Text style={[styles.calcBadgeText, { color: theme.accent }]}>
+                  = {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
+                </Text>
+              </Pressable>
+            )}
           </View>
           {!!split && (
             <Text style={[styles.lockNote, { color: colorTheme.ink3 }]}>
@@ -470,6 +495,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   amountInputLocked: {},
+  calcBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  calcBadgeText: { fontFamily: numFont(700), fontSize: 14 },
   lockNote: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 6 },
   splitRow: {
     flexDirection: 'row',

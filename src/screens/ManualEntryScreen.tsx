@@ -14,6 +14,7 @@ import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { BASE_CURRENCY, deriveNative, isMultiCurrency, round2 } from '../lib/currency';
+import { cleanCalcInput, evaluateExpression } from '../lib/calc';
 import { decimalsFor } from '../lib/currencies';
 import { fmtMoney } from '../lib/format';
 import { rateFor, ratesFromCache } from '../lib/fx';
@@ -136,7 +137,8 @@ export function ManualEntryScreen({
   });
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
-  const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
+  const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
+  const amount = Math.max(0, calc.result ?? 0);
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
   // The linked account's balance is native to ITS OWN currency (Task 9), which may differ
@@ -271,12 +273,35 @@ export function ManualEntryScreen({
             )}
             <TextInput
               value={amountText}
-              onChangeText={(t) => setAmountText(decimals === 0 ? t.replace(/[^0-9]/g, '') : t)}
-              keyboardType={decimals === 0 ? 'number-pad' : 'decimal-pad'}
+              onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
+              onBlur={() => {
+                if (calc.isExpression && calc.result != null && calc.result > 0) {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
+                }
+              }}
+              onSubmitEditing={() => {
+                if (calc.isExpression && calc.result != null && calc.result > 0) {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
+                }
+              }}
+              keyboardType="numbers-and-punctuation"
               placeholder={decimals === 0 ? '0' : '0.00'}
               placeholderTextColor={colorTheme.ink3}
               style={[styles.amountInput, { color: colorTheme.ink }]}
             />
+            {calc.isExpression && calc.result != null && calc.result > 0 && (
+              <Pressable
+                onPress={() => {
+                  setAmountText(decimals === 0 ? String(Math.round(calc.result!)) : calc.result!.toFixed(decimals));
+                }}
+                hitSlop={8}
+                style={[styles.calcBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+              >
+                <Text style={[styles.calcBadgeText, { color: theme.accent }]}>
+                  = {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
+                </Text>
+              </Pressable>
+            )}
           </View>
         </TourAnchor>
         {currency !== BASE_CURRENCY && rate != null && (
@@ -405,6 +430,7 @@ export function ManualEntryScreen({
         initial={activeSplit}
         onClose={() => setSplitting(false)}
         onApply={(draft) => {
+          setAmountText(draft.gross.toFixed(decimals));
           setSplit(draft);
           setSplitting(false);
         }}
@@ -443,6 +469,16 @@ const styles = StyleSheet.create({
   fxHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: { flex: 1, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
+  calcBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  calcBadgeText: { fontFamily: numFont(700), fontSize: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
   gridCell: { width: '50%', paddingHorizontal: 5, paddingBottom: 10 },
   addChip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14, borderRadius: radius.sm, borderWidth: 1.5, borderStyle: 'dashed' },

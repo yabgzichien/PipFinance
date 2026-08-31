@@ -1,7 +1,7 @@
 // src/components/GlossaryVisualGuide.tsx
-// Exact 1:1 UI/UX interactive previews matching Pip's real components (SplitSheet, QuickAddField, AccountLinkField, CashflowStructure).
+// Exact 1:1 UI/UX interactive previews matching Pip's real components (ReceiptScanScreen, SplitSheet, QuickAddField, AccountLinkField, CashflowStructure).
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
@@ -19,13 +19,40 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
 
-  // Interactive state for Split Bill guide
+  // Interactive state for Receipt Itemized Split guide
+  const [receiptLines, setReceiptLines] = useState([
+    { id: '1', label: '2× Latte Macchiato', amount: 9.0, assignedTo: ['nugget', 'you'] },
+    { id: '2', label: 'Schweinschnitzel', amount: 22.0, assignedTo: ['nugget'] },
+    { id: '3', label: 'Chässpätzli', amount: 18.5, assignedTo: ['you'] },
+  ]);
+
+  const toggleReceiptAssign = (lineId: string, personId: string) => {
+    setReceiptLines((prev) =>
+      prev.map((line) => {
+        if (line.id !== lineId) return line;
+        const exists = line.assignedTo.includes(personId);
+        const next = exists ? line.assignedTo.filter((p) => p !== personId) : [...line.assignedTo, personId];
+        return { ...line, assignedTo: next };
+      })
+    );
+  };
+
+  const toggleReceiptShareAll = (lineId: string) => {
+    setReceiptLines((prev) =>
+      prev.map((line) => {
+        if (line.id !== lineId) return line;
+        const allAssigned = line.assignedTo.length === 2;
+        return { ...line, assignedTo: allAssigned ? ['you'] : ['nugget', 'you'] };
+      })
+    );
+  };
+
+  // Interactive state for Manual Split Bill guide
   const [splitMethod, setSplitMethod] = useState<SplitMethod>('shares');
   const [includeSelf, setIncludeSelf] = useState(true);
   const [alexShares, setAlexShares] = useState(2);
   const [sarahShares, setSarahShares] = useState(1);
   const [selfShares, setSelfShares] = useState(1);
-  const [activeChip, setActiveChip] = useState<'alex' | 'sarah' | 'maya'>('alex');
 
   // Interactive state for Owed Settled preview
   const [settledState, setSettledState] = useState<'pending' | 'settled' | 'written_off'>('pending');
@@ -44,6 +71,135 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
   const totalOwed = alexOwed + sarahOwed;
 
   switch (visualKey) {
+    case 'split_receipt_step': {
+      return (
+        <View style={[styles.appContainer, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+          {/* Header */}
+          <View style={styles.sheetHeaderRow}>
+            <View>
+              <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>Berghotel Grosse Scheidegg</Text>
+              <Text style={[styles.sheetSubtitle, { color: colorTheme.ink2 }]}>
+                {isZh ? '小票逐项分账预览' : 'Itemized Receipt Split Preview'}
+              </Text>
+            </View>
+            <View style={[styles.liveBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.liveBadgeText, { color: theme.accentInk }]}>{isZh ? '真实 UI 预览' : 'Live UI'}</Text>
+            </View>
+          </View>
+
+          {/* Table Members Section */}
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+            {isZh ? '同行人员（选填）' : 'Who was at the table (optional)'}
+          </Text>
+          <View style={styles.tableRow}>
+            <View style={[styles.tableChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Text style={[styles.tableChipText, { color: colorTheme.ink }]}>nugget</Text>
+              <Icon name="x" size={11} color={colorTheme.ink3} />
+            </View>
+            <View style={[styles.tableChip, styles.tableChipSelf, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+              <Text style={[styles.tableChipText, { color: theme.accentInk, fontFamily: uiFont(700) }]}>
+                {isZh ? '你 (You)' : 'You'}
+              </Text>
+            </View>
+            <View style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, paddingVertical: 4, paddingHorizontal: 8 }]}>
+              <Icon name="plus" size={11} color={colorTheme.ink2} stroke={2.4} />
+              <Text style={[styles.chipText, { color: colorTheme.ink2, fontSize: 11 }]}>{isZh ? '添加好友' : '+ fyy'}</Text>
+            </View>
+          </View>
+
+          {/* Items Section */}
+          <View style={[styles.sectionHeaderRow, { marginTop: 10 }]}>
+            <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginBottom: 0 }]}>
+              {isZh ? '点单明细（点击头像分配）' : 'What they ordered (Tap to assign)'}
+            </Text>
+          </View>
+
+          <View style={[styles.receiptCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            {receiptLines.map((line, idx) => {
+              const hasNugget = line.assignedTo.includes('nugget');
+              const hasYou = line.assignedTo.includes('you');
+              const isShared = hasNugget && hasYou;
+
+              return (
+                <View key={line.id} style={[styles.receiptItemRow, idx > 0 && [styles.receiptDivider, { borderTopColor: colorTheme.line }]]}>
+                  <View style={styles.receiptItemHead}>
+                    <Text style={[styles.receiptItemName, { color: colorTheme.ink }]} numberOfLines={1}>
+                      {line.label}
+                    </Text>
+                    <Text style={[styles.receiptItemAmount, { color: colorTheme.ink }]}>
+                      CHF {line.amount.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.avatarRow}>
+                    {/* Nugget Avatar */}
+                    <Pressable
+                      onPress={() => toggleReceiptAssign(line.id, 'nugget')}
+                      style={[
+                        styles.itemAvatar,
+                        { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
+                        hasNugget && { backgroundColor: theme.accent, borderColor: theme.accent },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.itemAvatarText,
+                          { color: colorTheme.ink2 },
+                          hasNugget && { color: '#ffffff', fontFamily: uiFont(700) },
+                        ]}
+                      >
+                        N
+                      </Text>
+                    </Pressable>
+
+                    {/* You Avatar */}
+                    <Pressable
+                      onPress={() => toggleReceiptAssign(line.id, 'you')}
+                      style={[
+                        styles.itemAvatar,
+                        styles.itemAvatarYou,
+                        { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
+                        hasYou && { backgroundColor: theme.accent, borderColor: theme.accent },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.itemAvatarText,
+                          { color: colorTheme.ink2 },
+                          hasYou && { color: '#ffffff', fontFamily: uiFont(700) },
+                        ]}
+                      >
+                        YOU
+                      </Text>
+                    </Pressable>
+
+                    {/* Shared Toggle */}
+                    <Pressable onPress={() => toggleReceiptShareAll(line.id)} style={styles.sharedBtn}>
+                      <Text
+                        style={[
+                          styles.sharedBtnText,
+                          { color: isShared ? theme.accent : colorTheme.ink3 },
+                          isShared && { fontFamily: uiFont(700) },
+                        ]}
+                      >
+                        {isShared ? (isZh ? '均摊 ✓' : 'Shared ✓') : (isZh ? '平摊' : 'Share')}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Exact Bottom Primary Button */}
+          <View style={[styles.mockPrimaryBtn, { backgroundColor: theme.accentInk, marginTop: 12 }]}>
+            <Icon name="check" size={16} color="#ffffff" stroke={2.4} />
+            <Text style={styles.mockPrimaryBtnText}>{isZh ? '使用此分账结果' : 'Use this split'}</Text>
+          </View>
+        </View>
+      );
+    }
+
     case 'split_step_1': {
       const METHODS: { key: SplitMethod; label: string; labelZh: string; hint: string; hintZh: string }[] = [
         { key: 'equal', label: 'Equal', labelZh: '均摊', hint: 'Everyone pays the same', hintZh: '所有人平摊费用' },
@@ -63,7 +219,7 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
               <Text style={[styles.sheetSubtitle, { color: colorTheme.ink2 }]}>Din Tai Fung</Text>
             </View>
             <View style={[styles.liveBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
-              <Text style={[styles.liveBadgeText, { color: theme.accentInk }]}>{isZh ? '真实 UI 预览' : 'Live UI Preview'}</Text>
+              <Text style={[styles.liveBadgeText, { color: theme.accentInk }]}>{isZh ? '手动模式' : 'Manual Mode'}</Text>
             </View>
           </View>
 
@@ -98,20 +254,14 @@ export function GlossaryVisualGuide({ visualKey }: VisualProps) {
           {/* Who else was there label & chips */}
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '同行人员' : 'Who else was there'}</Text>
           <View style={styles.chipWrap}>
-            <Pressable
-              onPress={() => setActiveChip('alex')}
-              style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
-            >
+            <View style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
               <Icon name="check" size={13} color={theme.accent} stroke={2.4} />
               <Text style={[styles.chipText, { color: theme.onTint }]}>Alex</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setActiveChip('sarah')}
-              style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
-            >
+            </View>
+            <View style={[styles.chip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
               <Icon name="check" size={13} color={theme.accent} stroke={2.4} />
               <Text style={[styles.chipText, { color: theme.onTint }]}>Sarah</Text>
-            </Pressable>
+            </View>
             <View style={[styles.chip, styles.addChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
               <Icon name="plus" size={13} color={colorTheme.ink2} stroke={2.4} />
               <Text style={[styles.chipText, { color: colorTheme.ink2 }]}>{isZh ? '添加人员' : 'Add a name'}</Text>
@@ -607,23 +757,23 @@ const styles = StyleSheet.create({
   appContainer: {
     borderRadius: radius.md,
     borderWidth: 1,
-    padding: 14,
-    marginVertical: 10,
+    padding: 12,
+    marginVertical: 8,
     ...shadowCard,
   },
   sheetHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   sheetTitle: {
     fontFamily: uiFont(700),
-    fontSize: 16,
+    fontSize: 15,
   },
   sheetSubtitle: {
     fontFamily: uiFont(500),
-    fontSize: 12,
+    fontSize: 11.5,
     marginTop: 1,
   },
   liveBadge: {
@@ -634,7 +784,90 @@ const styles = StyleSheet.create({
   },
   liveBadgeText: {
     fontFamily: uiFont(700),
+    fontSize: 9.5,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  tableChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  tableChipSelf: {},
+  tableChipText: {
+    fontFamily: uiFont(600),
+    fontSize: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  receiptCard: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  receiptItemRow: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  receiptDivider: {
+    borderTopWidth: 1,
+  },
+  receiptItemHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  receiptItemName: {
+    fontFamily: uiFont(600),
+    fontSize: 12.5,
+    flex: 1,
+  },
+  receiptItemAmount: {
+    fontFamily: numFont(700),
+    fontSize: 13,
+  },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  itemAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemAvatarYou: {
+    width: 34,
+    borderRadius: 999,
+    paddingHorizontal: 4,
+  },
+  itemAvatarText: {
+    fontFamily: uiFont(600),
     fontSize: 10,
+  },
+  sharedBtn: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  sharedBtnText: {
+    fontFamily: uiFont(600),
+    fontSize: 11,
   },
   toggle: {
     flexDirection: 'row',
@@ -1069,7 +1302,6 @@ const styles = StyleSheet.create({
   eqTitle: {
     fontFamily: uiFont(600),
     fontSize: 10,
-    marginBottom: 1,
   },
   eqValue: {
     fontFamily: numFont(700),

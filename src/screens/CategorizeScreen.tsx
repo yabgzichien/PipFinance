@@ -206,6 +206,9 @@ export function CategorizeScreen({
   };
 
   const applySplit = (draft: SplitDraft | null) => {
+    if (draft) {
+      setAmount(draft.gross);
+    }
     setSplitDrafts((prev) => {
       const next = [...prev];
       next[originalIndex] = draft;

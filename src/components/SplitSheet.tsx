@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fmtMoney } from '../lib/format';
-import { computeSplit, sharesFromSplit, validateSplit, type Participant } from '../lib/split';
+import { computeSplit, fromCents, sharesFromSplit, toCents, validateSplit, type Participant } from '../lib/split';
 import type { SplitDraft, SplitMethod } from '../lib/types';
 import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
@@ -55,6 +55,10 @@ export function SplitSheet({
   const { isZh } = useLanguage();
   const { people, addPerson } = useAppData();
 
+  const [currentGross, setCurrentGross] = useState(gross);
+  const [editingGross, setEditingGross] = useState(false);
+  const [grossInput, setGrossInput] = useState(gross.toFixed(2));
+
   const [method, setMethod] = useState<SplitMethod>('equal');
   const [includeSelf, setIncludeSelf] = useState(true);
   const [picked, setPicked] = useState<string[]>([]);
@@ -75,6 +79,10 @@ export function SplitSheet({
   // the saved amounts unchanged rather than inventing a portioning that would alter them.
   useEffect(() => {
     if (!visible) return;
+    const initialGross = initial ? initial.gross : gross;
+    setCurrentGross(initialGross);
+    setGrossInput(initialGross.toFixed(2));
+    setEditingGross(false);
     if (initial && initial.shares.length > 0) {
       // Replayed against the gross the split was SAVED at, not the sheet's current one: the
       // portions are the user's intent, and re-applying them to an amount edited since is
@@ -96,7 +104,19 @@ export function SplitSheet({
       setSelfWeight(1);
       setIncludeSelf(true);
     }
-  }, [visible, initial]);
+  }, [visible, initial, gross]);
+
+  const commitGrossEdit = () => {
+    const val = parseFloat(grossInput.replace(/[^0-9.]/g, ''));
+    if (!isNaN(val) && val > 0) {
+      const rounded = Math.round(val * 100) / 100;
+      setCurrentGross(rounded);
+      setGrossInput(rounded.toFixed(2));
+    } else {
+      setGrossInput(currentGross.toFixed(2));
+    }
+    setEditingGross(false);
+  };
 
   const participants: Participant[] = useMemo(
     () =>
@@ -108,9 +128,28 @@ export function SplitSheet({
     [picked, weights, exacts]
   );
 
-  const input = { gross, participants, method, includeSelf, selfWeight };
-  const error = useMemo(() => validateSplit(input), [gross, participants, method, includeSelf, selfWeight]);
-  const result = useMemo(() => computeSplit(input), [gross, participants, method, includeSelf, selfWeight]);
+  const sumExacts = useMemo(() => {
+    const totalCents = participants.reduce((s, p) => s + Math.max(0, toCents(p.exact ?? 0)), 0);
+    return fromCents(totalCents);
+  }, [participants]);
+
+  const input = { gross: currentGross, participants, method, includeSelf, selfWeight };
+  const error = useMemo(() => validateSplit(input), [currentGross, participants, method, includeSelf, selfWeight]);
+  const result = useMemo(() => computeSplit(input), [currentGross, participants, method, includeSelf, selfWeight]);
+
+  const canOverwriteGross = useMemo(() => {
+    if (method !== 'exact' || sumExacts <= 0) return false;
+    const grossCents = toCents(currentGross);
+    const sumCents = toCents(sumExacts);
+    if (sumCents > grossCents) return true;
+    if (!includeSelf && sumCents !== grossCents) return true;
+    return false;
+  }, [method, sumExacts, currentGross, includeSelf]);
+
+  const overwriteGross = () => {
+    setCurrentGross(sumExacts);
+    setGrossInput(sumExacts.toFixed(2));
+  };
 
   const owedBy = useMemo(() => {
     const map: Record<string, number> = {};
@@ -135,7 +174,7 @@ export function SplitSheet({
   const apply = () => {
     if (error) return;
     onApply({
-      gross,
+      gross: currentGross,
       ownShare: result.ownShare,
       method,
       shares: result.shares.filter((s) => s.owed > 0),
@@ -152,12 +191,55 @@ export function SplitSheet({
         <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
         <View style={styles.head}>
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.title, { color: colorTheme.ink }]}>
-                {isZh ? `分摊 ${fmtMoney(gross, currency)}` : `Split ${fmtMoney(gross, currency)}`}
-              </Text>
-              <InfoButton entry="split_bill" />
-            </View>
+            {editingGross ? (
+              <View style={styles.headerEditRow}>
+                <Text style={[styles.title, { color: colorTheme.ink }]}>
+                  {isZh ? '分摊' : 'Split'}
+                </Text>
+                <TextInput
+                  value={grossInput}
+                  onChangeText={setGrossInput}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  selectTextOnFocus
+                  onBlur={commitGrossEdit}
+                  onSubmitEditing={commitGrossEdit}
+                  style={[
+                    styles.grossInput,
+                    {
+                      color: colorTheme.ink,
+                      backgroundColor: colorTheme.surface2,
+                      borderColor: theme.accent,
+                    },
+                  ]}
+                />
+                <Pressable
+                  onPress={commitGrossEdit}
+                  hitSlop={6}
+                  style={[styles.headerConfirmBtn, { backgroundColor: theme.accent }]}
+                  accessibilityLabel={isZh ? '确认' : 'Confirm'}
+                >
+                  <Icon name="check" size={14} color="#fff" stroke={2.6} />
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Pressable
+                  onPress={() => {
+                    setGrossInput(currentGross.toFixed(2));
+                    setEditingGross(true);
+                  }}
+                  style={styles.headerTitlePressable}
+                  accessibilityLabel={isZh ? '修改账单总额' : 'Edit bill total'}
+                >
+                  <Text style={[styles.title, { color: colorTheme.ink }]}>
+                    {isZh ? `分摊 ${fmtMoney(currentGross, currency)}` : `Split ${fmtMoney(currentGross, currency)}`}
+                  </Text>
+                  <Icon name="pencil" size={14} color={colorTheme.ink3} />
+                </Pressable>
+                <InfoButton entry="split_bill" />
+              </View>
+            )}
             {!!merchant && (
               <Text style={[styles.subtitle, { color: colorTheme.ink2 }]} numberOfLines={1}>
                 {merchant}
@@ -295,7 +377,29 @@ export function SplitSheet({
             </Text>
           </View>
 
-          {!!error && picked.length > 0 && <Text style={styles.error}>{error}</Text>}
+          {!!error && picked.length > 0 && (
+            <View style={[styles.errorContainer, canOverwriteGross && { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <Text style={styles.error}>{error}</Text>
+              {canOverwriteGross && (
+                <Pressable
+                  onPress={overwriteGross}
+                  style={[styles.overwriteBtn, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+                  accessibilityLabel={
+                    isZh
+                      ? `将账单总额改为 ${fmtMoney(sumExacts, currency)}`
+                      : `Overwrite bill total to ${fmtMoney(sumExacts, currency)}`
+                  }
+                >
+                  <Icon name="pencil" size={13} color={theme.accent} stroke={2.4} />
+                  <Text style={[styles.overwriteText, { color: theme.onTint }]}>
+                    {isZh
+                      ? `将账单总额改为 ${fmtMoney(sumExacts, currency)}`
+                      : `Overwrite bill total to ${fmtMoney(sumExacts, currency)}`}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           <View style={{ marginTop: 16 }}>
             <PrimaryButton onPress={apply} height={52} disabled={!!error}>
@@ -334,6 +438,32 @@ const styles = StyleSheet.create({
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },
   head: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 },
   title: { fontFamily: uiFont(700), fontSize: 19 },
+  headerTitlePressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  headerEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  grossInput: {
+    minWidth: 90,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    fontFamily: numFont(700),
+    fontSize: 17,
+  },
+  headerConfirmBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   subtitle: { fontFamily: uiFont(500), fontSize: 13, marginTop: 2 },
   toggle: {
     flexDirection: 'row',
@@ -424,7 +554,28 @@ const styles = StyleSheet.create({
   summaryLabelSoft: { fontFamily: uiFont(600), fontSize: 13 },
   summaryValueSoft: { fontFamily: numFont(600), fontSize: 14 },
   summaryNote: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 4 },
-  error: { fontFamily: uiFont(600), fontSize: 12.5, color: '#b3261e', marginTop: 12, textAlign: 'center' },
+  errorContainer: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    gap: 8,
+  },
+  error: { fontFamily: uiFont(600), fontSize: 12.5, color: '#b3261e', textAlign: 'center' },
+  overwriteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 2,
+  },
+  overwriteText: { fontFamily: uiFont(700), fontSize: 13 },
   removeBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 16 },
   removeText: { fontFamily: uiFont(700), fontSize: 14, color: '#b3261e' },
 });

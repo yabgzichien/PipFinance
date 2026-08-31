@@ -93,7 +93,7 @@ describe('Glossary Localization', () => {
     const entry = getGlossaryEntry('split_bill', 'zh');
     expect(entry).toBeDefined();
     expect(entry?.term).toBe('分摊账单');
-    expect(entry?.steps?.length).toBe(3);
-    expect(entry?.steps?.[0].title).toBe('选择分摊模式与同行人员');
+    expect(entry?.steps?.length).toBe(4);
+    expect(entry?.steps?.[0].title).toBe('点单明细逐项分配');
   });
 });

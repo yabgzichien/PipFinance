@@ -23,13 +23,13 @@ describe('GLOSSARY', () => {
     expect(splitBill.term).toBe('Split bill');
     expect(splitBill.short).toContain('Divide a shared bill');
     expect(splitBill.body).toContain('Equal, Shares, or Exact');
-    expect(splitBill.body).toContain('I was on this bill too');
     expect(splitBill.body).toContain('Owed to you');
     expect(splitBill.steps).toBeDefined();
-    expect(splitBill.steps?.length).toBe(3);
-    expect(splitBill.steps?.[0].visualKey).toBe('split_step_1');
-    expect(splitBill.steps?.[1].visualKey).toBe('split_step_2');
-    expect(splitBill.steps?.[2].visualKey).toBe('split_step_3');
+    expect(splitBill.steps?.length).toBe(4);
+    expect(splitBill.steps?.[0].visualKey).toBe('split_receipt_step');
+    expect(splitBill.steps?.[1].visualKey).toBe('split_step_1');
+    expect(splitBill.steps?.[2].visualKey).toBe('split_step_2');
+    expect(splitBill.steps?.[3].visualKey).toBe('split_step_3');
   });
 
   it('contains owed_to_you explaining receivables, settling, and write-offs', () => {

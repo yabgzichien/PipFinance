@@ -131,6 +131,41 @@ describe('validateSplit', () => {
       validateSplit(input({ gross: 100, method: 'exact', participants: [{ personId: 'ali', exact: 30 }] }))
     ).toBeNull();
   });
+
+  it('validates and computes cleanly when gross is overwritten to match exact amounts sum', () => {
+    const participants = [{ personId: 'fyy', exact: 20 }, { personId: 'nugget', exact: 33 }];
+    // Initially gross is 32, which overshoots
+    const initialInput = input({ gross: 32, method: 'exact', participants, includeSelf: true });
+    expect(validateSplit(initialInput)).toBe('Those amounts add up to more than the bill.');
+
+    // Overwriting gross to sum of exacts (53)
+    const sumExacts = participants.reduce((s, p) => s + p.exact, 0);
+    expect(sumExacts).toBe(53);
+
+    const overwrittenInput = input({ gross: sumExacts, method: 'exact', participants, includeSelf: true });
+    expect(validateSplit(overwrittenInput)).toBeNull();
+
+    const result = computeSplit(overwrittenInput);
+    expect(result.ownShare).toBe(0);
+    expect(result.shares).toEqual([
+      { personId: 'fyy', owed: 20 },
+      { personId: 'nugget', owed: 33 },
+    ]);
+  });
+
+  it('validates when gross is overwritten and payer is not on the bill', () => {
+    const participants = [{ personId: 'fyy', exact: 20 }, { personId: 'nugget', exact: 33 }];
+    const sumExacts = 53;
+    const off = input({ gross: sumExacts, method: 'exact', includeSelf: false, participants });
+    expect(validateSplit(off)).toBeNull();
+
+    const result = computeSplit(off);
+    expect(result.ownShare).toBe(0);
+    expect(result.shares).toEqual([
+      { personId: 'fyy', owed: 20 },
+      { personId: 'nugget', owed: 33 },
+    ]);
+  });
 });
 
 describe('computeItemized', () => {
