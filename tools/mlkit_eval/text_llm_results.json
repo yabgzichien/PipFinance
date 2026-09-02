@@ -1,0 +1,256 @@
+{
+  "1000105419.jpg": {
+    "file": "1000105419.jpg",
+    "ocr_text_length_chars": 463,
+    "upload_payload_size_bytes": 1954,
+    "latency_ms": 1451.21,
+    "prompt_tokens_total": 540,
+    "completion_tokens": 147,
+    "total_tokens": 687,
+    "parsed_json": {
+      "merchant": "NS PLT",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "A15",
+          "amount": 12.0,
+          "quantity": 1
+        },
+        {
+          "label": "A18",
+          "amount": 14.0,
+          "quantity": 1
+        }
+      ],
+      "subtotal": 26.0,
+      "serviceCharge": null,
+      "tax": null,
+      "total": 26.0,
+      "discount": null
+    },
+    "mlkit_spatial_text": "NS PLT\n(202304001569 (LLP0035619-LGN))\nNO 21 JALAN BRP 6/10\nBUKIT RAHMAN PUTRA\n47000 SUNGAI BULOH SELANGOR\nTABLE: 12\nBILL: 57\n23/08/2026 13:17:00\nCASHIER: CASHIER 1\n\nITEM    QTY    PRICE    AMOUNT\n----------------------------------------\nA15    1    12.00    12.00\nA18    1    14.00    14.00\n----------------------------------------\nTOTAL QTY: 2\nSUBTOTAL: 26.00\nDISCOUNT: 0.00\nROUNDING: 0.00\nTOTAL (RM): 26.00\nCASH: 50.00\nCHANGE: 24.00\nTHANK YOU PLEASE COME AGAIN"
+  },
+  "1000105421.jpg": {
+    "file": "1000105421.jpg",
+    "ocr_text_length_chars": 634,
+    "upload_payload_size_bytes": 2184,
+    "latency_ms": 1311.04,
+    "prompt_tokens_total": 604,
+    "completion_tokens": 217,
+    "total_tokens": 821,
+    "parsed_json": {
+      "merchant": "THE ML KITCHEN (SEPANG) SDN. BHD.",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "麻辣烫 Mala Soup",
+          "amount": 32.45,
+          "quantity": 0.59
+        },
+        {
+          "label": "白饭 Rice",
+          "amount": 2.0,
+          "quantity": 1
+        },
+        {
+          "label": "白饭 Rice",
+          "amount": 2.0,
+          "quantity": 1
+        }
+      ],
+      "subtotal": 36.45,
+      "serviceCharge": null,
+      "tax": null,
+      "total": 34.58,
+      "discount": {
+        "amount": 1.82,
+        "timing": "after"
+      }
+    },
+    "mlkit_spatial_text": "THE ML KITCHEN (SEPANG) SDN. BHD.\n202401019741 (1565590-T)\nNO 15-G, JALAN KLIA AVENUE,\nPUSAT PERNIAGAAN KLIA AVENUE,\n43900 SEPANG, SELANGOR.\nTEL: 011-5427 8688\n\nReceipt No: CS00016422\nDate: 23/08/2026    7:15:59 PM\nCashier: CASHIER\nTable: T12\n\nItem    Qty    Price    Total(RM)\n----------------------------------------\n麻辣烫 Mala Soup    0.59    55.00    32.45\n微辣 Less Spicy\n白汤 White Soup\n白饭 Rice    1    2.00    2.00\n白饭 Rice    1    2.00    2.00\n----------------------------------------\nSub Total:    36.45\nDiscount (5%):    -1.82\nTotal (RM):    34.58\nRounding:    0.00\nGrand Total (RM):    34.58\nPayment - DuitNow:    34.58\nTHANK YOU!"
+  },
+  "1000105423.jpg": {
+    "file": "1000105423.jpg",
+    "ocr_text_length_chars": 1242,
+    "upload_payload_size_bytes": 2749,
+    "latency_ms": 2311.62,
+    "prompt_tokens_total": 926,
+    "completion_tokens": 667,
+    "total_tokens": 1593,
+    "parsed_json": {
+      "merchant": "ECONSAVE CASH & CARRY (SPG) SDN BHD",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "KOBIS BULAT LOCAL",
+          "amount": 0.91,
+          "quantity": 1
+        },
+        {
+          "label": "DELIFISH SMALL FRI",
+          "amount": 3.2,
+          "quantity": 1
+        },
+        {
+          "label": "C.KIMCHAM (+-100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "C.KIMCHAM (+-100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "C.KIMCHAM (+-100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "SHRIMP PASTE",
+          "amount": 9.9,
+          "quantity": 1
+        },
+        {
+          "label": "ANCHOR CHEDDAR CHE",
+          "amount": 9.45,
+          "quantity": 1
+        },
+        {
+          "label": "KNIFE CLAS LIGHT S",
+          "amount": 5.8,
+          "quantity": 1
+        },
+        {
+          "label": "LACT B/YOG SBRRY",
+          "amount": 4.79,
+          "quantity": 1
+        },
+        {
+          "label": "NR 3IN1 ORI 14X28G",
+          "amount": 8.9,
+          "quantity": 1
+        },
+        {
+          "label": "(PS) MI SEDAAP GOR",
+          "amount": 4.45,
+          "quantity": 1
+        },
+        {
+          "label": "MS INS SOTO 5X75G",
+          "amount": 5.2,
+          "quantity": 1
+        },
+        {
+          "label": "MILO 400G",
+          "amount": 9.8,
+          "quantity": 1
+        },
+        {
+          "label": "GARDENIA ORI CLAS",
+          "amount": 2.85,
+          "quantity": 1
+        },
+        {
+          "label": "100PLUS 1.5L",
+          "amount": 2.89,
+          "quantity": 1
+        },
+        {
+          "label": "T/MORAH POTONG",
+          "amount": 4.42,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        }
+      ],
+      "subtotal": 76.24,
+      "serviceCharge": null,
+      "tax": null,
+      "total": 76.25,
+      "discount": null
+    },
+    "mlkit_spatial_text": "ECONSAVE CASH & CARRY (SPG) SDN BHD\nLOT 1234, JALAN SEPANG,\n43900 SEPANG, SELANGOR.\nTEL: 03-8706 1234\nTAX INVOICE\nINVOICE NO: INV-20260831-0982\nDATE: 31/08/2026    19:37:12\nCASHIER: POS 04\n\nDESCRIPTION    QTY    PRICE    TOTAL(RM)\n--------------------------------------------------\nKOBIS BULAT LOCAL    1    0.91    0.91 S\nDELIFISH SMALL FRI    1    3.20    3.20 S\nC.KIMCHAM (+-100G)    1    0.99    0.99 S\nC.KIMCHAM (+-100G)    1    0.99    0.99 S\nC.KIMCHAM (+-100G)    1    0.99    0.99 S\nSHRIMP PASTE    1    9.90    9.90 S\nANCHOR CHEDDAR CHE    1    9.45    9.45 S\nKNIFE CLAS LIGHT S    1    5.80    5.80 S\nLACT B/YOG SBRRY    1    4.79    4.79 S\nNR 3IN1 ORI 14X28G    1    8.90    8.90 S\n(PS) MI SEDAAP GOR    1    4.45    4.45 S\nMS INS SOTO 5X75G    1    5.20    5.20 S\nMILO 400G    1    9.80    9.80 S\nGARDENIA ORI CLAS    1    2.85    2.85 S\n100PLUS 1.5L    1    2.89    2.89 S\nT/MORAH POTONG    1    4.42    4.42 S\nPLASTIC BAG    1    0.20    0.20 S\nPLASTIC BAG    1    0.20    0.20 S\nPLASTIC BAG    1    0.20    0.20 S\n--------------------------------------------------\nTOTAL ITEMS: 19\nSUBTOTAL:    76.24\nROUNDING:    0.01\nTOTAL AMOUNT (RM):    76.25\nCASH RECEIVED:    100.00\nCHANGE:    23.75\nGOODS SOLD ARE NOT RETURNABLE\nTHANK YOU"
+  },
+  "tngscreenshot.png": {
+    "file": "tngscreenshot.png",
+    "ocr_text_length_chars": 314,
+    "upload_payload_size_bytes": 1528,
+    "latency_ms": 1998.61,
+    "prompt_tokens_total": 412,
+    "completion_tokens": 513,
+    "total_tokens": 925,
+    "parsed_json": {
+      "transactions": [
+        {
+          "merchant": "GOLDEN BITE FOODS",
+          "amount": 5.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": "Food & Beverage",
+          "method": "DuitNow QR"
+        },
+        {
+          "merchant": "NAN SAN HWAN",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": "Transfer",
+          "method": "Touch 'n Go"
+        },
+        {
+          "merchant": "BBT KOPITIAM",
+          "amount": 1.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": "Food & Beverage",
+          "method": "DuitNow QR"
+        },
+        {
+          "merchant": "MUHAMAD FADERILAH SUHAIMI BIN AZAM",
+          "amount": 7.5,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": "Other",
+          "method": "Touch 'n Go"
+        },
+        {
+          "merchant": "CHATHERINE WIJAYA",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "in",
+          "date": "2026-08-20",
+          "category": "Income",
+          "method": "DuitNow QR"
+        },
+        {
+          "merchant": "FONG YAN YAN",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "in",
+          "date": "2026-08-20",
+          "category": "Income",
+          "method": "DuitNow QR"
+        }
+      ]
+    },
+    "mlkit_spatial_text": "9:41\nTouch 'n Go eWallet\nTransaction History\n\n20 Aug 2026\nGOLDEN BITE FOODS\nDuitNow QR\n-RM 5.00\n\nNAN SAN HWAN\nTransfer to Wallet\n-RM 8.00\n\nBBT KOPITIAM\nDuitNow QR TNGD\n-RM 1.00\n\nMUHAMAD FADERILAH SUHAIMI BIN AZAM\nPayment\n-RM 7.50\n\nCHATHERINE WIJAYA\nDuitNow Received\n+RM 8.00\n\nFONG YAN YAN\nDuitNow Received\n+RM 8.00"
+  }
+}

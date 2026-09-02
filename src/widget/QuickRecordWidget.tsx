@@ -82,7 +82,7 @@ export function QuickRecordWidget({ streak = 0 }: QuickRecordWidgetProps = {}) {
         paddingVertical: 6,
       }}
     >
-      {/* 1. Left button: Mascot + Streak Flame Badge (Opens Pip Home / Dashboard) */}
+      {/* 1. Left button: Mascot + Streak Flame Badge (Opens Add Transaction) */}
       <FlexWidget
         style={{
           flex: 1,
@@ -91,8 +91,8 @@ export function QuickRecordWidget({ streak = 0 }: QuickRecordWidgetProps = {}) {
           justifyContent: 'center',
         }}
         clickAction="OPEN_URI"
-        clickActionData={{ uri: 'pip://dashboard' }}
-        accessibilityLabel="Open Pip"
+        clickActionData={{ uri: 'pip://add' }}
+        accessibilityLabel="Add Transaction"
       >
         <SvgWidget
           svg={getMascotStreakSvg(streak)}

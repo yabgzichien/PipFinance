@@ -19,7 +19,7 @@ describe('QuickRecordWidget', () => {
     // Child 0: Mascot container with streak SVG
     const mascotBtn = children[0];
     expect(mascotBtn.props.clickAction).toBe('OPEN_URI');
-    expect(mascotBtn.props.clickActionData).toEqual({ uri: 'pip://dashboard' });
+    expect(mascotBtn.props.clickActionData).toEqual({ uri: 'pip://add' });
     const mascotSvg = mascotBtn.props.children;
     expect(mascotSvg.props.svg).toContain('>5<');
     expect(mascotSvg.props.svg).toContain('#FAA81A'); // Flame gold color

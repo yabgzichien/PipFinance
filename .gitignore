@@ -70,6 +70,13 @@ promo-video/.hyperframes/
 promo-video/capture/
 promo-video/snapshots/
 
+# gradle / android build artifacts in subtools
+.gradle/
+**/build/
+local.properties
+*.apk
+
 # test artifacts
 tax-relief-evidence-*.zip
 *.zip
+

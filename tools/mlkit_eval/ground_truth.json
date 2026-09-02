@@ -1,0 +1,130 @@
+{
+  "tngscreenshot.png": {
+    "type": "transactions_list",
+    "app": "Touch 'n Go eWallet",
+    "transactions": [
+      {
+        "merchant": "GOLDEN BITE FOODS",
+        "amount": 5.00,
+        "direction": "out",
+        "date": "2026-08-20",
+        "description": "DuitNow QR"
+      },
+      {
+        "merchant": "NAN SAN HWAN",
+        "amount": 8.00,
+        "direction": "out",
+        "date": "2026-08-20",
+        "description": "Transfer to Wallet"
+      },
+      {
+        "merchant": "BBT KOPITIAM",
+        "amount": 1.00,
+        "direction": "out",
+        "date": "2026-08-20",
+        "description": "DuitNow QR TNGD"
+      },
+      {
+        "merchant": "MUHAMAD FADERILAH SUHAIMI BIN AZAM",
+        "amount": 7.50,
+        "direction": "out",
+        "date": "2026-08-20",
+        "description": "Payment"
+      },
+      {
+        "merchant": "CHATHERINE WIJAYA",
+        "amount": 8.00,
+        "direction": "in",
+        "date": "2026-08-20",
+        "description": "DuitNow Received"
+      },
+      {
+        "merchant": "FONG YAN YAN",
+        "amount": 8.00,
+        "direction": "in",
+        "date": "2026-08-20",
+        "description": "DuitNow Received"
+      }
+    ]
+  },
+  "1000105419.jpg": {
+    "type": "receipt",
+    "merchant": "NS PLT",
+    "date": "2026-08-23",
+    "time": "13:17:00",
+    "subtotal": 26.00,
+    "tax": 0.00,
+    "total": 26.00,
+    "currency": "MYR",
+    "items": [
+      {
+        "label": "A15",
+        "amount": 12.00,
+        "quantity": 1
+      },
+      {
+        "label": "A18",
+        "amount": 14.00,
+        "quantity": 1
+      }
+    ]
+  },
+  "1000105421.jpg": {
+    "type": "receipt",
+    "merchant": "THE ML KITCHEN (SEPANG) SDN. BHD.",
+    "date": "2026-08-23",
+    "time": "19:15:59",
+    "subtotal": 36.45,
+    "discount": 1.82,
+    "total": 34.58,
+    "currency": "MYR",
+    "items": [
+      {
+        "label": "麻辣烫 Mala Soup",
+        "amount": 32.45,
+        "quantity": 0.59
+      },
+      {
+        "label": "白饭 Rice",
+        "amount": 2.00,
+        "quantity": 1
+      },
+      {
+        "label": "白饭 Rice",
+        "amount": 2.00,
+        "quantity": 1
+      }
+    ]
+  },
+  "1000105423.jpg": {
+    "type": "receipt",
+    "merchant": "ECONSAVE CASH & CARRY (SPG) SDN BHD",
+    "date": "2026-08-31",
+    "time": "19:37",
+    "subtotal": 76.24,
+    "rounding": 0.01,
+    "total": 76.25,
+    "currency": "MYR",
+    "items": [
+      { "label": "KOBIS BULAT LOCAL", "amount": 0.91, "quantity": 1 },
+      { "label": "DELIFISH SMALL FRI", "amount": 3.20, "quantity": 1 },
+      { "label": "C.KIMCHAM (+-100G)", "amount": 0.99, "quantity": 1 },
+      { "label": "C.KIMCHAM (+-100G)", "amount": 0.99, "quantity": 1 },
+      { "label": "C.KIMCHAM (+-100G)", "amount": 0.99, "quantity": 1 },
+      { "label": "SHRIMP PASTE", "amount": 9.90, "quantity": 1 },
+      { "label": "ANCHOR CHEDDAR CHE", "amount": 9.45, "quantity": 1 },
+      { "label": "KNIFE CLAS LIGHT S", "amount": 5.80, "quantity": 1 },
+      { "label": "LACT B/YOG SBRRY", "amount": 4.79, "quantity": 1 },
+      { "label": "NR 3IN1 ORI 14X28G", "amount": 8.90, "quantity": 1 },
+      { "label": "(PS) MI SEDAAP GOR", "amount": 4.45, "quantity": 1 },
+      { "label": "MS INS SOTO 5X75G", "amount": 5.20, "quantity": 1 },
+      { "label": "MILO 400G", "amount": 9.80, "quantity": 1 },
+      { "label": "GARDENIA ORI CLAS", "amount": 2.85, "quantity": 1 },
+      { "label": "100PLUS 1.5L", "amount": 2.89, "quantity": 1 },
+      { "label": "T/MORAH POTONG", "amount": 4.42, "quantity": 1 },
+      { "label": "PLASTIC BAG", "amount": 0.20, "quantity": 1 },
+      { "label": "PLASTIC BAG", "amount": 0.20, "quantity": 1 },
+      { "label": "PLASTIC BAG", "amount": 0.20, "quantity": 1 }
+    ]
+  }
+}

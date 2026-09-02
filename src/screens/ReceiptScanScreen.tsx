@@ -213,7 +213,7 @@ export function ReceiptScanScreen({
     setPhase('reading');
     setError('');
     try {
-      const scanned = await scanReceiptImage(image.base64, image.mime);
+      const scanned = await scanReceiptImage(image);
       applyScan(scanned);
       onScanned?.(scanned);
       setPhase('assign');

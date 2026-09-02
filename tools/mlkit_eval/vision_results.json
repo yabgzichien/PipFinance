@@ -1,0 +1,263 @@
+{
+  "1000105419.jpg": {
+    "file": "1000105419.jpg",
+    "raw_file_size_bytes": 1637979,
+    "upload_payload_size_bytes": 2185880,
+    "latency_ms": 2924.31,
+    "prompt_tokens_total": 1471,
+    "image_tokens": 1056,
+    "text_prompt_tokens": 415,
+    "completion_tokens": 171,
+    "total_tokens": 1642,
+    "parsed_json": {
+      "merchant": "NS PLT",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "A15",
+          "amount": 12.0,
+          "quantity": null
+        },
+        {
+          "label": "A18",
+          "amount": 14.0,
+          "quantity": null
+        }
+      ],
+      "subtotal": 26.0,
+      "serviceCharge": null,
+      "tax": 0.0,
+      "total": 26.0,
+      "discount": {
+        "amount": 0.0,
+        "timing": "after"
+      }
+    }
+  },
+  "1000105421.jpg": {
+    "file": "1000105421.jpg",
+    "raw_file_size_bytes": 1315305,
+    "upload_payload_size_bytes": 1755648,
+    "latency_ms": 3048.51,
+    "prompt_tokens_total": 1486,
+    "image_tokens": 1071,
+    "text_prompt_tokens": 415,
+    "completion_tokens": 211,
+    "total_tokens": 1697,
+    "parsed_json": {
+      "merchant": "THE ML KITCHEN (SEPANG) SDN. BHD",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "Mala Soup",
+          "amount": 32.45,
+          "quantity": 0.59
+        },
+        {
+          "label": "Rice",
+          "amount": 2.0,
+          "quantity": 1
+        },
+        {
+          "label": "Rice",
+          "amount": 2.0,
+          "quantity": 1
+        }
+      ],
+      "subtotal": 36.45,
+      "serviceCharge": null,
+      "tax": null,
+      "total": 34.58,
+      "discount": {
+        "amount": 1.82,
+        "timing": "after"
+      }
+    }
+  },
+  "1000105423.jpg": {
+    "file": "1000105423.jpg",
+    "raw_file_size_bytes": 368533,
+    "upload_payload_size_bytes": 493288,
+    "latency_ms": 3226.87,
+    "prompt_tokens_total": 1469,
+    "image_tokens": 1054,
+    "text_prompt_tokens": 415,
+    "completion_tokens": 657,
+    "total_tokens": 2126,
+    "parsed_json": {
+      "merchant": "ECONSAVE CASH & CARRY (SPG) SDN BHD",
+      "currency": "MYR",
+      "items": [
+        {
+          "label": "KOBIS BULAT LOCAL",
+          "amount": 0.91,
+          "quantity": 1
+        },
+        {
+          "label": "DELIFISH SMALL FRI",
+          "amount": 3.2,
+          "quantity": 1
+        },
+        {
+          "label": "C KIMCHAM (+100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "C KIMCHAM (+100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "C KIMCHAM (+100G)",
+          "amount": 0.99,
+          "quantity": 1
+        },
+        {
+          "label": "SHRIMP PASTE",
+          "amount": 9.9,
+          "quantity": 1
+        },
+        {
+          "label": "ANCHOR CHEDDAR CHE",
+          "amount": 9.45,
+          "quantity": 1
+        },
+        {
+          "label": "KNIFE CLAS LIGHT S",
+          "amount": 5.8,
+          "quantity": 1
+        },
+        {
+          "label": "LACT B/YOG SBRRY",
+          "amount": 4.79,
+          "quantity": 1
+        },
+        {
+          "label": "NR 3IN1 ORI 14X28G",
+          "amount": 8.9,
+          "quantity": 1
+        },
+        {
+          "label": "(PS) MI SEDAAP GOR",
+          "amount": 4.45,
+          "quantity": 1
+        },
+        {
+          "label": "MS INS SOTO 5X75G",
+          "amount": 5.2,
+          "quantity": 1
+        },
+        {
+          "label": "MILO 400G",
+          "amount": 9.8,
+          "quantity": 1
+        },
+        {
+          "label": "GARDENIA ORI CLAS",
+          "amount": 2.85,
+          "quantity": 1
+        },
+        {
+          "label": "100PLUS 1.5L",
+          "amount": 2.89,
+          "quantity": 1
+        },
+        {
+          "label": "T/MORAH POTONG",
+          "amount": 4.42,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        },
+        {
+          "label": "PLASTIC BAG",
+          "amount": 0.2,
+          "quantity": 1
+        }
+      ],
+      "subtotal": 76.24,
+      "serviceCharge": null,
+      "tax": null,
+      "total": 76.25,
+      "discount": null
+    }
+  },
+  "tngscreenshot.png": {
+    "file": "tngscreenshot.png",
+    "raw_file_size_bytes": 518235,
+    "upload_payload_size_bytes": 692468,
+    "latency_ms": 2368.56,
+    "prompt_tokens_total": 1371,
+    "image_tokens": 1080,
+    "text_prompt_tokens": 291,
+    "completion_tokens": 509,
+    "total_tokens": 1880,
+    "parsed_json": {
+      "transactions": [
+        {
+          "merchant": "GOLDEN BITE FOODS",
+          "amount": 5.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": null,
+          "method": "DuitNow QR"
+        },
+        {
+          "merchant": "Transfer to NAN SAN HWAN",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": null,
+          "method": "Transfer to Wallet"
+        },
+        {
+          "merchant": "BBT KOPITIAM",
+          "amount": 1.0,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": null,
+          "method": "DuitNow QR TNGD"
+        },
+        {
+          "merchant": "MUHAMAD FADERILAH SUHAIMI BIN AZAM",
+          "amount": 7.5,
+          "currency": "MYR",
+          "direction": "out",
+          "date": "2026-08-20",
+          "category": null,
+          "method": "Payment"
+        },
+        {
+          "merchant": "Receive from CHATHERINE WIJAYA",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "in",
+          "date": "2026-08-20",
+          "category": null,
+          "method": "DuitNow Received"
+        },
+        {
+          "merchant": "Receive from FONG YAN YAN",
+          "amount": 8.0,
+          "currency": "MYR",
+          "direction": "in",
+          "date": "2026-08-20",
+          "category": null,
+          "method": null
+        }
+      ]
+    }
+  }
+}
