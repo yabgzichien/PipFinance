@@ -1,12 +1,15 @@
 // src/screens/NetWorthScreen.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
+import { CalcBadge } from '../components/CalcBadge';
 import { CurrencyChip } from '../components/CurrencyChip';
 import { InstitutionBadge } from '../components/InstitutionBadge';
+import { BrandBadge } from '../components/BrandBadge';
+import { matchBrand, matchCrypto } from '../components/BrandLogo';
 import { InstitutionField } from '../components/InstitutionField';
 import { BalanceScanScreen } from './BalanceScanScreen';
 import { ScanBalanceButton } from '../components/ScanBalanceButton';
@@ -16,10 +19,13 @@ import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../compo
 import { getActiveCurrencies, getEntryCurrency, refreshFxRates } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
-import { BASE_CURRENCY, isMultiCurrency } from '../lib/currency';
+import { BASE_CURRENCY, isMultiCurrency, round2 } from '../lib/currency';
+import { cleanCalcInput, evaluateExpression } from '../lib/calc';
+import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
-import { isStale, ratesFromCache, staleLabel } from '../lib/fx';
+import { rateFor, ratesFromCache, isStale, staleLabel } from '../lib/fx';
 import { matchInstitution } from '../lib/institutions';
+import { tap } from '../lib/haptics';
 import { confirmAction } from '../lib/platformAlert';
 import {
   CLASS_BY_ID,
@@ -60,6 +66,7 @@ function formatClassLabel(cls: string, isZh: boolean, fallbackLabel: string): st
     case 'cash': return '现金与银行';
     case 'bank': return '银行账户';
     case 'investments': return '投资资产';
+    case 'illiquid': return '非流动资产';
     case 'credit': return '信用卡';
     case 'loans': return '借贷债务';
     default: return fallbackLabel;
@@ -572,6 +579,8 @@ function AssetClassCard({
             myrValue={value}
             currency={account.currency}
             interestRate={account.interestRate}
+            cost={account.cost}
+            cls={account.cls}
             unconvertible={unconvertible.includes(account.id)}
             fxAsOf={fxAsOf}
             dc={dc}
@@ -592,6 +601,8 @@ function ManualRowD({
   myrValue,
   currency,
   interestRate,
+  cost,
+  cls,
   unconvertible,
   fxAsOf,
   dc,
@@ -606,6 +617,8 @@ function ManualRowD({
   myrValue: number;
   currency: string;
   interestRate?: number | null;
+  cost?: number | null;
+  cls?: string;
   unconvertible: boolean;
   fxAsOf: Record<string, string>;
   dc: DisplayCurrency;
@@ -615,7 +628,9 @@ function ManualRowD({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const inst = matchInstitution(name);
+  const brand = inst ? (matchBrand(inst.id) || matchBrand(inst.name)) : matchBrand(name);
   const isCustomImage = customIcon && (
     customIcon.startsWith('data:') ||
     customIcon.startsWith('file:') ||
@@ -628,10 +643,34 @@ function ManualRowD({
   // reading in SGD needs the SGD equivalent of a ringgit account just as much as the
   // reverse, and an SGD account under an SGD display currency needs no hint at all.
   const foreign = currency !== dc.code;
-  const subText = interestRate != null ? `${sub} · ${interestRate}% APR` : sub;
+  const subText = useMemo(() => {
+    if (cls === 'illiquid') {
+      const parts: string[] = [];
+      if (cost != null && cost > 0) {
+        const diff = nativeValue - cost;
+        const pct = Math.round((diff / cost) * 1000) / 10;
+        const sign = diff >= 0 ? '+' : '−';
+        parts.push(isZh ? `${sign}${Math.abs(pct)}% 较成本` : `${sign}${Math.abs(pct)}% vs cost`);
+      }
+      if (interestRate != null) {
+        if (interestRate > 0) {
+          parts.push(isZh ? `+${interestRate}%/年 预估增值` : `+${interestRate}%/yr ETA`);
+        } else if (interestRate < 0) {
+          parts.push(isZh ? `−${Math.abs(interestRate)}%/年 预估折旧` : `−${Math.abs(interestRate)}%/yr dep.`);
+        } else {
+          parts.push(isZh ? '0%/年' : '0%/yr');
+        }
+      }
+      if (parts.length > 0) return parts.join(' · ');
+      return sub;
+    }
+    return interestRate != null ? `${sub} · ${interestRate}% APR` : sub;
+  }, [cls, cost, nativeValue, interestRate, isZh, sub]);
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
-      {inst ? (
+      {brand ? (
+        <BrandBadge brand={brand} size={36} rad={11} />
+      ) : inst ? (
         <InstitutionBadge inst={inst} size={36} />
       ) : isCustomImage ? (
         <View style={[styles.rowTile, { backgroundColor: theme.accentTint, overflow: 'hidden' }]}>
@@ -678,6 +717,7 @@ function HoldingRowD({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const badge = badgeFor(grp.sub, grp.symbol);
+  const cryptoBrand = grp.sub === 'crypto' ? matchCrypto(grp.symbol) || matchCrypto(grp.ticker) || matchCrypto(grp.name) : null;
   const unitPx = price ? toQuantityUnitPrice(grp.symbol, price.priceMYR) : null;
   const ch = price?.change24 ?? null;
   const chUp = (ch ?? 0) >= 0;
@@ -685,10 +725,14 @@ function HoldingRowD({
   const tick = grp.sub === 'commodity' ? (grp.symbol.startsWith('SI') ? 'XAG' : 'XAU') : grp.ticker;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
-      <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-        <Text style={[styles.badgeTick, { color: badge.clr }]} numberOfLines={1}>{tick}</Text>
-        <Text style={[styles.badgeLbl, { color: badge.clr }]}>{badge.lbl}</Text>
-      </View>
+      {cryptoBrand ? (
+        <BrandBadge brand={cryptoBrand} size={38} rad={11} />
+      ) : (
+        <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+          <Text style={[styles.badgeTick, { color: badge.clr }]} numberOfLines={1}>{tick}</Text>
+          <Text style={[styles.badgeLbl, { color: badge.clr }]}>{badge.lbl}</Text>
+        </View>
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.rowName, { color: colorTheme.ink }]} numberOfLines={1}>{grp.name}</Text>
         <View style={styles.holdMetaRow}>
@@ -745,6 +789,7 @@ function LiabilityRowD({
 }) {
   const colorTheme = useThemeColors();
   const inst = matchInstitution(name);
+  const brand = inst ? (matchBrand(inst.id) || matchBrand(inst.name)) : matchBrand(name);
   const isCustomImage = customIcon && (
     customIcon.startsWith('data:') ||
     customIcon.startsWith('file:') ||
@@ -759,7 +804,9 @@ function LiabilityRowD({
   const foreign = currency !== dc.code;
   return (
     <Pressable onPress={onPress} style={[styles.row, !isLast && [styles.rowDivider, { borderBottomColor: colorTheme.line }]]}>
-      {inst ? (
+      {brand ? (
+        <BrandBadge brand={brand} size={36} rad={11} />
+      ) : inst ? (
         <InstitutionBadge inst={inst} size={36} />
       ) : isCustomImage ? (
         <View style={[styles.rowTile, { overflow: 'hidden' }]}>
@@ -853,6 +900,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   const [qtyText, setQtyText] = useState('');
   const [costText, setCostText] = useState('');
   const [rateText, setRateText] = useState('');
+  const [rateMode, setRateMode] = useState<'appreciation' | 'depreciation'>('depreciation');
   const [searchOpen, setSearchOpen] = useState(false);
   const [customIcon, setCustomIcon] = useState<string | null>(null);
   // A manually-created account's own currency (holdings stay MYR-only, priced via quotesMYR).
@@ -862,6 +910,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
   const reset = () => {
     setKind('asset'); setCls('cash'); setName(''); setValueText('');
     setHoldingMode(false); setCoin(null); setQtyText(''); setCostText(''); setRateText('');
+    setRateMode('depreciation');
     setCustomIcon(null); setCurrency(BASE_CURRENCY);
   };
   const close = () => { reset(); onClose(); };
@@ -872,7 +921,7 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
     if (!visible) return;
     if (preset) {
       setKind('asset'); setCls('investments'); setHoldingMode(true);
-      setCoin(preset); setName(''); setValueText(''); setQtyText(''); setCostText(''); setRateText(''); setCustomIcon(null);
+      setCoin(preset); setName(''); setValueText(''); setQtyText(''); setCostText(''); setRateText(''); setRateMode('depreciation'); setCustomIcon(null);
     } else {
       reset();
     }
@@ -892,11 +941,76 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
 
   const isInvest = kind === 'asset' && cls === 'investments';
   const isHoldingType = isInvest && holdingMode;
+  const isIlliquid = kind === 'asset' && cls === 'illiquid';
   const pickedSub = coin ? subFromType(coin.type) : null;
   const qtyUnit = pickedSub === 'commodity' ? 'g' : coin?.ticker ?? '';
   const qtyLabel = pickedSub === 'commodity' ? 'Grams' : pickedSub === 'stock' ? 'Shares' : 'Quantity';
   const quantity = Math.max(0, parseFloat(qtyText.replace(/[^0-9.]/g, '')) || 0);
-  const value = Math.max(0, parseFloat(valueText.replace(/[^0-9.]/g, '')) || 0);
+
+  const valueDecimals = decimalsFor(currency);
+  const valueCalc = useMemo(() => evaluateExpression(valueText, valueDecimals), [valueText, valueDecimals]);
+  const value = Math.max(0, valueCalc.result ?? 0);
+
+  const mergeScaleX = useRef(new Animated.Value(1)).current;
+  const mergeScaleY = useRef(new Animated.Value(1)).current;
+  const mergeOpacity = useRef(new Animated.Value(1)).current;
+  const [isMergingValue, setIsMergingValue] = useState(false);
+
+  const handleMergeValue = () => {
+    if (!valueCalc.isExpression || valueCalc.result == null || valueCalc.result <= 0) return;
+    const finalValue = valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals);
+    const useNative = Platform.OS !== 'web';
+
+    setIsMergingValue(true);
+    tap();
+
+    // Phase 1: Numbers converge/squeeze inward
+    Animated.parallel([
+      Animated.timing(mergeScaleX, {
+        toValue: 0.82,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeScaleY, {
+        toValue: 0.88,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeOpacity, {
+        toValue: 0.35,
+        duration: 80,
+        useNativeDriver: useNative,
+      }),
+    ]).start(() => {
+      setValueText(finalValue);
+
+      // Phase 2: Bloom outward with spring bounce into final number
+      Animated.parallel([
+        Animated.spring(mergeScaleX, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(mergeScaleY, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(mergeOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: useNative,
+        }),
+      ]).start(() => {
+        setIsMergingValue(false);
+      });
+    });
+  };
+
   const canSave = isHoldingType ? !!coin && quantity > 0 : name.trim().length > 0;
 
   const pickCoin = (c: TickerResult) => {
@@ -928,6 +1042,11 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
       const ticker = sub === 'commodity' ? 'g' : coin.ticker; // gold/silver measured in grams
       const cost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
       await addHolding(name.trim() || coin.name, sub, coin.id, ticker, Math.round(quantity * 1e8) / 1e8, cost, customIcon, rateVal);
+    } else if (isIlliquid) {
+      const parsedCost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
+      const numRate = rateText.trim() ? parseFloat(rateText.replace(/[^0-9.]/g, '')) : null;
+      const finalRate = numRate != null && Number.isFinite(numRate) ? (rateMode === 'depreciation' ? -Math.abs(numRate) : Math.abs(numRate)) : null;
+      await addAccount(name.trim(), 'asset', 'illiquid', Math.round(value * 100) / 100, todayISO(), customIcon, currency, finalRate, parsedCost);
     } else {
       await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon, currency, isInvest ? rateVal : null);
     }
@@ -957,14 +1076,14 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
                 <Pressable
                   key={k}
                   onPress={() => switchKind(k)}
-                  style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
+                  style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: theme.accentTint }]}
                 >
                   <Text
                     style={[
                       styles.toggleText,
                       { color: colorTheme.ink2 },
                       on && styles.toggleTextOn,
-                      on && { color: colorTheme.ink },
+                      on && { color: theme.accent },
                     ]}
                   >
                     {k === 'asset' ? (isZh ? '资产' : 'Assets') : (isZh ? '负债' : 'Liabilities')}
@@ -1036,43 +1155,165 @@ function AddAccountModal({ visible, preset, onClose }: { visible: boolean; prese
                 {coin ? <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{qtyUnit}</Text> : null}
               </View>
 
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Invested amount (optional)</Text>
+              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '持仓成本 / 买入总额 (选填)' : 'Invested amount (optional)'}</Text>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
-                <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder="cost of investment" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
+                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
+                <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder={isZh ? '买入成本' : 'cost of investment'} placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
 
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Interest rate (optional)</Text>
+              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '年化收益率 / APR (选填)' : 'Interest rate (optional)'}</Text>
               <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
                 <TextInput value={rateText} onChangeText={setRateText} keyboardType="decimal-pad" placeholder="APR" placeholderTextColor={colorTheme.ink3} style={[styles.compactInput, { color: colorTheme.ink }]} />
                 <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>%</Text>
               </View>
 
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Name (optional)</Text>
-              <TextInput value={name} onChangeText={setName} placeholder="e.g. My holding" placeholderTextColor={colorTheme.ink3} style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]} />
+              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '账户名称 (选填)' : 'Name (optional)'}</Text>
+              <TextInput value={name} onChangeText={setName} placeholder={isZh ? '例如：我的持仓' : 'e.g. My holding'} placeholderTextColor={colorTheme.ink3} style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]} />
             </>
           ) : (
             <>
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Account</Text>
+              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                {cls === 'illiquid' ? (isZh ? '资产名称' : 'Asset name') : (isZh ? '账户名称' : 'Account')}
+              </Text>
               <InstitutionField
                 value={name}
                 onChangeText={setName}
-                placeholder={kind === 'asset' ? 'e.g. TnG eWallet, Maybank FD' : 'e.g. Car Loan'}
-                onPick={() => { if (kind === 'asset') setCls('cash'); }}
+                placeholder={
+                  kind === 'asset'
+                    ? cls === 'illiquid'
+                      ? isZh
+                        ? '例如：2022 本田思域、满家乐公寓'
+                        : 'e.g. 2022 Honda Civic, Mont Kiara Condo'
+                      : isZh
+                        ? '例如：TnG 电子钱包、Maybank'
+                        : 'e.g. TnG eWallet, Maybank FD'
+                    : isZh
+                      ? '例如：Porsche 车贷 / 信用卡'
+                      : 'e.g. Porsche, Car Loan'
+                }
+                onPick={(inst) => {
+                  if (inst.kind === 'auto') {
+                    if (kind === 'liability') setCls('car');
+                    else setCls('illiquid');
+                  } else if (kind === 'asset') {
+                    setCls('cash');
+                  }
+                }}
               />
 
               <View style={[styles.labelRow, { marginTop: 18 }]}>
-                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{kind === 'asset' ? 'Current value' : 'Outstanding amount'}</Text>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                  {cls === 'illiquid'
+                    ? isZh
+                      ? '当前市值'
+                      : 'Market value'
+                    : kind === 'asset'
+                      ? isZh
+                        ? '当前金额'
+                        : 'Current value'
+                      : isZh
+                        ? '待还金额'
+                        : 'Outstanding amount'}
+                </Text>
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
                 {isMultiCurrency(activeCurrencies) ? (
                   <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
                 ) : (
-                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
                 )}
-                <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" placeholder="0.00" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
+                <Animated.View
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    opacity: mergeOpacity,
+                    transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
+                  }}
+                >
+                  <TextInput
+                    value={valueText}
+                    onChangeText={(t) => setValueText(cleanCalcInput(t, valueDecimals > 0))}
+                    onSubmitEditing={handleMergeValue}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder={valueDecimals === 0 ? '0' : '0.00'}
+                    placeholderTextColor={colorTheme.ink3}
+                    style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
+                  />
+                </Animated.View>
+                {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                  <CalcBadge
+                    result={valueCalc.result}
+                    decimals={valueDecimals}
+                    onApply={handleMergeValue}
+                  />
+                )}
               </View>
+              {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                <Text style={[styles.calcHint, { color: theme.accent }]}>
+                  = {currency} {valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals)}
+                </Text>
+              )}
+
+              {isIlliquid && (
+                <>
+                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                    {isZh ? '购置成本 (选填)' : 'Cost of asset (optional)'}
+                  </Text>
+                  <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                    <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
+                    <TextInput
+                      value={costText}
+                      onChangeText={setCostText}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.amountInput, { color: colorTheme.ink }]}
+                    />
+                  </View>
+
+                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                    {isZh ? '预估年化增值/折旧率 (选填)' : 'ETA appreciation / depreciation % (optional)'}
+                  </Text>
+                  <View style={[styles.toggle, { marginTop: 6, marginBottom: 8, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+                    {([
+                      ['appreciation', isZh ? '+ 增值' : '+ Appreciation'],
+                      ['depreciation', isZh ? '− 折旧' : '− Depreciation'],
+                    ] as const).map(([m, label]) => {
+                      const on = rateMode === m;
+                      return (
+                        <Pressable
+                          key={m}
+                          onPress={() => setRateMode(m)}
+                          style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
+                        >
+                          <Text
+                            style={[
+                              styles.toggleText,
+                              { color: colorTheme.ink2 },
+                              on && styles.toggleTextOn,
+                              on && { color: m === 'appreciation' ? theme.accent : colorTheme.ink },
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, width: 160 }]}>
+                    <TextInput
+                      value={rateText}
+                      onChangeText={setRateText}
+                      keyboardType="decimal-pad"
+                      placeholder={rateMode === 'depreciation' ? '10.0' : '5.0'}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.compactInput, { color: colorTheme.ink }]}
+                    />
+                    <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>% / yr</Text>
+                  </View>
+                </>
+              )}
 
               {isInvest && (
                 <>
@@ -1255,11 +1496,75 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
   const [qtyText, setQtyText] = useState('');
   const [costText, setCostText] = useState('');
   const [rateText, setRateText] = useState('');
+  const [editRateMode, setEditRateMode] = useState<'appreciation' | 'depreciation'>('depreciation');
   const [customIcon, setCustomIcon] = useState<string | null>(null);
   const [holdingCoin, setHoldingCoin] = useState<TickerResult | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const holding = account ? isHolding(account) : false;
+  const valueDecimals = decimalsFor(account?.currency ?? BASE_CURRENCY);
+  const valueCalc = useMemo(() => evaluateExpression(valueText, valueDecimals), [valueText, valueDecimals]);
+
+  const mergeScaleX = useRef(new Animated.Value(1)).current;
+  const mergeScaleY = useRef(new Animated.Value(1)).current;
+  const mergeOpacity = useRef(new Animated.Value(1)).current;
+  const [isMergingValue, setIsMergingValue] = useState(false);
+
+  const handleMergeValue = () => {
+    if (!valueCalc.isExpression || valueCalc.result == null || valueCalc.result <= 0) return;
+    const finalValue = valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals);
+    const useNative = Platform.OS !== 'web';
+
+    setIsMergingValue(true);
+    tap();
+
+    // Phase 1: Numbers converge/squeeze inward
+    Animated.parallel([
+      Animated.timing(mergeScaleX, {
+        toValue: 0.82,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeScaleY, {
+        toValue: 0.88,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeOpacity, {
+        toValue: 0.35,
+        duration: 80,
+        useNativeDriver: useNative,
+      }),
+    ]).start(() => {
+      setValueText(finalValue);
+
+      // Phase 2: Bloom outward with spring bounce into final number
+      Animated.parallel([
+        Animated.spring(mergeScaleX, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(mergeScaleY, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(mergeOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: useNative,
+        }),
+      ]).start(() => {
+        setIsMergingValue(false);
+      });
+    });
+  };
 
   const openId = account?.id;
   React.useEffect(() => {
@@ -1269,10 +1574,22 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
       setValueText(String(accountValues[account.id] ?? 0));
       setQtyText(account.quantity != null ? String(account.quantity) : '');
       setCostText(account.cost != null ? String(account.cost) : (account.cls === 'investments' && !isHolding(account) && (accountValues[account.id] ?? 0) > 0 ? String(accountValues[account.id]) : ''));
-      setRateText(account.interestRate != null ? String(account.interestRate) : '');
+      if (account.interestRate != null) {
+        if (account.interestRate < 0) {
+          setEditRateMode('depreciation');
+          setRateText(String(Math.abs(account.interestRate)));
+        } else {
+          setEditRateMode('appreciation');
+          setRateText(String(account.interestRate));
+        }
+      } else {
+        setEditRateMode(account.cls === 'illiquid' ? 'depreciation' : 'appreciation');
+        setRateText('');
+      }
       setCustomIcon(account.icon ?? null);
       setHoldingCoin(null);
       setSearchOpen(false);
+      setShowHistory(false);
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1304,7 +1621,15 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
 
   const save = async () => {
     const newName = name.trim() || account.name;
-    const parsedRate = rateText.trim() ? parseFloat(rateText.replace(/[^0-9.]/g, '')) || null : null;
+    const isCurrentIlliquid = account.cls === 'illiquid' || cls === 'illiquid';
+    let parsedRate: number | null = null;
+    if (rateText.trim()) {
+      const num = parseFloat(rateText.replace(/[^0-9.]/g, ''));
+      if (Number.isFinite(num)) {
+        parsedRate = isCurrentIlliquid && editRateMode === 'depreciation' ? -Math.abs(num) : num;
+      }
+    }
+    const parsedCost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
 
     // 1. Converting a manual account to a live holding
     if (!holding && holdingCoin) {
@@ -1356,10 +1681,10 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
     }
 
     // 3. Regular manual account update
-    if (newName !== account.name || cls !== account.cls || customIcon !== account.icon || parsedRate !== account.interestRate) {
-      await updateAccount(account.id, { name: newName, cls, icon: customIcon, interestRate: parsedRate });
+    if (newName !== account.name || cls !== account.cls || customIcon !== account.icon || parsedRate !== account.interestRate || parsedCost !== account.cost) {
+      await updateAccount(account.id, { name: newName, cls, icon: customIcon, interestRate: parsedRate, cost: parsedCost });
     }
-    const v = parseFloat(valueText.replace(/[^0-9.]/g, ''));
+    const v = valueCalc.result != null ? valueCalc.result : parseFloat(valueText.replace(/[^0-9.]/g, ''));
     const value = Number.isFinite(v) && v >= 0 ? Math.round(v * 100) / 100 : null;
     if (value !== null && value !== (accountValues[account.id] ?? 0)) {
       await setBalance(account.id, value, todayISO());
@@ -1423,8 +1748,8 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
 
               <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '买入成本 / 总投入 (成本价)' : 'Invested amount (cost)'}</Text>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
-                <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder="cost of investment" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
+                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
+                <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder={isZh ? '买入成本' : 'cost of investment'} placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
               </View>
 
               <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '年化收益率 / APR (选填)' : 'Interest rate (optional)'}</Text>
@@ -1439,20 +1764,69 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
           ) : (
             <>
               <View style={styles.labelRow}>
-                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{account.kind === 'asset' ? (isZh ? '当前金额' : 'Current value') : (isZh ? '待还金额' : 'Outstanding amount')}</Text>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                  {account.cls === 'illiquid' || cls === 'illiquid'
+                    ? isZh
+                      ? '当前市值'
+                      : 'Market value'
+                    : account.kind === 'asset'
+                      ? isZh
+                        ? '当前金额'
+                        : 'Current value'
+                      : isZh
+                        ? '待还金额'
+                        : 'Outstanding amount'}
+                </Text>
                 <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
               </View>
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
                 <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
-                <TextInput value={valueText} onChangeText={setValueText} keyboardType="decimal-pad" selectTextOnFocus style={[styles.amountInput, { color: colorTheme.ink }]} />
+                <Animated.View
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    opacity: mergeOpacity,
+                    transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
+                  }}
+                >
+                  <TextInput
+                    value={valueText}
+                    onChangeText={(t) => setValueText(cleanCalcInput(t, valueDecimals > 0))}
+                    onSubmitEditing={handleMergeValue}
+                    keyboardType="numbers-and-punctuation"
+                    selectTextOnFocus
+                    style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
+                  />
+                </Animated.View>
+                {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                  <CalcBadge
+                    result={valueCalc.result}
+                    decimals={valueDecimals}
+                    onApply={handleMergeValue}
+                  />
+                )}
               </View>
+              {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                <Text style={[styles.calcHint, { color: theme.accent }]}>
+                  = {account.currency} {valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals)}
+                </Text>
+              )}
               <Text style={[styles.hint, { color: colorTheme.ink2 }]}>{isZh ? '保存新金额将记录为今天的最新余额。' : 'Saving a new value records it as of today.'}</Text>
 
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '账户名称' : 'Account'}</Text>
+              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                {account.cls === 'illiquid' || cls === 'illiquid' ? (isZh ? '资产名称' : 'Asset name') : (isZh ? '账户名称' : 'Account')}
+              </Text>
               <InstitutionField
                 value={name}
                 onChangeText={setName}
-                onPick={() => { if (account.kind === 'asset') setCls('cash'); }}
+                onPick={(inst) => {
+                  if (inst.kind === 'auto') {
+                    if (account.kind === 'liability') setCls('car');
+                    else setCls('illiquid');
+                  } else if (account.kind === 'asset') {
+                    setCls('cash');
+                  }
+                }}
               />
 
               <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '分类' : 'Type'}</Text>
@@ -1467,6 +1841,83 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
                   );
                 })}
               </View>
+
+              {(account.cls === 'illiquid' || cls === 'illiquid') && (
+                <>
+                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                    {isZh ? '购置成本 (选填)' : 'Cost of asset (optional)'}
+                  </Text>
+                  <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                    <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
+                    <TextInput
+                      value={costText}
+                      onChangeText={setCostText}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.amountInput, { color: colorTheme.ink }]}
+                    />
+                  </View>
+
+                  {(() => {
+                    const costVal = parseFloat(costText.replace(/[^0-9.]/g, ''));
+                    const curVal = parseFloat(valueText.replace(/[^0-9.]/g, ''));
+                    if (Number.isFinite(costVal) && costVal > 0 && Number.isFinite(curVal)) {
+                      const diff = curVal - costVal;
+                      const pct = Math.round((diff / costVal) * 1000) / 10;
+                      const up = diff >= 0;
+                      return (
+                        <Text style={[styles.profitLine, { color: up ? theme.accent : RED2, marginTop: 6 }]}>
+                          {up ? '▲' : '▼'} {up ? '+' : '−'}{fmtMoney(dc.convert(Math.abs(diff)), dc.code)}
+                          {` (${up ? '+' : '−'}${Math.abs(pct)}%) ${isZh ? '较购置成本' : 'vs cost'}`}
+                        </Text>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
+                    {isZh ? '预估年化增值/折旧率 (选填)' : 'ETA appreciation / depreciation % (optional)'}
+                  </Text>
+                  <View style={[styles.toggle, { marginTop: 6, marginBottom: 8, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+                    {([
+                      ['appreciation', isZh ? '+ 增值' : '+ Appreciation'],
+                      ['depreciation', isZh ? '− 折旧' : '− Depreciation'],
+                    ] as const).map(([m, label]) => {
+                      const on = editRateMode === m;
+                      return (
+                        <Pressable
+                          key={m}
+                          onPress={() => setEditRateMode(m)}
+                          style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
+                        >
+                          <Text
+                            style={[
+                              styles.toggleText,
+                              { color: colorTheme.ink2 },
+                              on && styles.toggleTextOn,
+                              on && { color: m === 'appreciation' ? theme.accent : colorTheme.ink },
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, width: 160 }]}>
+                    <TextInput
+                      value={rateText}
+                      onChangeText={setRateText}
+                      keyboardType="decimal-pad"
+                      placeholder={editRateMode === 'depreciation' ? '10.0' : '5.0'}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.compactInput, { color: colorTheme.ink }]}
+                    />
+                    <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>% / yr</Text>
+                  </View>
+                </>
+              )}
 
               {(account.cls === 'investments' || cls === 'investments') && (
                 <>
@@ -1526,7 +1977,7 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
                           {isZh ? '买入成本 / 总投资额 (选填)' : 'Invested amount (cost)'}
                         </Text>
                         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
                           <TextInput
                             value={costText}
                             onChangeText={setCostText}
@@ -1555,17 +2006,58 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
           )}
 
           {history.length > 1 && (
-            <>
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '历史记录' : 'History'}</Text>
-              <Card style={{ overflow: 'hidden' }}>
-                {history.map((e, i) => (
-                  <View key={e.id} style={[styles.histRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
-                    <Text style={[styles.histDate, { color: colorTheme.ink2 }]}>{shortDate(e.asOf)}</Text>
-                    <Text style={[styles.histVal, { color: colorTheme.ink }]}>{fmtMoney(e.value, account.currency)}</Text>
-                  </View>
-                ))}
-              </Card>
-            </>
+            <View style={{ marginTop: 18 }}>
+              <Pressable
+                onPress={() => setShowHistory((prev) => !prev)}
+                style={[
+                  styles.historyBtn,
+                  {
+                    backgroundColor: colorTheme.surface,
+                    borderColor: showHistory ? theme.accent : colorTheme.line,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  showHistory
+                    ? (isZh ? '收起历史记录' : 'Hide histories')
+                    : (isZh ? '查看历史记录' : 'View histories')
+                }
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Icon
+                    name="clock"
+                    size={16}
+                    color={showHistory ? theme.accent : colorTheme.ink2}
+                  />
+                  <Text
+                    style={[
+                      styles.historyBtnText,
+                      { color: showHistory ? theme.accent : colorTheme.ink },
+                    ]}
+                  >
+                    {showHistory
+                      ? (isZh ? '收起历史记录' : 'Hide histories')
+                      : (isZh ? '查看历史记录' : 'View histories')}
+                  </Text>
+                </View>
+                <Icon
+                  name={showHistory ? 'chevronUp' : 'chevronDown'}
+                  size={16}
+                  color={showHistory ? theme.accent : colorTheme.ink3}
+                />
+              </Pressable>
+
+              {showHistory && (
+                <Card style={{ overflow: 'hidden', marginTop: 8 }}>
+                  {history.map((e, i) => (
+                    <View key={e.id} style={[styles.histRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+                      <Text style={[styles.histDate, { color: colorTheme.ink2 }]}>{shortDate(e.asOf)}</Text>
+                      <Text style={[styles.histVal, { color: colorTheme.ink }]}>{fmtMoney(e.value, account.currency)}</Text>
+                    </View>
+                  ))}
+                </Card>
+              )}
+            </View>
           )}
 
           {/* Custom icon picker */}
@@ -1766,8 +2258,9 @@ const styles = StyleSheet.create({
   classChipText: { fontFamily: uiFont(600), fontSize: 13 },
   textInput: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 13, fontFamily: uiFont(600), fontSize: 16 },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
+  calcHint: { fontFamily: numFont(600), fontSize: 13, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
-  amountInput: { flex: 1, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
+  amountInput: { flex: 1, minWidth: 0, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
   compactInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1787,8 +2280,22 @@ const styles = StyleSheet.create({
   compactUnit: {
     fontFamily: uiFont(600),
     fontSize: 13,
+    flexShrink: 0,
   },
   hint: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 6 },
+  historyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  historyBtnText: {
+    fontFamily: uiFont(600),
+    fontSize: 13.5,
+  },
   histRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 11 },
   histDate: { fontFamily: uiFont(500), fontSize: 13 },
   histVal: { fontFamily: numFont(600), fontSize: 13.5 },

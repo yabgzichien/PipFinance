@@ -55,6 +55,17 @@ describe('GLOSSARY', () => {
     expect(quickAdd.steps?.length).toBe(2);
   });
 
+  it('contains reduce_liability explaining instalments for car and real estate loans', () => {
+    const entry = GLOSSARY['reduce_liability'];
+    expect(entry).toBeDefined();
+    expect(entry.term).toBe('Reduce liability');
+    expect(entry.short).toContain('instalment');
+    expect(entry.body).toContain('car instalment');
+    expect(entry.body).toContain('real estate');
+    expect(entry.steps).toBeDefined();
+    expect(entry.steps?.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('validates all steps when defined have non-empty titles and descriptions', () => {
     for (const [key, entry] of Object.entries(GLOSSARY)) {
       if (entry.steps) {

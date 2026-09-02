@@ -55,9 +55,9 @@ export function SplitSheet({
   const { isZh } = useLanguage();
   const { people, addPerson } = useAppData();
 
-  const [currentGross, setCurrentGross] = useState(gross);
+  const [currentGross, setCurrentGross] = useState(gross ?? 0);
   const [editingGross, setEditingGross] = useState(false);
-  const [grossInput, setGrossInput] = useState(gross.toFixed(2));
+  const [grossInput, setGrossInput] = useState((gross ?? 0).toFixed(2));
 
   const [method, setMethod] = useState<SplitMethod>('equal');
   const [includeSelf, setIncludeSelf] = useState(true);
@@ -186,10 +186,12 @@ export function SplitSheet({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.head}>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.head}>
           <View style={{ flex: 1 }}>
             {editingGross ? (
               <View style={styles.headerEditRow}>
@@ -415,6 +417,7 @@ export function SplitSheet({
             </Pressable>
           )}
         </ScrollView>
+        </View>
       </KeyboardAvoidingView>
 
       <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
@@ -424,11 +427,8 @@ export function SplitSheet({
 
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: 18,

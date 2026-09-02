@@ -80,6 +80,7 @@ import {
   addCommitment as dbAddCommitment,
   archiveCommitment as dbArchiveCommitment,
   deleteCommitment as dbDeleteCommitment,
+  deleteCommitmentFromMonth as dbDeleteCommitmentFromMonth,
   ensureOccurrences as dbEnsureOccurrences,
   listCommitments as dbListCommitments,
   listOccurrences as dbListOccurrences,
@@ -186,6 +187,8 @@ interface OccurrenceReversal {
   costMyr: number;
   cashTargetId: string | null;
   cashTargetNative: number;
+  liabilityTargetId: string | null;
+  liabilityTargetNative: number;
 }
 
 function todayKey(): string {
@@ -399,7 +402,7 @@ interface AppData {
    *  in between. */
   streakCelebrationToken: number;
 
-  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null) => Promise<string>;
+  addAccount: (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null, cost?: number | null) => Promise<string>;
   /** Returns a default account id for the add flows, creating a "Cash" account if none exist. */
   ensureDefaultAccount: () => Promise<string>;
   updateAccount: (
@@ -449,7 +452,7 @@ interface AppData {
     patch: Partial<Pick<Commitment, 'label' | 'amount' | 'categoryId' | 'fromAccountId' | 'toAccountId' | 'dueDay' | 'endMonth' | 'reliefCode'>>
   ) => Promise<void>;
   archiveCommitmentEntry: (id: string) => Promise<void>;
-  deleteCommitmentEntry: (id: string) => Promise<void>;
+  deleteCommitmentEntry: (id: string, fromMonth?: string) => Promise<void>;
   /** Import commitments from a version-2 Advanced Import JSON (see advancedImport.ts). Skips
    *  any commitment whose merchantKey + dueDay already exists locally. */
   importParsedCommitments: (parsed: ParsedCommitment[]) => Promise<void>;
@@ -1150,8 +1153,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, [refreshAll]);
 
   const addAccount = useCallback(
-    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null) => {
-      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon, currency, interestRate);
+    async (name: string, kind: AccountKind, cls: string, openingValue: number, asOf: string, icon?: string | null, currency?: string, interestRate?: number | null, cost?: number | null) => {
+      const created = await dbAddAccount(name, kind, cls, openingValue, asOf, icon, currency, interestRate, cost);
       const [accts, entries] = await Promise.all([listAccounts(), listBalanceEntries()]);
       setAccounts(accts);
       setBalanceEntries(entries);
@@ -1314,7 +1317,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         amount: input.amount,
         categoryId: input.kind === 'investment' ? null : input.categoryId ?? null,
         fromAccountId: input.fromAccountId ?? null,
-        toAccountId: input.kind === 'investment' ? input.toAccountId ?? null : null,
+        toAccountId: input.toAccountId ?? null,
         dueDay: input.dueDay,
         startMonth: input.startMonth ?? currentMonthKey(),
         currency: input.currency,
@@ -1343,10 +1346,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await refreshCommitmentState();
   }, [refreshCommitmentState]);
 
-  const deleteCommitmentEntry = useCallback(async (id: string) => {
-    await dbDeleteCommitment(id);
-    await refreshCommitmentState();
-  }, [refreshCommitmentState]);
+  const deleteCommitmentEntry = useCallback(
+    async (id: string, fromMonth?: string) => {
+      if (fromMonth) {
+        await dbDeleteCommitmentFromMonth(id, fromMonth);
+      } else {
+        await dbDeleteCommitment(id);
+      }
+      await refreshCommitmentState();
+    },
+    [refreshCommitmentState]
+  );
 
   /**
    * Import commitments parsed from a version-2 Advanced Import JSON (see advancedImport.ts).
@@ -1376,7 +1386,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           amount: p.amount,
           categoryId,
           fromAccountId: resolveAccount(p.fromAccount),
-          toAccountId: p.kind === 'investment' ? resolveAccount(p.toAccount) : null,
+          toAccountId: resolveAccount(p.toAccount),
           dueDay: p.dueDay,
           startMonth: p.startMonth,
           endMonth: p.endMonth,
@@ -1484,6 +1494,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           : undefined;
       const holding = investTarget && isHolding(investTarget) ? investTarget : null;
       const cashTarget = investTarget && !isHolding(investTarget) ? investTarget : null;
+      const liabilityTarget =
+        commitment.kind === 'expense' && commitment.toAccountId
+          ? accounts.find((a) => a.id === commitment.toAccountId && a.kind === 'liability')
+          : undefined;
 
       return {
         fromAccountId: commitment.fromAccountId ?? null,
@@ -1495,6 +1509,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         costMyr: myrPaidAmount,
         cashTargetId: cashTarget?.id ?? null,
         cashTargetNative: cashTarget ? nativeForAccount(myrPaidAmount, cashTarget.id, rates) : 0,
+        liabilityTargetId: liabilityTarget?.id ?? null,
+        liabilityTargetNative: liabilityTarget ? nativeForAccount(myrPaidAmount, liabilityTarget.id, rates) : 0,
       };
     },
     [commitments, accounts, nativeForAccount]
@@ -1505,6 +1521,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       const today = todayKey();
       if (plan.fromAccountId) {
         await recordBalanceLink(plan.fromAccountId, plan.fromNative, 'add', today);
+      }
+      if (plan.liabilityTargetId) {
+        await recordBalanceLink(plan.liabilityTargetId, plan.liabilityTargetNative, 'add', today);
       }
       if (plan.holdingId) {
         // Subtracted in SQL and clamped at zero (see `adjustHoldingQuantity`). Reading the
@@ -1679,11 +1698,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         (commitment.currency === BASE_CURRENCY ? null : rateFor(rates, commitment.currency));
       const myrPaidAmount = fxRate != null ? occurrenceMyr(paidAmount, fxRate) : paidAmount;
 
-      // The investment target, resolved once up front: both the currency check below and the
-      // holding-vs-cost-only branch further down need to know which kind of account it is.
+      // The investment target or liability target, resolved once up front
       const investTarget =
         commitment.kind === 'investment' && commitment.toAccountId
           ? accounts.find((a) => a.id === commitment.toAccountId)
+          : undefined;
+      const liabilityTarget =
+        commitment.kind === 'expense' && commitment.toAccountId
+          ? accounts.find((a) => a.id === commitment.toAccountId && a.kind === 'liability')
           : undefined;
 
       // Every currency conversion this tick will need, resolved BEFORE any write below. A
@@ -1692,12 +1714,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       // movement and the occurrence stuck "scheduled", inviting a duplicate tap.
       let fromNative: number | null = null;
       let targetNative: number | null = null;
+      let liabilityNative: number | null = null;
       try {
         if (commitment.fromAccountId) {
           fromNative = nativeForAccount(myrPaidAmount, commitment.fromAccountId, rates);
         }
         if (investTarget && !isHolding(investTarget)) {
           targetNative = nativeForAccount(myrPaidAmount, investTarget.id, rates);
+        }
+        if (liabilityTarget) {
+          liabilityNative = nativeForAccount(myrPaidAmount, liabilityTarget.id, rates);
         }
       } catch (e) {
         notify("Couldn't record this payment", e instanceof Error ? e.message : 'A currency conversion failed.');
@@ -1721,6 +1747,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
       if (commitment.fromAccountId && fromNative != null) {
         await recordBalanceLink(commitment.fromAccountId, fromNative, 'subtract', paidOn);
+      }
+      if (liabilityTarget && liabilityNative != null) {
+        await recordBalanceLink(liabilityTarget.id, liabilityNative, 'subtract', paidOn);
       }
 
       let unitsAdded: number | null = null;

@@ -6,7 +6,7 @@
 //    - If user has nothing to import: branches to Budget -> Recurring payment -> Notifications -> Widget.
 // Every step after the intro can be skipped individually.
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FadeIn } from '../components/Motion';
 import { ProgressTrack, TopBar } from '../components/ui';
@@ -104,52 +104,54 @@ export function OnboardingScreen() {
         </View>
       )}
 
-      {/* Keyed on `step` so each step remounts and replays its entrance; the steps hold no
-          state worth preserving across a move, and the back button re-enters an earlier one
-          fresh rather than showing a half-filled form the user already skipped past. */}
-      <FadeIn key={step} style={styles.fill} offset={back ? -14 : 16}>
-        {step === 'intro' && <PipIntroStep onNext={() => advance('import')} />}
-        {step === 'import' && (
-          <ImportStep
-            hasImported={hasImported}
-            onStartImport={() => advance('advanced_import')}
-            onSkip={() => {
-              setHasImported(false);
-              advance('budget');
-            }}
-            onContinue={() => advance('notifications')}
-          />
-        )}
-        {step === 'advanced_import' && (
-          <AdvancedImportScreen
-            onClose={goBack}
-            onSuccess={() => {
-              setHasImported(true);
-              advance('notifications');
-            }}
-            isWizard
-          />
-        )}
-        {step === 'budget' && (
-          <BudgetStep
-            onNext={() => advance('recurring')}
-            onSkip={() => advance('recurring')}
-          />
-        )}
-        {step === 'recurring' && (
-          <RecurringPaymentStep
-            onNext={() => advance('notifications')}
-            onSkip={() => advance('notifications')}
-          />
-        )}
-        {step === 'notifications' && (
-          <NotificationsStep
-            onNext={() => advance('widget')}
-            onSkip={() => advance('widget')}
-          />
-        )}
-        {step === 'widget' && <WidgetStep onFinish={finish} />}
-      </FadeIn>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {/* Keyed on `step` so each step remounts and replays its entrance; the steps hold no
+            state worth preserving across a move, and the back button re-enters an earlier one
+            fresh rather than showing a half-filled form the user already skipped past. */}
+        <FadeIn key={step} style={styles.fill} offset={back ? -14 : 16}>
+          {step === 'intro' && <PipIntroStep onNext={() => advance('import')} />}
+          {step === 'import' && (
+            <ImportStep
+              hasImported={hasImported}
+              onStartImport={() => advance('advanced_import')}
+              onSkip={() => {
+                setHasImported(false);
+                advance('budget');
+              }}
+              onContinue={() => advance('notifications')}
+            />
+          )}
+          {step === 'advanced_import' && (
+            <AdvancedImportScreen
+              onClose={goBack}
+              onSuccess={() => {
+                setHasImported(true);
+                advance('notifications');
+              }}
+              isWizard
+            />
+          )}
+          {step === 'budget' && (
+            <BudgetStep
+              onNext={() => advance('recurring')}
+              onSkip={() => advance('recurring')}
+            />
+          )}
+          {step === 'recurring' && (
+            <RecurringPaymentStep
+              onNext={() => advance('notifications')}
+              onSkip={() => advance('notifications')}
+            />
+          )}
+          {step === 'notifications' && (
+            <NotificationsStep
+              onNext={() => advance('widget')}
+              onSkip={() => advance('widget')}
+            />
+          )}
+          {step === 'widget' && <WidgetStep onFinish={finish} />}
+        </FadeIn>
+      </KeyboardAvoidingView>
     </View>
   );
 }

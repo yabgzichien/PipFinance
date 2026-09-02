@@ -11,6 +11,7 @@ import {
   toMyrValues,
   nativeAccountTotalsByCurrency,
   ACCOUNT_CLASSES,
+  classesFor,
 } from '../src/lib/networth';
 import type { Account, BalanceEntry } from '../src/lib/types';
 
@@ -275,5 +276,44 @@ describe('ACCOUNT_CLASSES', () => {
   it('supports accounts with optional interestRate (APR)', () => {
     const accountWithAPR = acct({ id: 'inv_fd', cls: 'investments', interestRate: 3.85 });
     expect(accountWithAPR.interestRate).toBe(3.85);
+  });
+
+  it('includes illiquid asset class', () => {
+    const illiquidMeta = ACCOUNT_CLASSES.find((c) => c.id === 'illiquid');
+    expect(illiquidMeta).toBeDefined();
+    expect(illiquidMeta?.kind).toBe('asset');
+    expect(illiquidMeta?.label).toBe('Illiquid Assets');
+  });
+
+  it('classesFor asset includes illiquid', () => {
+    const assetClasses = classesFor('asset');
+    const ids = assetClasses.map((c) => c.id);
+    expect(ids).toContain('illiquid');
+  });
+
+  it('classesFor liability does not include illiquid', () => {
+    const liabilityClasses = classesFor('liability');
+    const ids = liabilityClasses.map((c) => c.id);
+    expect(ids).not.toContain('illiquid');
+  });
+
+  it('groupByClass groups illiquid accounts correctly', () => {
+    const accounts = [
+      acct({ id: 'prop1', kind: 'asset', cls: 'illiquid', name: 'Mont Kiara Condo' }),
+      acct({ id: 'prop2', kind: 'asset', cls: 'illiquid', name: '2022 Honda Civic' }),
+      acct({ id: 'bank1', kind: 'asset', cls: 'cash', name: 'Maybank' }),
+    ];
+    const values: Record<string, number> = { prop1: 800000, prop2: 90000, bank1: 5000 };
+    const { assets } = groupByClass(accounts, values);
+    const illiquidGroup = assets.find((g) => g.cls === 'illiquid');
+    expect(illiquidGroup).toBeDefined();
+    expect(illiquidGroup?.total).toBe(890000);
+    expect(illiquidGroup?.accounts).toHaveLength(2);
+  });
+
+  it('illiquid assets support cost and depreciation rate', () => {
+    const asset = acct({ id: 'car1', kind: 'asset', cls: 'illiquid', cost: 95000, interestRate: -10.0 });
+    expect(asset.cost).toBe(95000);
+    expect(asset.interestRate).toBe(-10.0);
   });
 });

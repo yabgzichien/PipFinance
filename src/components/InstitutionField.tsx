@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View, type TextStyle } from 're
 import { InstitutionBadge } from './InstitutionBadge';
 import { searchInstitutions, type Institution } from '../lib/institutions';
 import { radius, uiFont } from '../theme';
+import { useLanguage } from '../i18n';
 import { useThemeColors } from '../state/colorScheme';
 
 /**
@@ -27,6 +28,7 @@ export function InstitutionField({
   inputStyle?: TextStyle;
 }) {
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [focused, setFocused] = useState(false);
   const matches = useMemo(() => (focused ? searchInstitutions(value) : []), [focused, value]);
 
@@ -50,15 +52,25 @@ export function InstitutionField({
       />
       {matches.length > 0 && (
         <View style={[styles.dropdown, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
-          {matches.map((m, i) => (
-            <Pressable key={m.id} onPress={() => pick(m)} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
-              <InstitutionBadge inst={m} size={32} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{m.name}</Text>
-                <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{m.kind === 'bank' ? 'Bank' : 'E-Wallet'}</Text>
-              </View>
-            </Pressable>
-          ))}
+          {matches.map((m, i) => {
+            const subLabel =
+              m.kind === 'auto'
+                ? (isZh ? '汽车品牌 / 车贷' : 'Car Brand / Loan')
+                : m.kind === 'service'
+                ? (isZh ? '订阅服务' : 'Subscription')
+                : m.kind === 'ewallet'
+                ? (isZh ? '电子钱包' : 'E-Wallet')
+                : (isZh ? '银行' : 'Bank');
+            return (
+              <Pressable key={m.id} onPress={() => pick(m)} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+                <InstitutionBadge inst={m} size={32} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{m.name}</Text>
+                  <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{subLabel}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       )}
     </View>

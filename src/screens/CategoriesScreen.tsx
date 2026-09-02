@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
@@ -126,7 +126,8 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={t('categoriesTitle')} onBack={onBack} />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
         {/* kind toggle */}
         <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
           {(['expense', 'income'] as TxnType[]).map((k) => {
@@ -272,6 +273,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
           </PrimaryButton>
         </Card>
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

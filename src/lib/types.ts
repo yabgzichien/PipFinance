@@ -117,13 +117,13 @@ export interface Account {
   sub: string | null; // 'crypto' | 'stock' | 'commodity'
   symbol: string | null; // Yahoo Finance symbol, e.g. 'BTC-USD', 'AAPL', '1155.KL'
   ticker: string | null; // display ticker, e.g. 'BTC'
-  quantity: number | null; // units held
-  cost: number | null; // total invested amount in MYR (cost basis), for profit
+  quantity: number | null; // units held (null for illiquid and plain manual accounts)
+  cost: number | null; // total invested/purchase amount in MYR (cost basis / acquisition cost)
   icon?: string | null; // custom gallery image URI or null
   /** The currency this account is denominated in. Balances are stored native and
    *  converted at read time against a live cached rate. Defaults to 'MYR'. */
   currency: string;
-  /** Optional interest rate / APR percentage for investment accounts/holdings. */
+  /** Optional interest rate / APR percentage for investment accounts, or annual ETA appreciation (+%) / depreciation (-%) rate for illiquid assets. */
   interestRate?: number | null;
 }
 

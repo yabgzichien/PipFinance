@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
@@ -135,7 +135,8 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={t('settingsTitle')} onBack={onBack} />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
         {/* Search bar */}
         <View style={[styles.searchRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
           <Icon name="search" size={16} color={colorTheme.ink3} />
@@ -495,7 +496,18 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
             </View>
           </>
         )}
+
+        {/* Legal & Trademarks Disclaimer */}
+        <View style={styles.legalSection}>
+          <Text style={[styles.legalTitle, { color: colorTheme.ink3 }]}>
+            {t('legalTrademarksTitle')}
+          </Text>
+          <Text style={[styles.legalText, { color: colorTheme.ink3 }]}>
+            {t('legalTrademarksNotice')}
+          </Text>
+        </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -1042,5 +1054,24 @@ const styles = StyleSheet.create({
   clearSearchBtnText: {
     fontFamily: uiFont(600),
     fontSize: 13.5,
+  },
+  legalSection: {
+    marginTop: 36,
+    marginBottom: 24,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  legalTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 11.5,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  legalText: {
+    fontFamily: uiFont(400),
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
   },
 });

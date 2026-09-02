@@ -1,7 +1,7 @@
 // src/screens/BalanceScanScreen.tsx
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { InstitutionBadge } from '../components/InstitutionBadge';
@@ -18,9 +18,12 @@ import { notify } from '../lib/platformAlert';
 import { searchCrypto, resolveCryptoTickers } from '../prices';
 import type { TickerResult } from '../lib/prices';
 import type { Account, AccountKind } from '../lib/types';
+import { getScanStage } from '../lib/scanningNarration';
+import { ScanProgressBar } from '../components/ScanProgressBar';
 import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { useAppData } from '../state/store';
 import { colors, numFont, radius, uiFont } from '../theme';
 
@@ -41,10 +44,19 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
   const { accounts, accountValues, addAccount, addHolding, setBalance } = useAppData();
+  const reducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>('pick');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [doneMsg, setDoneMsg] = useState('');
+  const [readingSecs, setReadingSecs] = useState(0);
+
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    setReadingSecs(0);
+    const id = setInterval(() => setReadingSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   // ── holdings-review state (crypto wallet screenshots) ──────────────────────
   const [rows, setRows] = useState<HoldingRow[]>([]);
@@ -214,7 +226,8 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={isZh ? '扫描余额' : 'Scan Balance'} onBack={onClose} />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 110 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 110 }} keyboardShouldPersistTaps="handled">
         {phase === 'pick' && (
           <>
             <PipSays expr="curious">
@@ -233,12 +246,24 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
           </>
         )}
 
-        {phase === 'scanning' && (
-          <>
-            <PipSays expr="think"><BubbleText>{isZh ? '正在识别截图…' : 'Reading the screenshot…'}</BubbleText></PipSays>
-            <Card style={styles.busy}><ActivityIndicator color={theme.accent} /></Card>
-          </>
-        )}
+        {phase === 'scanning' && (() => {
+          const stage = getScanStage('balance', readingSecs, isZh);
+          return (
+            <>
+              <PipSays expr={stage.expr} float={!reducedMotion} idea={stage.idea}>
+                <BubbleText>{stage.text}</BubbleText>
+              </PipSays>
+              <ScanProgressBar
+                progress={stage.progress}
+                label={isZh ? '快照识别进度' : 'Snapshot scanning progress'}
+                style={{ marginTop: 16 }}
+              />
+              <Card style={[styles.busy, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                <ActivityIndicator color={theme.accent} />
+              </Card>
+            </>
+          );
+        })()}
 
         {phase === 'needprovider' && (
           <>
@@ -405,6 +430,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
           </PrimaryButton>
         </View>
       )}
+      </KeyboardAvoidingView>
 
       <TickerSearchModal
         visible={searchKey != null}

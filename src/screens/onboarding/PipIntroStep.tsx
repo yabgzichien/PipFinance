@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
@@ -152,77 +152,83 @@ export function PipIntroStep({ onNext }: { onNext: () => void }) {
         onRequestClose={() => setPickerOpen(false)}
       >
         <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
-          <Pressable
-            style={[
-              styles.modalSheet,
-              { backgroundColor: colorTheme.surface, paddingBottom: insets.bottom + 16 },
-            ]}
-            onPress={(e) => e.stopPropagation()}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalAvoider}
+            pointerEvents="box-none"
           >
-            <View style={[styles.modalHandle, { backgroundColor: colorTheme.line }]} />
-
-            <Text style={[styles.modalTitle, { color: colorTheme.ink }]}>
-              {language === 'zh' ? '选择默认货币' : 'Select default currency'}
-            </Text>
-
-            {/* Search bar inside modal */}
-            <View style={[styles.searchRow, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line }]}>
-              <Icon name="search" size={16} color={colorTheme.ink2} />
-              <TextInput
-                value={search}
-                onChangeText={setSearch}
-                placeholder={t('wizardCurrencySearchPlaceholder')}
-                placeholderTextColor={colorTheme.ink3}
-                style={[styles.searchInput, { color: colorTheme.ink }]}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-                autoFocus
-              />
-              {search.length > 0 && (
-                <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                  <Icon name="x" size={14} color={colorTheme.ink2} />
-                </Pressable>
-              )}
-            </View>
-
-            {/* Filtered currency list */}
-            <ScrollView
-              style={{ maxHeight: 340 }}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+            <Pressable
+              style={[
+                styles.modalSheet,
+                { backgroundColor: colorTheme.surface, paddingBottom: insets.bottom + 16 },
+              ]}
+              onPress={(e) => e.stopPropagation()}
             >
-              {filtered.map((c) => {
-                const on = selectedCurrency === c.code;
-                return (
-                  <Pressable
-                    key={c.code}
-                    onPress={() => {
-                      pickCurrency(c.code);
-                      setPickerOpen(false);
-                      setSearch('');
-                    }}
-                    style={[styles.currRow, on && { backgroundColor: theme.accentTint }]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.currCode, { color: colorTheme.ink }, on && { color: theme.onTint }]}>
-                        {c.code}{' '}
-                        <Text style={[styles.currLabel, { color: colorTheme.ink2 }, on && { color: theme.onTint }]}>
-                          {c.label}
-                        </Text>
-                      </Text>
-                    </View>
-                    {on && <Icon name="check" size={16} color={theme.accent} />}
+              <View style={[styles.modalHandle, { backgroundColor: colorTheme.line }]} />
+
+              <Text style={[styles.modalTitle, { color: colorTheme.ink }]}>
+                {language === 'zh' ? '选择默认货币' : 'Select default currency'}
+              </Text>
+
+              {/* Search bar inside modal */}
+              <View style={[styles.searchRow, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line }]}>
+                <Icon name="search" size={16} color={colorTheme.ink2} />
+                <TextInput
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder={t('wizardCurrencySearchPlaceholder')}
+                  placeholderTextColor={colorTheme.ink3}
+                  style={[styles.searchInput, { color: colorTheme.ink }]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  autoFocus
+                />
+                {search.length > 0 && (
+                  <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                    <Icon name="x" size={14} color={colorTheme.ink2} />
                   </Pressable>
-                );
-              })}
-              {filtered.length === 0 && (
-                <Text style={[styles.noResult, { color: colorTheme.ink2 }]}>
-                  {language === 'zh' ? '未找到匹配货币' : 'No matching currencies'}
-                </Text>
-              )}
-            </ScrollView>
-          </Pressable>
+                )}
+              </View>
+
+              {/* Filtered currency list */}
+              <ScrollView
+                style={{ maxHeight: 340 }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {filtered.map((c) => {
+                  const on = selectedCurrency === c.code;
+                  return (
+                    <Pressable
+                      key={c.code}
+                      onPress={() => {
+                        pickCurrency(c.code);
+                        setPickerOpen(false);
+                        setSearch('');
+                      }}
+                      style={[styles.currRow, on && { backgroundColor: theme.accentTint }]}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.currCode, { color: colorTheme.ink }, on && { color: theme.onTint }]}>
+                          {c.code}{' '}
+                          <Text style={[styles.currLabel, { color: colorTheme.ink2 }, on && { color: theme.onTint }]}>
+                            {c.label}
+                          </Text>
+                        </Text>
+                      </View>
+                      {on && <Icon name="check" size={16} color={theme.accent} />}
+                    </Pressable>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <Text style={[styles.noResult, { color: colorTheme.ink2 }]}>
+                    {language === 'zh' ? '未找到匹配货币' : 'No matching currencies'}
+                  </Text>
+                )}
+              </ScrollView>
+            </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
     </View>
@@ -294,6 +300,10 @@ const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalAvoider: {
+    width: '100%',
     justifyContent: 'flex-end',
   },
   modalSheet: {

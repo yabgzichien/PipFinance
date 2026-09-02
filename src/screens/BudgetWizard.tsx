@@ -1,6 +1,6 @@
 // src/screens/BudgetWizard.tsx
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddCategoryModal } from '../components/AddCategoryModal';
 import { Icon } from '../components/Icon';
@@ -95,11 +95,12 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
         />
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ padding: spacing.base, paddingBottom: insets.bottom + 120 }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={{ padding: spacing.base, paddingBottom: insets.bottom + 120 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         {/* Income section */}
         <Eyebrow style={{ marginBottom: spacing.sm }}>{isZh ? '预计月收入' : 'Expected monthly income'}</Eyebrow>
         <Card style={styles.incomeCard}>
@@ -199,6 +200,7 @@ export function BudgetWizard({ onDone, onBack }: { onDone: () => void; onBack?: 
           <BtnLabel>{isZh ? '保存预算' : 'Save budget'}</BtnLabel>
         </PrimaryButton>
       </View>
+      </KeyboardAvoidingView>
 
       <AddCategoryModal
         visible={adding}

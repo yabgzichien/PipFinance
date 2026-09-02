@@ -10,7 +10,7 @@ import { useThemeColors } from '../state/colorScheme';
 export type IconName =
   | 'fuel' | 'cart' | 'utensils' | 'car' | 'coffee' | 'bag' | 'heart' | 'receipt' | 'play' | 'dots'
   | 'camera' | 'image' | 'plus' | 'check' | 'sparkles' | 'x' | 'chevronRight' | 'chevronLeft'
-  | 'chevronDown' | 'scan' | 'trending' | 'clock' | 'arrowRight' | 'search' | 'gallery' | 'wallet'
+  | 'chevronDown' | 'chevronUp' | 'scan' | 'trending' | 'clock' | 'arrowRight' | 'search' | 'gallery' | 'wallet'
   | 'trash' | 'sliders' | 'gear' | 'alert' | 'pencil' | 'gift' | 'return' | 'percent'
   | 'home' | 'scale' | 'signal' | 'book' | 'shield' | 'store' | 'download' | 'file' | 'table'
   | 'copy' | 'upload' | 'code' | 'pin' | 'chart' | 'filter' | 'share' | 'folder';
@@ -133,6 +133,11 @@ const ICONS: Record<IconName, RenderFn> = {
   chevronDown: (s, w) => (
     <G fill="none" stroke={s} strokeWidth={w}>
       <Path d="M5 9l7 7 7-7" />
+    </G>
+  ),
+  chevronUp: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Path d="M5 15l7-7 7 7" />
     </G>
   ),
   scan: (s, w) => (

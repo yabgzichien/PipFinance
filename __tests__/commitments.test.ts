@@ -108,3 +108,96 @@ describe('foreign currency commitments', () => {
     expect(occurrenceMyr(2000, 1)).toBe(2000);
   });
 });
+
+import { formatTimelineDateHeader } from '../src/lib/dates';
+
+describe('formatTimelineDateHeader', () => {
+  const today = '2026-09-01';
+
+  it('formats Today, Tomorrow, and Yesterday accurately', () => {
+    expect(formatTimelineDateHeader('2026-09-01', today, false)).toBe('Today SEP 1');
+    expect(formatTimelineDateHeader('2026-09-02', today, false)).toBe('Tomorrow SEP 2');
+    expect(formatTimelineDateHeader('2026-08-31', today, false)).toBe('Yesterday AUG 31');
+  });
+
+  it('formats specific days of week and month dates matching the design reference', () => {
+    expect(formatTimelineDateHeader('2026-09-07', today, false)).toBe('Monday SEP 7');
+    expect(formatTimelineDateHeader('2026-09-19', today, false)).toBe('Saturday SEP 19');
+    expect(formatTimelineDateHeader('2026-10-01', today, false)).toBe('Thursday OCT 1');
+    expect(formatTimelineDateHeader('2026-10-09', today, false)).toBe('Friday OCT 9');
+    expect(formatTimelineDateHeader('2026-10-18', today, false)).toBe('Sunday OCT 18');
+  });
+
+  it('formats in Chinese accurately when isZh is true', () => {
+    expect(formatTimelineDateHeader('2026-09-01', today, true)).toBe('今天 9月1日');
+    expect(formatTimelineDateHeader('2026-09-02', today, true)).toBe('明天 9月2日');
+    expect(formatTimelineDateHeader('2026-09-07', today, true)).toBe('周一 9月7日');
+    expect(formatTimelineDateHeader('2026-09-19', today, true)).toBe('周六 9月19日');
+    expect(formatTimelineDateHeader('2026-10-01', today, true)).toBe('周四 10月1日');
+  });
+});
+
+import { defaultLinkEffect, applyEffect } from '../src/lib/networth';
+
+describe('instalment commitments with liability reduction', () => {
+  it('correctly models a car loan or mortgage instalment with fromAccountId and toAccountId', () => {
+    const carInstalment = commitment({
+      label: 'Proton X50 Loan',
+      kind: 'expense',
+      amount: 1100,
+      categoryId: 'travelling',
+      fromAccountId: 'bank-savings-id',
+      toAccountId: 'car-loan-liability-id',
+      dueDay: 15,
+    });
+
+    expect(carInstalment.kind).toBe('expense');
+    expect(carInstalment.fromAccountId).toBe('bank-savings-id');
+    expect(carInstalment.toAccountId).toBe('car-loan-liability-id');
+    expect(carInstalment.amount).toBe(1100);
+
+    // Paying the instalment reduces the liability balance
+    const liabilityEffect = defaultLinkEffect('liability', 'expense');
+    expect(liabilityEffect).toBe('subtract');
+
+    const outstandingLoan = 55000;
+    const nextOutstanding = applyEffect(outstandingLoan, carInstalment.amount, liabilityEffect);
+    expect(nextOutstanding).toBe(53900);
+
+    // Paying the instalment also reduces the funding bank account balance
+    const assetEffect = defaultLinkEffect('asset', 'expense');
+    expect(assetEffect).toBe('subtract');
+
+    const bankBalance = 15000;
+    const nextBankBalance = applyEffect(bankBalance, carInstalment.amount, assetEffect);
+    expect(nextBankBalance).toBe(13900);
+  });
+
+  it('generates up to 24 months of future occurrences for seamless month-to-month navigation', () => {
+    const stream = commitment({ label: 'Netflix', startMonth: '2026-01', dueDay: 10 });
+    const occs = occurrencesFor(stream, '2026-08');
+    expect(occs.length).toBe(24);
+    expect(occs[0].month).toBe('2026-08');
+    expect(occs[0].dueDate).toBe('2026-08-10');
+    expect(occs[23].month).toBe('2028-07');
+    expect(occs[23].dueDate).toBe('2028-07-10');
+  });
+
+  it('preserves historical occurrences prior to the cancellation month and drops forward ones', () => {
+    // When OpenAI subscription is deleted on August 2026, endMonth is capped to 2026-07
+    const openAI = commitment({ label: 'ChatGPT Plus', startMonth: '2026-01', endMonth: '2026-07', dueDay: 20 });
+    
+    // Past months (e.g. from 2026-01) still produce their occurrences up through 2026-07
+    const historicalOccs = occurrencesFor(openAI, '2026-01', 24);
+    expect(historicalOccs.map((o) => o.month)).toEqual([
+      '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07'
+    ]);
+
+    // From August 2026 onwards, no future occurrences are generated
+    const futureOccs = occurrencesFor(openAI, '2026-08', 24);
+    expect(futureOccs).toEqual([]);
+  });
+});
+
+
+

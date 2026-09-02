@@ -35,9 +35,13 @@ export function WidgetStep({ onFinish }: { onFinish: () => void }) {
     haptics.tap();
     setBusy(true);
     try {
-      await requestPinWidget({ widgetName: 'StreakWidget' });
+      await requestPinWidget({ widgetName: 'QuickRecordWidget' });
     } catch {
-      // Unsupported launcher/OS version  Finish still works below.
+      try {
+        await requestPinWidget({ widgetName: 'StreakWidget' });
+      } catch {
+        // Unsupported launcher/OS version — Finish still works below.
+      }
     } finally {
       setBusy(false);
       setAsked(true);

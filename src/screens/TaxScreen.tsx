@@ -1,6 +1,5 @@
-// src/screens/TaxScreen.tsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { MapCommitmentSheet } from '../components/MapCommitmentSheet';
@@ -112,7 +111,8 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg, paddingTop: insets.top }]}>
       <TopBar title={isZh ? '个人所得税减免' : 'Tax relief'} onBack={onBack} />
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.yaRow}>
           {AVAILABLE_YAS.map((y) => (
             <Pressable
@@ -392,6 +392,7 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
         })}
 
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {schedule && (
         <ReliefTagEditSheet

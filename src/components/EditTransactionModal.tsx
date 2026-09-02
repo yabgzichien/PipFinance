@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Image as RNImage, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
@@ -12,6 +12,7 @@ import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { deleteReceiptImage } from '../lib/receiptStorage';
+import { tap } from '../lib/haptics';
 import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -19,6 +20,7 @@ import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 import { AccountLinkField } from './AccountLinkField';
 import { AddCategoryModal } from './AddCategoryModal';
+import { CalcBadge } from './CalcBadge';
 import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
@@ -51,15 +53,17 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [cat, setCat] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
   const [adding, setAdding] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [linkId, setLinkId] = useState<string | null>(null);
-  const [linkEffect, setLinkEffect] = useState<LinkEffect>('subtract');
+  const [fromAccountId, setFromAccountId] = useState<string | null>(null);
+  const [toAccountId, setToAccountId] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState(false);
   // Cached rates, refreshed each time a transaction is opened for editing: needed to convert
   // this row's MYR-equivalent into a linked account's own currency (Task 9), since
   // `balance_entries.value` is native to the account rather than always MYR.
   const [rates, setRates] = useState<Record<string, number>>({});
+
+  const assetAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'asset'), [accounts]);
+  const liabilityAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'liability'), [accounts]);
 
   const openId = txn?.id;
   useEffect(() => {
@@ -71,9 +75,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setType(txn.type);
       setCat(txn.categoryId);
       setRemark(txn.remark ?? '');
-      setExpanded(false);
-      setLinkId(null);
-      setLinkEffect(defaultLinkEffect('asset', txn.type));
+      setFromAccountId(null);
+      setToAccountId(null);
       setSplitting(false);
       setViewingReceipt(false);
       listFxRates().then((fx) => setRates(ratesFromCache(fx)));
@@ -104,37 +107,83 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     .map((s) => people.find((p) => p.id === s.personId)?.name ?? 'someone')
     .join(', ');
 
-  const selectLink = (id: string | null) => {
-    setLinkId(id);
-    const a = id ? accounts.find((x) => x.id === id) : null;
-    if (a) setLinkEffect(defaultLinkEffect(a.kind, type));
-  };
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
-  // Collapsed: show 4 (keep the selected one visible). Expanded: show all.
-  const visible = useMemo(() => {
-    if (expanded) return grid;
-    const top4 = grid.slice(0, 4);
-    if (!cat || top4.some((c) => c.id === cat)) return top4;
-    const selected = grid.find((c) => c.id === cat);
-    return selected ? [selected, ...top4].slice(0, 4) : top4;
-  }, [grid, expanded, cat]);
+
+  const decimals = decimalsFor(txn?.currency ?? BASE_CURRENCY);
+  const currencyLabel = currencyPrefix(txn?.currency ?? BASE_CURRENCY);
+  const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
+
+  const mergeScaleX = useRef(new Animated.Value(1)).current;
+  const mergeScaleY = useRef(new Animated.Value(1)).current;
+  const mergeOpacity = useRef(new Animated.Value(1)).current;
+  const [isMerging, setIsMerging] = useState(false);
 
   if (!txn) return <Modal visible={false} transparent />;
 
-  // Currency is fixed once a row is written (spec §Non-goals: changing it after the fact is
-  // out of scope for v1), so this is read-only context, not a control.
-  const decimals = decimalsFor(txn.currency);
-  const currencyLabel = currencyPrefix(txn.currency);
-  const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
+  const handleMerge = () => {
+    if (!calc.isExpression || calc.result == null || calc.result <= 0) return;
+    const finalValue = decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals);
+    const useNative = Platform.OS !== 'web';
 
-  // The linked account's balance is native to ITS OWN currency (Task 9). No conversion (and
-  // so no rate) is needed when the row's currency already matches the account's, or the
-  // account is MYR; otherwise the account's own rate must be cached, or `deriveNative` would
-  // throw on save.
-  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
-  const linkConvertible =
-    !linkAccount || linkAccount.currency === txn.currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
+    setIsMerging(true);
+    tap();
+
+    // Phase 1: Numbers squeeze/merge inward
+    Animated.parallel([
+      Animated.timing(mergeScaleX, {
+        toValue: 0.82,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeScaleY, {
+        toValue: 0.88,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeOpacity, {
+        toValue: 0.35,
+        duration: 80,
+        useNativeDriver: useNative,
+      }),
+    ]).start(() => {
+      // Switch text to merged result
+      setAmountText(finalValue);
+
+      // Phase 2: Bloom outward with spring bounce into final number
+      Animated.parallel([
+        Animated.spring(mergeScaleX, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(mergeScaleY, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(mergeOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: useNative,
+        }),
+      ]).start(() => {
+        setIsMerging(false);
+      });
+    });
+  };
+
+  const fromAccount = fromAccountId ? accounts.find((a) => a.id === fromAccountId) ?? null : null;
+  const fromConvertible =
+    !fromAccount || fromAccount.currency === txn.currency || fromAccount.currency === BASE_CURRENCY || rateFor(rates, fromAccount.currency) != null;
+  const toAccount = toAccountId ? accounts.find((a) => a.id === toAccountId) ?? null : null;
+  const toConvertible =
+    !toAccount || toAccount.currency === txn.currency || toAccount.currency === BASE_CURRENCY || rateFor(rates, toAccount.currency) != null;
+  const canSave = fromConvertible && toConvertible;
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -143,10 +192,6 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       const c = categories.find((x) => x.id === prev);
       return c && c.kind === t ? prev : t === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID;
     });
-    if (linkId) {
-      const a = accounts.find((x) => x.id === linkId);
-      if (a) setLinkEffect(defaultLinkEffect(a.kind, t));
-    }
   };
 
   const save = async () => {
@@ -169,16 +214,20 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // both for its own bookkeeping and, below, as the starting point for converting into the
     // linked account's own currency.
     const myrAmount = txn.fxRate != null ? round2(amount * txn.fxRate) : amount;
-    // Accounts are natively denominated (Task 9): when the row's own currency already matches
-    // the linked account's, its native amount is used unconverted rather than round-tripped
-    // through MYR (which could drift a cent from double rounding); otherwise the MYR-equivalent
-    // is converted into the account's own currency at the account's own rate (the inverse of
-    // `deriveMyr`), same principle as ManualEntryScreen's save.
-    if (linkId && linkAccount) {
-      const effect: LinkEffect = linkAccount.kind === 'liability' ? linkEffect : defaultLinkEffect(linkAccount.kind, type);
+
+    // 1. Pay from / Deposit into account
+    if (fromAccountId && fromAccount) {
+      const effect: LinkEffect = type === 'income' ? 'add' : 'subtract';
       const linkAmount =
-        linkAccount.currency === txn.currency ? amount : deriveNative(myrAmount, linkAccount.currency, rateFor(rates, linkAccount.currency));
-      await recordBalanceLink(linkId, linkAmount, effect, txn.date ?? todayISO());
+        fromAccount.currency === txn.currency ? amount : deriveNative(myrAmount, fromAccount.currency, rateFor(rates, fromAccount.currency));
+      await recordBalanceLink(fromAccountId, linkAmount, effect, txn.date ?? todayISO());
+    }
+
+    // 2. Reduce liability account for expense
+    if (type === 'expense' && toAccountId && toAccount) {
+      const toAmount =
+        toAccount.currency === txn.currency ? amount : deriveNative(myrAmount, toAccount.currency, rateFor(rates, toAccount.currency));
+      await recordBalanceLink(toAccountId, toAmount, 'subtract', txn.date ?? todayISO());
     }
     onClose();
   };
@@ -207,10 +256,12 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.head}>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.head}>
           <Text style={[styles.title, { color: colorTheme.ink }]} numberOfLines={1}>
             {txn.merchantRaw || currentCatLabel}
           </Text>
@@ -272,41 +323,35 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{split ? (isZh ? '个人承担' : 'Your share') : (isZh ? '金额' : 'Amount')}</Text>
           <View style={styles.amountRow}>
             <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyLabel}</Text>
-            <TextInput
-              value={amountText}
-              onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
-              onBlur={() => {
-                if (!split && calc.isExpression && calc.result != null && calc.result > 0) {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
-                }
+            <Animated.View
+              style={{
+                flex: 1,
+                minWidth: 0,
+                opacity: mergeOpacity,
+                transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
               }}
-              onSubmitEditing={() => {
-                if (!split && calc.isExpression && calc.result != null && calc.result > 0) {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
-                }
-              }}
-              keyboardType="numbers-and-punctuation"
-              selectTextOnFocus
-              editable={!split}
-              style={[
-                styles.amountInput,
-                { color: colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
-                !!split && styles.amountInputLocked,
-                !!split && { backgroundColor: colorTheme.surface2, color: colorTheme.ink2 },
-              ]}
-            />
+            >
+              <TextInput
+                value={amountText}
+                onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
+                onSubmitEditing={handleMerge}
+                keyboardType="numbers-and-punctuation"
+                selectTextOnFocus
+                editable={!split}
+                style={[
+                  styles.amountInput,
+                  { color: isMerging ? theme.accent : colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
+                  !!split && styles.amountInputLocked,
+                  !!split && { backgroundColor: colorTheme.surface2, color: colorTheme.ink2 },
+                ]}
+              />
+            </Animated.View>
             {!split && calc.isExpression && calc.result != null && calc.result > 0 && (
-              <Pressable
-                onPress={() => {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result!)) : calc.result!.toFixed(decimals));
-                }}
-                hitSlop={8}
-                style={[styles.calcBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
-              >
-                <Text style={[styles.calcBadgeText, { color: theme.accent }]}>
-                  = {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
-                </Text>
-              </Pressable>
+              <CalcBadge
+                result={calc.result}
+                decimals={decimals}
+                onApply={handleMerge}
+              />
             )}
           </View>
           {!!split && (
@@ -321,28 +366,18 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             <>
               <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '分类' : 'Category'}</Text>
               <View style={styles.grid}>
-                {visible.map((c) => (
+                {grid.map((c) => (
                   <View key={c.id} style={styles.gridCell}>
                     <CategoryChip category={c} selected={cat === c.id} suggested={false} onPress={() => setCat(c.id)} />
                   </View>
                 ))}
-                {expanded && (
-                  <View style={styles.gridCell}>
-                    <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
-                      <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-                      <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
-                    </Pressable>
-                  </View>
-                )}
+                <View style={styles.gridCell}>
+                  <Pressable onPress={() => setAdding(true)} style={[styles.addChip, { borderColor: theme.accentSoft, backgroundColor: theme.accentTint }]}>
+                    <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+                    <Text style={[styles.addChipText, { color: theme.accent }]}>{isZh ? '新建分类' : 'New category'}</Text>
+                  </Pressable>
+                </View>
               </View>
-              {grid.length > 4 && (
-                <Pressable onPress={() => setExpanded((e) => !e)} style={styles.moreBtn} hitSlop={6}>
-                  <Text style={[styles.moreText, { color: theme.accent }]}>{expanded ? (isZh ? '收起' : 'Show less') : (isZh ? `显示全部 ${grid.length} 个` : `Show all ${grid.length}`)}</Text>
-                  <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}>
-                    <Icon name="chevronDown" size={16} color={theme.accent} />
-                  </View>
-                </Pressable>
-              )}
             </>
           )}
 
@@ -380,12 +415,33 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             </Pressable>
           )}
 
-          <View style={{ marginTop: 18 }}>
-            <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} label={isZh ? '关联账户（选填）' : 'Link to account (optional)'} />
-          </View>
+          {type !== 'transfer' && (
+            <>
+              <View style={{ marginTop: 18 }}>
+                <AccountLinkField
+                  accounts={assetAccounts.length > 0 ? assetAccounts : accounts}
+                  selectedId={fromAccountId}
+                  onSelect={setFromAccountId}
+                  label={type === 'expense' ? (isZh ? '扣款账户（选填）' : 'Pay from (optional)') : (isZh ? '存入账户（选填）' : 'Deposit into (optional)')}
+                />
+              </View>
+
+              {type === 'expense' && (
+                <View style={{ marginTop: 18 }}>
+                  <AccountLinkField
+                    accounts={liabilityAccounts}
+                    selectedId={toAccountId}
+                    onSelect={setToAccountId}
+                    label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
+                    infoEntry="reduce_liability"
+                  />
+                </View>
+              )}
+            </>
+          )}
 
           <View style={{ marginTop: 20 }}>
-            <PrimaryButton onPress={save} height={52} disabled={!linkConvertible}>
+            <PrimaryButton onPress={save} height={52} disabled={!canSave}>
               <Icon name="check" size={18} color="#fff" stroke={2.4} />
               <BtnLabel>{isZh ? '保存修改' : 'Save changes'}</BtnLabel>
             </PrimaryButton>
@@ -396,6 +452,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             <Text style={styles.deleteText}>{isZh ? '删除账单' : 'Delete transaction'}</Text>
           </Pressable>
         </ScrollView>
+        </View>
       </KeyboardAvoidingView>
 
       <AddCategoryModal
@@ -457,11 +514,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: 18,
@@ -487,6 +541,7 @@ const styles = StyleSheet.create({
   rmPrefix: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: {
     flex: 1,
+    minWidth: 0,
     fontFamily: numFont(700),
     fontSize: 24,
     paddingVertical: 10,
@@ -495,16 +550,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   amountInputLocked: {},
-  calcBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginLeft: 6,
-  },
-  calcBadgeText: { fontFamily: numFont(700), fontSize: 14 },
   lockNote: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 6 },
   splitRow: {
     flexDirection: 'row',
@@ -543,8 +588,6 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   addChipText: { fontFamily: uiFont(700), fontSize: 13.5 },
-  moreBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8 },
-  moreText: { fontFamily: uiFont(600), fontSize: 13.5 },
   deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 16, marginTop: 4 },
   deleteText: { fontFamily: uiFont(700), fontSize: 14.5, color: '#b3261e' },
 });

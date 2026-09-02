@@ -17,6 +17,7 @@ import { File } from 'expo-file-system';
 import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -665,11 +666,12 @@ export function AdvancedImportScreen({
         <TopBar title="Advanced Import" onBack={onClose} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         {/* ── Pip intro / done message ── */}
         <PipSays expr={phase === 'done' ? 'happy' : 'idle'}>
           <BubbleText>
@@ -970,6 +972,7 @@ export function AdvancedImportScreen({
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

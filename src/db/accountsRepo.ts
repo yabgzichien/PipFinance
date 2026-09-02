@@ -76,14 +76,15 @@ export async function addAccount(
   asOf: string,
   icon?: string | null,
   currency: string = 'MYR',
-  interestRate?: number | null
+  interestRate?: number | null,
+  cost?: number | null
 ): Promise<Account> {
   const db = await getDb();
   const id = genId();
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon, currency, interest_rate) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)',
+      'INSERT INTO accounts (id, name, kind, cls, archived, created_at, icon, currency, interest_rate, cost) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?)',
       id,
       name,
       kind,
@@ -91,7 +92,8 @@ export async function addAccount(
       now,
       icon ?? null,
       currency,
-      interestRate ?? null
+      interestRate ?? null,
+      cost ?? null
     );
     await db.runAsync(
       'INSERT INTO balance_entries (id, account_id, value, as_of, created_at) VALUES (?, ?, ?, ?, ?)',
@@ -102,7 +104,7 @@ export async function addAccount(
       now
     );
   });
-  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: null, icon: icon ?? null, currency, interestRate: interestRate ?? null };
+  return { id, name, kind, cls, archived: false, createdAt: now, sub: null, symbol: null, ticker: null, quantity: null, cost: cost ?? null, icon: icon ?? null, currency, interestRate: interestRate ?? null };
 }
 
 export async function updateAccount(

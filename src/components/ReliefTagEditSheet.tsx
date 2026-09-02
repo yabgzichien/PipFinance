@@ -11,15 +11,23 @@ import type { ReliefSchedule } from '../lib/reliefSchedule';
 import type { ReliefTag, Transaction } from '../lib/types';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { saveReceiptImage } from '../lib/receiptStorage';
+import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, uiFont } from '../theme';
 
-const EVIDENCE_LABEL: Record<string, string> = {
+const EVIDENCE_LABEL_EN: Record<string, string> = {
   complete: 'Complete',
   'missing-cert': 'Needs certification',
   'no-image': 'No photo',
   'weak-unnamed': 'Weak: no name',
+};
+
+const EVIDENCE_LABEL_ZH: Record<string, string> = {
+  complete: '凭证完整',
+  'missing-cert': '需补充证书/证明',
+  'no-image': '暂无票据照片',
+  'weak-unnamed': '凭证信息不完整',
 };
 
 export function ReliefTagEditSheet({
@@ -38,6 +46,7 @@ export function ReliefTagEditSheet({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   const [code, setCode] = useState('');
   const [amountText, setAmountText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,6 +62,7 @@ export function ReliefTagEditSheet({
 
   const line = schedule.lines.find((l) => l.code === code) ?? schedule.lines.find((l) => l.code === tag.code)!;
   const evidence = evidenceState(tag, txn, line);
+  const evidenceLabel = isZh ? EVIDENCE_LABEL_ZH[evidence] ?? evidence : EVIDENCE_LABEL_EN[evidence] ?? evidence;
 
   const save = async () => {
     const n = parseFloat(amountText.replace(/[^0-9.]/g, ''));
@@ -70,7 +80,10 @@ export function ReliefTagEditSheet({
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        notify('Permission needed', 'Allow photo access to attach this.');
+        notify(
+          isZh ? '需要相册权限' : 'Permission needed',
+          isZh ? '请允许访问相册以添加凭据照片。' : 'Allow photo access to attach this.'
+        );
         return;
       }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
@@ -83,7 +96,10 @@ export function ReliefTagEditSheet({
       } catch {
         // A failed copy just means no attached photo, not a lost tag: say so and leave the
         // tag exactly as it was.
-        notify('Could not attach', 'That photo could not be saved. Try again.');
+        notify(
+          isZh ? '无法添加照片' : 'Could not attach',
+          isZh ? '照片保存失败，请重试。' : 'That photo could not be saved. Try again.'
+        );
       }
     } finally {
       setBusy(false);
@@ -91,11 +107,16 @@ export function ReliefTagEditSheet({
   };
 
   const remove = () => {
-    confirmAction('Remove this tag?', 'This only removes the relief tag, not the transaction itself.', 'Remove', async () => {
-      await deleteReliefTag(tag.id);
-      onChanged();
-      onClose();
-    });
+    confirmAction(
+      isZh ? '删除此减免标记？' : 'Remove this tag?',
+      isZh ? '这只会移除减免税额标记，不会删除该笔交易记录。' : 'This only removes the relief tag, not the transaction itself.',
+      isZh ? '删除' : 'Remove',
+      async () => {
+        await deleteReliefTag(tag.id);
+        onChanged();
+        onClose();
+      }
+    );
   };
 
   return (
@@ -103,10 +124,12 @@ export function ReliefTagEditSheet({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.head}>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.head}>
           <Text style={[styles.title, { color: colorTheme.ink }]} numberOfLines={1}>
             {txn.merchantRaw || line.label}
           </Text>
@@ -116,7 +139,7 @@ export function ReliefTagEditSheet({
         </View>
 
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Caption color={colorTheme.ink2}>Relief line</Caption>
+          <Caption color={colorTheme.ink2}>{isZh ? '税收减免项目' : 'Relief line'}</Caption>
           <View style={styles.lineList}>
             {schedule.lines.map((l) => (
               <Pressable
@@ -133,7 +156,7 @@ export function ReliefTagEditSheet({
             ))}
           </View>
 
-          <Caption color={colorTheme.ink2} style={{ marginTop: 16 }}>Claimed amount (RM)</Caption>
+          <Caption color={colorTheme.ink2} style={{ marginTop: 16 }}>{isZh ? '申报减免金额 (RM)' : 'Claimed amount (RM)'}</Caption>
           <TextInput
             value={amountText}
             onChangeText={setAmountText}
@@ -143,14 +166,16 @@ export function ReliefTagEditSheet({
 
           <View style={[styles.evidenceRow, { borderColor: colorTheme.line2 }]}>
             <Icon name={evidence === 'complete' ? 'check' : 'alert'} size={16} color={evidence === 'complete' ? theme.accent : colorTheme.ink2} />
-            <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13 }}>{EVIDENCE_LABEL[evidence]}</Text>
+            <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13 }}>{evidenceLabel}</Text>
           </View>
 
           {line.requiresCert && (
             <Pressable disabled={busy} onPress={() => attachPhoto('certImageUri')} style={[styles.attachRow, { borderColor: colorTheme.line2 }]}>
               <Icon name="upload" size={16} color={colorTheme.ink2} />
               <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13 }}>
-                {tag.certImageUri ? 'Replace certification photo' : 'Attach certification photo'}
+                {tag.certImageUri
+                  ? (isZh ? '更换证书证明照片' : 'Replace certification photo')
+                  : (isZh ? '添加证书证明照片' : 'Attach certification photo')}
               </Text>
             </Pressable>
           )}
@@ -159,20 +184,23 @@ export function ReliefTagEditSheet({
           <Pressable disabled={busy} onPress={() => attachPhoto('einvoiceImageUri')} style={[styles.attachRow, { borderColor: colorTheme.line2 }]}>
             <Icon name="upload" size={16} color={colorTheme.ink2} />
             <Text style={{ color: colorTheme.ink, fontFamily: uiFont(600), fontSize: 13 }}>
-              {tag.einvoiceImageUri ? 'Replace e-Invoice photo' : 'Attach e-Invoice photo'}
+              {tag.einvoiceImageUri
+                ? (isZh ? '更换电子发票照片' : 'Replace e-Invoice photo')
+                : (isZh ? '添加电子发票照片' : 'Attach e-Invoice photo')}
             </Text>
           </Pressable>
           {tag.einvoiceImageUri && <RNImage source={{ uri: tag.einvoiceImageUri }} style={styles.thumb} />}
 
           <Pressable onPress={remove} style={{ marginTop: 18, alignSelf: 'center' }} hitSlop={8}>
-            <Text style={{ color: '#b3261e', fontFamily: uiFont(600), fontSize: 13 }}>Remove tag</Text>
+            <Text style={{ color: '#b3261e', fontFamily: uiFont(600), fontSize: 13 }}>{isZh ? '删除减免标记' : 'Remove tag'}</Text>
           </Pressable>
         </ScrollView>
 
         <View style={{ marginTop: 14 }}>
           <PrimaryButton onPress={save}>
-            <BtnLabel>Save</BtnLabel>
+            <BtnLabel>{isZh ? '保存修改' : 'Save'}</BtnLabel>
           </PrimaryButton>
+        </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -181,7 +209,8 @@ export function ReliefTagEditSheet({
 
 const styles = StyleSheet.create({
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10 },
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { maxHeight: '85%', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10 },
   handle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 12 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   title: { fontFamily: uiFont(700), fontSize: 17, flex: 1, marginRight: 10 },

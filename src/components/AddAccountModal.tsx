@@ -1,8 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CalcBadge } from './CalcBadge';
 import { getEntryCurrency } from '../db/currencyRepo';
 import { todayISO } from '../lib/duplicates';
+import { BASE_CURRENCY } from '../lib/currency';
+import { currencyPrefix } from '../lib/format';
+import { cleanCalcInput, evaluateExpression } from '../lib/calc';
+import { tap } from '../lib/haptics';
 import { classesFor } from '../lib/networth';
 import { subFromType, type TickerResult } from '../lib/prices';
 import type { AccountKind } from '../lib/types';
@@ -13,6 +18,7 @@ import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { numFont, radius, uiFont } from '../theme';
 import { Icon, type IconName } from './Icon';
+import { InstitutionField } from './InstitutionField';
 import { TickerSearchModal } from './TickerSearchModal';
 import { BtnLabel, PrimaryButton } from './ui';
 
@@ -35,11 +41,14 @@ export function AddAccountModal({
   const [name, setName] = useState('');
   const [kind, setKind] = useState<AccountKind>('asset');
   const [cls, setCls] = useState('cash');
+  const [entryCurrency, setEntryCurrency] = useState<string>(BASE_CURRENCY);
   const [holdingMode, setHoldingMode] = useState(false);
   const [coin, setCoin] = useState<TickerResult | null>(null);
   const [qtyText, setQtyText] = useState('');
   const [costText, setCostText] = useState('');
   const [rateText, setRateText] = useState('');
+  const [rateMode, setRateMode] = useState<'appreciation' | 'depreciation'>('depreciation');
+  const [valueText, setValueText] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -50,12 +59,15 @@ export function AddAccountModal({
       setName('');
       setKind('asset');
       setCls('cash');
+      setValueText('');
       setHoldingMode(false);
       setCoin(null);
       setQtyText('');
       setCostText('');
       setRateText('');
+      setRateMode('depreciation');
       setSearchOpen(false);
+      getEntryCurrency().then((c) => setEntryCurrency(c ?? BASE_CURRENCY));
     }
   }, [visible]);
 
@@ -68,10 +80,70 @@ export function AddAccountModal({
 
   const isInvest = kind === 'asset' && cls === 'investments';
   const isHoldingType = isInvest && holdingMode;
+  const isIlliquid = kind === 'asset' && cls === 'illiquid';
   const pickedSub = coin ? subFromType(coin.type) : null;
   const qtyUnit = pickedSub === 'commodity' ? 'g' : coin?.ticker ?? '';
   const qtyLabel = pickedSub === 'commodity' ? (isZh ? '克重' : 'Grams') : pickedSub === 'stock' ? (isZh ? '股数' : 'Shares') : (isZh ? '数量' : 'Quantity');
   const quantity = Math.max(0, parseFloat(qtyText.replace(/[^0-9.]/g, '')) || 0);
+
+  const valueCalc = useMemo(() => evaluateExpression(valueText, 2), [valueText]);
+  const mergeScaleX = useRef(new Animated.Value(1)).current;
+  const mergeScaleY = useRef(new Animated.Value(1)).current;
+  const mergeOpacity = useRef(new Animated.Value(1)).current;
+  const [isMergingValue, setIsMergingValue] = useState(false);
+
+  const handleMergeValue = () => {
+    if (!valueCalc.isExpression || valueCalc.result == null || valueCalc.result <= 0) return;
+    const finalValue = valueCalc.result.toFixed(2);
+    const useNative = Platform.OS !== 'web';
+
+    setIsMergingValue(true);
+    tap();
+
+    Animated.parallel([
+      Animated.timing(mergeScaleX, {
+        toValue: 0.82,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeScaleY, {
+        toValue: 0.88,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeOpacity, {
+        toValue: 0.35,
+        duration: 80,
+        useNativeDriver: useNative,
+      }),
+    ]).start(() => {
+      setValueText(finalValue);
+
+      Animated.parallel([
+        Animated.spring(mergeScaleX, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(mergeScaleY, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(mergeOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: useNative,
+        }),
+      ]).start(() => {
+        setIsMergingValue(false);
+      });
+    });
+  };
 
   const canSave = isHoldingType ? !busy && !!coin && quantity > 0 : !busy && name.trim().length > 0;
 
@@ -108,6 +180,14 @@ export function AddAccountModal({
           rateVal
         );
         onCreated(id);
+      } else if (isIlliquid) {
+        const currency = await getEntryCurrency();
+        const parsedCost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
+        const numRate = rateText.trim() ? parseFloat(rateText.replace(/[^0-9.]/g, '')) : null;
+        const finalRate = numRate != null && Number.isFinite(numRate) ? (rateMode === 'depreciation' ? -Math.abs(numRate) : Math.abs(numRate)) : null;
+        const val = Math.max(0, valueCalc.result ?? (parseFloat(valueText.replace(/[^0-9.]/g, '')) || 0));
+        const id = await addAccount(name.trim(), 'asset', 'illiquid', Math.round(val * 100) / 100, todayISO(), null, currency, finalRate, parsedCost);
+        onCreated(id);
       } else {
         const currency = await getEntryCurrency();
         const id = await addAccount(name.trim(), kind, cls, 0, todayISO(), null, currency, isInvest ? rateVal : null);
@@ -138,8 +218,8 @@ export function AddAccountModal({
               {(['asset', 'liability'] as AccountKind[]).map((k) => {
                 const on = kind === k;
                 return (
-                  <Pressable key={k} onPress={() => switchKind(k)} style={[styles.toggleBtn, on && { backgroundColor: colorTheme.surface }]}>
-                    <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>
+                  <Pressable key={k} onPress={() => switchKind(k)} style={[styles.toggleBtn, on && { backgroundColor: theme.accentTint }]}>
+                    <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: theme.accent }]}>
                       {k === 'asset' ? (isZh ? '资产' : 'Assets') : (isZh ? '负债' : 'Liabilities')}
                     </Text>
                   </Pressable>
@@ -217,7 +297,7 @@ export function AddAccountModal({
 
                 <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '持仓成本 / 买入总额 (选填)' : 'Invested amount (optional)'}</Text>
                 <View style={[styles.amountRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(entryCurrency)}</Text>
                   <TextInput
                     value={costText}
                     onChangeText={setCostText}
@@ -253,16 +333,130 @@ export function AddAccountModal({
               </>
             ) : (
               <>
-                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '账户名称' : 'Account name'}</Text>
-                <TextInput
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                  {isIlliquid ? (isZh ? '资产名称' : 'Asset name') : (isZh ? '账户名称' : 'Account name')}
+                </Text>
+                <InstitutionField
                   value={name}
                   onChangeText={setName}
-                  placeholder={kind === 'asset' ? (isZh ? '例如：Maybank 储蓄账户' : 'e.g. Maybank Savings') : (isZh ? '例如：车贷 / 信用卡' : 'e.g. Car Loan')}
-                  placeholderTextColor={colorTheme.ink3}
-                  style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
-                  maxLength={30}
-                  autoFocus
+                  placeholder={
+                    kind === 'asset'
+                      ? isIlliquid
+                        ? isZh
+                          ? '例如：2022 本田思域、满家乐公寓'
+                          : 'e.g. 2022 Honda Civic, Mont Kiara Condo'
+                        : isZh
+                          ? '例如：Maybank 储蓄账户'
+                          : 'e.g. Maybank Savings'
+                      : isZh
+                        ? '例如：Porsche 车贷 / 信用卡'
+                        : 'e.g. Porsche Loan, Car Loan'
+                  }
+                  onPick={(inst) => {
+                    if (inst.kind === 'auto') {
+                      setCls(kind === 'liability' ? 'car' : 'illiquid');
+                    } else if (kind === 'asset') {
+                      setCls('cash');
+                    }
+                  }}
+                  inputStyle={{ backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }}
                 />
+
+                {isIlliquid && (
+                  <>
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                      {isZh ? '当前市值' : 'Market value'}
+                    </Text>
+                    <View style={[styles.amountRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+                      <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(entryCurrency)}</Text>
+                      <Animated.View
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          opacity: mergeOpacity,
+                          transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
+                        }}
+                      >
+                        <TextInput
+                          value={valueText}
+                          onChangeText={(t) => setValueText(cleanCalcInput(t, true))}
+                          onSubmitEditing={handleMergeValue}
+                          keyboardType="numbers-and-punctuation"
+                          placeholder="0.00"
+                          placeholderTextColor={colorTheme.ink3}
+                          style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
+                        />
+                      </Animated.View>
+                      {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                        <CalcBadge
+                          result={valueCalc.result}
+                          decimals={2}
+                          onApply={handleMergeValue}
+                        />
+                      )}
+                    </View>
+                    {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                      <Text style={[styles.calcHint, { color: theme.accent }]}>
+                        = {entryCurrency} {valueCalc.result.toFixed(2)}
+                      </Text>
+                    )}
+
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                      {isZh ? '购置成本 (选填)' : 'Cost of asset (optional)'}
+                    </Text>
+                    <View style={[styles.amountRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+                      <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(entryCurrency)}</Text>
+                      <TextInput
+                        value={costText}
+                        onChangeText={setCostText}
+                        keyboardType="decimal-pad"
+                        placeholder="0.00"
+                        placeholderTextColor={colorTheme.ink3}
+                        style={[styles.amountInput, { color: colorTheme.ink }]}
+                      />
+                    </View>
+
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
+                      {isZh ? '预估年化增值/折旧率 (选填)' : 'ETA appreciation / depreciation % (optional)'}
+                    </Text>
+                    <View style={[styles.toggle, { marginTop: 6, marginBottom: 8, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+                      {([
+                        ['appreciation', isZh ? '+ 增值' : '+ Appreciation'],
+                        ['depreciation', isZh ? '− 折旧' : '− Depreciation'],
+                      ] as const).map(([m, label]) => {
+                        const on = rateMode === m;
+                        return (
+                          <Pressable
+                            key={m}
+                            onPress={() => setRateMode(m)}
+                            style={[styles.toggleBtn, on && { backgroundColor: colorTheme.surface }]}
+                          >
+                            <Text
+                              style={[
+                                styles.toggleText,
+                                { color: colorTheme.ink2 },
+                                on && { color: m === 'appreciation' ? theme.accent : colorTheme.ink },
+                              ]}
+                            >
+                              {label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, width: 160 }]}>
+                      <TextInput
+                        value={rateText}
+                        onChangeText={setRateText}
+                        keyboardType="decimal-pad"
+                        placeholder={rateMode === 'depreciation' ? '10.0' : '5.0'}
+                        placeholderTextColor={colorTheme.ink3}
+                        style={[styles.compactInput, { color: colorTheme.ink }]}
+                      />
+                      <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>% / yr</Text>
+                    </View>
+                  </>
+                )}
 
                 {isInvest && (
                   <>
@@ -349,8 +543,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   rm: { fontFamily: numFont(600), fontSize: 16 },
+  calcHint: { fontFamily: numFont(600), fontSize: 13, marginTop: -6, marginBottom: 12, marginLeft: 2 },
   amountInput: {
     flex: 1,
+    minWidth: 0,
     fontFamily: numFont(700),
     fontSize: 18,
     paddingVertical: 10,
@@ -375,5 +571,6 @@ const styles = StyleSheet.create({
   compactUnit: {
     fontFamily: uiFont(600),
     fontSize: 13,
+    flexShrink: 0,
   },
 });

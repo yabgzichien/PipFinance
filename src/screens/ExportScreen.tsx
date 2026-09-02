@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -442,7 +443,8 @@ export function ExportScreen({
         <TopBar title={isZh ? '财务报表与导出' : 'Financial Reports & Export'} onBack={onBack} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 48 }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 48 }} keyboardShouldPersistTaps="handled">
         <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '1. 报表周期' : '1. Reporting Period'}</Eyebrow>
         <View style={[styles.periodTabs, { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 }]}>
           {PERIOD_TABS.map((tab) => {
@@ -723,6 +725,7 @@ export function ExportScreen({
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* DOCUMENT PREVIEW MODAL */}
       <Modal

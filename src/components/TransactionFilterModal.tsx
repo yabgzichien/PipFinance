@@ -55,10 +55,12 @@ export function TransactionFilterModal({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.head}>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.head}>
           <Text style={[styles.title, { color: colorTheme.ink }]}>{isZh ? '筛选交易明细' : 'Filter transactions'}</Text>
           <Pressable onPress={onClose} hitSlop={8}>
             <Icon name="x" size={20} color={colorTheme.ink2} />
@@ -143,6 +145,7 @@ export function TransactionFilterModal({
             <Text style={styles.doneText}>{isZh ? '显示结果' : 'Show results'}</Text>
           </Pressable>
         </View>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -150,7 +153,8 @@ export function TransactionFilterModal({
 
 const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '90%' },
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '90%' },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   title: { flex: 1, fontFamily: uiFont(700), fontSize: 18 },

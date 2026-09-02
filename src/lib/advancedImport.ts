@@ -45,7 +45,7 @@ SECTION 2 — ACCOUNT BALANCES
 ──────────────────────────────────────
 For each distinct account / holding in the file(s), output one entry:
 - name: account name as shown in the document
-- type: one of → "Cash", "Investments", "Mortgage", "Personal Loan", "Credit Card", "Pay Later", "Car Loan"
+- type: one of → "Cash", "Investments", "Illiquid Assets", "Mortgage", "Personal Loan", "Credit Card", "Pay Later", "Car Loan"
 - balance: current balance as a POSITIVE number (outstanding amount for loans/cards)
 - currency: 3-letter code (e.g. "MYR", "USD", "SGD", "CNY", "JPY", "EUR", "GBP", etc.) — use "${defaultCurrency}" if not stated
 - as_of: YYYY-MM-DD date of the balance reading, or the statement end date
@@ -401,6 +401,14 @@ export const TYPE_TO_CLS: Record<string, string> = {
   cash: 'cash',
   investments: 'investments',
   investment: 'investments',
+  'illiquid assets': 'illiquid',
+  'illiquid asset': 'illiquid',
+  illiquid: 'illiquid',
+  'real estate': 'illiquid',
+  property: 'illiquid',
+  'fixed assets': 'illiquid',
+  'fixed asset': 'illiquid',
+  vehicle: 'illiquid',
   mortgage: 'mortgage',
   'personal loan': 'personal',
   personal: 'personal',

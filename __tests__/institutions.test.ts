@@ -137,4 +137,15 @@ describe('searchInstitutions', () => {
     expect(searchInstitutions('hsbc')[0]?.id).toBe('hsbc');
     expect(searchInstitutions('HSBC')[0]?.id).toBe('hsbc');
   });
+
+  it('matches and searches car brands such as Porsche, Proton, Honda', () => {
+    expect(searchInstitutions('porsche')[0]?.id).toBe('porsche');
+    expect(searchInstitutions('Porsche')[0]?.name).toBe('Porsche');
+    expect(searchInstitutions('Macan')[0]?.id).toBe('porsche');
+    expect(searchInstitutions('proton')[0]?.id).toBe('proton');
+    expect(searchInstitutions('honda')[0]?.id).toBe('honda');
+    expect(matchInstitution('Porsche')?.id).toBe('porsche');
+    expect(matchInstitution('Porsche Macan Loan')?.id).toBe('porsche');
+    expect(matchInstitution('Proton X50 Loan')?.id).toBe('proton');
+  });
 });

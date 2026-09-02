@@ -18,6 +18,7 @@ export interface ClassMeta {
 export const ACCOUNT_CLASSES: ClassMeta[] = [
   { id: 'cash', label: 'Cash & Bank', kind: 'asset', icon: 'wallet' },
   { id: 'investments', label: 'Investments', kind: 'asset', icon: 'trending' },
+  { id: 'illiquid', label: 'Illiquid Assets', kind: 'asset', icon: 'home' },
   // Money friends owe you from split bills. Maintained by the split engine, never by hand.
   { id: 'receivable', label: 'Owed to me', kind: 'asset', icon: 'gift', managed: true },
   { id: 'mortgage', label: 'Mortgage', kind: 'liability', icon: 'home' },

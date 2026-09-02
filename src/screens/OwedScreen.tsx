@@ -274,10 +274,12 @@ function SettleSheet({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.sheetHead}>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.sheetHead}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
               {isZh ? `${share.personName} 已还款` : `${share.personName} paid you back`}
@@ -371,6 +373,7 @@ function SettleSheet({
             </BtnLabel>
           </PrimaryButton>
         </View>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -415,11 +418,8 @@ const styles = StyleSheet.create({
   emptySub: { fontFamily: uiFont(500), fontSize: 13.5, marginTop: 6, textAlign: 'center', lineHeight: 19 },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: 18,

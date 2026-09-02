@@ -39,4 +39,12 @@ describe('compute7DayDots', () => {
     const dots = compute7DayDots([t(8), t(10)], NOW);
     expect(dots).toEqual([false, false, false, false, false, false, false]);
   });
+
+  it('StreakWidget renders the new QuickRecordWidget for existing home screen placements', () => {
+    const { StreakWidget } = require('../src/widget/StreakWidget');
+    const { QuickRecordWidget } = require('../src/widget/QuickRecordWidget');
+    const element = StreakWidget({ streak: 7 });
+    expect(element.type).toBe(QuickRecordWidget);
+    expect(element.props.streak).toBe(7);
+  });
 });

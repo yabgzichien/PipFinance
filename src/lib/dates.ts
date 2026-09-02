@@ -155,3 +155,32 @@ export function addMonthsClamped(isoDate: string, months: number): string {
   const dd = String(target.getUTCDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }
+
+const ZH_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+/** Format date for recurring timeline headers: e.g. "Tomorrow SEP 1", "Wednesday SEP 2", "Saturday SEP 19" */
+export function formatTimelineDateHeader(dueDate: string, today: string, isZh = false): string {
+  const [y, m, d] = dueDate.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  if (!y || !m || !d) return dueDate;
+
+  const dueUTC = Date.UTC(y, m - 1, d);
+  const todayUTC = Date.UTC(ty, tm - 1, td);
+  const diffDays = Math.round((dueUTC - todayUTC) / 86400000);
+  const dateObj = new Date(dueUTC);
+  const dayOfWeek = dateObj.getUTCDay();
+  const monthShort = MONTHS_SHORT[m - 1] ? MONTHS_SHORT[m - 1].toUpperCase() : '';
+
+  if (isZh) {
+    if (diffDays === 0) return `今天 ${m}月${d}日`;
+    if (diffDays === 1) return `明天 ${m}月${d}日`;
+    if (diffDays === -1) return `昨天 ${m}月${d}日`;
+    return `周${ZH_WEEKDAYS[dayOfWeek]} ${m}月${d}日`;
+  }
+
+  if (diffDays === 0) return `Today ${monthShort} ${d}`;
+  if (diffDays === 1) return `Tomorrow ${monthShort} ${d}`;
+  if (diffDays === -1) return `Yesterday ${monthShort} ${d}`;
+  return `${WEEKDAYS[dayOfWeek]} ${monthShort} ${d}`;
+}
+

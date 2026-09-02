@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
 import { AddCategoryModal } from '../components/AddCategoryModal';
+import { CalcBadge } from '../components/CalcBadge';
 import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
@@ -16,8 +17,9 @@ import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { BASE_CURRENCY, deriveNative, isMultiCurrency, round2 } from '../lib/currency';
 import { cleanCalcInput, evaluateExpression } from '../lib/calc';
 import { decimalsFor } from '../lib/currencies';
-import { fmtMoney } from '../lib/format';
+import { currencyPrefix, fmtMoney } from '../lib/format';
 import { rateFor, ratesFromCache } from '../lib/fx';
+import { tap } from '../lib/haptics';
 import { SplitSheet } from '../components/SplitSheet';
 import type { Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -123,32 +125,94 @@ export function ManualEntryScreen({
   // prevent. Gates save rather than ever letting a foreign row through at parity.
   const rate = currency === BASE_CURRENCY ? 1 : rateFor(rates, currency);
 
-  // Every transaction is tied to an account. Default to a cash account (prefer an
-  // existing one); the effect below seeds it and creates a "Cash" account if none exist.
+  // Accounts grouped by kind
+  const assetAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'asset'), [accounts]);
+  const liabilityAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'liability'), [accounts]);
+
+  // Default to a cash account (prefer an existing one); seeds and creates a "Cash" account if none exist.
   const defaultAcctId = useMemo(() => {
-    const act = accounts.filter((a) => !a.archived);
+    const act = assetAccounts.length > 0 ? assetAccounts : accounts.filter((a) => !a.archived);
     return (act.find((a) => a.cls === 'cash') ?? act[0])?.id ?? null;
-  }, [accounts]);
-  const [linkId, setLinkId] = useState<string | null>(defaultAcctId);
-  const [linkEffect, setLinkEffect] = useState<LinkEffect>(() => {
-    const act = accounts.filter((a) => !a.archived);
-    const initialAcc = defaultAcctId ? act.find((a) => a.id === defaultAcctId) : null;
-    return initialAcc ? defaultLinkEffect(initialAcc.kind, initialType ?? 'expense') : (initialType === 'income' ? 'add' : 'subtract');
-  });
+  }, [assetAccounts, accounts]);
+
+  const [fromAccountId, setFromAccountId] = useState<string | null>(defaultAcctId);
+  const [toAccountId, setToAccountId] = useState<string | null>(null);
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
   const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
   const amount = Math.max(0, calc.result ?? 0);
+
+  const mergeScaleX = useRef(new Animated.Value(1)).current;
+  const mergeScaleY = useRef(new Animated.Value(1)).current;
+  const mergeOpacity = useRef(new Animated.Value(1)).current;
+  const [isMerging, setIsMerging] = useState(false);
+
+  const handleMerge = () => {
+    if (!calc.isExpression || calc.result == null || calc.result <= 0) return;
+    const finalValue = decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals);
+    const useNative = Platform.OS !== 'web';
+
+    setIsMerging(true);
+    tap();
+
+    // Phase 1: Numbers converge/squeeze inward
+    Animated.parallel([
+      Animated.timing(mergeScaleX, {
+        toValue: 0.82,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeScaleY, {
+        toValue: 0.88,
+        duration: 80,
+        easing: Easing.in(Easing.ease),
+        useNativeDriver: useNative,
+      }),
+      Animated.timing(mergeOpacity, {
+        toValue: 0.35,
+        duration: 80,
+        useNativeDriver: useNative,
+      }),
+    ]).start(() => {
+      // Switch text to merged result
+      setAmountText(finalValue);
+
+      // Phase 2: Pop & Bloom outward with spring bounce into final number
+      Animated.parallel([
+        Animated.spring(mergeScaleX, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.spring(mergeScaleY, {
+          toValue: 1,
+          tension: 180,
+          friction: 6,
+          useNativeDriver: useNative,
+        }),
+        Animated.timing(mergeOpacity, {
+          toValue: 1,
+          duration: 140,
+          useNativeDriver: useNative,
+        }),
+      ]).start(() => {
+        setIsMerging(false);
+      });
+    });
+  };
+
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
-  // The linked account's balance is native to ITS OWN currency (Task 9), which may differ
-  // from the row's own currency. No conversion (and so no rate) is needed when the row's
-  // currency already matches the account's, or the account is MYR; otherwise the account's
-  // own rate must be cached, or `deriveNative` would throw at save time.
-  const linkAccount = linkId ? accounts.find((a) => a.id === linkId) ?? null : null;
-  const linkConvertible =
-    !linkAccount || linkAccount.currency === currency || linkAccount.currency === BASE_CURRENCY || rateFor(rates, linkAccount.currency) != null;
-  const canSave = amount > 0 && !!cat && !!validDate && !!linkId && rate != null && linkConvertible;
+
+  const fromAccount = fromAccountId ? accounts.find((a) => a.id === fromAccountId) ?? null : null;
+  const fromConvertible =
+    !fromAccount || fromAccount.currency === currency || fromAccount.currency === BASE_CURRENCY || rateFor(rates, fromAccount.currency) != null;
+  const toAccount = toAccountId ? accounts.find((a) => a.id === toAccountId) ?? null : null;
+  const toConvertible =
+    !toAccount || toAccount.currency === currency || toAccount.currency === BASE_CURRENCY || rateFor(rates, toAccount.currency) != null;
+  const canSave = amount > 0 && !!cat && !!validDate && !!fromAccountId && rate != null && fromConvertible && toConvertible;
 
   useEffect(() => {
     onAmountValidChange?.(amount > 0);
@@ -164,30 +228,16 @@ export function ManualEntryScreen({
     if (t === type) return;
     setType(t);
     setCat(null);
-    if (linkId) {
-      const a = accounts.find((x) => x.id === linkId);
-      if (a) setLinkEffect(defaultLinkEffect(a.kind, t));
-    }
-  };
-
-  const selectLink = (id: string | null) => {
-    setLinkId(id);
-    const a = id ? accounts.find((x) => x.id === id) : null;
-    if (a) setLinkEffect(defaultLinkEffect(a.kind, type));
   };
 
   // Seed the required account selection once accounts are known, creating a
   // default "Cash" account if the user has none yet.
   useEffect(() => {
-    if (linkId) {
-      const a = accounts.find((x) => x.id === linkId);
-      if (a) setLinkEffect(defaultLinkEffect(a.kind, type));
-      return;
+    if (!fromAccountId) {
+      if (defaultAcctId) setFromAccountId(defaultAcctId);
+      else ensureDefaultAccount().then((id) => setFromAccountId(id));
     }
-    if (defaultAcctId) selectLink(defaultAcctId);
-    else ensureDefaultAccount().then(selectLink);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultAcctId]);
+  }, [defaultAcctId, fromAccountId, ensureDefaultAccount]);
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
@@ -212,18 +262,22 @@ export function ManualEntryScreen({
       currency,
       fxRate: currency === BASE_CURRENCY ? null : rate,
     };
-    // The balance moves by the full bill even when the row records only a share, because the
-    // whole amount is what actually left the account. Accounts are natively denominated
-    // (Task 9): when the row's own currency already matches the linked account's, the row's
-    // native amount is used unconverted rather than round-tripped through MYR (which could
-    // drift a cent from double rounding); otherwise the MYR-equivalent is converted into the
-    // account's own currency at the account's own rate (the inverse of `deriveMyr`).
-    if (linkId && linkAccount) {
-      const effect: LinkEffect = linkAccount.kind === 'liability' ? linkEffect : defaultLinkEffect(linkAccount.kind, type);
-      const linkAmt =
-        linkAccount.currency === currency ? amt : deriveNative(myrAmt, linkAccount.currency, rateFor(rates, linkAccount.currency));
-      await recordBalanceLink(linkId, linkAmt, effect, validDate);
+
+    // 1. Deduct from / Add to "Pay from" / "Deposit into" account
+    if (fromAccountId && fromAccount) {
+      const effect: LinkEffect = type === 'income' ? 'add' : 'subtract';
+      const fromAmt =
+        fromAccount.currency === currency ? amt : deriveNative(myrAmt, fromAccount.currency, rateFor(rates, fromAccount.currency));
+      await recordBalanceLink(fromAccountId, fromAmt, effect, validDate);
     }
+
+    // 2. Reduce liability account (e.g. car/mortgage loan) for expenses
+    if (type === 'expense' && toAccountId && toAccount) {
+      const toAmt =
+        toAccount.currency === currency ? amt : deriveNative(myrAmt, toAccount.currency, rateFor(rates, toAccount.currency));
+      await recordBalanceLink(toAccountId, toAmt, 'subtract', validDate);
+    }
+
     onComplete(item, cat, activeSplit);
   };
 
@@ -233,7 +287,8 @@ export function ManualEntryScreen({
         <TopBar title={title ?? (startSplitting ? (isZh ? '分摊账单' : 'Split a bill') : (isZh ? '手动记账' : 'Add manually'))} onBack={onBack} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 130 }} keyboardShouldPersistTaps="handled">
         {isTutorial && (
           <View style={{ marginBottom: spacing.md }}>
             <PipSays expr="curious" size={48}>
@@ -269,41 +324,43 @@ export function ManualEntryScreen({
             {isMultiCurrency(activeCurrencies) ? (
               <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
             ) : (
-              <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+              <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
             )}
-            <TextInput
-              value={amountText}
-              onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
-              onBlur={() => {
-                if (calc.isExpression && calc.result != null && calc.result > 0) {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
-                }
+            <Animated.View
+              style={{
+                flex: 1,
+                minWidth: 0,
+                opacity: mergeOpacity,
+                transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
               }}
-              onSubmitEditing={() => {
-                if (calc.isExpression && calc.result != null && calc.result > 0) {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals));
-                }
-              }}
-              keyboardType="numbers-and-punctuation"
-              placeholder={decimals === 0 ? '0' : '0.00'}
-              placeholderTextColor={colorTheme.ink3}
-              style={[styles.amountInput, { color: colorTheme.ink }]}
-            />
+            >
+              <TextInput
+                value={amountText}
+                onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
+                onSubmitEditing={handleMerge}
+                keyboardType="numbers-and-punctuation"
+                placeholder={decimals === 0 ? '0' : '0.00'}
+                placeholderTextColor={colorTheme.ink3}
+                style={[
+                  styles.amountInput,
+                  { color: isMerging ? theme.accent : colorTheme.ink },
+                ]}
+              />
+            </Animated.View>
             {calc.isExpression && calc.result != null && calc.result > 0 && (
-              <Pressable
-                onPress={() => {
-                  setAmountText(decimals === 0 ? String(Math.round(calc.result!)) : calc.result!.toFixed(decimals));
-                }}
-                hitSlop={8}
-                style={[styles.calcBadge, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
-              >
-                <Text style={[styles.calcBadgeText, { color: theme.accent }]}>
-                  = {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
-                </Text>
-              </Pressable>
+              <CalcBadge
+                result={calc.result}
+                decimals={decimals}
+                onApply={handleMerge}
+              />
             )}
           </View>
         </TourAnchor>
+        {calc.isExpression && calc.result != null && calc.result > 0 && (
+          <Text style={[styles.calcHint, { color: theme.accent }]}>
+            = {currency} {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
+          </Text>
+        )}
         {currency !== BASE_CURRENCY && rate != null && (
           <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
         )}
@@ -339,9 +396,27 @@ export function ManualEntryScreen({
 
         <TourAnchor id="tour_account_field" activeId={activeTourAnchor}>
           <View style={{ marginTop: 18 }}>
-            <AccountLinkField accounts={accounts} selectedId={linkId} effect={linkEffect} onSelect={selectLink} onEffect={setLinkEffect} required />
+            <AccountLinkField
+              accounts={assetAccounts.length > 0 ? assetAccounts : accounts}
+              selectedId={fromAccountId}
+              onSelect={setFromAccountId}
+              label={type === 'expense' ? (isZh ? '扣款账户' : 'Pay from') : (isZh ? '存入账户' : 'Deposit into')}
+              required
+            />
           </View>
         </TourAnchor>
+
+        {type === 'expense' && (
+          <View style={{ marginTop: 18 }}>
+            <AccountLinkField
+              accounts={liabilityAccounts}
+              selectedId={toAccountId}
+              onSelect={setToAccountId}
+              label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
+              infoEntry="reduce_liability"
+            />
+          </View>
+        )}
 
         <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
         <TextInput
@@ -411,6 +486,7 @@ export function ManualEntryScreen({
           </PrimaryButton>
         </TourAnchor>
       </View>
+      </KeyboardAvoidingView>
 
       <AddCategoryModal
         visible={adding}
@@ -467,18 +543,9 @@ const styles = StyleSheet.create({
   dateHintBad: { color: '#c5402f' },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
   fxHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
+  calcHint: { fontFamily: numFont(600), fontSize: 13, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
-  amountInput: { flex: 1, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
-  calcBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginLeft: 6,
-  },
-  calcBadgeText: { fontFamily: numFont(700), fontSize: 14 },
+  amountInput: { flex: 1, minWidth: 0, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
   gridCell: { width: '50%', paddingHorizontal: 5, paddingBottom: 10 },
   addChip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14, borderRadius: radius.sm, borderWidth: 1.5, borderStyle: 'dashed' },

@@ -6,15 +6,18 @@ import { AccountLinkField } from '../components/AccountLinkField';
 import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { Amount, BtnLabel, BubbleText, Card, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { BrandBadge } from '../components/BrandBadge';
+import { BRAND_SUGGESTIONS, matchBrand } from '../components/BrandLogo';
 import { getActiveCurrencies } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { DEFAULT_EXPENSE_ID } from '../data/categories';
+
 import { currentMonthKey } from '../lib/budget';
 import { computeCommitmentRecord } from '../lib/commitmentRecord';
 import { occurrenceMyr, type Commitment, type CommitmentKind, type CommitmentOccurrence } from '../lib/commitments';
 import { BASE_CURRENCY, decimalsFor, isMultiCurrency } from '../lib/currency';
 import { rateFor, ratesFromCache } from '../lib/fx';
-import { monthLabel, shortDate } from '../lib/dates';
+import { formatTimelineDateHeader, shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
 import { currencyPrefix, fmtMoney } from '../lib/format';
 import { RECEIVABLE_CLS } from '../lib/networth';
@@ -24,7 +27,7 @@ import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
-import { colors, numFont, radius, uiFont } from '../theme';
+import { colors, numFont, radius, shadowCard, uiFont } from '../theme';
 
 const GREEN = '#1f8a5b';
 const RED = '#c5402f';
@@ -38,15 +41,27 @@ function statusColor(o: CommitmentOccurrence, overdue: boolean, colorTheme: Retu
 }
 
 function statusLabel(o: CommitmentOccurrence, overdue: boolean, isZh: boolean): string {
-  if (o.status === 'paid') return isZh ? '已按时支付' : 'Paid on time';
+  if (o.status === 'paid') return isZh ? '已按时支付' : 'Paid';
   if (o.status === 'late') return isZh ? '已逾期支付' : 'Paid late';
   if (o.status === 'skipped') return isZh ? '已跳过' : 'Skipped';
-  return overdue ? (isZh ? '已逾期' : 'Overdue') : (isZh ? `到期日 ${shortDate(o.dueDate)}` : `Due ${shortDate(o.dueDate)}`);
+  return overdue ? (isZh ? '已逾期' : 'Overdue') : (isZh ? '待支付' : 'Upcoming');
+}
+
+interface DateGroup {
+  date: string;
+  occurrences: CommitmentOccurrence[];
+  totalMyr: number;
+}
+
+function addMonthsKey(mk: string, delta: number): string {
+  const [y, m] = mk.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /**
- * The monthly todo list for recurring commitments (bills + DCA investments): everything
- * overdue, then everything due in the month being viewed, each a tap-to-pay checkbox row.
+ * The recurring commitments screen with a sleek timeline view, month-to-month navigation,
+ * accurate due-date grouping, brand logos, daily subtotals, and comprehensive recurring management.
  */
 export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -60,6 +75,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
     payCommitment,
     unpayCommitment,
     skipCommitment,
+    deleteCommitmentEntry,
     previewCommitmentMatch,
   } = useAppData();
   const dc = useDisplayCurrency();
@@ -76,12 +92,24 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
   }, []);
 
   const today = useMemo(() => todayISO(), []);
-  const [viewMonth, setViewMonth] = useState(() => currentMonthKey());
+  const curMonth = useMemo(() => currentMonthKey(new Date()), []);
+  const [selectedMonth, setSelectedMonth] = useState<string>(curMonth);
+  const isCurrentMonth = selectedMonth === curMonth;
+
   const [editing, setEditing] = useState<Commitment | 'new' | null>(null);
   const [actionsFor, setActionsFor] = useState<CommitmentOccurrence | null>(null);
 
   const commitmentById = useMemo(() => new Map(commitments.map((c) => [c.id, c])), [commitments]);
+  const accountById = useMemo(() => new Map(accounts.map((a) => [a.id as string, a])), [accounts]);
 
+  // Occurrences belonging to the selected month
+  const monthOccurrences = useMemo(() => {
+    return commitmentOccurrences
+      .filter((o) => o.month === selectedMonth)
+      .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+  }, [commitmentOccurrences, selectedMonth]);
+
+  // Overdue occurrences (scheduled with due date before today)
   const overdue = useMemo(
     () =>
       commitmentOccurrences
@@ -91,35 +119,54 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
   );
   const overdueIds = useMemo(() => new Set(overdue.map((o) => o.id)), [overdue]);
 
-  const thisMonth = useMemo(
-    () =>
-      commitmentOccurrences
-        .filter((o) => o.month === viewMonth && !overdueIds.has(o.id))
-        .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
-    [commitmentOccurrences, viewMonth, overdueIds]
-  );
+  // Group occurrences by due date
+  const groupOccurrencesByDate = (occs: CommitmentOccurrence[]): DateGroup[] => {
+    const map = new Map<string, CommitmentOccurrence[]>();
+    for (const o of occs) {
+      const list = map.get(o.dueDate) ?? [];
+      list.push(o);
+      map.set(o.dueDate, list);
+    }
+    const groups: DateGroup[] = [];
+    for (const [date, items] of map.entries()) {
+      const totalMyr = items.reduce((s, o) => {
+        const c = commitmentById.get(o.commitmentId);
+        const fx = o.fxRate ?? (c && c.currency !== BASE_CURRENCY ? rateFor(rates, c.currency) : 1) ?? 1;
+        return s + occurrenceMyr(o.amount, fx);
+      }, 0);
+      groups.push({ date, occurrences: items, totalMyr });
+    }
+    return groups.sort((a, b) => (a.date < b.date ? -1 : 1));
+  };
 
-  const monthTotal =
-    thisMonth.reduce((s, o) => {
-      const c = commitmentById.get(o.commitmentId);
-      const fx = o.fxRate ?? (c && c.currency !== BASE_CURRENCY ? rateFor(rates, c.currency) : 1) ?? 1;
-      return s + occurrenceMyr(o.amount, fx);
-    }, 0) +
-    overdue.reduce((s, o) => {
+  const monthGroups = useMemo(
+    () => groupOccurrencesByDate(monthOccurrences),
+    [monthOccurrences, commitmentById, rates]
+  );
+  const overdueGroups = useMemo(() => groupOccurrencesByDate(overdue), [overdue, commitmentById, rates]);
+
+  // Displayed occurrences for total and unpaid counts
+  const displayedOccurrences = useMemo(() => {
+    if (isCurrentMonth) {
+      const nonOverdueInMonth = monthOccurrences.filter((o) => !overdueIds.has(o.id));
+      return [...overdue, ...nonOverdueInMonth];
+    }
+    return monthOccurrences;
+  }, [isCurrentMonth, monthOccurrences, overdue, overdueIds]);
+
+  const monthTotal = useMemo(() => {
+    return displayedOccurrences.reduce((s, o) => {
       const c = commitmentById.get(o.commitmentId);
       const fx = o.fxRate ?? (c && c.currency !== BASE_CURRENCY ? rateFor(rates, c.currency) : 1) ?? 1;
       return s + occurrenceMyr(o.amount, fx);
     }, 0);
-  const unpaidCount = thisMonth.filter((o) => o.status === 'scheduled').length + overdue.length;
+  }, [displayedOccurrences, commitmentById, rates]);
+
+  const unpaidCount = useMemo(() => {
+    return displayedOccurrences.filter((o) => o.status === 'scheduled').length;
+  }, [displayedOccurrences]);
 
   const record = useMemo(() => computeCommitmentRecord(commitmentOccurrences), [commitmentOccurrences]);
-
-  const months = useMemo(() => {
-    const set = new Set(commitmentOccurrences.map((o) => o.month));
-    set.add(currentMonthKey());
-    return [...set].sort();
-  }, [commitmentOccurrences]);
-  const monthIdx = months.indexOf(viewMonth);
 
   const handleToggle = async (o: CommitmentOccurrence) => {
     if (o.status === 'paid' || o.status === 'late') {
@@ -153,36 +200,57 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const confirmDeleteCommitment = (commitmentId: string, fromMonth?: string) => {
+    const c = commitmentById.get(commitmentId);
+    if (!c) return;
+    const targetMonth = fromMonth ?? selectedMonth;
+    confirmAction(
+      isZh ? '删除定期项目？' : 'Delete recurring payment?',
+      isZh
+        ? `从 ${formatMonthLabel(targetMonth, true)} 起停止并删除“${c.label}”的后续所有待办？该月之前的历史记录将继续完整保留。`
+        : `Remove "${c.label}" from ${formatMonthLabel(targetMonth, true)} onwards? This removes occurrences for ${formatMonthLabel(targetMonth, true)} and all future months, while keeping all prior history intact.`,
+      isZh ? '删除' : 'Delete',
+      async () => {
+        await deleteCommitmentEntry(c.id, targetMonth);
+      }
+    );
+  };
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar
-          title={isZh ? '定期支出与定投' : 'Recurring'}
+          title={isZh ? '定期支出与定投' : 'Recurring commitments'}
           onBack={onBack}
           right={
-            <Pressable onPress={() => setEditing('new')} hitSlop={8} accessibilityLabel="Add a recurring commitment">
-              <Icon name="plus" size={20} color={theme.accent} stroke={2.4} />
+            <Pressable
+              onPress={() => setEditing('new')}
+              hitSlop={8}
+              accessibilityLabel="Add a recurring commitment"
+              style={[styles.addCircleBtn, { backgroundColor: RED }]}
+            >
+              <Icon name="plus" size={15} color="#ffffff" stroke={2.8} />
             </Pressable>
           }
         />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 36 }} showsVerticalScrollIndicator={false}>
         {commitments.length === 0 ? (
           <>
             <PipSays expr="idle">
               <BubbleText>
                 {isZh
                   ? '设置定期账单或每月定投，我会在此处提醒您并生成待办清单。'
-                  : 'Set up a bill or a monthly investment and I will remind you and keep the todo list here.'}
+                  : 'Set up a bill or a monthly investment and I will remind you and keep the timeline here.'}
               </BubbleText>
             </PipSays>
             <Card style={{ padding: 26, alignItems: 'center', marginTop: 14 }}>
               <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>{isZh ? '暂无定期项目' : 'Nothing set up yet'}</Text>
               <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
                 {isZh
-                  ? '车贷、房租、话费套餐或每月固定定投 — 添加一次即可按期打勾完成。'
-                  : "Car installments, telco bills, or a fixed monthly amount into savings — add it once and tick it off each time it's paid."}
+                  ? '车贷、房租、话费套餐、流媒体订阅或每月固定定投 — 添加一次即可按期打勾完成。'
+                  : "Streaming, telco bills, car loans, or a fixed monthly investment — add it once and keep your schedule on track."}
               </Text>
               <View style={{ marginTop: 16, alignSelf: 'stretch' }}>
                 <PrimaryButton onPress={() => setEditing('new')} height={48}>
@@ -194,84 +262,103 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
           </>
         ) : (
           <>
+            {/* Month Navigator */}
+            <View style={styles.monthNav}>
+              <Pressable
+                onPress={() => setSelectedMonth((prev) => addMonthsKey(prev, -1))}
+                style={[styles.monthNavBtn, { backgroundColor: colorTheme.surface }]}
+                accessibilityRole="button"
+                accessibilityLabel="Previous month"
+                hitSlop={8}
+              >
+                <Icon name="chevronLeft" size={16} color={colorTheme.ink} stroke={2.4} />
+              </Pressable>
+              <Text style={[styles.monthLabel, { color: colorTheme.ink }]}>
+                {formatMonthLabel(selectedMonth, true)}
+              </Text>
+              <Pressable
+                onPress={() => setSelectedMonth((prev) => addMonthsKey(prev, 1))}
+                style={[styles.monthNavBtn, { backgroundColor: colorTheme.surface }]}
+                accessibilityRole="button"
+                accessibilityLabel="Next month"
+                hitSlop={8}
+              >
+                <Icon name="chevronRight" size={16} color={colorTheme.ink} stroke={2.4} />
+              </Pressable>
+            </View>
+
+            {/* Top Summary Card */}
             <Card style={styles.totalCard}>
               <Eyebrow>
                 {unpaidCount === 0
-                  ? (isZh ? '本月已全部付清' : 'All caught up')
-                  : (isZh ? `本月剩余 ${unpaidCount} 项待付` : `${unpaidCount} left this month`)}
+                  ? (isZh ? '该月已全部付清' : 'All caught up')
+                  : (isZh ? `${unpaidCount} 项待付` : `${unpaidCount} due ${isCurrentMonth ? 'this month' : 'in month'}`)}
               </Eyebrow>
-              <Amount value={dc.convert(monthTotal)} currency={dc.code} size={28} weight={700} color={theme.accent} />
+              <Amount value={dc.convert(monthTotal)} currency={dc.code} size={28} weight={700} color={RED} />
               {record.total > 0 && (
                 <Text style={[styles.recordLine, { color: colorTheme.ink2 }]}>
                   {isZh
                     ? `按时支付率 ${Math.round(record.onTimeRatio * 100)}%（${record.onTime} / ${record.total}）`
-                    : `Paid on time ${Math.round(record.onTimeRatio * 100)}% of the time (${record.onTime} of ${record.total})`}
+                    : `Paid on time ${Math.round(record.onTimeRatio * 100)}% (${record.onTime} of ${record.total})`}
                 </Text>
               )}
             </Card>
 
-            {overdue.length > 0 && (
-              <>
-                <Text style={[styles.sectionLabel, { color: RED }]}>{isZh ? '已逾期' : 'Overdue'}</Text>
-                <Card style={{ overflow: 'hidden' }}>
-                  {overdue.map((o, i) => (
-                    <OccurrenceRow
-                      key={o.id}
-                      occurrence={o}
-                      commitment={commitmentById.get(o.commitmentId)}
-                      overdue
-                      divider={i > 0}
-                      onToggle={() => handleToggle(o)}
-                      onOpenActions={() => setActionsFor(o)}
-                    />
-                  ))}
-                </Card>
-              </>
-            )}
-
-            <View style={styles.monthNav}>
-              <Pressable
-                onPress={() => monthIdx > 0 && setViewMonth(months[monthIdx - 1])}
-                disabled={monthIdx <= 0}
-                hitSlop={8}
-                style={{ opacity: monthIdx <= 0 ? 0.3 : 1 }}
-              >
-                <Icon name="chevronLeft" size={18} color={colorTheme.ink2} />
-              </Pressable>
-              <Text style={[styles.monthLabel, { color: colorTheme.ink }]}>
-                {formatMonthLabel(viewMonth, true)}
-              </Text>
-              <Pressable
-                onPress={() => monthIdx < months.length - 1 && setViewMonth(months[monthIdx + 1])}
-                disabled={monthIdx >= months.length - 1}
-                hitSlop={8}
-                style={{ opacity: monthIdx >= months.length - 1 ? 0.3 : 1 }}
-              >
-                <Icon name="chevronRight" size={18} color={colorTheme.ink2} />
-              </Pressable>
-            </View>
-
-            {thisMonth.length === 0 ? (
-              <Card style={{ padding: 20, alignItems: 'center' }}>
-                <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-                  {isZh ? '本月暂无到期项目。' : 'Nothing due this month.'}
-                </Text>
-              </Card>
-            ) : (
-              <Card style={{ overflow: 'hidden' }}>
-                {thisMonth.map((o, i) => (
-                  <OccurrenceRow
-                    key={o.id}
-                    occurrence={o}
-                    commitment={commitmentById.get(o.commitmentId)}
-                    overdue={false}
-                    divider={i > 0}
-                    onToggle={() => handleToggle(o)}
-                    onOpenActions={() => setActionsFor(o)}
+            {/* Overdue Section (If any and on current month) */}
+            {isCurrentMonth && overdue.length > 0 && (
+              <View style={{ marginTop: 20 }}>
+                <View style={styles.overdueHeaderRow}>
+                  <Text style={[styles.sectionLabel, { color: RED }]}>{isZh ? '已逾期' : 'Overdue'}</Text>
+                  <Text style={[styles.overdueBadge, { color: RED, backgroundColor: 'rgba(197, 64, 47, 0.1)' }]}>
+                    {overdue.length}
+                  </Text>
+                </View>
+                {overdueGroups.map((group) => (
+                  <TimelineDateGroup
+                    key={`overdue-${group.date}`}
+                    group={group}
+                    today={today}
+                    isZh={isZh}
+                    isOverdueSection
+                    commitmentById={commitmentById}
+                    accountById={accountById}
+                    overdueIds={overdueIds}
+                    onToggle={handleToggle}
+                    onOpenActions={setActionsFor}
+                    onDelete={confirmDeleteCommitment}
                   />
                 ))}
-              </Card>
+              </View>
             )}
+
+            {/* Month Timeline */}
+            <View style={{ marginTop: isCurrentMonth && overdue.length > 0 ? 16 : 22 }}>
+              {monthGroups.length === 0 ? (
+                <Card style={{ padding: 24, alignItems: 'center' }}>
+                  <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
+                    {isZh
+                      ? `在 ${formatMonthLabel(selectedMonth, true)} 暂无定期项目。`
+                      : `No commitments scheduled for ${formatMonthLabel(selectedMonth, true)}.`}
+                  </Text>
+                </Card>
+              ) : (
+                monthGroups.map((group) => (
+                  <TimelineDateGroup
+                    key={group.date}
+                    group={group}
+                    today={today}
+                    isZh={isZh}
+                    isOverdueSection={false}
+                    commitmentById={commitmentById}
+                    accountById={accountById}
+                    overdueIds={overdueIds}
+                    onToggle={handleToggle}
+                    onOpenActions={setActionsFor}
+                    onDelete={confirmDeleteCommitment}
+                  />
+                ))
+              )}
+            </View>
           </>
         )}
       </ScrollView>
@@ -302,64 +389,196 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
+/** Renders one date group with the timeline rail, date header, daily total, and card rows */
+function TimelineDateGroup({
+  group,
+  today,
+  isZh,
+  isOverdueSection,
+  commitmentById,
+  accountById,
+  overdueIds,
+  onToggle,
+  onOpenActions,
+  onDelete,
+}: {
+  group: DateGroup;
+  today: string;
+  isZh: boolean;
+  isOverdueSection: boolean;
+  commitmentById: Map<string, Commitment>;
+  accountById: Map<string, any>;
+  overdueIds: Set<string>;
+  onToggle: (o: CommitmentOccurrence) => void;
+  onOpenActions: (o: CommitmentOccurrence) => void;
+  onDelete: (commitmentId: string, fromMonth?: string) => void;
+}) {
+  const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
+
+  return (
+    <View style={styles.timelineSection}>
+      {/* Left Timeline Rail Column */}
+      <View style={styles.timelineRailCol}>
+        <View
+          style={[
+            styles.timelineNode,
+            {
+              borderColor: isOverdueSection ? RED : colorTheme.line,
+              backgroundColor: colorTheme.bg,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.timelineInnerDot,
+              { backgroundColor: isOverdueSection ? RED : colorTheme.line },
+            ]}
+          />
+        </View>
+        <View style={[styles.timelineLine, { backgroundColor: colorTheme.line2 }]} />
+      </View>
+
+      {/* Right Timeline Content Area */}
+      <View style={styles.timelineContentArea}>
+        {/* Date Header Row */}
+        <View style={styles.dateHeaderRow}>
+          <Text style={[styles.dateHeaderText, { color: isOverdueSection ? RED : colorTheme.ink }]}>
+            {formatTimelineDateHeader(group.date, today, isZh)}
+          </Text>
+          <Text style={[styles.dateHeaderTotal, { color: colorTheme.ink3 }]}>
+            {fmtMoney(dc.convert(group.totalMyr), dc.code)}
+          </Text>
+        </View>
+
+        {/* Commitment Cards */}
+        <View style={[styles.cardGroup, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
+          {group.occurrences.map((o, idx) => (
+            <OccurrenceRow
+              key={o.id}
+              occurrence={o}
+              commitment={commitmentById.get(o.commitmentId)}
+              accountById={accountById}
+              overdue={overdueIds.has(o.id)}
+              divider={idx > 0}
+              onToggle={() => onToggle(o)}
+              onOpenActions={() => onOpenActions(o)}
+              onDelete={() => onDelete(o.commitmentId, o.month)}
+            />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function OccurrenceRow({
   occurrence,
   commitment,
+  accountById,
   overdue,
   divider,
   onToggle,
   onOpenActions,
+  onDelete,
 }: {
   occurrence: CommitmentOccurrence;
   commitment: Commitment | undefined;
+  accountById: Map<string, any>;
   overdue: boolean;
   divider: boolean;
   onToggle: () => void;
   onOpenActions: () => void;
+  onDelete: () => void;
 }) {
-  const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
   const checked = occurrence.status === 'paid' || occurrence.status === 'late';
-  const skipped = occurrence.status === 'skipped';
+  const brand = matchBrand(commitment?.label);
+
+  const targetAcct = commitment?.toAccountId ? accountById.get(commitment.toAccountId) : null;
+  const subtitleSuffix =
+    targetAcct && commitment?.kind === 'expense' && targetAcct.kind === 'liability'
+      ? ` · ${isZh ? '抵扣' : 'Pays down'} ${targetAcct.name}`
+      : targetAcct && commitment?.kind === 'investment'
+      ? ` · ${isZh ? '转入' : 'Into'} ${targetAcct.name}`
+      : '';
 
   return (
-    <View style={[styles.row, divider && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+    <Pressable
+      onPress={onOpenActions}
+      style={({ pressed }) => [
+        styles.row,
+        divider && [styles.divider, { borderTopColor: colorTheme.line2 }],
+        pressed && { backgroundColor: colorTheme.surface2 },
+        checked && { opacity: 0.6 },
+      ]}
+    >
+      {/* Checkbox (taps toggle paid/unpaid) */}
       <Pressable
-        onPress={onToggle}
-        disabled={skipped}
-        hitSlop={8}
-        accessibilityRole="checkbox"
-        accessibilityState={{ checked }}
+        onPress={(e) => { e.stopPropagation?.(); onToggle(); }}
+        hitSlop={6}
+        accessibilityLabel={checked ? 'Mark unpaid' : 'Mark paid'}
+        style={[
+          styles.checkbox,
+          {
+            borderColor: checked ? GREEN : colorTheme.line,
+            backgroundColor: checked ? GREEN : 'transparent',
+          },
+        ]}
       >
-        <View
-          style={[
-            styles.check,
-            { borderColor: checked ? statusColor(occurrence, overdue, colorTheme) : colorTheme.line, backgroundColor: colorTheme.surface },
-            checked && { backgroundColor: statusColor(occurrence, overdue, colorTheme), borderColor: statusColor(occurrence, overdue, colorTheme) },
-          ]}
-        >
-          {checked && <Icon name="check" size={13} color={colors.onAccent} stroke={2.6} />}
-        </View>
+        {checked && <Icon name="check" size={11} color="#ffffff" stroke={2.8} />}
       </Pressable>
 
-      <Pressable onPress={onOpenActions} style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
+      {/* Brand Logo or Category Icon Fallback */}
+      <BrandBadge
+        brand={brand}
+        size={38}
+        rad={10}
+        fallbackLabel={commitment?.label}
+        fallbackIcon={commitment?.kind === 'investment' ? 'trending' : 'receipt'}
+      />
+
+      {/* Subscription Name and Frequency Subtitle */}
+      <View style={{ flex: 1, minWidth: 0, justifyContent: 'center' }}>
+        <Text
+          style={[
+            styles.rowLabel,
+            { color: colorTheme.ink },
+            checked && styles.strikethrough,
+          ]}
+          numberOfLines={1}
+        >
           {commitment?.label ?? (isZh ? '定期项目' : 'Commitment')}
           {commitment?.kind === 'investment' ? ' · DCA' : ''}
         </Text>
-        <Text style={[styles.rowSub, { color: statusColor(occurrence, overdue, colorTheme) }]}>
-          {statusLabel(occurrence, overdue, isZh)}
+        <Text style={[styles.rowSub, { color: statusColor(occurrence, overdue, colorTheme) }]} numberOfLines={1}>
+          {statusLabel(occurrence, overdue, isZh)}{subtitleSuffix}
         </Text>
-      </Pressable>
+      </View>
 
-      <Text style={[styles.occurrenceAmount, { color: colorTheme.ink }]}>
+      {/* Amount in Red/Coral Accent (dimmed when paid) */}
+      <Text style={[
+        styles.occurrenceAmount,
+        { color: checked ? colorTheme.ink3 : RED },
+        checked && styles.strikethrough,
+      ]}>
         {fmtMoney(occurrence.paidAmount ?? occurrence.amount, commitment?.currency ?? BASE_CURRENCY)}
       </Text>
-      <Pressable onPress={onOpenActions} hitSlop={8} accessibilityLabel="More">
-        <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+
+      {/* Delete / Action Icon Button */}
+      <Pressable
+        onPress={(e) => {
+          e.stopPropagation?.();
+          onDelete();
+        }}
+        hitSlop={8}
+        accessibilityLabel="Delete commitment"
+        style={styles.trashBtn}
+      >
+        <Icon name="trash" size={15} color={colorTheme.ink3} />
       </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
@@ -378,19 +597,21 @@ function CommitmentActionsSheet({
 }) {
   const insets = useSafeAreaInsets();
   const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
-  const { archiveCommitmentEntry, deleteCommitmentEntry } = useAppData();
+  const { formatMonthLabel, isZh } = useLanguage();
+  const { archiveCommitmentEntry, deleteCommitmentEntry, payCommitment, unpayCommitment } = useAppData();
   if (!occurrence || !commitment) return <Modal visible={false} transparent />;
+
+  const isPaid = occurrence.status === 'paid' || occurrence.status === 'late';
 
   const confirmDelete = () => {
     confirmAction(
-      isZh ? '删除此定期项目？' : 'Delete this commitment?',
+      isZh ? '删除定期项目？' : 'Delete recurring payment?',
       isZh
-        ? `确认删除“${commitment.label}”以及所有关联待办？已自动生成的历史流水将继续保留，仅删除此定期提醒与后续待办。`
-        : `Remove "${commitment.label}" and every occurrence it generated? Transactions it created stay in your Activity — this only removes the recurring schedule and todo entries.`,
+        ? `从 ${formatMonthLabel(occurrence.month, true)} 起停止并删除“${commitment.label}”的后续所有待办？该月之前的历史记录将继续完整保留。`
+        : `Remove "${commitment.label}" from ${formatMonthLabel(occurrence.month, true)} onwards? This removes occurrences for ${formatMonthLabel(occurrence.month, true)} and all future months, while keeping all prior history intact.`,
       isZh ? '删除' : 'Delete',
       async () => {
-        await deleteCommitmentEntry(commitment.id);
+        await deleteCommitmentEntry(commitment.id, occurrence.month);
         onClose();
       }
     );
@@ -399,23 +620,45 @@ function CommitmentActionsSheet({
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>{commitment.label}</Text>
+      <View style={styles.sheetAvoider} pointerEvents="box-none">
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>{commitment.label}</Text>
 
-        <ActionRow icon="pencil" label={isZh ? '编辑' : 'Edit'} onPress={() => onEdit(commitment)} />
-        {occurrence.status === 'scheduled' && (
-          <ActionRow icon="x" label={isZh ? '跳过本月' : 'Skip this month'} onPress={onSkip} />
-        )}
-        <ActionRow
-          icon="clock"
-          label={isZh ? '归档（停止后续生成）' : 'Archive (stop future occurrences)'}
-          onPress={async () => {
-            await archiveCommitmentEntry(commitment.id);
-            onClose();
-          }}
-        />
-        <ActionRow icon="trash" label={isZh ? '删除' : 'Delete'} danger onPress={confirmDelete} />
+          {isPaid ? (
+            <ActionRow
+              icon="x"
+              label={isZh ? '撤销支付标记' : 'Mark as unpaid'}
+              onPress={async () => {
+                await unpayCommitment(occurrence.id);
+                onClose();
+              }}
+            />
+          ) : (
+            <ActionRow
+              icon="check"
+              label={isZh ? '标记为已支付' : 'Mark as paid'}
+              onPress={async () => {
+                await payCommitment(occurrence.id);
+                onClose();
+              }}
+            />
+          )}
+
+          <ActionRow icon="pencil" label={isZh ? '编辑' : 'Edit'} onPress={() => onEdit(commitment)} />
+          {occurrence.status === 'scheduled' && (
+            <ActionRow icon="x" label={isZh ? '跳过本期' : 'Skip this occurrence'} onPress={onSkip} />
+          )}
+          <ActionRow
+            icon="clock"
+            label={isZh ? '归档（停止后续生成）' : 'Archive (stop future occurrences)'}
+            onPress={async () => {
+              await archiveCommitmentEntry(commitment.id);
+              onClose();
+            }}
+          />
+          <ActionRow icon="trash" label={isZh ? '删除' : 'Delete'} danger onPress={confirmDelete} />
+        </View>
       </View>
     </Modal>
   );
@@ -497,7 +740,6 @@ function CommitmentEditorModal({
       setFromAccountId(editingExisting.fromAccountId);
       setToAccountId(editingExisting.toAccountId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   if (!visible) return <Modal visible={false} transparent />;
@@ -505,6 +747,7 @@ function CommitmentEditorModal({
   const expenseCategories = categories.filter((c) => c.kind === 'expense');
   const investmentAccounts = accounts.filter((a) => !a.archived && a.cls === 'investments');
   const fromAccounts = accounts.filter((a) => !a.archived && a.kind === 'asset' && a.cls !== RECEIVABLE_CLS);
+  const liabilityAccounts = accounts.filter((a) => !a.archived && a.kind === 'liability');
 
   const amount = Math.max(0, Number(amountText.replace(/[^0-9.]/g, '')) || 0);
   const dueDay = Math.min(31, Math.max(1, parseInt(dueDayText, 10) || 1));
@@ -519,7 +762,7 @@ function CommitmentEditorModal({
         dueDay,
         categoryId: kind === 'investment' ? null : categoryId,
         fromAccountId,
-        toAccountId: kind === 'investment' ? toAccountId : null,
+        toAccountId,
       });
     } else {
       await addCommitmentEntry({
@@ -541,136 +784,181 @@ function CommitmentEditorModal({
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}
+        style={styles.sheetAvoider}
+        pointerEvents="box-none"
       >
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.sheetHead}>
-          <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
-            {editingExisting
-              ? (isZh ? '编辑定期项目' : 'Edit commitment')
-              : (isZh ? '新建定期支出 / 定投' : 'New recurring commitment')}
-          </Text>
-          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
-            <Icon name="x" size={20} color={colorTheme.ink2} />
-          </Pressable>
-        </View>
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.sheetHead}>
+            <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>
+              {editingExisting
+                ? (isZh ? '编辑定期项目' : 'Edit commitment')
+                : (isZh ? '新建定期支出 / 定投' : 'New recurring commitment')}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={8} accessibilityLabel="Close">
+              <Icon name="x" size={20} color={colorTheme.ink2} />
+            </Pressable>
+          </View>
 
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {!editingExisting && (
-            <>
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '类型' : 'Type'}</Text>
-              <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-                {(['expense', 'investment'] as CommitmentKind[]).map((k) => {
-                  const on = kind === k;
-                  return (
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {!editingExisting && (
+              <>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '类型' : 'Type'}</Text>
+                <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+                  {(['expense', 'investment'] as CommitmentKind[]).map((k) => {
+                    const on = kind === k;
+                    return (
+                      <Pressable
+                        key={k}
+                        onPress={() => setKind(k)}
+                        style={[styles.toggleBtn, on && { backgroundColor: colorTheme.surface }]}
+                      >
+                        <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>
+                          {k === 'expense' ? (isZh ? '定期账单' : 'Bill') : (isZh ? '定期定投 (DCA)' : 'Investment (DCA)')}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
+            )}
+
+            <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>
+              {kind === 'investment'
+                ? (isZh ? '定投名称（例如“标普500 定投”）' : 'Name (e.g. "S&P 500 DCA")')
+                : (isZh ? '账单名称（例如“Apple One”、“ChatGPT Plus”）' : 'Name (e.g. "Apple One", "Netflix", "Maxis")')}
+            </Text>
+            <TextInput
+              value={label}
+              onChangeText={setLabel}
+              placeholder={kind === 'investment' ? (isZh ? '每月定投项目' : 'Monthly investment') : (isZh ? '账单名称' : 'Bill name')}
+              placeholderTextColor={colorTheme.ink3}
+              style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+            />
+
+            {/* Brand suggestion chips — shown when name field has ≥1 char */}
+            {label.trim().length > 0 && (() => {
+              const q = label.toLowerCase();
+              const hits = BRAND_SUGGESTIONS.filter((s) => s.label.toLowerCase().includes(q));
+              if (hits.length === 0) return null;
+              return (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="always"
+                  style={{ marginTop: 8, marginHorizontal: -4 }}
+                  contentContainerStyle={{ paddingHorizontal: 4, gap: 8, flexDirection: 'row' }}
+                >
+                  {hits.slice(0, 12).map((s, i) => (
                     <Pressable
-                      key={k}
-                      onPress={() => setKind(k)}
-                      style={[styles.toggleBtn, on && { backgroundColor: colorTheme.surface }]}
+                      key={`${s.key}-${i}`}
+                      onPress={() => setLabel(s.label)}
+                      style={[styles.brandChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}
                     >
-                      <Text style={[styles.toggleText, { color: colorTheme.ink2 }, on && { color: colorTheme.ink }]}>
-                        {k === 'expense' ? (isZh ? '定期账单' : 'Bill') : (isZh ? '定期定投 (DCA)' : 'Investment (DCA)')}
+                      <BrandBadge brand={s.key} size={28} rad={7} fallbackLabel={s.label} />
+                      <Text style={[styles.brandChipLabel, { color: colorTheme.ink }]} numberOfLines={1}>
+                        {s.label}
                       </Text>
                     </Pressable>
-                  );
-                })}
-              </View>
-            </>
-          )}
+                  ))}
+                </ScrollView>
+              );
+            })()}
 
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 16 }]}>
-            {kind === 'investment'
-              ? (isZh ? '定投名称（例如“标普500 定投”）' : 'Name (e.g. "S&P 500 DCA")')
-              : (isZh ? '账单名称（例如“话费套餐”）' : 'Name (e.g. "Maxis Postpaid")')}
-          </Text>
-          <TextInput
-            value={label}
-            onChangeText={setLabel}
-            placeholder={kind === 'investment' ? (isZh ? '每月定投项目' : 'Monthly investment') : (isZh ? '账单名称' : 'Bill name')}
-            placeholderTextColor={colorTheme.ink3}
-            style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-          />
 
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '金额' : 'Amount'}</Text>
-              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                {isMultiCurrency(activeCurrencies) && !editingExisting ? (
-                  <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
-                ) : (
-                  <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 16 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '金额' : 'Amount'}</Text>
+                <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                  {isMultiCurrency(activeCurrencies) && !editingExisting ? (
+                    <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
+                  ) : (
+                    <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
+                  )}
+                  <TextInput
+                    value={amountText}
+                    onChangeText={(t) => setAmountText(decimalsFor(currency) === 0 ? t.replace(/[^0-9]/g, '') : t)}
+                    keyboardType={decimalsFor(currency) === 0 ? 'number-pad' : 'decimal-pad'}
+                    selectTextOnFocus
+                    style={[styles.amountInput, { color: colorTheme.ink }]}
+                  />
+                </View>
+                {currency !== BASE_CURRENCY && rateFor(rates, currency) != null && (
+                  <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * (rateFor(rates, currency) ?? 1), BASE_CURRENCY)}</Text>
                 )}
+              </View>
+              <View style={{ width: 100 }}>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '每月到期日' : 'Due day'}</Text>
                 <TextInput
-                  value={amountText}
-                  onChangeText={(t) => setAmountText(decimalsFor(currency) === 0 ? t.replace(/[^0-9]/g, '') : t)}
-                  keyboardType={decimalsFor(currency) === 0 ? 'number-pad' : 'decimal-pad'}
+                  value={dueDayText}
+                  onChangeText={setDueDayText}
+                  keyboardType="number-pad"
                   selectTextOnFocus
-                  style={[styles.amountInput, { color: colorTheme.ink }]}
+                  style={[styles.textInput, { color: colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line, textAlign: 'center' }]}
                 />
               </View>
-              {currency !== BASE_CURRENCY && rateFor(rates, currency) != null && (
-                <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * (rateFor(rates, currency) ?? 1), BASE_CURRENCY)}</Text>
-              )}
             </View>
-            <View style={{ width: 100 }}>
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '每月到期日' : 'Due day'}</Text>
-              <TextInput
-                value={dueDayText}
-                onChangeText={setDueDayText}
-                keyboardType="number-pad"
-                selectTextOnFocus
-                style={[styles.textInput, { color: colorTheme.ink, backgroundColor: colorTheme.surface, borderColor: colorTheme.line, textAlign: 'center' }]}
+
+            {/* Pay from is on the top */}
+            <View style={{ marginTop: 18 }}>
+              <AccountLinkField
+                accounts={fromAccounts as any}
+                selectedId={fromAccountId}
+                onSelect={setFromAccountId}
+                label={isZh ? '扣款账户' : 'Pay from'}
               />
             </View>
-          </View>
 
-          {kind === 'expense' && (
-            <>
-              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '支出分类' : 'Category'}</Text>
-              <View style={styles.grid}>
-                {expenseCategories.map((c) => (
-                  <View key={c.id} style={styles.gridCell}>
-                    <CategoryChip category={c} selected={categoryId === c.id} suggested={false} onPress={() => setCategoryId(c.id)} />
-                  </View>
-                ))}
+            {kind === 'expense' && (
+              <>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '支出分类' : 'Category'}</Text>
+                <View style={styles.grid}>
+                  {expenseCategories.map((c) => (
+                    <View key={c.id} style={styles.gridCell}>
+                      <CategoryChip category={c} selected={categoryId === c.id} suggested={false} onPress={() => setCategoryId(c.id)} />
+                    </View>
+                  ))}
+                </View>
+
+                {/* Reduce liability is on the bottom */}
+                <View style={{ marginTop: 18 }}>
+                  <AccountLinkField
+                    accounts={liabilityAccounts as any}
+                    selectedId={toAccountId}
+                    onSelect={setToAccountId}
+                    label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
+                    infoEntry="reduce_liability"
+                  />
+                </View>
+              </>
+            )}
+
+            {kind === 'investment' && (
+              <View style={{ marginTop: 18 }}>
+                {investmentAccounts.length === 0 ? (
+                  <Text style={[styles.emptySub, { color: colorTheme.amber }]}>
+                    {isZh ? '请先在净资产中添加投资账户或持仓，然后再来设置定投计划。' : 'Add an investment holding or account in Net Worth first, then come back to set up the DCA.'}
+                  </Text>
+                ) : (
+                  <AccountLinkField
+                    accounts={investmentAccounts as any}
+                    selectedId={toAccountId}
+                    onSelect={setToAccountId}
+                    label={isZh ? '转入投资账户' : 'Invest into'}
+                    required
+                  />
+                )}
               </View>
-            </>
-          )}
+            )}
 
-          {kind === 'investment' && (
-            <View style={{ marginTop: 18 }}>
-              {investmentAccounts.length === 0 ? (
-                <Text style={[styles.emptySub, { color: colorTheme.amber }]}>
-                  {isZh ? '请先在净资产中添加投资账户或持仓，然后再来设置定投计划。' : 'Add an investment holding or account in Net Worth first, then come back to set up the DCA.'}
-                </Text>
-              ) : (
-                <AccountLinkField
-                  accounts={investmentAccounts as any}
-                  selectedId={toAccountId}
-                  onSelect={setToAccountId}
-                  label={isZh ? '转入投资账户' : 'Invest into'}
-                  required
-                />
-              )}
+            <View style={{ marginTop: 20 }}>
+              <PrimaryButton onPress={save} height={52} disabled={!canSave}>
+                <Icon name="check" size={18} color="#fff" stroke={2.4} />
+                <BtnLabel>{editingExisting ? (isZh ? '保存修改' : 'Save changes') : (isZh ? '添加定期项目' : 'Add commitment')}</BtnLabel>
+              </PrimaryButton>
             </View>
-          )}
-
-          <View style={{ marginTop: 18 }}>
-            <AccountLinkField
-              accounts={fromAccounts as any}
-              selectedId={fromAccountId}
-              onSelect={setFromAccountId}
-              label={isZh ? '扣款账户' : 'Pay from'}
-            />
-          </View>
-
-          <View style={{ marginTop: 20 }}>
-            <PrimaryButton onPress={save} height={52} disabled={!canSave}>
-              <Icon name="check" size={18} color="#fff" stroke={2.4} />
-              <BtnLabel>{editingExisting ? (isZh ? '保存修改' : 'Save changes') : (isZh ? '添加定期项目' : 'Add commitment')}</BtnLabel>
-            </PrimaryButton>
-          </View>
-        </ScrollView>
+          </ScrollView>
+        </View>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -678,27 +966,127 @@ function CommitmentEditorModal({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  totalCard: { padding: 18, gap: 6, marginTop: 14 },
+  monthNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  monthNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadowCard,
+  },
+  monthLabel: {
+    fontFamily: uiFont(700),
+    fontSize: 16,
+    minWidth: 140,
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  totalCard: { padding: 16, marginTop: 10 },
   recordLine: { fontFamily: uiFont(500), fontSize: 12, marginTop: 4 },
-  sectionLabel: { fontFamily: uiFont(700), fontSize: 12.5, marginTop: 20, marginBottom: 8, marginLeft: 2, textTransform: 'uppercase', letterSpacing: 0.3 },
-  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 22, marginBottom: 10 },
-  monthLabel: { fontFamily: uiFont(700), fontSize: 15, minWidth: 130, textAlign: 'center' },
+  sectionLabel: { fontFamily: uiFont(700), fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.4 },
+  overdueHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, marginLeft: 2 },
+  overdueBadge: { fontFamily: uiFont(700), fontSize: 11, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
   emptyTitle: { fontFamily: uiFont(700), fontSize: 17 },
   emptySub: { fontFamily: uiFont(500), fontSize: 13.5, marginTop: 6, textAlign: 'center', lineHeight: 19 },
 
+  addCircleBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Timeline Styles */
+  timelineSection: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  timelineRailCol: {
+    width: 22,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  timelineNode: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 3,
+    zIndex: 2,
+  },
+  timelineInnerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  timelineLine: {
+    width: 1.5,
+    flex: 1,
+    marginTop: 2,
+    marginBottom: -16,
+  },
+  timelineContentArea: {
+    flex: 1,
+    minWidth: 0,
+  },
+  dateHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: 8,
+    paddingRight: 4,
+  },
+  dateHeaderText: {
+    fontFamily: uiFont(700),
+    fontSize: 13.5,
+    letterSpacing: 0.2,
+  },
+  dateHeaderTotal: {
+    fontFamily: numFont(600),
+    fontSize: 12.5,
+  },
+  cardGroup: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+
   divider: { borderTopWidth: 1 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 13 },
-  check: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   rowLabel: { fontFamily: uiFont(700), fontSize: 14.5 },
-  rowSub: { fontFamily: uiFont(600), fontSize: 12, marginTop: 2 },
+  rowSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
   occurrenceAmount: { fontFamily: numFont(700), fontSize: 15 },
+  trashBtn: { padding: 4 },
+  strikethrough: { textDecorationLine: 'line-through' },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: {
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     paddingHorizontal: 18,
@@ -718,6 +1106,18 @@ const styles = StyleSheet.create({
   rmPrefix: { fontFamily: numFont(600), fontSize: 16 },
   amountInput: { flex: 1, paddingVertical: 9, fontFamily: numFont(700), fontSize: 18 },
   fxHint: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 4, marginLeft: 2 },
+
+  brandChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  brandChipLabel: { fontFamily: uiFont(600), fontSize: 13 },
+
 
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, borderWidth: 1 },
   toggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 999 },

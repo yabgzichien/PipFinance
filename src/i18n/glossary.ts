@@ -197,6 +197,22 @@ export const ZH_GLOSSARY: Record<string, GlossaryEntry> = {
       },
     ],
   },
+  reduce_liability: {
+    term: '抵扣负债账户',
+    short: '将分期还款关联至负债账户，按期支付时同步减少净资产中的剩余欠款。',
+    body:
+      '适用于按月支付的各类分期贷款项目（例如汽车分期车贷、房产分期房贷或个人贷款等）。设置关联后，每次确认支付分期时：\n\n' +
+      '• 扣款账户：支出的银行或现金账户资金减少。\n' +
+      '• 负债账户：对应的车贷、房贷或贷款剩余欠款同步抵扣减少（资产负债表中负债下降）。\n\n' +
+      '普通无负债的周期性订阅账单（如流媒体、话费套餐）保持为“无”即可。',
+    steps: [
+      {
+        badge: '分期还款',
+        title: '车贷与房贷分期自动减债',
+        desc: '关联车贷或房产贷款账户，每月支付分期时自动扣减负债余额，真实反映净资产变化。',
+      },
+    ],
+  },
 };
 
 export function getGlossaryEntry(entryKey: string, lang: SupportedLanguage = 'en'): GlossaryEntry | undefined {

@@ -8,6 +8,8 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, uiFont } from '../theme';
 import { Icon } from './Icon';
+import { BrandBadge } from './BrandBadge';
+import { matchCrypto } from './BrandLogo';
 
 /** Search-and-pick a ticker. `search` is injected so the same UI serves crypto, stocks, or commodities (all Yahoo). */
 export function TickerSearchModal({
@@ -87,16 +89,25 @@ export function TickerSearchModal({
             {busy && <ActivityIndicator size="small" color={theme.accent} />}
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 360 }}>
-            {results.map((c) => (
-              <Pressable key={c.id} onPress={() => onPick(c)} style={[styles.row, { borderTopColor: colorTheme.line2 }]}>
-                <View style={[styles.tickerBox, { backgroundColor: theme.accentTint }]}><Text style={[styles.tickerText, { color: theme.accent }]}>{c.ticker.slice(0, 4)}</Text></View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{c.name}</Text>
-                  <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{c.ticker}</Text>
-                </View>
-                <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
-              </Pressable>
-            ))}
+            {results.map((c) => {
+              const cryptoBrand = c.type === 'crypto' ? matchCrypto(c.ticker) || matchCrypto(c.name) : null;
+              return (
+                <Pressable key={c.id} onPress={() => onPick(c)} style={[styles.row, { borderTopColor: colorTheme.line2 }]}>
+                  {cryptoBrand ? (
+                    <BrandBadge brand={cryptoBrand} size={38} rad={10} />
+                  ) : (
+                    <View style={[styles.tickerBox, { backgroundColor: theme.accentTint }]}>
+                      <Text style={[styles.tickerText, { color: theme.accent }]}>{c.ticker.slice(0, 4)}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.name, { color: colorTheme.ink }]} numberOfLines={1}>{c.name}</Text>
+                    <Text style={[styles.sub, { color: colorTheme.ink2 }]}>{c.ticker}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+                </Pressable>
+              );
+            })}
             {!busy && query.trim().length >= 2 && results.length === 0 && (
               <Text style={[styles.empty, { color: colorTheme.ink2 }]}>
                 {isZh ? `未找到与“${query.trim()}”匹配的结果。` : `No matches for “${query.trim()}”.`}

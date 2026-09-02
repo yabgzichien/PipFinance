@@ -233,16 +233,40 @@ export function PipSays({
   // (think's single brow, sheepish's wince) reads as a hairline below this. Kept as one shared
   // default rather than sized per screen, so every PipSays call site stays visually consistent.
   size = 60,
+  float,
+  idea,
+  glasses,
+  nerdy,
+  celebrate,
+  hat,
+  propellerHat,
   children,
 }: {
   expr?: PipExpr;
   size?: number;
+  float?: boolean;
+  idea?: boolean;
+  glasses?: boolean;
+  nerdy?: boolean;
+  celebrate?: boolean;
+  hat?: boolean;
+  propellerHat?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-end' }}>
       <View style={{ width: size, alignItems: 'center' }}>
-        <Pip size={size} expr={expr} />
+        <Pip
+          size={size}
+          expr={expr}
+          float={float}
+          idea={idea}
+          glasses={glasses}
+          nerdy={nerdy}
+          celebrate={celebrate}
+          hat={hat}
+          propellerHat={propellerHat}
+        />
       </View>
       <Bubble style={{ flex: 1 }}>{children}</Bubble>
     </View>

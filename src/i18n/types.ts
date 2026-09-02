@@ -96,6 +96,8 @@ export interface Translations {
   resetToSetup: string;
   resetToSetupTitle: string;
   resetToSetupBody: string;
+  legalTrademarksTitle: string;
+  legalTrademarksNotice: string;
 
   // Dashboard
   monthlySpend: string;
@@ -195,6 +197,7 @@ export interface Translations {
   typeCash: string;
   typeBank: string;
   typeInvestment: string;
+  typeIlliquid: string;
   typeCreditCard: string;
   typeLoan: string;
   historyTitle: string;

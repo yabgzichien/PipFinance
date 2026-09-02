@@ -5,7 +5,7 @@
 import { isHolding } from './prices';
 import type { Account } from './types';
 
-export type InstitutionKind = 'bank' | 'ewallet';
+export type InstitutionKind = 'bank' | 'ewallet' | 'auto' | 'service';
 
 export interface Institution {
   id: string;
@@ -60,6 +60,30 @@ export const INSTITUTIONS: Institution[] = [
   { id: 'bigpay', name: 'BigPay', aliases: [], kind: 'ewallet', monogram: 'Big', color: '#1B1B1B' },
   { id: 'mae', name: 'MAE by Maybank2u', aliases: ['MAE'], kind: 'ewallet', monogram: 'MAE', color: '#FFC726' },
   { id: 'setel', name: 'Setel', aliases: ['Setel Petronas'], kind: 'ewallet', monogram: 'Setel', color: '#00A19A' },
+
+  // ── Automotive / Car Brands (Car Loans & Vehicles) ───────────────────────
+  { id: 'porsche', name: 'Porsche', aliases: ['Porsche Loan', 'Porsche Financial', 'Macan', 'Cayenne', 'Taycan', 'Panamera', '911'], kind: 'auto', monogram: 'POR', color: '#D4AF37' },
+  { id: 'proton', name: 'Proton', aliases: ['Proton Loan', 'X50', 'X70', 'X90', 'S70', 'Saga', 'Persona', 'Iriz'], kind: 'auto', monogram: 'PRT', color: '#002B49' },
+  { id: 'perodua', name: 'Perodua', aliases: ['Perodua Loan', 'Myvi', 'Bezza', 'Alza', 'Axia', 'Ativa', 'Aruz'], kind: 'auto', monogram: 'P2', color: '#00843D' },
+  { id: 'honda', name: 'Honda', aliases: ['Honda Loan', 'Civic', 'City', 'HR-V', 'HRV', 'CR-V', 'CRV', 'Accord'], kind: 'auto', monogram: 'HND', color: '#111111' },
+  { id: 'toyota', name: 'Toyota', aliases: ['Toyota Loan', 'Vios', 'Yaris', 'Corolla', 'Camry', 'Hilux', 'Veloz', 'Cross'], kind: 'auto', monogram: 'TYT', color: '#EB0A1E' },
+  { id: 'byd', name: 'BYD', aliases: ['BYD Loan', 'Atto', 'Atto 3', 'Dolphin', 'Sealion', 'Seal'], kind: 'auto', monogram: 'BYD', color: '#0F172A' },
+  { id: 'chery', name: 'Chery', aliases: ['Chery Loan', 'Omoda', 'Omoda 5', 'Tiggo', 'Jaecoo'], kind: 'auto', monogram: 'CHY', color: '#7F1D1D' },
+  { id: 'audi', name: 'Audi', aliases: ['Audi Loan'], kind: 'auto', monogram: 'AUD', color: '#111111' },
+  { id: 'mazda', name: 'Mazda', aliases: ['Mazda Loan', 'CX-3', 'CX-5', 'CX-30', 'CX-8'], kind: 'auto', monogram: 'MZD', color: '#101010' },
+  { id: 'nissan', name: 'Nissan', aliases: ['Nissan Loan', 'Almera', 'Serena', 'Navara'], kind: 'auto', monogram: 'NIS', color: '#C3002F' },
+  { id: 'bmw', name: 'BMW', aliases: ['BMW Financial', 'BMW Credit'], kind: 'auto', monogram: 'BMW', color: '#0066B1' },
+  { id: 'mercedes', name: 'Mercedes-Benz', aliases: ['Mercedes', 'Benz', 'AMG', 'Mercedes-Benz Financial'], kind: 'auto', monogram: 'MB', color: '#111111' },
+
+  // ── Digital Subscriptions & Services ─────────────────────────────────────
+  { id: 'netflix', name: 'Netflix', aliases: [], kind: 'service', monogram: 'NFLX', color: '#E50914' },
+  { id: 'spotify', name: 'Spotify', aliases: [], kind: 'service', monogram: 'SPOT', color: '#1DB954' },
+  { id: 'youtube', name: 'YouTube Premium', aliases: ['YouTube', 'YT Premium'], kind: 'service', monogram: 'YT', color: '#FF0000' },
+  { id: 'apple', name: 'Apple', aliases: ['Apple Music', 'iCloud', 'Apple One'], kind: 'service', monogram: 'APPL', color: '#111111' },
+  { id: 'openai', name: 'OpenAI', aliases: ['ChatGPT', 'ChatGPT Plus'], kind: 'service', monogram: 'OAI', color: '#10A37F' },
+  { id: 'google_ai', name: 'Google AI', aliases: ['Gemini', 'Gemini Advanced', 'Google One AI'], kind: 'service', monogram: 'GEM', color: '#1BA1E2' },
+  { id: 'claude', name: 'Claude', aliases: ['Anthropic', 'Claude Pro'], kind: 'service', monogram: 'CLD', color: '#CC785C' },
+  { id: 'cursor', name: 'Cursor', aliases: ['Cursor AI', 'Anysphere'], kind: 'service', monogram: 'CUR', color: '#090D16' },
 ];
 
 const norm = (s: string): string => s.trim().toLowerCase();

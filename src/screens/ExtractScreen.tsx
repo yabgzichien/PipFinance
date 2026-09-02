@@ -9,6 +9,8 @@ import { BASE_CURRENCY } from '../lib/currency';
 import { suggestForMerchant } from '../lib/recommend';
 import type { ExtractedTxn } from '../lib/types';
 import { getLLM, llmErrorMessage } from '../llm';
+import { getScanStage } from '../lib/scanningNarration';
+import { ScanProgressBar } from '../components/ScanProgressBar';
 import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -172,15 +174,21 @@ export function ExtractScreen({
         />
 
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
-          {phase === 'scanning' && (
-            <PipSays expr="think">
-              <BubbleText>
-                {isZh
-                  ? `正在识别您的截图${readingSecs > 0 ? `（已用时 ${readingSecs} 秒）` : '…'}`
-                  : `Reading your screenshot${readingSecs > 0 ? ` (${readingSecs}s)` : '…'}`}
-              </BubbleText>
-            </PipSays>
-          )}
+          {phase === 'scanning' && (() => {
+            const stage = getScanStage('statement', readingSecs, isZh);
+            return (
+              <>
+                <PipSays expr={stage.expr} float={!reducedMotion} idea={stage.idea}>
+                  <BubbleText>{stage.text}</BubbleText>
+                </PipSays>
+                <ScanProgressBar
+                  progress={stage.progress}
+                  label={isZh ? '账单提取进度' : 'Extraction progress'}
+                  style={{ marginTop: 16 }}
+                />
+              </>
+            );
+          })()}
           {phase === 'found' && (
             <PipSays expr="happy">
               <BubbleText>

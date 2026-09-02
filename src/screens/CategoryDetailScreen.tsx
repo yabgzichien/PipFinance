@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
@@ -263,7 +263,8 @@ export function CategoryDetailScreen({
         })}
       </ScrollView>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm, paddingBottom: insets.bottom + spacing.xl }} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm, paddingBottom: insets.bottom + spacing.xl }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {editingMeta && (
           <FadeIn>
             <Card style={styles.editPanel}>
@@ -385,6 +386,7 @@ export function CategoryDetailScreen({
           )}
         </FadeIn>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
     </View>

@@ -3,7 +3,7 @@
 // ReceiptScanScreen's title+Switch row pattern (the app's only precedent for a per-item
 // boolean toggle in a list — everything else on Settings is a global segmented pill).
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Eyebrow, TopBar } from '../components/ui';
@@ -93,10 +93,11 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={isZh ? '货币设置' : 'Currencies'} onBack={onBack} />
       </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}
-        keyboardShouldPersistTaps="handled"
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 40 }}
+          keyboardShouldPersistTaps="handled"
+        >
         {isMultiCurrency(active) && (
           <View style={{ marginBottom: 24 }}>
             <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '默认货币' : 'Default'}</Eyebrow>
@@ -182,6 +183,7 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
           </Text>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

@@ -11,6 +11,7 @@ import { radius, uiFont } from '../theme';
 import { AddAccountModal } from './AddAccountModal';
 import { Icon, type IconName } from './Icon';
 import { InfoButton } from './InfoButton';
+import { BrandLogo, matchBrand } from './BrandLogo';
 
 /**
  * Control to tie a transaction to an asset/liability account. The account is
@@ -37,6 +38,7 @@ export function AccountLinkField({
   onEffect,
   label,
   required = false,
+  infoEntry,
 }: {
   accounts: Account[];
   selectedId: string | null;
@@ -45,6 +47,7 @@ export function AccountLinkField({
   onEffect?: (e: LinkEffect) => void;
   label?: string;
   required?: boolean;
+  infoEntry?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -53,8 +56,8 @@ export function AccountLinkField({
   const { isZh } = useLanguage();
   const displayLabel = label ?? (isZh ? '账户' : 'Account');
   const active = accounts.filter((a) => !a.archived);
-  if (active.length === 0) return null;
   const sel = active.find((a) => a.id === selectedId) ?? null;
+  const selBrand = sel ? matchBrand(sel.name) : null;
 
   const choose = (id: string | null) => {
     onSelect(id);
@@ -63,11 +66,18 @@ export function AccountLinkField({
 
   return (
     <View>
-      <Text style={[styles.label, { color: colorTheme.ink2 }]}>{displayLabel}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <Text style={[styles.label, { color: colorTheme.ink2, marginBottom: 0 }]}>{displayLabel}</Text>
+        {infoEntry && <InfoButton entry={infoEntry} />}
+      </View>
 
       <Pressable onPress={() => setOpen(true)} style={[styles.trigger, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
         {sel ? (
-          <Icon name={(CLASS_BY_ID[sel.cls]?.icon ?? 'wallet') as IconName} size={16} color={colorTheme.ink2} />
+          selBrand ? (
+            <BrandLogo brand={selBrand} size={18} />
+          ) : (
+            <Icon name={(CLASS_BY_ID[sel.cls]?.icon ?? 'wallet') as IconName} size={16} color={colorTheme.ink2} />
+          )
         ) : null}
         <Text
           style={[
@@ -162,9 +172,16 @@ function Option({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const brand = matchBrand(label);
   return (
     <Pressable onPress={onPress} style={[styles.option, active && { backgroundColor: theme.accentTint }]}>
-      {icon ? <Icon name={icon} size={16} color={active ? theme.accent : colorTheme.ink3} /> : <View style={styles.optionIconSpacer} />}
+      {brand ? (
+        <BrandLogo brand={brand} size={18} />
+      ) : icon ? (
+        <Icon name={icon} size={16} color={active ? theme.accent : colorTheme.ink3} />
+      ) : (
+        <View style={styles.optionIconSpacer} />
+      )}
       <Text style={[styles.optionText, { color: colorTheme.ink }, active && { color: theme.onTint }]} numberOfLines={1}>
         {label}
       </Text>

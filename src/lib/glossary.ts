@@ -209,5 +209,21 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
       },
     ],
   },
+  reduce_liability: {
+    term: 'Reduce liability',
+    short: 'Link an instalment payment to pay down an outstanding loan or debt in your Net Worth.',
+    body:
+      'When paying recurring instalments (for example, a car instalment or a real estate / mortgage instalment), linking your liability account ensures each payment reduces the remaining debt balance on your balance sheet.\n\n' +
+      '• Pay with: The bank or cash account funding the payment (balance decreases).\n' +
+      '• Liability account: The car loan, mortgage, or personal loan being paid down (outstanding debt decreases).\n\n' +
+      'For regular non-debt subscriptions (like Netflix or phone bills), leave this set to "None".',
+    steps: [
+      {
+        badge: 'Instalments',
+        title: 'Pay down car or mortgage loans',
+        desc: 'Link instalments like car or real estate loans to automatically decrease outstanding liabilities when paid.',
+      },
+    ],
+  },
 };
 

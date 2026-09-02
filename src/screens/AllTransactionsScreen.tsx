@@ -5,6 +5,8 @@ import { EditTransactionModal } from '../components/EditTransactionModal';
 import { Icon } from '../components/Icon';
 import { TransactionFilterModal } from '../components/TransactionFilterModal';
 import { Amount, Card, CatBadge, Eyebrow, IconButton, TopBar } from '../components/ui';
+import { BrandBadge } from '../components/BrandBadge';
+import { matchBrand } from '../components/BrandLogo';
 import { txnMonthKey } from '../lib/budget';
 import { isValidIsoDate, monthLabel, shortDate } from '../lib/dates';
 import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
@@ -84,6 +86,7 @@ const TxnRow = React.memo(function TxnRow({
   const transfer = txn.type === 'transfer';
   const catLabel = tCat(cat);
   const description = txn.remark?.trim() || (txn.merchantRaw && txn.merchantRaw !== cat.label ? txn.merchantRaw : '');
+  const brand = matchBrand(txn.merchantRaw) || matchBrand(txn.remark);
   return (
     <Pressable
       onPress={() => onPress(txn)}
@@ -104,7 +107,11 @@ const TxnRow = React.memo(function TxnRow({
           {isSel && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
         </View>
       )}
-      <CatBadge category={cat} size={40} />
+      {brand ? (
+        <BrandBadge brand={brand} size={40} rad={11} />
+      ) : (
+        <CatBadge category={cat} size={40} />
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[styles.merchant, { color: colorTheme.ink }]} numberOfLines={1}>
           {transfer ? (isZh ? '转账' : 'Transfer') : catLabel}

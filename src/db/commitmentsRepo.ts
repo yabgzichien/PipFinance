@@ -184,6 +184,35 @@ export async function deleteCommitment(id: string): Promise<void> {
   });
 }
 
+/**
+ * Deletes occurrences from `fromMonth` onwards for a commitment, capping its schedule
+ * to the previous month so that prior history (before `fromMonth`) is preserved intact.
+ * If no prior occurrences exist, deletes the commitment entirely.
+ */
+export async function deleteCommitmentFromMonth(id: string, fromMonth: string): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    const prior = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM commitment_occurrences WHERE commitment_id = ? AND month < ?',
+      id,
+      fromMonth
+    );
+    const hasPriorHistory = (prior?.count ?? 0) > 0;
+
+    if (!hasPriorHistory) {
+      await db.runAsync('DELETE FROM commitment_occurrences WHERE commitment_id = ?', id);
+      await db.runAsync('DELETE FROM commitments WHERE id = ?', id);
+    } else {
+      const [y, m] = fromMonth.split('-').map(Number);
+      const prevDate = new Date(Date.UTC(y, m - 2, 1));
+      const prevMonth = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+      
+      await db.runAsync('UPDATE commitments SET end_month = ? WHERE id = ?', prevMonth, id);
+      await db.runAsync('DELETE FROM commitment_occurrences WHERE commitment_id = ? AND month >= ?', id, fromMonth);
+    }
+  });
+}
+
 // --- Occurrences --------------------------------------------------------------
 
 export async function listOccurrences(): Promise<CommitmentOccurrence[]> {
@@ -225,7 +254,8 @@ export async function ensureOccurrences(now: Date = new Date()): Promise<void> {
       if (c.archived) continue;
       const currency = c.currency ?? BASE_CURRENCY;
       const fxRate = currency === BASE_CURRENCY ? null : rateFor(rates, currency);
-      for (const occ of occurrencesFor(c, fromMonth)) {
+      const start = c.startMonth && c.startMonth < fromMonth ? c.startMonth : fromMonth;
+      for (const occ of occurrencesFor(c, start)) {
         const id = genId();
         const createdAt = new Date().toISOString();
         await db.runAsync(

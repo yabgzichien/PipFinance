@@ -231,6 +231,8 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [calendarOrigin, setCalendarOrigin] = useState<Screen>('recap');
   const [exportMonth, setExportMonth] = useState<string | undefined>(undefined);
   const [exportOrigin, setExportOrigin] = useState<Screen>('settings');
+  const [commitmentsOrigin, setCommitmentsOrigin] = useState<Screen>('settings');
+  const [currencyOrigin, setCurrencyOrigin] = useState<Screen>('settings');
   const [addTutorialMode, setAddTutorialMode] = useState<'scan' | 'manual' | undefined>(undefined);
   const [addInitialType, setAddInitialType] = useState<TxnType | undefined>(undefined);
   const [addPhase, setAddPhase] = useState<AddFlowPhase>('attach');
@@ -523,7 +525,13 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   // goes. Returns whether it actually navigated (false only on Home, which has nowhere back to
   // go and falls through to the exit-confirm gate instead).
   const goBack = (): boolean => {
-    const target = backTargetFor(screen, { owedOrigin, calendarOrigin, exportOrigin });
+    const target = backTargetFor(screen, {
+      owedOrigin,
+      calendarOrigin,
+      exportOrigin,
+      commitmentsOrigin,
+      currencyOrigin,
+    });
     if (!target) return false;
     if (screen === 'transactions') setTxnFilter(null);
     setScreen(target);
@@ -640,13 +648,19 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setOwedOrigin('home');
             setScreen('owed');
           }}
-          onOpenCommitments={() => setScreen('commitments')}
+          onOpenCommitments={() => {
+            setCommitmentsOrigin('home');
+            setScreen('commitments');
+          }}
           onOpenCalendar={() => {
             setCalendarOrigin('home');
             setCalendarMonth(undefined);
             setScreen('calendar');
           }}
-          onOpenCurrencySettings={() => setScreen('currencySettings')}
+          onOpenCurrencySettings={() => {
+            setCurrencyOrigin('home');
+            setScreen('currencySettings');
+          }}
           onOpenExport={() => openExport('home')}
         />
       )}
@@ -680,9 +694,15 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onAdvancedImport={() => setScreen('advancedImport')}
           onOpenExport={() => openExport('settings')}
           onOpenCategories={() => setScreen('categories')}
-          onOpenCommitments={() => setScreen('commitments')}
+          onOpenCommitments={() => {
+            setCommitmentsOrigin('settings');
+            setScreen('commitments');
+          }}
           onOpenTax={() => setScreen('tax')}
-          onOpenCurrencySettings={() => setScreen('currencySettings')}
+          onOpenCurrencySettings={() => {
+            setCurrencyOrigin('settings');
+            setScreen('currencySettings');
+          }}
           taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />

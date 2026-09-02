@@ -60,7 +60,7 @@ export interface NewOccurrence {
 }
 
 /** How many months ahead of `fromMonth` to keep occurrences materialised. */
-export const OCCURRENCE_HORIZON_MONTHS = 6;
+export const OCCURRENCE_HORIZON_MONTHS = 24;
 
 /** A tick matches an existing transaction within this fraction of the expected amount. */
 const MATCH_AMOUNT_TOLERANCE = 0.05;

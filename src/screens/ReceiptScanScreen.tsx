@@ -4,8 +4,8 @@
 // and ride on each person's own items; the amount the card was charged is the figure everything
 // reconciles to, because that is what left the account.
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddPersonModal } from '../components/AddPersonModal';
 import { Icon } from '../components/Icon';
@@ -21,12 +21,15 @@ import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
 import { saveReceiptImage } from '../lib/receiptStorage';
 import { scanReceiptImage } from '../lib/scanReceipt';
+import { getScanStage } from '../lib/scanningNarration';
+import { ScanProgressBar } from '../components/ScanProgressBar';
 import { computeBillTotal, computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { colors, numFont, radius, uiFont } from '../theme';
 import type { PickedImage } from './AttachScreen';
 
@@ -74,6 +77,8 @@ const EMPTY_SCAN: ScannedReceipt = {
 
 type Phase = 'capture' | 'reading' | 'assign';
 
+const PREVIEW_H = 280;
+
 export function ReceiptScanScreen({
   initialImage,
   cachedReceipt,
@@ -107,6 +112,7 @@ export function ReceiptScanScreen({
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
   const { people, addPerson } = useAppData();
+  const reducedMotion = useReducedMotion();
 
   const [phase, setPhase] = useState<Phase>(cachedReceipt ? 'assign' : initialImage ? 'reading' : 'capture');
   const [error, setError] = useState('');
@@ -130,6 +136,30 @@ export function ReceiptScanScreen({
   const [viewingPhoto, setViewingPhoto] = useState(false);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
   const [activatingCode, setActivatingCode] = useState<string | null>(null);
+  const [readingSecs, setReadingSecs] = useState(0);
+  const scan = useRef(new Animated.Value(0)).current;
+
+  // scanline loop while reading
+  useEffect(() => {
+    if (phase !== 'reading' || reducedMotion) return;
+    const loop = Animated.loop(
+      Animated.timing(scan, {
+        toValue: 1,
+        duration: 1500,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase, reducedMotion, scan]);
+
+  useEffect(() => {
+    if (phase !== 'reading') return;
+    setReadingSecs(0);
+    const id = setInterval(() => setReadingSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   useEffect(() => {
     getActiveCurrencies().then(setActiveCurrencies);
@@ -361,12 +391,63 @@ export function ReceiptScanScreen({
   };
 
   if (phase === 'reading') {
+    const stage = getScanStage('receipt', readingSecs, isZh);
+    const translateY = scan.interpolate({ inputRange: [0, 1], outputRange: [0, PREVIEW_H - 28] });
     return (
-      <View style={[styles.root, { backgroundColor: colorTheme.bg }, styles.center]}>
-        <PipSays expr="think">
-          <BubbleText>{isZh ? '正在逐行识别小票… 请稍候几秒。' : 'Reading the receipt line by line… this takes a few seconds.'}</BubbleText>
-        </PipSays>
-        <ActivityIndicator color={theme.accent} style={{ marginTop: 22 }} />
+      <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
+        <View style={{ paddingTop: insets.top + 4 }}>
+          <TopBar
+            title={isZh ? '正在识别小票…' : 'Reading receipt…'}
+            onBack={() => (initialImage ? onBack() : setPhase('capture'))}
+          />
+        </View>
+        <ScrollView
+          contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <PipSays expr={stage.expr} float={!reducedMotion} idea={stage.idea}>
+            <BubbleText>{stage.text}</BubbleText>
+          </PipSays>
+
+          <ScanProgressBar
+            progress={stage.progress}
+            label={isZh ? '小票识别进度' : 'Receipt scan progress'}
+            style={{ marginTop: 16 }}
+          />
+
+          {pickedImage && (
+            <Pressable onPress={() => setViewingPhoto(true)} style={{ paddingTop: 16 }}>
+              <Card style={[styles.previewCard, { backgroundColor: colorTheme.surface2 }]}>
+                <Image
+                  source={{ uri: pickedImage.uri }}
+                  style={[styles.previewImg, { backgroundColor: colorTheme.surface2 }]}
+                  resizeMode="contain"
+                />
+                {!reducedMotion && (
+                  <Animated.View
+                    style={[
+                      styles.scanline,
+                      { borderTopColor: theme.accent, transform: [{ translateY }] },
+                    ]}
+                  />
+                )}
+              </Card>
+            </Pressable>
+          )}
+
+          <Text style={[styles.hint, { color: colorTheme.ink3, marginTop: 18 }]}>
+            {isZh ? '正在逐行核对明细、单价与税费…' : 'Parsing line items, amounts, and tax rates…'}
+          </Text>
+        </ScrollView>
+
+        <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
+          <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
+            {pickedImage && <Image source={{ uri: pickedImage.uri }} style={styles.viewerImage} resizeMode="contain" />}
+            <Pressable onPress={() => setViewingPhoto(false)} style={[styles.viewerClose, { top: insets.top + 12 }]} hitSlop={10}>
+              <Icon name="x" size={22} color="#fff" />
+            </Pressable>
+          </Pressable>
+        </Modal>
       </View>
     );
   }
@@ -425,11 +506,12 @@ export function ReceiptScanScreen({
         />
       </View>
 
-      <ScrollView
-        contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 130 }}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 130 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         {error !== '' && (
           <Card style={[styles.errorCard, { backgroundColor: colorTheme.redTint, borderColor: colorTheme.redSoft }]}>
             <Icon name="alert" size={17} color="#b3261e" />
@@ -786,6 +868,7 @@ export function ReceiptScanScreen({
           <BtnLabel>{splitting ? (isZh ? '使用此分账' : 'Use this split') : (isZh ? '使用此小票' : 'Use this receipt')}</BtnLabel>
         </PrimaryButton>
       </View>
+      </KeyboardAvoidingView>
 
       <AddPersonModal visible={addPersonOpen} onClose={() => setAddPersonOpen(false)} onSubmit={addNew} />
 
@@ -1014,6 +1097,17 @@ const styles = StyleSheet.create({
   keepTitle: { fontFamily: uiFont(700), fontSize: 14 },
   keepSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 2 },
   receiptThumb: { width: 44, height: 44, borderRadius: 10, borderWidth: 1 },
+  previewCard: { overflow: 'hidden', padding: 0 },
+  previewImg: { width: '100%', height: PREVIEW_H },
+  scanline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 28,
+    backgroundColor: 'rgba(31,138,91,0.28)',
+    borderTopWidth: 2,
+  },
   viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
   viewerImage: { width: '100%', height: '80%' },
   viewerClose: { position: 'absolute', right: 18, padding: 8 },
