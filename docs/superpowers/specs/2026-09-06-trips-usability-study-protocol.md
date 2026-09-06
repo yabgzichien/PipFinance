@@ -45,9 +45,9 @@ Ask these before scheduling a session:
 
 Read or send this before the session, and obtain explicit yes/no before starting:
 
-> "Thank you for helping with this session. We're researching whether a feature idea for Pip — grouping expenses by trip — is worth building. This is not a test of you; there are no wrong answers, and if something is confusing that is useful information for us, not a failure on your part.
+> "Thank you for helping with this session. We're researching how people track and think about their spending, including spending on trips — this is not a test of you; there are no wrong answers, and if something is confusing that is useful information for us, not a failure on your part.
 >
-> The session will take about 30–45 minutes. We'll first ask a few questions about how you currently think about trip spending, then walk through some tasks in a prototype.
+> The session will take about 30–45 minutes. We'll first ask a few questions about how you currently think about your spending, then walk through some tasks. At the end, we'll explain in full what we were testing and give you a chance to ask questions or withdraw your data having heard it.
 >
 > You can use your own real transaction records during the session, or you can use made-up numbers if you'd rather not share real financial details — either is fine, and it will not change how we run the session. Please tell us at the start which one you're doing.
 >
@@ -55,7 +55,11 @@ Read or send this before the session, and obtain explicit yes/no before starting
 >
 > Participation is voluntary and unpaid/paid-as-agreed [fill in locally]. Do you consent to proceed on these terms?"
 
+This wording is deliberate: it names the general research domain (how people track and think about spending, including trips) without naming the specific mechanism being tested (grouping expenses by trip). The pre-task interview in Section 3 depends on the participant not yet knowing what the feature does — see that section for why. Full disclosure happens in the debrief at the end of the session (Section 3, end; consent contract confirmed in Section 10).
+
 Record the participant's answer to "own records or fictionalized" on the observation sheet (Section 7) — it affects how literally to take specific amounts they mention, but not how the task performance is scored.
+
+Recruitment messages and scheduling emails sent before the session must use the same general framing as this script — "how you track and think about spending" or equivalent — and must not mention trips-as-grouping, trip totals, or any other description of the mechanism being tested. The screener questions in Section 2.2 already avoid this; keep any outreach copy consistent with them.
 
 ## 3. Pre-task interview
 
@@ -72,9 +76,15 @@ Record answers verbatim (write down what they say, not a paraphrase or your inte
 
 Do not lead with "would you like a feature that groups your trip expenses" — that question belongs nowhere in this interview. The goal is to find out whether the need already exists in some form, not to ask if a described feature sounds nice.
 
+### 3.1 Debrief (end of session, after Section 5's tasks)
+
+The consent script in Section 2.4 deliberately does not name the mechanism being tested — it describes the general research domain only, so the pre-task interview above measures an uncontaminated answer. Because of that, full disclosure is owed at the end, not the start.
+
+After all tasks in Section 5 are complete, tell the participant plainly: "What we were actually testing today is whether grouping your expenses by trip — so you can see what a trip cost across your normal spending categories — would be useful to you. We didn't tell you that up front because we wanted your honest answer to how you currently work this out, before you'd seen our idea for it." Give them the chance to ask questions, and reconfirm their consent to keep the session data now that they know the full purpose — this is a distinct check from the general consent given in Section 2.4, and either can be withdrawn independently within the one-week window.
+
 ## 4. Fixture ledger
 
-Use the same fixture across all participants so runs are comparable. Present it as a pre-loaded set of transactions in the prototype (or as printed/mocked entries if the prototype is not interactive enough to seed data). Frame: a 4-day trip to Singapore, 12–15 September 2026, for the fictional "Alex."
+Use the same fixture across all participants so runs are comparable. Present it as a pre-loaded set of transactions in the study stimulus (see Section 5 for the required fidelity of that stimulus), or as printed/mocked entries if the stimulus is not interactive enough to seed data. Frame: a 4-day trip to Singapore, 12–15 September 2026, for the fictional "Alex."
 
 | # | Date | Merchant | Amount | Currency | Category (pre-set) | Purpose in the fixture |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -89,7 +99,11 @@ All six rows exist in the participant's transaction history before the session s
 
 ## 5. Task script
 
-Run tasks in this order for every participant. Introduce the prototype only after the pre-task interview (Section 3) is complete.
+### 5.1 Stimulus fidelity requirement
+
+The stimulus used for tasks (a)–(e) must be **low-fidelity** — static screens, a clickable wireframe/mockup, or a deliberately unstyled build — regardless of how far the parallel Stage C implementation has progressed by the time this study runs. PRD Section 6.1 requires this ("Use a low-fidelity flow"), and it is not optional convenience. If a finished, styled build exists, do not substitute it for the prototype specified here: a polished build lets visual craft stand in for genuine feature appeal, which is exactly the confound low fidelity exists to remove, and it would make task times and completion rates incomparable to what this protocol expects. Build the low-fidelity stimulus separately even if a production build is available to reach for.
+
+Run tasks in this order for every participant. Introduce the stimulus only after the pre-task interview (Section 3) is complete, and keep any framing of it consistent with the general, non-mechanism-naming language established in Section 2.4 until the debrief (Section 3.1).
 
 | Task | Instruction given to participant | What it probes |
 | --- | --- | --- |
@@ -159,7 +173,7 @@ If any of these show up, the honest conclusion is "defer or substantially rework
 ## 10. Ethics and data handling
 
 - **Voluntary participation.** No participant is required to complete the session; they may stop or skip any task or question at any point without needing to justify it.
-- **Informed consent.** Use the language in Section 2.4 verbatim or materially equivalent, obtained before the session starts and recorded (a note of "consented, [date]" is sufficient — no signature required for this internal study).
+- **Informed consent.** Use the language in Section 2.4 verbatim or materially equivalent, obtained before the session starts and recorded (a note of "consented, [date]" is sufficient — no signature required for this internal study). Consent at the start covers the general research domain only, by design (see Section 2.4's note on why the mechanism is withheld); it is completed by the debrief in Section 3.1, where the specific feature is disclosed and consent to retain the session's data is reconfirmed. Both the initial consent and the debrief reconfirmation are required parts of this contract — a session that skips the debrief has not obtained full informed consent.
 - **No remote analytics.** This study runs on a local or facilitated prototype with a human observer taking notes. No telemetry, crash reporting, or usage analytics SDK is added to any build used for this study.
 - **No collection of transaction contents beyond what the participant volunteers.** If a participant chooses to use real transaction data during the session, only what they say aloud or visibly enter into the prototype is recorded in notes — do not ask to see their bank app, statements, or any record outside the session itself. Participants using fictionalized records satisfy the same tasks without exposing real financial details, and this option must be offered, not just tolerated if requested.
 - **Recording and retention.** Audio/screen recordings (if consented to) and written notes are for internal product review only, retained only as long as needed to write up the study findings, and not shared outside the immediate product team. Participants may request deletion of their session data within one week of the session.
