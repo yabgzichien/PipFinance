@@ -62,6 +62,16 @@ import {
   writeOffShare as dbWriteOffShare,
 } from '../db/splitRepo';
 import { fromCents, openReceivableTotal, outstanding, receivableMyr, toCents, type OpenShare } from '../lib/split';
+import {
+  listTrips,
+  addTrip as dbAddTrip,
+  renameTrip as dbRenameTrip,
+  setTripArchived as dbSetTripArchived,
+  deleteTrip as dbDeleteTrip,
+  setTransactionTrip as dbSetTransactionTrip,
+  setTransactionsTrip as dbSetTransactionsTrip,
+} from '../db/tripsRepo';
+import { inheritedTripId, type Trip } from '../lib/trips';
 import { refreshPrices as fetchPrices } from '../prices';
 import { budgetHash, currentMonthKey, monthKey, positiveAllocations } from '../lib/budget';
 import { computeCoverage, type Coverage } from '../lib/coverage';
@@ -312,6 +322,14 @@ export interface AppData {
   updateCategoryHue: (id: string, hue: number) => Promise<void>;
   setCategoryHidden: (id: string, hidden: boolean) => Promise<void>;
   activateSuggested: (templateKeys: string[]) => Promise<string[]>;
+  /** Named groupings over existing transactions. See src/lib/trips.ts and src/db/tripsRepo.ts. */
+  trips: Trip[];
+  addTrip: (name: string, startDate?: string | null, endDate?: string | null) => Promise<Trip>;
+  renameTrip: (id: string, name: string) => Promise<void>;
+  setTripArchived: (id: string, archived: boolean) => Promise<void>;
+  deleteTrip: (id: string) => Promise<void>;
+  setTransactionTrip: (txnId: string, tripId: string | null) => Promise<void>;
+  setTransactionsTrip: (txnIds: string[], tripId: string | null) => Promise<void>;
   commitCategorized: (
     items: ExtractedTxn[],
     assignments: (string | null)[],
@@ -533,9 +551,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
   const [tasksDone, setTasksDoneState] = useState<ExploreTaskId[]>([]);
   const [duitNowQrUri, setDuitNowQrUriState] = useState<string | null>(null);
+  const [trips, setTrips] = useState<Trip[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, duitNowQrRaw] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, duitNowQrRaw, tripRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -566,7 +585,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         dbListShares(),
         dbListPayments(),
         getMeta(DUITNOW_QR_KEY),
+        listTrips(),
       ]);
+    setTrips(tripRows);
     setDuitNowQrUriState(duitNowQrRaw || null);
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
@@ -917,6 +938,47 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return ids;
   }, []);
 
+  const addTrip = useCallback(async (name: string, startDate?: string | null, endDate?: string | null) => {
+    const created = await dbAddTrip(name, startDate ?? null, endDate ?? null);
+    setTrips(await listTrips());
+    return created;
+  }, []);
+
+  const renameTrip = useCallback(async (id: string, name: string) => {
+    await dbRenameTrip(id, name);
+    setTrips(await listTrips());
+  }, []);
+
+  const setTripArchived = useCallback(async (id: string, archived: boolean) => {
+    await dbSetTripArchived(id, archived);
+    setTrips(await listTrips());
+  }, []);
+
+  /** Deleting a trip clears `trip_id` off every member transaction (see tripsRepo), so the
+   *  transaction list is stale the moment this resolves and must be refreshed alongside trips. */
+  const deleteTrip = useCallback(async (id: string) => {
+    await dbDeleteTrip(id);
+    const [tripRows, txns] = await Promise.all([listTrips(), listTransactions()]);
+    setTrips(tripRows);
+    setTransactions(txns);
+  }, []);
+
+  /** Moving a transaction in or out of a trip changes what `transactions` says about it, so the
+   *  list is re-read alongside trips — otherwise the UI would keep showing the old grouping. */
+  const setTransactionTrip = useCallback(async (txnId: string, tripId: string | null) => {
+    await dbSetTransactionTrip(txnId, tripId);
+    const [tripRows, txns] = await Promise.all([listTrips(), listTransactions()]);
+    setTrips(tripRows);
+    setTransactions(txns);
+  }, []);
+
+  const setTransactionsTrip = useCallback(async (txnIds: string[], tripId: string | null) => {
+    await dbSetTransactionsTrip(txnIds, tripId);
+    const [tripRows, txns] = await Promise.all([listTrips(), listTransactions()]);
+    setTrips(tripRows);
+    setTransactions(txns);
+  }, []);
+
   const commitCategorized = useCallback(
     async (
       items: ExtractedTxn[],
@@ -1116,6 +1178,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           type: 'expense',
           date: todayKey(),
           categoryId: origin?.categoryId ?? DEFAULT_EXPENSE_ID,
+          // The write-off is the same consumption as the original bill, so it belongs to the
+          // same trip. Without this, a Singapore dinner someone never paid back would drop out
+          // of the Singapore total at exactly the moment it genuinely became the user's own cost.
+          tripId: inheritedTripId(origin),
           source: 'manual',
           remark: person ? `Written off: ${person.name} never paid this back` : 'Written-off split',
         },
@@ -2114,6 +2180,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     updateCategoryHue,
     setCategoryHidden,
     activateSuggested,
+    trips,
+    addTrip,
+    renameTrip,
+    setTripArchived,
+    deleteTrip,
+    setTransactionTrip,
+    setTransactionsTrip,
     commitCategorized,
     applyReliefDetection,
     saveTransactionEdits,

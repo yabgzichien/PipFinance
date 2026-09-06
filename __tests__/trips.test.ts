@@ -2,7 +2,7 @@
 // The totals contract is the whole of Trips that can be wrong quietly. Every case here is one
 // the spec names explicitly, and each has a way of producing a plausible-looking number that is
 // not the number the user means.
-import { computeTripTotals } from '../src/lib/trips';
+import { computeTripTotals, inheritedTripId } from '../src/lib/trips';
 import type { Transaction } from '../src/lib/types';
 
 // Stand-in for useDisplayCurrency().convertTxn: MYR passes through, SGD is 3.5.
@@ -85,5 +85,23 @@ describe('computeTripTotals', () => {
 
   it('an empty trip totals zero rather than throwing', () => {
     expect(computeTripTotals([], 'trip-sg', convert)).toEqual({ recordedExpenses: 0, txnCount: 0, byCategory: [] });
+  });
+});
+
+describe('inheritedTripId', () => {
+  // `writeOffShare` (src/state/store.tsx) uses this to decide the trip for the expense it
+  // creates when a friend never pays back a split bill. It is tested here as a pure helper
+  // because writeOffShare itself lives inside AppDataProvider's React context and has no
+  // existing harness in this codebase to drive it directly.
+  it('takes the trip from the origin transaction, so a written-off share stays in its trip total', () => {
+    expect(inheritedTripId({ tripId: 'trip-sg' })).toBe('trip-sg');
+  });
+
+  it('falls back to no trip when the origin transaction was never in one', () => {
+    expect(inheritedTripId({ tripId: null })).toBeNull();
+  });
+
+  it('falls back to no trip when there is no origin transaction at all (e.g. a deleted bill)', () => {
+    expect(inheritedTripId(undefined)).toBeNull();
   });
 });

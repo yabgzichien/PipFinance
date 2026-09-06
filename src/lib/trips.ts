@@ -43,6 +43,17 @@ export interface TripTotals {
  * Membership is explicit and date-independent: an accommodation booked two months early counts,
  * and an unrelated payment made mid-trip does not.
  */
+/**
+ * The trip a written-off split share's new expense should inherit.
+ *
+ * The write-off is the same consumption as the original bill, so it belongs to the same trip.
+ * Without this, a Singapore dinner someone never paid back would drop out of the Singapore total
+ * at exactly the moment it genuinely became the user's own cost.
+ */
+export function inheritedTripId(origin: { tripId?: string | null } | undefined | null): string | null {
+  return origin?.tripId ?? null;
+}
+
 export function computeTripTotals(
   txns: Transaction[],
   tripId: string,
