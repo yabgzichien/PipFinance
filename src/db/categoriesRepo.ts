@@ -135,17 +135,32 @@ export async function countVisible(kind: 'expense' | 'income'): Promise<number> 
 /** Hide a category from new-entry choices, or show that same historical row again. */
 export async function setCategoryHidden(id: string, hidden: boolean): Promise<void> {
   const db = await getDb();
-  if (hidden) {
-    const row = await db.getFirstAsync<{ kind: string }>('SELECT kind FROM categories WHERE id = ?', id);
-    if (!row) return;
-    const kind = row.kind === 'income' ? 'income' : 'expense';
-    const visible = await db.getFirstAsync<{ n: number }>(
-      'SELECT COUNT(*) AS n FROM categories WHERE kind = ? AND is_hidden = 0',
-      row.kind
-    );
-    if ((visible?.n ?? 0) <= 1) throw new LastVisibleCategoryError(kind);
+  if (!hidden) {
+    await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, id);
+    return;
   }
-  await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', hidden ? 1 : 0, id);
+
+  // The count lives in the same statement as the state transition. Two simultaneous hide taps
+  // cannot both pass this predicate: after one succeeds, the other affects zero rows.
+  const result = await db.runAsync(
+    `UPDATE categories SET is_hidden = 1
+     WHERE id = ? AND is_hidden = 0
+       AND 1 < (SELECT COUNT(*) FROM categories
+                WHERE kind = (SELECT kind FROM categories WHERE id = ?) AND is_hidden = 0)`,
+    id,
+    id
+  );
+  if (result.changes > 0) return;
+
+  // A zero-row conditional update is harmless for rows which disappeared or were already
+  // hidden (including a concurrent repeat). A still-visible row means the count predicate was
+  // the reason it missed, so hiding it would empty its kind.
+  const row = await db.getFirstAsync<{ kind: string; is_hidden: number }>(
+    'SELECT kind, is_hidden FROM categories WHERE id = ?',
+    id
+  );
+  if (!row || row.is_hidden) return;
+  throw new LastVisibleCategoryError(row.kind === 'income' ? 'income' : 'expense');
 }
 
 /**
@@ -179,20 +194,35 @@ export async function activateSuggestedCategories(templateKeys: string[]): Promi
         continue;
       }
 
-      const id = await uniqueId(category.id);
-      await db.runAsync(
-        `INSERT INTO categories (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key)
-           VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)`,
-        id,
-        category.label,
-        category.icon,
-        category.hue,
-        category.kind,
-        sort,
-        category.templateKey
-      );
-      sort += 1;
-      ids.push(id);
+      let id = await uniqueId(category.id);
+      while (true) {
+        // The partial unique index on template_key makes concurrent repeated activations
+        // converge. An unrelated id collision retries a collision-safe suffix instead.
+        await db.runAsync(
+          `INSERT OR IGNORE INTO categories (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key)
+             VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)`,
+          id,
+          category.label,
+          category.icon,
+          category.hue,
+          category.kind,
+          sort,
+          category.templateKey
+        );
+        const resulting = await db.getFirstAsync<{ id: string; is_hidden: number }>(
+          'SELECT id, is_hidden FROM categories WHERE template_key = ?',
+          category.templateKey
+        );
+        if (resulting) {
+          if (resulting.is_hidden) {
+            await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, resulting.id);
+          }
+          ids.push(resulting.id);
+          sort += 1;
+          break;
+        }
+        id = await uniqueId(id);
+      }
     }
   });
   return ids;
