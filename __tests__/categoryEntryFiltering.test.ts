@@ -4,6 +4,7 @@
 // explicitly taken out of circulation.
 import { buildCategoryGuessPrompt, parseCategoryGuess } from '../src/llm/categoryGuessPrompt';
 import { parseQuickAddReply } from '../src/llm/quickAddPrompt';
+import { resolveSuggestion } from '../src/lib/categorySuggestion';
 
 const VISIBLE = [
   { id: 'food', label: 'Food', kind: 'expense' as const },
@@ -39,5 +40,34 @@ describe('quick add options', () => {
       '2026-09-06'
     );
     expect(parsed[0]?.categoryId ?? null).toBeNull();
+  });
+});
+
+describe('learned memory vs hidden categories', () => {
+  const visible = [
+    { id: 'food', kind: 'expense' as const },
+    { id: 'travelling', kind: 'expense' as const },
+  ];
+
+  it('uses a learned mapping that still points at a visible category', () => {
+    expect(resolveSuggestion('shell', { shell: 'travelling' }, visible, null)).toEqual({
+      categoryId: 'travelling',
+      source: 'learned',
+    });
+  });
+
+  it('falls through to the guess when the learned target is hidden', () => {
+    expect(resolveSuggestion('shell', { shell: 'opt-petrol' }, visible, 'travelling')).toEqual({
+      categoryId: 'travelling',
+      source: 'guess',
+    });
+  });
+
+  it('returns null rather than a hidden category when there is no guess either', () => {
+    expect(resolveSuggestion('shell', { shell: 'opt-petrol' }, visible, null)).toBeNull();
+  });
+
+  it('rejects a guess that names a hidden category', () => {
+    expect(resolveSuggestion('shell', {}, visible, 'opt-petrol')).toBeNull();
   });
 });

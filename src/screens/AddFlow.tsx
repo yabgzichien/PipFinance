@@ -8,6 +8,7 @@ import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
 import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
+import { resolveSuggestion } from '../lib/categorySuggestion';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
@@ -16,7 +17,8 @@ import { type ScannedReceipt } from '../lib/parseReceipt';
 import { resolveQuickAdd } from '../lib/quickAdd';
 import type { QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
-import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
+import { autoFillStats, type AutoFillStats } from '../lib/recommend';
+import { merchantKey } from '../lib/normalize';
 import { workingsFromReceipt } from '../lib/splitMessage';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource, type TxnType } from '../lib/types';
 import { useAppData, type NewLearned } from '../state/store';
@@ -267,11 +269,10 @@ function AddFlowPhases({
     setExtractElapsedMs(elapsedMs);
 
     const learned: (CategorySuggestion | null)[] = items.map((it) => {
-      const s = suggestForMerchant(memory, it.merchant);
-      if (!s) return null;
-      const cat = catById[s];
+      const suggestion = resolveSuggestion(merchantKey(it.merchant), memory, entryCategories, null);
+      const cat = suggestion ? catById[suggestion.categoryId] : undefined;
       // only pre-fill if the learned category matches this item's kind
-      return cat && cat.kind === it.type ? { categoryId: s, source: 'learned' } : null;
+      return cat && cat.kind === it.type ? suggestion : null;
     });
     setLearnedThisScan(learned);
 
@@ -298,7 +299,11 @@ function AddFlowPhases({
         }),
         GUESS_TIMEOUT_MS
       );
-      setSuggestions(learned.map((s, i) => s ?? (guessed[i] ? { categoryId: guessed[i]!, source: 'guess' } : null)));
+      setSuggestions(
+        learned.map((suggestion, i) =>
+          suggestion ?? resolveSuggestion(merchantKey(items[i].merchant), {}, entryCategories, guessed[i] ?? null)
+        )
+      );
     } catch {
       // Enhancement-only: any failure (network, timeout, bad reply) just falls
       // back to today's behavior  no suggestion for that merchant.

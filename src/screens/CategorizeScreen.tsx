@@ -78,7 +78,11 @@ export function CategorizeScreen({
   const stepIndices = useMemo(() => items.map((_, i) => i), [items]);
 
   const [assignments, setAssignments] = useState<(string | null)[]>(() =>
-    extracted.map((_, i) => suggestions[i]?.categoryId ?? null)
+    extracted.map((item, i) => {
+      const categoryId = suggestions[i]?.categoryId;
+      const category = categoryId ? categories.find((c) => c.id === categoryId) : undefined;
+      return category?.kind === item.type ? category.id : null;
+    })
   );
   const [acked, setAcked] = useState<Record<number, boolean>>({});
   const [step, setStep] = useState(0);
