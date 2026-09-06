@@ -21,6 +21,24 @@ describe('i18n Translation Dictionary Parity', () => {
       expect(value.length).toBeGreaterThan(0);
     }
   });
+
+  it('includes the category catalogue and visibility strings in both languages', () => {
+    const categoryCatalogueKeys = [
+      'addCategorySheetTitle', 'tabSuggested', 'tabCreateYourOwn',
+      'searchSuggestedPlaceholder', 'noSuggestionsMatch', 'suggestionAdded',
+      'suggestionShowAgain', 'addNCategories', 'addOneCategory',
+      'hiddenSectionTitle', 'hideFromNewExpenses', 'showAgain', 'hiddenBadge',
+      'hideLastVisibleTitle', 'hideLastVisibleBody', 'hideUsedByCommitmentTitle',
+      'hideUsedByCommitmentBody', 'reviewRecurringPayments', 'hiddenKeepsHistoryNote',
+      'renameCategory', 'renameCategoryHint', 'categoryColor',
+      'activationFailedTitle', 'activationFailedBody', 'retry',
+    ];
+
+    for (const key of categoryCatalogueKeys) {
+      expect(en).toHaveProperty(key);
+      expect(zh).toHaveProperty(key);
+    }
+  });
 });
 
 describe('Category Localization', () => {

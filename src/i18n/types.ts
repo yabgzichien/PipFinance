@@ -227,6 +227,31 @@ export interface Translations {
   categoryName: string;
   categoryIcon: string;
   categoryColor: string;
+  // Category catalogue and visibility
+  addCategorySheetTitle: string;
+  tabSuggested: string;
+  tabCreateYourOwn: string;
+  searchSuggestedPlaceholder: string;
+  noSuggestionsMatch: string;
+  suggestionAdded: string;
+  suggestionShowAgain: string;
+  addNCategories: string;
+  addOneCategory: string;
+  hiddenSectionTitle: string;
+  hideFromNewExpenses: string;
+  showAgain: string;
+  hiddenBadge: string;
+  hideLastVisibleTitle: string;
+  hideLastVisibleBody: string;
+  hideUsedByCommitmentTitle: string;
+  hideUsedByCommitmentBody: string;
+  reviewRecurringPayments: string;
+  hiddenKeepsHistoryNote: string;
+  renameCategory: string;
+  renameCategoryHint: string;
+  activationFailedTitle: string;
+  activationFailedBody: string;
+  retry: string;
   categoryKind: string;
   expenseCategories: string;
   incomeCategories: string;
@@ -521,4 +546,3 @@ export interface Translations {
   reopen: string;
   allSettled: string;
 }
-
