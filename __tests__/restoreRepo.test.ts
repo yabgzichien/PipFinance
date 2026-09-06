@@ -103,6 +103,38 @@ describe('restoreFromBackupPayload', () => {
     expect(insert!.args).toContain('rent');
   });
 
+  it('restores hueOverride: 0 as 0, not null — zero is a real hue (red)', async () => {
+    const db = install(fakeDb());
+    await restoreFromBackupPayload(
+      { categories: [{ id: 'opt-red', label: 'Red Thing', icon: 'dots', hue: 0, kind: 'expense', hueOverride: 0 }] },
+      new Map()
+    );
+    const insert = db.statements.find((s) => s.sql.includes('INSERT INTO categories'));
+    // id, label, icon, hue, kind, is_default, sort, is_hidden, template_key, label_override,
+    // icon_override, hue_override — hue_override is index 11.
+    expect(insert!.args[11]).toBe(0);
+    expect(insert!.args[11]).not.toBeNull();
+  });
+
+  it('restores isHidden: false as 0, same as a legacy payload that omits the field', async () => {
+    const dbExplicit = install(fakeDb());
+    await restoreFromBackupPayload(
+      { categories: [{ id: 'food-explicit', label: 'Food', icon: 'burger', hue: 162, kind: 'expense', isHidden: false }] },
+      new Map()
+    );
+    const insertExplicit = dbExplicit.statements.find((s) => s.sql.includes('INSERT INTO categories'));
+    // is_hidden is index 7.
+    expect(insertExplicit!.args[7]).toBe(0);
+
+    const dbLegacy = install(fakeDb());
+    await restoreFromBackupPayload(
+      { categories: [{ id: 'food-legacy', label: 'Food', icon: 'burger', hue: 162, kind: 'expense' }] },
+      new Map()
+    );
+    const insertLegacy = dbLegacy.statements.find((s) => s.sql.includes('INSERT INTO categories'));
+    expect(insertLegacy!.args[7]).toBe(0);
+  });
+
   it('skips malformed rows without an id rather than throwing', async () => {
     const db = install(fakeDb());
     await expect(
