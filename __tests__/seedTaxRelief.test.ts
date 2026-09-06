@@ -7,7 +7,10 @@ import { buildAuditPackPdf, buildEvidenceZip } from '../src/lib/taxExport';
 import type { ReliefTag, Transaction } from '../src/lib/types';
 
 const ROOT_DIR = path.resolve(__dirname, '..');
-const ARTIFACT_DIR = '/home/yang/.gemini/antigravity/brain/90c0aac5-f12e-4e17-9e55-669b9c3ba1cf';
+// Optional convenience copy for a caller that explicitly wants generated artifacts elsewhere.
+// Keep the suite portable and sandbox-safe by default instead of targeting one developer tool's
+// machine-specific workspace on every run.
+const ARTIFACT_DIR = process.env.PIP_TEST_ARTIFACT_DIR?.trim() || null;
 const RECEIPTS_DIR = path.join(ROOT_DIR, 'assets/demo/receipts');
 
 const rPopular = path.join(RECEIPTS_DIR, 'popular_bookstore_receipt.png');
@@ -254,7 +257,7 @@ describe('Seed Tax Relief, Clean PDF Export & Separate Evidence ZIP Export', () 
     fs.writeFileSync(localPdfPath, pdfBytes);
     expect(fs.existsSync(localPdfPath)).toBe(true);
 
-    if (fs.existsSync(ARTIFACT_DIR)) {
+    if (ARTIFACT_DIR && fs.existsSync(ARTIFACT_DIR)) {
       const artifactPdfPath = path.join(ARTIFACT_DIR, `tax-relief-statement-${ya}.pdf`);
       fs.writeFileSync(artifactPdfPath, pdfBytes);
       expect(fs.existsSync(artifactPdfPath)).toBe(true);
@@ -270,7 +273,7 @@ describe('Seed Tax Relief, Clean PDF Export & Separate Evidence ZIP Export', () 
     fs.writeFileSync(localZipPath, zipBytes);
     expect(fs.existsSync(localZipPath)).toBe(true);
 
-    if (fs.existsSync(ARTIFACT_DIR)) {
+    if (ARTIFACT_DIR && fs.existsSync(ARTIFACT_DIR)) {
       const artifactZipPath = path.join(ARTIFACT_DIR, `tax-relief-evidence-${ya}.zip`);
       fs.writeFileSync(artifactZipPath, zipBytes);
       expect(fs.existsSync(artifactZipPath)).toBe(true);
