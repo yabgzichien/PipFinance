@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OPTIONAL_GROUPS, searchOptionalCategories, type OptionalCategory } from '../data/optionalCategories';
 import { useLanguage } from '../i18n';
 import { OPTIONAL_CATEGORY_TRANSLATIONS, OPTIONAL_GROUP_TITLES } from '../i18n/categoryTranslations';
 import { notify } from '../lib/platformAlert';
+import { createOpeningGuard } from '../lib/openingGuard';
 import type { Category, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -55,6 +56,15 @@ export function AddCategorySheet({
   const [query, setQuery] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const openingGuard = useRef(createOpeningGuard());
+  const observedVisible = useRef(visible);
+
+  // Invalidate immediately when a parent changes `visible`; waiting for an effect would leave
+  // a window where a just-resolved promise could affect the next opening.
+  if (observedVisible.current !== visible) {
+    observedVisible.current = visible;
+    if (!visible) openingGuard.current.invalidate();
+  }
 
   useEffect(() => {
     if (!visible) return;
@@ -83,28 +93,44 @@ export function AddCategorySheet({
     ));
   };
 
+  const closeCurrentOpening = () => {
+    openingGuard.current.invalidate();
+    onClose();
+  };
+
   const activateSelected = async () => {
     if (busy || selectedKeys.length === 0) return;
+    const operation = openingGuard.current.begin();
     setBusy(true);
+    let ids: string[];
     try {
-      const ids = await activateSuggested(selectedKeys);
-      onActivated?.(ids);
-      onClose();
+      ids = await activateSuggested(selectedKeys);
     } catch {
-      notify(t('activationFailedTitle'), t('activationFailedBody'));
-    } finally {
-      setBusy(false);
+      if (openingGuard.current.isCurrent(operation)) {
+        notify(t('activationFailedTitle'), t('activationFailedBody'));
+        setBusy(false);
+      }
+      return;
+    }
+    if (!openingGuard.current.isCurrent(operation)) return;
+    onActivated?.(ids);
+    if (openingGuard.current.isCurrent(operation)) {
+      closeCurrentOpening();
     }
   };
 
   const showAgain = async (templateKey: string) => {
     if (busy) return;
+    const operation = openingGuard.current.begin();
     setBusy(true);
     try {
       await activateSuggested([templateKey]);
     } catch {
-      notify(t('activationFailedTitle'), t('activationFailedBody'));
-    } finally {
+      if (openingGuard.current.isCurrent(operation)) {
+        notify(t('activationFailedTitle'), t('activationFailedBody'));
+      }
+    }
+    if (openingGuard.current.isCurrent(operation)) {
       setBusy(false);
     }
   };
@@ -116,8 +142,8 @@ export function AddCategorySheet({
     : t('addNCategories').replace('{n}', String(selectedKeys.length));
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
+    <Modal visible transparent animationType="fade" onRequestClose={closeCurrentOpening}>
+      <Pressable style={styles.backdrop} onPress={closeCurrentOpening} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[styles.center, { pointerEvents: 'box-none' }]}
@@ -125,7 +151,7 @@ export function AddCategorySheet({
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom }]}>
           <View style={styles.head}>
             <Text style={[styles.title, { color: colorTheme.ink }]}>{t('addCategorySheetTitle')}</Text>
-            <Pressable onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel={isZh ? '关闭' : 'Close'}>
+            <Pressable onPress={closeCurrentOpening} style={styles.closeButton} accessibilityRole="button" accessibilityLabel={isZh ? '关闭' : 'Close'}>
               <Icon name="x" size={20} color={colorTheme.ink2} />
             </Pressable>
           </View>
@@ -191,7 +217,7 @@ export function AddCategorySheet({
 
                         if (present?.isHidden) {
                           return (
-                            <View key={suggestion.templateKey} style={[styles.row, styles.staticRow, { borderColor: colorTheme.line }]}>
+                            <View key={suggestion.templateKey} style={[styles.row, { borderColor: colorTheme.line }]}>
                               <CatBadge category={catalogueCategory(suggestion)} size={40} />
                               <View style={styles.rowCopy}>
                                 <Text style={[styles.rowName, { color: colorTheme.ink }]}>{translation.name}</Text>
@@ -204,7 +230,7 @@ export function AddCategorySheet({
                                 accessibilityRole="button"
                                 accessibilityLabel={`${translation.name}: ${t('suggestionShowAgain')}`}
                               >
-                                <Text style={[styles.showAgainText, { color: accent.accent }]}>{t('suggestionShowAgain')}</Text>
+                                <Text style={[styles.showAgainText, { color: accent.onTint }]}>{t('suggestionShowAgain')}</Text>
                               </Pressable>
                             </View>
                           );
