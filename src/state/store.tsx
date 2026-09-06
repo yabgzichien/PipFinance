@@ -1,5 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { addCategory as dbAddCategory, deleteCategory as dbDeleteCategory, updateCategoryIcon as dbUpdateCategoryIcon, updateCategoryLabel as dbUpdateCategoryLabel, listCategories } from '../db/categoriesRepo';
+import {
+  addCategory as dbAddCategory,
+  deleteCategory as dbDeleteCategory,
+  updateCategoryIcon as dbUpdateCategoryIcon,
+  updateCategoryLabel as dbUpdateCategoryLabel,
+  updateCategoryHue as dbUpdateCategoryHue,
+  setCategoryHidden as dbSetCategoryHidden,
+  activateSuggestedCategories as dbActivateSuggested,
+  listCategories,
+} from '../db/categoriesRepo';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import { getMemoryMap, upsertMemory } from '../db/memoryRepo';
 import {
@@ -252,6 +261,9 @@ export interface AppData {
   ready: boolean;
   categories: Category[];
   catById: Record<string, Category>;
+  /** Visible-only categories, for new-entry choices and LLM options. See `categories` for the
+   *  full list every historical and budget view still needs. */
+  entryCategories: Category[];
   transactions: Transaction[];
   memory: MemoryMap;
   expectedIncome: number;
@@ -296,6 +308,9 @@ export interface AppData {
   updateCategoryIcon: (id: string, icon: string) => Promise<void>;
   /** Rename a category. Allowed on every category, including the protected generics. */
   updateCategoryLabel: (id: string, label: string) => Promise<void>;
+  updateCategoryHue: (id: string, hue: number) => Promise<void>;
+  setCategoryHidden: (id: string, hidden: boolean) => Promise<void>;
+  activateSuggested: (templateKeys: string[]) => Promise<string[]>;
   commitCategorized: (
     items: ExtractedTxn[],
     assignments: (string | null)[],
@@ -787,6 +802,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return map;
   }, [categories]);
 
+  /**
+   * The categories offered for NEW entries — manual entry, categorize, edit, LLM options.
+   *
+   * Deliberately a separate selector rather than a filter applied to `categories`: history,
+   * breakdowns, budget rows and the category-detail screen must still resolve a hidden category
+   * to its badge and label, so app state keeps every row and only the entry paths narrow.
+   */
+  const entryCategories = useMemo(() => categories.filter((c) => !c.isHidden), [categories]);
+
   /** All shares (open and settled) joined with person and bill context, for full traceability on the Owed screen. */
   const allOwedShares = useMemo<OpenShare[]>(() => {
     const txnById: Record<string, Transaction> = {};
@@ -868,6 +892,26 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const updateCategoryLabel = useCallback(async (id: string, label: string) => {
     await dbUpdateCategoryLabel(id, label);
     setCategories(await listCategories());
+  }, []);
+
+  const updateCategoryHue = useCallback(async (id: string, hue: number) => {
+    await dbUpdateCategoryHue(id, hue);
+    setCategories(await listCategories());
+  }, []);
+
+  /** Hide a category from new entries, or show it again. Throws LastVisibleCategoryError when
+   * hiding would empty a kind; callers surface that rather than swallowing it. */
+  const setCategoryHidden = useCallback(async (id: string, hidden: boolean) => {
+    await dbSetCategoryHidden(id, hidden);
+    setCategories(await listCategories());
+  }, []);
+
+  /** Turn on catalogue suggestions. Atomic and idempotent at the repo layer, so a retry after
+   * a failed save cannot leave a half-applied batch or a duplicate. */
+  const activateSuggested = useCallback(async (templateKeys: string[]) => {
+    const ids = await dbActivateSuggested(templateKeys);
+    setCategories(await listCategories());
+    return ids;
   }, []);
 
   const commitCategorized = useCallback(
@@ -2042,6 +2086,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     ready,
     categories,
     catById,
+    entryCategories,
     transactions,
     memory,
     expectedIncome,
@@ -2060,6 +2105,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     deleteCategory,
     updateCategoryIcon,
     updateCategoryLabel,
+    updateCategoryHue,
+    setCategoryHidden,
+    activateSuggested,
     commitCategorized,
     applyReliefDetection,
     saveTransactionEdits,
