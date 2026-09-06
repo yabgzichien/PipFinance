@@ -258,6 +258,24 @@ export interface Translations {
   deleteCategoryConfirmTitle: string;
   deleteCategoryConfirmBody: string;
 
+  // Trips
+  tripsTitle: string;
+  tripRecordedExpenses: string;
+  newTrip: string;
+  tripNamePlaceholder: string;
+  tripDatesOptional: string;
+  addExistingExpenses: string;
+  addToTrip: string;
+  noTrip: string;
+  archivedTrips: string;
+  archiveTrip: string;
+  unarchiveTrip: string;
+  showArchived: string;
+  deleteTripTitle: string;
+  deleteTripBody: string;
+  emptyTripBody: string;
+  tripCountExpenses: string;
+
   // Commitments / Tax / Currencies / Export
   commitmentsTitle: string;
   addCommitment: string;

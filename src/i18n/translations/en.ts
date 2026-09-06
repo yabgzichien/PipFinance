@@ -258,6 +258,24 @@ export const en: Translations = {
   deleteCategoryConfirmTitle: 'Delete category?',
   deleteCategoryConfirmBody: 'Transactions in this category will be moved to {fallback}.',
 
+  // Trips
+  tripsTitle: 'Trips',
+  tripRecordedExpenses: 'Recorded expenses',
+  newTrip: 'New trip',
+  tripNamePlaceholder: 'e.g. Singapore · September 2026',
+  tripDatesOptional: 'Dates (optional)',
+  addExistingExpenses: 'Add existing expenses',
+  addToTrip: 'Add to trip',
+  noTrip: 'No trip',
+  archivedTrips: 'Archived',
+  archiveTrip: 'Archive trip',
+  unarchiveTrip: 'Unarchive',
+  showArchived: 'Show archived',
+  deleteTripTitle: 'Remove this trip?',
+  deleteTripBody: 'Your expenses stay exactly as they are — only the grouping is removed.',
+  emptyTripBody: 'No expenses in this trip yet. Add one, or attach expenses you have already recorded.',
+  tripCountExpenses: '{n} expenses',
+
   // Commitments / Tax / Currencies / Export
   commitmentsTitle: 'Recurring commitments',
   addCommitment: 'Add recurring bill',

@@ -259,6 +259,24 @@ export const zh: Translations = {
   deleteCategoryConfirmBody: '该分类下的交易明细将重新归类至“{fallback}”。',
 
   // Commitments / Tax / Currencies / Export
+
+  // Trips
+  tripsTitle: '行程',
+  tripRecordedExpenses: '已记录支出',
+  newTrip: '新行程',
+  tripNamePlaceholder: '例如：新加坡 · 2026年9月',
+  tripDatesOptional: '日期（选填）',
+  addExistingExpenses: '添加已有支出',
+  addToTrip: '添加至行程',
+  noTrip: '无行程',
+  archivedTrips: '已存档',
+  archiveTrip: '存档行程',
+  unarchiveTrip: '取消存档',
+  showArchived: '显示已存档',
+  deleteTripTitle: '移除该行程？',
+  deleteTripBody: '您记录的支出不受影响——只是移除了行程分组。',
+  emptyTripBody: '该行程暂无支出。添加一笔新支出，或关联已记录的支出。',
+  tripCountExpenses: '{n} 笔支出',
   commitmentsTitle: '周期性账单与定投',
   addCommitment: '添加周期项目',
   frequency: '周期频率',
