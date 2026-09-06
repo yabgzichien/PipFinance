@@ -550,6 +550,13 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     hue: c.hue,
     kind: c.kind,
     isDefault: c.isDefault,
+    // Visibility, template identity and presentation overrides are user decisions, not derived
+    // state — a restore that dropped them would silently un-hide categories and revert renames.
+    isHidden: c.isHidden,
+    templateKey: c.templateKey,
+    labelOverride: c.labelOverride,
+    iconOverride: c.iconOverride,
+    hueOverride: c.hueOverride,
   }));
 
   const commitments = (extra?.commitments ?? []).map((c) => ({

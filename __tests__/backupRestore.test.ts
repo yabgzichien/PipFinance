@@ -6,8 +6,44 @@ import {
 import { generateFullBackupZip, type CommitmentExportExtra } from '../src/lib/financialExport';
 import { peekBackupZip, InvalidBackupError } from '../src/lib/backupRestore';
 import { validateBackupPayload } from '../src/db/restoreRepo';
+import { __seedCategoriesForTest } from '../src/db/db';
 import type { Account, BalanceEntry, Category, Transaction } from '../src/lib/types';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
+
+/** Builds a minimal full-backup fixture and returns the parsed `backup.json` payload, mirroring
+ *  the zip-reading idiom above (`unzipSync` + `strFromU8`). `extra` accepts the same pieces
+ *  `generateFullBackupZip` does, plus `transactions` (Task 20/Trips will pass its own extra
+ *  pieces through the same second argument, so this signature is fixed up front). */
+function buildBackupPayloadForTest(
+  cats: Category[],
+  extra?: Partial<CommitmentExportExtra & { transactions: Transaction[] }>
+): any {
+  const { transactions = [], ...restExtra } = extra ?? {};
+  const period = buildReportPeriod('all-time');
+  const bundle = buildFinancialReportBundle(transactions, cats, [], [], period, 'Pip User', {}, 'MYR');
+  const zipBytes = generateFullBackupZip(bundle, transactions, restExtra as CommitmentExportExtra);
+  const zipEntries = unzipSync(zipBytes);
+  return JSON.parse(strFromU8(zipEntries['backup.json']));
+}
+
+/** Minimal fake db for `seedCategories`, mirroring __tests__/categorySeeding.test.ts's idiom. */
+function fakeDb(rows: { all?: Record<string, unknown[]> } = {}) {
+  const statements: { sql: string; args: unknown[] }[] = [];
+  return {
+    statements,
+    runAsync: (sql: string, ...args: unknown[]) => {
+      statements.push({ sql, args });
+      return Promise.resolve({ changes: 1, lastInsertRowId: 1 });
+    },
+    getFirstAsync: () => Promise.resolve(null),
+    getAllAsync: (sql: string) => {
+      const key = Object.keys(rows.all ?? {}).find((k) => sql.includes(k));
+      return Promise.resolve(key !== undefined ? (rows.all as Record<string, unknown[]>)[key] : []);
+    },
+    execAsync: () => Promise.resolve(),
+    withTransactionAsync: (fn: () => Promise<void>) => fn(),
+  };
+}
 
 function makeTxn(over: Partial<Transaction>): Transaction {
   return {
@@ -170,5 +206,39 @@ describe('validateBackupPayload', () => {
     expect(validateBackupPayload(null)).toBe(false);
     expect(validateBackupPayload('a string')).toBe(false);
     expect(validateBackupPayload({ transactions: 'not-an-array' })).toBe(false);
+  });
+});
+
+describe('category visibility and overrides round-trip', () => {
+  it('carries the new fields through the backup payload', () => {
+    const cats: Category[] = [
+      {
+        id: 'opt-petrol', label: 'Petrol', icon: 'car', hue: 12, kind: 'expense', isDefault: false,
+        isHidden: true, templateKey: 'optional.car.petrol.v1',
+        labelOverride: 'Minyak', iconOverride: null, hueOverride: 42,
+      },
+    ];
+    const payload = buildBackupPayloadForTest(cats);
+    expect(payload.categories[0]).toMatchObject({
+      id: 'opt-petrol',
+      isHidden: true,
+      templateKey: 'optional.car.petrol.v1',
+      labelOverride: 'Minyak',
+      hueOverride: 42,
+    });
+  });
+
+  it('accepts an older backup whose categories have none of the new fields', () => {
+    const legacy = { categories: [{ id: 'food', label: 'Food', icon: 'burger', hue: 162, kind: 'expense', isDefault: true }] };
+    expect(validateBackupPayload(legacy)).toBe(true);
+  });
+
+  it('a restored optional category is not re-added by the next seed', async () => {
+    const db = fakeDb({ all: { deleted_default_categories: [] } });
+    await __seedCategoriesForTest(db as any);
+    const inserted = db.statements
+      .filter((s) => s.sql.includes('INSERT INTO categories'))
+      .map((s) => s.args[0]);
+    expect(inserted).not.toContain('opt-petrol');
   });
 });

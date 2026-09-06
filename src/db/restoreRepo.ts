@@ -14,7 +14,22 @@ import { merchantKey as toMerchantKey } from '../lib/normalize';
 export interface BackupPayload {
   version?: number;
   statement?: { exportedAt?: string };
-  categories?: any[];
+  categories?: Array<{
+    id?: string;
+    label?: string;
+    icon?: string;
+    hue?: number;
+    kind?: string;
+    isDefault?: boolean;
+    sort?: number;
+    // Visibility, template identity and presentation overrides — absent on a backup written
+    // before 2026-09-06, which must read as "visible, no explicit overrides".
+    isHidden?: boolean;
+    templateKey?: string | null;
+    labelOverride?: string | null;
+    iconOverride?: string | null;
+    hueOverride?: number | null;
+  }>;
   deletedDefaultCategories?: string[];
   accounts?: any[];
   transactions?: any[];
@@ -106,14 +121,24 @@ export async function restoreFromBackupPayload(
     for (const c of payload.categories ?? []) {
       if (!c?.id || !c?.label) continue;
       await db.runAsync(
-        'INSERT INTO categories (id, label, icon, hue, kind, is_default, sort) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        `INSERT INTO categories
+           (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key, label_override, icon_override, hue_override)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         c.id,
         c.label,
         c.icon ?? 'dots',
         typeof c.hue === 'number' ? c.hue : 0,
         c.kind === 'income' ? 'income' : 'expense',
         c.isDefault ? 1 : 0,
-        sort++
+        sort++,
+        // A backup written before 2026-09-06 carries none of these. Absent reads as "visible,
+        // no explicit overrides", which is exactly what those installs meant. A stored custom
+        // label still lives in `label` and is preserved untouched.
+        c.isHidden ? 1 : 0,
+        c.templateKey ?? null,
+        c.labelOverride ?? null,
+        c.iconOverride ?? null,
+        c.hueOverride ?? null
       );
     }
     for (const id of payload.deletedDefaultCategories ?? []) {
