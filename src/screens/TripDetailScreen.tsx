@@ -30,20 +30,31 @@ function AddExistingExpensesModal({
   visible,
   onClose,
   tripId,
+  tripName,
 }: {
   visible: boolean;
   onClose: () => void;
   tripId: string;
+  tripName: string;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, isZh, formatShortDate } = useLanguage();
-  const { transactions, catById, setTransactionsTrip } = useAppData();
+  const { transactions, catById, trips, setTransactionsTrip } = useAppData();
   const dc = useDisplayCurrency();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+
+  // Every other trip's name, keyed by id, so a row already belonging to one can say so —
+  // moving it here is a legitimate, spec-anticipated edit, but only if the user can see what
+  // it costs the trip it's leaving.
+  const tripNameById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const tr of trips) map[tr.id] = tr.name;
+    return map;
+  }, [trips]);
 
   const candidates = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -70,7 +81,7 @@ function AddExistingExpensesModal({
     });
   };
 
-  const commit = async () => {
+  const applySelection = async () => {
     if (selected.size === 0 || saving) return;
     setSaving(true);
     try {
@@ -81,6 +92,27 @@ function AddExistingExpensesModal({
     } finally {
       setSaving(false);
     }
+  };
+
+  const commit = () => {
+    if (selected.size === 0 || saving) return;
+    // Some of what's selected already belongs to another trip — moving it is a legitimate,
+    // explicit edit (spec §6.3), but it has to actually be explicit: say what's about to happen,
+    // by name, before it happens. Nothing is blocked, this only asks for a beat of confirmation.
+    const reassignCount = [...selected].filter((id) => {
+      const tx = candidates.find((c) => c.id === id);
+      return !!tx?.tripId;
+    }).length;
+    if (reassignCount === 0) {
+      void applySelection();
+      return;
+    }
+    confirmAction(
+      t('moveToTripConfirmTitle', { trip: tripName }),
+      t('moveToTripConfirmBody', { n: reassignCount, trip: tripName }),
+      t('moveToTripConfirmAction'),
+      applySelection
+    );
   };
 
   const handleClose = () => {
@@ -124,6 +156,7 @@ function AddExistingExpensesModal({
               candidates.map((tx) => {
                 const cat = catById[tx.categoryId ?? 'other'] ?? fallback;
                 const on = selected.has(tx.id);
+                const otherTripName = tx.tripId ? tripNameById[tx.tripId] : undefined;
                 return (
                   <Pressable
                     key={tx.id}
@@ -131,7 +164,11 @@ function AddExistingExpensesModal({
                     style={({ pressed }) => [styles.pickRow, { borderColor: colorTheme.line2 }, pressed && { backgroundColor: colorTheme.surface2 }]}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: on }}
-                    accessibilityLabel={`${tCat(cat)} ${fmtMoney(tx.nativeAmount ?? tx.amount, tx.currency)}`}
+                    accessibilityLabel={
+                      otherTripName
+                        ? `${tCat(cat)} ${fmtMoney(tx.nativeAmount ?? tx.amount, tx.currency)} · ${t('inOtherTrip', { name: otherTripName })}`
+                        : `${tCat(cat)} ${fmtMoney(tx.nativeAmount ?? tx.amount, tx.currency)}`
+                    }
                   >
                     <View style={[styles.checkbox, { borderColor: colorTheme.line }, on && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
                       {on && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
@@ -142,6 +179,14 @@ function AddExistingExpensesModal({
                         {tx.remark?.trim() || tx.merchantRaw || tCat(cat)}
                       </Body>
                       <Caption color={colorTheme.ink2}>{formatShortDate(tx.date ?? tx.createdAt)}</Caption>
+                      {otherTripName && (
+                        <View style={[styles.otherTripChip, { backgroundColor: theme.accentTint }]}>
+                          <Icon name="pin" size={10} color={theme.accentInk} />
+                          <Text style={[styles.otherTripChipText, { color: theme.onTint }]} numberOfLines={1}>
+                            {t('inOtherTrip', { name: otherTripName })}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <Amount value={tx.nativeAmount ?? tx.amount} currency={tx.currency} size={14} weight={700} />
                   </Pressable>
@@ -382,7 +427,7 @@ export function TripDetailScreen({
       </ScrollView>
 
       <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
-      <AddExistingExpensesModal visible={pickerOpen} onClose={() => setPickerOpen(false)} tripId={trip.id} />
+      <AddExistingExpensesModal visible={pickerOpen} onClose={() => setPickerOpen(false)} tripId={trip.id} tripName={trip.name} />
     </View>
   );
 }
@@ -423,5 +468,9 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 14, paddingVertical: 11 },
   pickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
   checkbox: { width: 22, height: 22, borderRadius: 999, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  // Same pill idiom as AllTransactionsScreen's owedChip: a small tinted badge carrying one fact
+  // the row would otherwise hide, sitting right under the row's date line.
+  otherTripChip: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: 4, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 999 },
+  otherTripChipText: { fontFamily: uiFont(600), fontSize: 10.5 },
   primaryLabel: { fontFamily: uiFont(700), fontSize: 15, color: '#fff' },
 });

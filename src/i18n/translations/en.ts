@@ -275,6 +275,10 @@ export const en: Translations = {
   deleteTripBody: 'Your expenses stay exactly as they are — only the grouping is removed.',
   emptyTripBody: 'No expenses in this trip yet. Add one, or attach expenses you have already recorded.',
   tripCountExpenses: '{n} expenses',
+  inOtherTrip: 'In {name}',
+  moveToTripConfirmTitle: 'Move expenses to {trip}?',
+  moveToTripConfirmBody: '{n} of the expenses you selected already belong to another trip. Continuing moves them out of that trip and into {trip}.',
+  moveToTripConfirmAction: 'Move',
 
   // Commitments / Tax / Currencies / Export
   commitmentsTitle: 'Recurring commitments',

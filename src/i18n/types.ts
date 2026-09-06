@@ -275,6 +275,10 @@ export interface Translations {
   deleteTripBody: string;
   emptyTripBody: string;
   tripCountExpenses: string;
+  inOtherTrip: string;
+  moveToTripConfirmTitle: string;
+  moveToTripConfirmBody: string;
+  moveToTripConfirmAction: string;
 
   // Commitments / Tax / Currencies / Export
   commitmentsTitle: string;
