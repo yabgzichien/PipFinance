@@ -25,7 +25,7 @@ export const EXPENSE_CATEGORIES: SeedCategory[] = [
   { id: 'shopping', label: 'Shopping', icon: 'cart', hue: 42, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'entertainment', label: 'Entertainment', icon: 'play', hue: 305, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense', ...SEED_DEFAULTS },
-  { id: 'travelling', label: 'Travelling', icon: 'car', hue: 248, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'travelling', label: 'Transport', icon: 'car', hue: 248, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'phone-bill', label: 'Phone Bill', icon: 'phone', hue: 355, kind: 'expense', ...SEED_DEFAULTS },

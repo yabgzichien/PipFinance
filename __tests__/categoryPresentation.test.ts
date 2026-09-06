@@ -47,9 +47,9 @@ describe('label resolution', () => {
     expect(resolveCategoryPresentation(custom, 'zh').label).toBe('Side Hustle');
   });
 
-  it('translates the travelling id by its current supplied wording', () => {
+  it('shows the relabelled Transport wording for the travelling id', () => {
     const t = cat({ id: 'travelling', label: 'Transport', templateKey: 'starter.travelling.v1' });
-    expect(resolveCategoryPresentation(t, 'en').label).toBe('Travelling');
+    expect(resolveCategoryPresentation(t, 'en').label).toBe('Transport');
     expect(resolveCategoryPresentation(t, 'zh').label).toBe('交通出行');
   });
 });

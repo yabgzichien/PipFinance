@@ -198,7 +198,7 @@ describe('migrateCategoryOverrides', () => {
       first: { app_meta: null },
       all: {
         'SELECT id, label, icon, hue FROM categories': [
-          { id: 'travelling', label: 'Travelling', icon: 'car', hue: 248 },
+          { id: 'travelling', label: 'Transport', icon: 'car', hue: 248 },
         ],
       },
     });

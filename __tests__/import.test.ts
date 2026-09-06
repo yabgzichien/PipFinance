@@ -156,7 +156,7 @@ describe('detectSourceVocabulary', () => {
   it('does not let a keyword list claim a label the source defined', () => {
     // 'Toll' and 'Fuel' both hit the built-in travelling keyword list; in a
     // tracker export they must stay distinct categories of their own.
-    const travelling = cat({ id: 'travelling', label: 'Travelling', kind: 'expense' });
+    const travelling = cat({ id: 'travelling', label: 'Transport', kind: 'expense' });
     const { labels } = detectSourceVocabulary(trackerRows(), [...cats, travelling]);
     const byLabel = Object.fromEntries(labels.map((l) => [l.label, l]));
     expect(byLabel['Toll'].existingId).toBeNull();
@@ -190,7 +190,7 @@ describe('detectSourceVocabulary', () => {
 describe('assignImported with a source vocabulary', () => {
   const cats = [
     cat({ id: 'food', label: 'Food', kind: 'expense' }),
-    cat({ id: 'travelling', label: 'Travelling', kind: 'expense' }),
+    cat({ id: 'travelling', label: 'Transport', kind: 'expense' }),
     cat({ id: 'other', label: 'Other Expenses', kind: 'expense' }),
   ];
   const catById: Record<string, Category> = Object.fromEntries(cats.map((c) => [c.id, c]));

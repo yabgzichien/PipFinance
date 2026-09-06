@@ -24,7 +24,7 @@ export const DEFAULT_CATEGORY_TRANSLATIONS: Record<string, Record<SupportedLangu
     zh: '其他支出',
   },
   travelling: {
-    en: 'Travelling',
+    en: 'Transport',
     zh: '交通出行',
   },
   insurance: {

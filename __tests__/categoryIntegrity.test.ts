@@ -122,3 +122,14 @@ describe('optional catalogue vs retired ids', () => {
     for (const c of OPTIONAL_CATEGORIES) expect(starters.has(c.templateKey)).toBe(false);
   });
 });
+
+describe('Transport relabel', () => {
+  it('changes the wording without creating a new id', () => {
+    expect(byId.get('travelling')?.label).toBe('Transport');
+    expect(byId.has('transport')).toBe(false);
+  });
+
+  it('keeps the retired transport id pointed at travelling', () => {
+    expect(CATEGORY_ID_REMAP['transport']).toBe('travelling');
+  });
+});
