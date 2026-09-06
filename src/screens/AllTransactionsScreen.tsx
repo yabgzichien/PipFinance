@@ -54,7 +54,10 @@ interface OwedInfo {
  * than on a wrapping `Card`, since a virtualised list has nowhere to hang a wrapper. The rows
  * are opaque and flush, so the group still reads as a single card.
  */
-const TxnRow = React.memo(function TxnRow({
+/** One ledger row, shared with TripDetailScreen so a trip's transaction list looks and behaves
+ *  exactly like the main ledger's — same brand-logo/category-badge fallback, same "owed" chip,
+ *  same tap-to-edit affordance. */
+export const TxnRow = React.memo(function TxnRow({
   dc,
   txn,
   cat,
@@ -144,11 +147,15 @@ export function AllTransactionsScreen({
   filterCategoryId,
   onClearFilter,
   onOpenOwed,
+  onOpenTrips,
 }: {
   onBack: () => void;
   filterCategoryId?: string | null;
   onClearFilter: () => void;
   onOpenOwed: () => void;
+  /** Opens the Trips list. Trips has no bottom-nav tab of its own — this compact header chip
+   *  is its only entry point from Activity. */
+  onOpenTrips: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -435,9 +442,20 @@ export function AllTransactionsScreen({
             title={filtered ? (filterCat ? tCat(filterCat) : (isZh ? '已筛选' : 'Filtered')) : t('allTransactionsTitle')}
             onBack={onBack}
             right={
-              <View>
-                <IconButton name="filter" onPress={() => setFilterOpen(true)} size={18} accessibilityLabel="Filter transactions" />
-                {advancedActive && <View style={[styles.filterDot, { backgroundColor: theme.accent, borderColor: colorTheme.bg }]} />}
+              <View style={styles.headerActions}>
+                <Pressable
+                  onPress={onOpenTrips}
+                  style={({ pressed }) => [styles.tripsChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, pressed && { backgroundColor: colorTheme.surface2 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('tripsTitle')}
+                >
+                  <Icon name="pin" size={15} color={colorTheme.ink2} />
+                  <Text style={[styles.tripsChipText, { color: colorTheme.ink }]}>{t('tripsTitle')}</Text>
+                </Pressable>
+                <View>
+                  <IconButton name="filter" onPress={() => setFilterOpen(true)} size={18} accessibilityLabel="Filter transactions" />
+                  {advancedActive && <View style={[styles.filterDot, { backgroundColor: theme.accent, borderColor: colorTheme.bg }]} />}
+                </View>
               </View>
             }
           />
@@ -518,6 +536,9 @@ const styles = StyleSheet.create({
   selectBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 6 },
   selectTitle: { flex: 1, fontFamily: uiFont(700), fontSize: 18 },
   delAction: { width: 42, height: 42, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tripsChip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1 },
+  tripsChipText: { fontFamily: uiFont(700), fontSize: 13 },
   filterDot: { position: 'absolute', top: -2, right: -2, width: 10, height: 10, borderRadius: 999, borderWidth: 2 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 13, marginTop: 10 },
   searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 14, paddingVertical: 11 },

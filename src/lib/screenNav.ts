@@ -23,7 +23,9 @@ export type Screen =
   | 'netWorthHistory'
   | 'tax'
   | 'currencySettings'
-  | 'backup';
+  | 'backup'
+  | 'trips'
+  | 'tripDetail';
 
 /** The destinations reachable from more than one place, so their own "back" has to return
  * wherever the user actually came from rather than a fixed screen. */
@@ -52,6 +54,8 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
       return origins.currencyOrigin ?? 'settings';
     case 'netWorthHistory':
       return 'networth';
+    case 'tripDetail':
+      return 'trips';
     case 'export':
       return origins.exportOrigin;
     case 'owed':
@@ -67,5 +71,7 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
     case 'networth':
     case 'breakdown':
       return 'home';
+    case 'trips':
+      return 'transactions';
   }
 }

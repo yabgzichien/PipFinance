@@ -39,6 +39,8 @@ import { CommitmentsScreen } from './src/screens/CommitmentsScreen';
 import { TaxScreen } from './src/screens/TaxScreen';
 import { CurrencySettingsScreen } from './src/screens/CurrencySettingsScreen';
 import { BackupScreen } from './src/screens/BackupScreen';
+import { TripsScreen } from './src/screens/TripsScreen';
+import { TripDetailScreen } from './src/screens/TripDetailScreen';
 import { GlossaryModal } from './src/components/InfoButton';
 import { AppAlertModal } from './src/components/AppAlertModal';
 import { TourSpotlight, type TourStepInfo } from './src/components/TourSpotlight';
@@ -228,6 +230,11 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
   const [txnFilter, setTxnFilter] = useState<string | null>(null);
   const [categoryDetailId, setCategoryDetailId] = useState<string | null>(null);
+  const [tripDetailId, setTripDetailId] = useState<string | null>(null);
+  // Set only when Add was opened from a trip's "Add expense" action, so AddFlow can attach the
+  // trip to whatever it saves and show it in the manual-entry title. Cleared on close alongside
+  // the other one-shot add-flow prefills below.
+  const [addTripId, setAddTripId] = useState<string | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
   // Calendar is reachable from both Recap and the Home streak card, so back has to return
   // where it came from  same pattern as owedOrigin above.
@@ -520,6 +527,17 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     }
     setAddTutorialMode(undefined);
     setAddInitialType(undefined);
+    setAddTripId(null);
+    setScreen('add');
+  };
+
+  // From a trip's own "Add expense" action: skip straight to manual entry (there's no reason to
+  // scan a receipt hub first when the user already committed to logging one trip expense) with
+  // the trip prefilled and shown in the title.
+  const openAddForTrip = (tripId: string) => {
+    setAddTutorialMode(undefined);
+    setAddInitialType(undefined);
+    setAddTripId(tripId);
     setScreen('add');
   };
 
@@ -668,9 +686,10 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       )}
       {screen === 'add' && (
         <AddFlow
-          key={addInitialType ? `add:${addInitialType}` : 'add:default'}
-          initialPhase={addInitialType ? 'manual' : undefined}
+          key={addTripId ? `add:trip:${addTripId}` : addInitialType ? `add:${addInitialType}` : 'add:default'}
+          initialPhase={addTripId || addInitialType ? 'manual' : undefined}
           initialType={addInitialType}
+          initialTripId={addTripId}
           tutorialMode={addTutorialMode}
           activeTourAnchor={activeAnchorId}
           onPhaseChange={handleAddPhaseChange}
@@ -679,6 +698,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onClose={() => {
             setAddTutorialMode(undefined);
             setAddInitialType(undefined);
+            setAddTripId(null);
             if (tourStep === 'scan_explain' || tourStep === 'manual_btn') {
               setTourStep('plus');
             } else if (tourStep === 'manual_add_expense') {
@@ -727,7 +747,24 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setOwedOrigin('transactions');
             setScreen('owed');
           }}
+          onOpenTrips={() => setScreen('trips')}
           onBack={goBack}
+        />
+      )}
+      {screen === 'trips' && (
+        <TripsScreen
+          onBack={goBack}
+          onOpenTrip={(id) => {
+            setTripDetailId(id);
+            setScreen('tripDetail');
+          }}
+        />
+      )}
+      {screen === 'tripDetail' && tripDetailId && (
+        <TripDetailScreen
+          tripId={tripDetailId}
+          onBack={goBack}
+          onAddExpense={(id) => openAddForTrip(id)}
         />
       )}
       {screen === 'owed' && <OwedScreen onBack={goBack} />}

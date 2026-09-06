@@ -1,0 +1,427 @@
+import React, { useMemo, useState } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { EditTransactionModal } from '../components/EditTransactionModal';
+import { Icon } from '../components/Icon';
+import { Pip } from '../components/Pip';
+import { TxnRow } from './AllTransactionsScreen';
+import { Amount, Body, Card, Caption, CatBadge, Eyebrow, IconButton, Label, PrimaryButton, Title, TopBar } from '../components/ui';
+import { fmtMoney } from '../lib/format';
+import { confirmAction } from '../lib/platformAlert';
+import { outstanding } from '../lib/split';
+import { computeTripTotals } from '../lib/trips';
+import type { Category, Transaction } from '../lib/types';
+import { useAccent } from '../state/accent';
+import { useThemeColors } from '../state/colorScheme';
+import { useAppData } from '../state/store';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
+import { useLanguage } from '../i18n';
+import { radius, spacing, uiFont } from '../theme';
+
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
+
+/**
+ * Picker for "Add existing expenses": every expense not already in this trip, so a charge
+ * logged before the trip screen existed (or attached to the wrong trip) can still be pulled
+ * in. Kept local to this screen rather than a shared component — there's no other place in the
+ * app that needs a bare multi-select transaction list.
+ */
+function AddExistingExpensesModal({
+  visible,
+  onClose,
+  tripId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  tripId: string;
+}) {
+  const insets = useSafeAreaInsets();
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { t, tCat, isZh, formatShortDate } = useLanguage();
+  const { transactions, catById, setTransactionsTrip } = useAppData();
+  const dc = useDisplayCurrency();
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return transactions
+      .filter((tx) => tx.type === 'expense' && tx.tripId !== tripId)
+      .filter((tx) => {
+        if (!q) return true;
+        const cat = catById[tx.categoryId ?? 'other'] ?? fallback;
+        return (
+          (tx.merchantRaw ?? '').toLowerCase().includes(q) ||
+          (tx.remark ?? '').toLowerCase().includes(q) ||
+          cat.label.toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt));
+  }, [transactions, tripId, query, catById]);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const commit = async () => {
+    if (selected.size === 0 || saving) return;
+    setSaving(true);
+    try {
+      await setTransactionsTrip([...selected], tripId);
+      setSelected(new Set());
+      setQuery('');
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClose = () => {
+    setSelected(new Set());
+    setQuery('');
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <Pressable style={styles.backdrop} onPress={handleClose} />
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.sheetAvoider} pointerEvents="box-none">
+        <View style={[styles.sheetCard, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 18 }]}>
+          <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
+          <View style={styles.sheetHead}>
+            <Title>{t('addExistingExpenses')}</Title>
+            <Pressable onPress={handleClose} hitSlop={8} accessibilityRole="button" accessibilityLabel={t('cancel')}>
+              <Icon name="x" size={20} color={colorTheme.ink2} />
+            </Pressable>
+          </View>
+
+          <View style={[styles.searchRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+            <Icon name="search" size={16} color={colorTheme.ink3} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={t('searchTransactionsPlaceholder')}
+              placeholderTextColor={colorTheme.ink3}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={[styles.searchInput, { color: colorTheme.ink }]}
+            />
+          </View>
+
+          <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {candidates.length === 0 ? (
+              <Caption color={colorTheme.ink2} style={{ textAlign: 'center', paddingVertical: spacing.lg }}>
+                {isZh ? '没有可添加的支出' : 'No expenses available to add'}
+              </Caption>
+            ) : (
+              candidates.map((tx) => {
+                const cat = catById[tx.categoryId ?? 'other'] ?? fallback;
+                const on = selected.has(tx.id);
+                return (
+                  <Pressable
+                    key={tx.id}
+                    onPress={() => toggle(tx.id)}
+                    style={({ pressed }) => [styles.pickRow, { borderColor: colorTheme.line2 }, pressed && { backgroundColor: colorTheme.surface2 }]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                    accessibilityLabel={`${tCat(cat)} ${fmtMoney(tx.nativeAmount ?? tx.amount, tx.currency)}`}
+                  >
+                    <View style={[styles.checkbox, { borderColor: colorTheme.line }, on && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
+                      {on && <Icon name="check" size={13} color="#fff" stroke={2.6} />}
+                    </View>
+                    <CatBadge category={cat} size={36} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Body weight={700} numberOfLines={1}>
+                        {tx.remark?.trim() || tx.merchantRaw || tCat(cat)}
+                      </Body>
+                      <Caption color={colorTheme.ink2}>{formatShortDate(tx.date ?? tx.createdAt)}</Caption>
+                    </View>
+                    <Amount value={tx.nativeAmount ?? tx.amount} currency={tx.currency} size={14} weight={700} />
+                  </Pressable>
+                );
+              })
+            )}
+          </ScrollView>
+
+          <View style={{ marginTop: spacing.md }}>
+            <PrimaryButton onPress={commit} disabled={selected.size === 0 || saving}>
+              <Text style={styles.primaryLabel}>
+                {t('addToTrip')}{selected.size > 0 ? ` · ${selected.size}` : ''}
+              </Text>
+            </PrimaryButton>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+export function TripDetailScreen({
+  tripId,
+  onBack,
+  onAddExpense,
+}: {
+  tripId: string;
+  onBack: () => void;
+  /** Opens the normal add flow with this trip prefilled and visible. */
+  onAddExpense: (tripId: string, tripName: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { t, tCat, isZh, formatShortDate } = useLanguage();
+  const { trips, transactions, catById, splits, shares, renameTrip, setTripArchived, deleteTrip } = useAppData();
+  const dc = useDisplayCurrency();
+
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  const trip = trips.find((tr) => tr.id === tripId);
+
+  const tripTxns = useMemo(() => transactions.filter((tx) => tx.tripId === tripId), [transactions, tripId]);
+  const totals = useMemo(() => computeTripTotals(transactions, tripId, dc.convertTxn), [transactions, tripId, dc]);
+  const sortedTxns = useMemo(
+    () => [...tripTxns].sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt)),
+    [tripTxns]
+  );
+
+  const owedByTxn = useMemo(() => {
+    const openBySplit: Record<string, number> = {};
+    for (const s of shares) {
+      if (s.status !== 'open') continue;
+      openBySplit[s.splitId] = (openBySplit[s.splitId] ?? 0) + outstanding(s);
+    }
+    const map: Record<string, { owed: number; gross: number }> = {};
+    for (const split of splits) {
+      const owed = openBySplit[split.id] ?? 0;
+      if (owed > 0) map[split.txnId] = { owed, gross: split.gross };
+    }
+    return map;
+  }, [splits, shares]);
+
+  if (!trip) {
+    return (
+      <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
+        <View style={{ paddingTop: insets.top + 4 }}>
+          <TopBar title={t('tripsTitle')} onBack={onBack} />
+        </View>
+        <View style={styles.center}>
+          <Pip size={64} expr="curious" />
+          <Body color={colorTheme.ink2} style={{ marginTop: spacing.md }}>
+            {isZh ? '找不到该行程。' : "This trip couldn't be found."}
+          </Body>
+        </View>
+      </View>
+    );
+  }
+
+  const openRename = () => {
+    setDraftName(trip.name);
+    setRenaming(true);
+  };
+  const saveRename = async () => {
+    const trimmed = draftName.trim();
+    if (!trimmed || savingName) return;
+    setSavingName(true);
+    try {
+      if (trimmed !== trip.name) await renameTrip(trip.id, trimmed);
+      setRenaming(false);
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const confirmDelete = () => {
+    confirmAction(t('deleteTripTitle'), t('deleteTripBody'), t('delete'), async () => {
+      await deleteTrip(trip.id);
+      onBack();
+    });
+  };
+
+  return (
+    <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
+      <View style={{ paddingTop: insets.top + 4 }}>
+        <TopBar
+          title={trip.name}
+          onBack={onBack}
+          right={
+            <View style={styles.headerActions}>
+              <IconButton name="pencil" onPress={openRename} size={16} accessibilityLabel={isZh ? '重命名行程' : 'Rename trip'} />
+              <IconButton name="trash" onPress={confirmDelete} size={16} accessibilityLabel={t('deleteTripTitle')} />
+            </View>
+          }
+        />
+      </View>
+
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm, paddingBottom: insets.bottom + spacing.xl }} showsVerticalScrollIndicator={false}>
+        {renaming && (
+          <Card style={styles.renameCard}>
+            <TextInput
+              value={draftName}
+              onChangeText={setDraftName}
+              placeholder={t('tripNamePlaceholder')}
+              placeholderTextColor={colorTheme.ink3}
+              style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
+              maxLength={60}
+              autoFocus
+            />
+            <View style={styles.renameActions}>
+              <Pressable onPress={() => setRenaming(false)} style={styles.renameActionBtn} disabled={savingName}>
+                <Label weight={700} color={colorTheme.ink2}>{t('cancel')}</Label>
+              </Pressable>
+              <Pressable onPress={saveRename} style={styles.renameActionBtn} disabled={savingName || !draftName.trim()}>
+                <Label weight={700} color={theme.accent}>{t('save')}</Label>
+              </Pressable>
+            </View>
+          </Card>
+        )}
+
+        <Card style={styles.hero}>
+          <Eyebrow>{t('tripRecordedExpenses')}</Eyebrow>
+          <Amount value={totals.recordedExpenses} currency={dc.code} size={32} weight={700} />
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+            {t('tripCountExpenses', { n: totals.txnCount })}
+          </Caption>
+
+          <Pressable
+            onPress={() => setTripArchived(trip.id, !trip.archived)}
+            style={[styles.archiveBtn, { borderColor: colorTheme.line }]}
+            accessibilityRole="button"
+          >
+            <Label weight={700} color={colorTheme.ink}>
+              {trip.archived ? t('unarchiveTrip') : t('archiveTrip')}
+            </Label>
+          </Pressable>
+        </Card>
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            onPress={() => onAddExpense(trip.id, trip.name)}
+            style={[styles.actionBtn, { backgroundColor: theme.accentInk }]}
+            accessibilityRole="button"
+          >
+            <Icon name="plus" size={16} color="#fff" />
+            <Text style={styles.actionBtnLabel}>{isZh ? '添加支出' : 'Add expense'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setPickerOpen(true)}
+            style={[styles.actionBtn, styles.actionBtnSecondary, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+            accessibilityRole="button"
+          >
+            <Icon name="folder" size={16} color={colorTheme.ink} />
+            <Text style={[styles.actionBtnLabel, { color: colorTheme.ink }]}>{t('addExistingExpenses')}</Text>
+          </Pressable>
+        </View>
+
+        {totals.byCategory.length > 0 && (
+          <>
+            <Eyebrow style={{ marginTop: spacing.base, marginBottom: spacing.sm }}>
+              {isZh ? '按分类' : 'By category'}
+            </Eyebrow>
+            <Card style={styles.listCard}>
+              {totals.byCategory.map((b, i) => {
+                const cat = catById[b.categoryId] ?? fallback;
+                const pct = totals.recordedExpenses > 0 ? Math.round((b.amount / totals.recordedExpenses) * 100) : 0;
+                return (
+                  <View key={b.categoryId} style={[styles.breakdownRow, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
+                    <CatBadge category={cat} size={36} />
+                    <Text style={[styles.breakdownLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Amount value={b.amount} currency={dc.code} size={14} weight={700} />
+                      <Caption color={colorTheme.ink2}>{pct}%</Caption>
+                    </View>
+                  </View>
+                );
+              })}
+            </Card>
+          </>
+        )}
+
+        <Eyebrow style={{ marginTop: spacing.base, marginBottom: spacing.sm }}>
+          {isZh ? '交易明细' : 'Transactions'}
+        </Eyebrow>
+        {sortedTxns.length === 0 ? (
+          <Card style={styles.emptyCard}>
+            <Pip size={64} expr="curious" float />
+            <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.md, lineHeight: 20 }}>
+              {t('emptyTripBody')}
+            </Body>
+          </Card>
+        ) : (
+          <Card style={styles.listCard}>
+            {sortedTxns.map((tx, i) => (
+              <View key={tx.id} style={[i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
+                <TxnRow
+                  txn={tx}
+                  cat={catById[tx.categoryId ?? 'other'] ?? fallback}
+                  owed={owedByTxn[tx.id]}
+                  dc={dc}
+                  first={i === 0}
+                  last={i === sortedTxns.length - 1}
+                  selectMode={false}
+                  isSel={false}
+                  theme={theme}
+                  colorTheme={colorTheme}
+                  onPress={setEditing}
+                  onLongPress={() => {}}
+                />
+              </View>
+            ))}
+          </Card>
+        )}
+      </ScrollView>
+
+      <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
+      <AddExistingExpensesModal visible={pickerOpen} onClose={() => setPickerOpen(false)} tripId={trip.id} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+
+  renameCard: { padding: spacing.base, marginBottom: spacing.md },
+  renameActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.base, marginTop: spacing.sm },
+  renameActionBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
+
+  hero: { padding: spacing.base, marginBottom: spacing.md, alignItems: 'flex-start' },
+  archiveBtn: { marginTop: spacing.md, minHeight: 44, paddingHorizontal: spacing.md, borderRadius: radius.sm, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+
+  actionsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, minHeight: 48, borderRadius: radius.sm },
+  actionBtnSecondary: { borderWidth: 1 },
+  actionBtnLabel: { fontFamily: uiFont(700), fontSize: 13.5, color: '#fff' },
+
+  listCard: { overflow: 'hidden' },
+  divider: { borderTopWidth: 1 },
+  breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
+  breakdownLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 14.5 },
+
+  emptyCard: { padding: spacing.lg, alignItems: 'center' },
+
+  input: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.md, fontFamily: uiFont(600), fontSize: 15 },
+
+  // Add-existing-expenses sheet
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
+  sheetCard: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: spacing.base, paddingTop: spacing.sm, maxHeight: '85%' },
+  handle: { width: 40, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: spacing.md },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  searchInput: { flex: 1, fontFamily: uiFont(600), fontSize: 14, paddingVertical: 11 },
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  checkbox: { width: 22, height: 22, borderRadius: 999, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  primaryLabel: { fontFamily: uiFont(700), fontSize: 15, color: '#fff' },
+});

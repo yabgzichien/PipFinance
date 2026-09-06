@@ -66,6 +66,10 @@ type AddFlowProps = {
   onPhaseChange?: (phase: Phase) => void;
   onAmountValidChange?: (valid: boolean) => void;
   onCategoryChosen?: () => void;
+  /** Opened from a trip's "Add expense" action: every row this flow saves is attached to this
+   *  trip the moment it's created, and the manual-entry title says so, so the trip is never a
+   *  silent side effect. */
+  initialTripId?: string | null;
 };
 
 /**
@@ -93,8 +97,9 @@ function AddFlowPhases({
   onPhaseChange,
   onAmountValidChange,
   onCategoryChosen,
+  initialTripId = null,
 }: AddFlowProps) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, entryCategories, catById, applyReliefDetection, markTaskDone } = useAppData();
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, entryCategories, catById, applyReliefDetection, markTaskDone, trips, setTransactionsTrip } = useAppData();
   const colorTheme = useThemeColors();
   const { t } = useLanguage();
 
@@ -135,6 +140,8 @@ function AddFlowPhases({
   // Ns" payoff line (docs/ui-engagement-plan.md Step 2). Null for any path that never ran a
   // live extraction (manual entry, receipt scan, a cached re-review).
   const [extractElapsedMs, setExtractElapsedMs] = useState<number | null>(null);
+
+  const tripName = initialTripId ? trips.find((tr) => tr.id === initialTripId)?.name ?? null : null;
 
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState<string | null>(null);
@@ -391,6 +398,10 @@ function AddFlowPhases({
         setAutoFill(null);
       }
 
+      if (initialTripId && created.length > 0) {
+        await setTransactionsTrip(created.map((c) => c.id), initialTripId);
+      }
+
       setResult(created);
       setNewLearned(learned);
       setPhase('saved');
@@ -411,6 +422,9 @@ function AddFlowPhases({
       [receiptResult?.photoUri ?? null]
     );
     await applyReliefDetection(created, cachedReceipt);
+    if (initialTripId && created.length > 0) {
+      await setTransactionsTrip(created.map((c) => c.id), initialTripId);
+    }
     setResult(created);
     setNewLearned(learned);
     setExtractElapsedMs(null);
@@ -492,8 +506,18 @@ function AddFlowPhases({
         onBack={backFromManualOrSplit}
         onComplete={onManualComplete}
         // Three ways in, three honest titles: a scanned receipt lands here already filled in, the
-        // no-receipt path is a bare split, and 'manual' is a plain typed entry.
-        title={phase !== 'split' ? undefined : receiptResult ? 'Check your receipt' : 'Split a bill'}
+        // no-receipt path is a bare split, and 'manual' is a plain typed entry. A trip-prefilled
+        // entry overrides all three — the trip is the whole reason this flow was opened, so it
+        // has to be the first thing the user reads, not a silent side effect discovered later.
+        title={
+          tripName
+            ? `${t('addToTrip')} · ${tripName}`
+            : phase !== 'split'
+            ? undefined
+            : receiptResult
+            ? 'Check your receipt'
+            : 'Split a bill'
+        }
         startSplitting={phase === 'split'}
         initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : quickPrefill?.label ?? null}
         initialAmount={phase === 'split' ? receiptResult?.charged ?? null : quickPrefill?.amount ?? null}
