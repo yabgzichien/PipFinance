@@ -79,11 +79,33 @@ describe('seedCategories', () => {
     expect(ids).not.toContain('insurance');
     expect(ids).toContain('food');
   });
+
+  it('is idempotent: seeding twice records identical statements', async () => {
+    const db = fakeDb({ all: { deleted_default_categories: [] } });
+    await __seedCategoriesForTest(db as any);
+    const first = db.sql();
+    const firstArgs = db.statements.map((s) => s.args);
+    await __seedCategoriesForTest(db as any);
+    const second = db.sql().slice(first.length);
+    const secondArgs = db.statements.map((s) => s.args).slice(firstArgs.length);
+    expect(second).toEqual(first);
+    expect(secondArgs).toEqual(firstArgs);
+  });
 });
 
 describe('migrateCategoryOverrides', () => {
-  it('is a no-op once the meta flag is set', async () => {
-    const db = fakeDb({ first: { app_meta: { value: 'done' } } });
+  it('is a no-op once the meta flag is set, even when a row looks renamed', async () => {
+    // The `all` fixture below supplies a genuinely renamed row (label 'Makan' is not any
+    // historical wording for 'food') so this test would fail if the `if (done) return;` guard
+    // were ever deleted — a bare "no `all` rows configured" fixture would pass either way.
+    const db = fakeDb({
+      first: { app_meta: { value: 'done' } },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Makan', icon: 'burger', hue: 162 },
+        ],
+      },
+    });
     await __migrateCategoryOverridesForTest(db as any);
     expect(db.sql().some((s) => s.startsWith('UPDATE categories SET label_override'))).toBe(false);
   });
@@ -114,5 +136,90 @@ describe('migrateCategoryOverrides', () => {
     });
     await __migrateCategoryOverridesForTest(db as any);
     expect(db.statements.some((s) => s.sql.includes('label_override'))).toBe(false);
+  });
+
+  it('captures a genuinely custom icon as an icon override', async () => {
+    const db = fakeDb({
+      first: { app_meta: null },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Food', icon: 'data:image/png;base64,abc', hue: 162 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db as any);
+    const write = db.statements.find((s) => s.sql.includes('icon_override'));
+    expect(write?.args).toContain('data:image/png;base64,abc');
+  });
+
+  it('does not treat a historical (but not current) icon as a user edit', async () => {
+    // 'cart' is food's OLD supplied icon (current is 'burger'). Before the icon/hue historical
+    // tables existed, this would have been misread as a user edit and pinned as a permanent
+    // override — exactly the bug this test guards against.
+    const db = fakeDb({
+      first: { app_meta: null },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Food', icon: 'cart', hue: 162 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db as any);
+    expect(db.statements.some((s) => s.sql.includes('icon_override'))).toBe(false);
+  });
+
+  it('captures a genuinely custom hue as a hue override', async () => {
+    const db = fakeDb({
+      first: { app_meta: null },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Food', icon: 'burger', hue: 7 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db as any);
+    const write = db.statements.find((s) => s.sql.includes('hue_override'));
+    expect(write?.args).toContain(7);
+  });
+
+  it('does not treat a historical (but not current) hue as a user edit', async () => {
+    // 330 is shopping's OLD supplied hue (current is 42).
+    const db = fakeDb({
+      first: { app_meta: null },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'shopping', label: 'Shopping', icon: 'cart', hue: 330 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db as any);
+    expect(db.statements.some((s) => s.sql.includes('hue_override'))).toBe(false);
+  });
+
+  it('is idempotent: a second run performs no writes because the flag is now set', async () => {
+    const db = fakeDb({
+      first: { app_meta: null },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Makan', icon: 'burger', hue: 162 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db as any);
+    expect(db.statements.some((s) => s.sql.includes('label_override'))).toBe(true);
+
+    // Second run: flip the fake's `first` fixture to reflect the flag the first run just wrote,
+    // mirroring what a real second launch would read back from app_meta.
+    const db2 = fakeDb({
+      first: { app_meta: { value: 'done' } },
+      all: {
+        'SELECT id, label, icon, hue FROM categories': [
+          { id: 'food', label: 'Makan', icon: 'burger', hue: 162 },
+        ],
+      },
+    });
+    await __migrateCategoryOverridesForTest(db2 as any);
+    expect(db2.statements.some((s) => s.sql.includes('label_override'))).toBe(false);
+    expect(db2.statements.some((s) => s.sql.startsWith('UPDATE categories SET'))).toBe(false);
   });
 });

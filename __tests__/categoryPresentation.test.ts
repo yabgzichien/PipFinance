@@ -70,4 +70,38 @@ describe('icon and hue resolution', () => {
   it('treats hueOverride 0 as a real override, not as absent', () => {
     expect(resolveCategoryPresentation(cat({ hueOverride: 0 }), 'en').hue).toBe(0);
   });
+
+  it('resolves a starter with a stale stored icon to the current supplied icon', () => {
+    // Simulates an upgraded install: the pre-2026-09-06 seed once wrote 'cart' for food (the old
+    // supplied icon), the row was never captured as an override (it's a historical Pip value, not
+    // a user edit), and the current supplied icon is 'burger'.
+    const stale = cat({ icon: 'cart', hue: 162, templateKey: 'starter.food.v1', iconOverride: null });
+    expect(resolveCategoryPresentation(stale, 'en').icon).toBe('burger');
+  });
+
+  it('resolves an optional catalogue category by its template key, not its stored icon', () => {
+    const petrol = cat({
+      id: 'opt-petrol',
+      icon: 'stale-icon',
+      hue: 1,
+      templateKey: 'optional.car.petrol.v1',
+    });
+    const p = resolveCategoryPresentation(petrol, 'en');
+    expect(p.icon).toBe('car');
+    expect(p.hue).toBe(12);
+  });
+
+  it('leaves a custom category icon/hue untouched (no supplied seed to fall back to)', () => {
+    const custom = cat({ id: 'side-hustle', icon: 'data:image/png;base64,abc', hue: 77, isDefault: false, templateKey: null });
+    const p = resolveCategoryPresentation(custom, 'en');
+    expect(p.icon).toBe('data:image/png;base64,abc');
+    expect(p.hue).toBe(77);
+  });
+
+  it('an explicit icon/hue override still beats the supplied value', () => {
+    const overridden = cat({ icon: 'cart', templateKey: 'starter.food.v1', iconOverride: 'utensils', hueOverride: 5 });
+    const p = resolveCategoryPresentation(overridden, 'en');
+    expect(p.icon).toBe('utensils');
+    expect(p.hue).toBe(5);
+  });
 });

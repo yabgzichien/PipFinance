@@ -1,6 +1,12 @@
 import * as SQLite from 'expo-sqlite';
 import { ALL_SEED_CATEGORIES, CATEGORY_ID_REMAP, INCOME_SEED_IDS } from '../data/categories';
-import { STARTER_TEMPLATE_KEYS, SEED_BY_ID, isSuppliedDefaultLabel } from '../data/categoryTemplates';
+import {
+  STARTER_TEMPLATE_KEYS,
+  SEED_BY_ID,
+  isSuppliedDefaultLabel,
+  isSuppliedDefaultIcon,
+  isSuppliedDefaultHue,
+} from '../data/categoryTemplates';
 
 const DB_NAME = 'pip.db';
 
@@ -263,9 +269,13 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     }
   }
   // Partial, so the many rows with no template key (every custom category) do not collide on NULL.
-  await db.execAsync(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_template ON categories (template_key) WHERE template_key IS NOT NULL'
-  );
+  try {
+    await db.execAsync(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_template ON categories (template_key) WHERE template_key IS NOT NULL'
+    );
+  } catch {
+    // index already present
+  }
 
   // Migration: a saved photo of the receipt that produced this transaction, kept only
   // when the user opts in on the scan's review screen.
@@ -468,9 +478,13 @@ async function migrateCategoryOverrides(db: SQLite.SQLiteDatabase): Promise<void
   for (const row of rows) {
     const seed = SEED_BY_ID.get(row.id);
     if (!seed) continue;
+    // Gated on "has Pip EVER shipped this value for this id", not "does it match today's seed".
+    // The pre-2026-09-06 seed clobbered icon/hue on every launch, so a stored row can be carrying
+    // an old Pip-supplied value rather than the current one — comparing only to the current seed
+    // would misread that as a user edit and pin it as a permanent override.
     const labelEdited = !isSuppliedDefaultLabel(row.id, row.label);
-    const iconEdited = row.icon !== seed.icon;
-    const hueEdited = row.hue !== seed.hue;
+    const iconEdited = !isSuppliedDefaultIcon(row.id, row.icon);
+    const hueEdited = !isSuppliedDefaultHue(row.id, row.hue);
     if (!labelEdited && !iconEdited && !hueEdited) continue;
     await db.runAsync(
       `UPDATE categories
