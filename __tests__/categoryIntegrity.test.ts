@@ -15,6 +15,8 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
 } from '../src/data/categories';
+import { OPTIONAL_CATEGORIES } from '../src/data/optionalCategories';
+import { STARTER_TEMPLATE_KEYS } from '../src/data/categoryTemplates';
 import { matchSourceCategory } from '../src/lib/import';
 import { buildDemoKit } from '../tools/demoKit/build';
 import type { Category } from '../src/lib/types';
@@ -100,5 +102,23 @@ describe('demo kit screenshot hints', () => {
         expect(byId.get(matched!)?.kind).toBe(row.type);
       }
     }
+  });
+});
+
+describe('optional catalogue vs retired ids', () => {
+  it('no catalogue id would be deleted by migrateCategoryIds on the next launch', () => {
+    const retired = new Set(Object.keys(CATEGORY_ID_REMAP));
+    for (const c of OPTIONAL_CATEGORIES) expect(retired.has(c.id)).toBe(false);
+  });
+
+  it('every seeded category carries a unique starter template key', () => {
+    const keys = ALL_SEED_CATEGORIES.map((c) => STARTER_TEMPLATE_KEYS[c.id]);
+    expect(keys.every(Boolean)).toBe(true);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('starter and optional template keys never overlap', () => {
+    const starters = new Set(Object.values(STARTER_TEMPLATE_KEYS));
+    for (const c of OPTIONAL_CATEGORIES) expect(starters.has(c.templateKey)).toBe(false);
   });
 });

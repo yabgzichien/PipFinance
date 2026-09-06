@@ -1,4 +1,5 @@
 import { getDb } from './db';
+import { optionalByTemplateKey, type OptionalCategory } from '../data/optionalCategories';
 import type { Category } from '../lib/types';
 
 interface CatRow {
@@ -94,18 +95,107 @@ export async function addCategory(
   };
 }
 
-/** Change a category's icon/picture in place  a named icon (see Icon.tsx) or a
- *  data:/file:/content:/http(s): URI for a custom photo. Allowed on every category,
- *  including the protected generics: the picture is cosmetic, not the delete-guard. */
+/** Change a category's icon/picture — a named icon (see Icon.tsx) or a data:/file:/content:/http(s):
+ *  URI for a custom photo. Written as an explicit override so the startup seed cannot revert it. */
 export async function updateCategoryIcon(id: string, icon: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE categories SET icon = ? WHERE id = ?', icon, id);
+  await db.runAsync('UPDATE categories SET icon_override = ? WHERE id = ?', icon, id);
 }
 
-/** Rename a category. Allowed on every category, including the protected generics. */
+/** Rename a category. Blank clears the rename and restores Pip's supplied wording. */
 export async function updateCategoryLabel(id: string, label: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE categories SET label = ? WHERE id = ?', label.trim(), id);
+  const trimmed = label.trim();
+  await db.runAsync('UPDATE categories SET label_override = ? WHERE id = ?', trimmed || null, id);
+}
+
+/** Change a category's colour. Same override contract as icon and label. */
+export async function updateCategoryHue(id: string, hue: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE categories SET hue_override = ? WHERE id = ?', hue, id);
+}
+
+/** Thrown when hiding would leave an expense or income entry grid empty. */
+export class LastVisibleCategoryError extends Error {
+  constructor(public kind: 'expense' | 'income') {
+    super(`Cannot hide the last visible ${kind} category`);
+  }
+}
+
+/** How many categories of a kind are currently offered for new entries. */
+export async function countVisible(kind: 'expense' | 'income'): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    'SELECT COUNT(*) AS n FROM categories WHERE kind = ? AND is_hidden = 0',
+    kind
+  );
+  return row?.n ?? 0;
+}
+
+/** Hide a category from new-entry choices, or show that same historical row again. */
+export async function setCategoryHidden(id: string, hidden: boolean): Promise<void> {
+  const db = await getDb();
+  if (hidden) {
+    const row = await db.getFirstAsync<{ kind: string }>('SELECT kind FROM categories WHERE id = ?', id);
+    if (!row) return;
+    const kind = row.kind === 'income' ? 'income' : 'expense';
+    const visible = await db.getFirstAsync<{ n: number }>(
+      'SELECT COUNT(*) AS n FROM categories WHERE kind = ? AND is_hidden = 0',
+      row.kind
+    );
+    if ((visible?.n ?? 0) <= 1) throw new LastVisibleCategoryError(kind);
+  }
+  await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', hidden ? 1 : 0, id);
+}
+
+/**
+ * Turn on one or more catalogue suggestions atomically. Template keys, rather than labels,
+ * preserve idempotence for repeats and distinguish catalogue categories from user-made matches.
+ */
+export async function activateSuggestedCategories(templateKeys: string[]): Promise<string[]> {
+  const db = await getDb();
+  const wanted = templateKeys
+    .map((key) => optionalByTemplateKey(key))
+    .filter((category): category is OptionalCategory => !!category);
+  if (wanted.length === 0) return [];
+
+  const ids: string[] = [];
+  await db.withTransactionAsync(async () => {
+    const sortRow = await db.getFirstAsync<{ m: number }>(
+      'SELECT COALESCE(MAX(sort), 0) + 1 AS m FROM categories'
+    );
+    let sort = sortRow?.m ?? 0;
+
+    for (const category of wanted) {
+      const existing = await db.getFirstAsync<{ id: string; is_hidden: number }>(
+        'SELECT id, is_hidden FROM categories WHERE template_key = ?',
+        category.templateKey
+      );
+      if (existing) {
+        if (existing.is_hidden) {
+          await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, existing.id);
+        }
+        ids.push(existing.id);
+        continue;
+      }
+
+      const id = await uniqueId(category.id);
+      await db.runAsync(
+        `INSERT INTO categories (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key)
+           VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)`,
+        id,
+        category.label,
+        category.icon,
+        category.hue,
+        category.kind,
+        sort,
+        category.templateKey
+      );
+      sort += 1;
+      ids.push(id);
+    }
+  });
+  return ids;
 }
 
 /**
