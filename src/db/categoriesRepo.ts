@@ -175,30 +175,40 @@ export async function activateSuggestedCategories(templateKeys: string[]): Promi
   if (wanted.length === 0) return [];
 
   const ids: string[] = [];
-  await db.withTransactionAsync(async () => {
-    const sortRow = await db.getFirstAsync<{ m: number }>(
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    // `withExclusiveTransactionAsync` provides its own connection. Every statement, including
+    // id collision probing, must stay on it or Expo can interleave an outer-connection query.
+    const uniqueTransactionId = async (base: string): Promise<string> => {
+      let id = base;
+      let n = 2;
+      while (await tx.getFirstAsync('SELECT 1 FROM categories WHERE id = ?', id)) {
+        id = `${base}-${n++}`;
+      }
+      return id;
+    };
+    const sortRow = await tx.getFirstAsync<{ m: number }>(
       'SELECT COALESCE(MAX(sort), 0) + 1 AS m FROM categories'
     );
     let sort = sortRow?.m ?? 0;
 
     for (const category of wanted) {
-      const existing = await db.getFirstAsync<{ id: string; is_hidden: number }>(
+      const existing = await tx.getFirstAsync<{ id: string; is_hidden: number }>(
         'SELECT id, is_hidden FROM categories WHERE template_key = ?',
         category.templateKey
       );
       if (existing) {
         if (existing.is_hidden) {
-          await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, existing.id);
+          await tx.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, existing.id);
         }
         ids.push(existing.id);
         continue;
       }
 
-      let id = await uniqueId(category.id);
+      let id = await uniqueTransactionId(category.id);
       while (true) {
         // The partial unique index on template_key makes concurrent repeated activations
         // converge. An unrelated id collision retries a collision-safe suffix instead.
-        await db.runAsync(
+        await tx.runAsync(
           `INSERT OR IGNORE INTO categories (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key)
              VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)`,
           id,
@@ -209,19 +219,19 @@ export async function activateSuggestedCategories(templateKeys: string[]): Promi
           sort,
           category.templateKey
         );
-        const resulting = await db.getFirstAsync<{ id: string; is_hidden: number }>(
+        const resulting = await tx.getFirstAsync<{ id: string; is_hidden: number }>(
           'SELECT id, is_hidden FROM categories WHERE template_key = ?',
           category.templateKey
         );
         if (resulting) {
           if (resulting.is_hidden) {
-            await db.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, resulting.id);
+            await tx.runAsync('UPDATE categories SET is_hidden = ? WHERE id = ?', 0, resulting.id);
           }
           ids.push(resulting.id);
           sort += 1;
           break;
         }
-        id = await uniqueId(id);
+        id = await uniqueTransactionId(id);
       }
     }
   });

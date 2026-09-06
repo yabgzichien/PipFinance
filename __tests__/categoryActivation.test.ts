@@ -11,32 +11,45 @@ import { activateSuggestedCategories } from '../src/db/categoriesRepo';
 
 function fakeDb(
   existingByKey: Record<string, { id: string; is_hidden: number }> = {},
-  options: { conflictOnInsert?: { id: string; is_hidden: number } } = {}
+  options: { conflictOnInsert?: { id: string; is_hidden: number }; requireExclusive?: boolean } = {}
 ) {
   const statements: { sql: string; args: unknown[] }[] = [];
   const rowsByKey = { ...existingByKey };
   let transactions = 0;
+  let exclusiveTransactions = 0;
+  const run = (sql: string, ...args: unknown[]) => {
+    statements.push({ sql, args });
+    if (sql.includes('INSERT OR IGNORE INTO categories')) {
+      const templateKey = args[6] as string;
+      if (options.conflictOnInsert) {
+        rowsByKey[templateKey] = options.conflictOnInsert;
+        return Promise.resolve({ changes: 0, lastInsertRowId: 0 });
+      }
+      rowsByKey[templateKey] = { id: args[0] as string, is_hidden: 0 };
+    }
+    return Promise.resolve({ changes: 1, lastInsertRowId: 1 });
+  };
+  const first = (sql: string, ...args: unknown[]) => {
+    if (sql.includes('template_key = ?')) return Promise.resolve(rowsByKey[args[0] as string] ?? null);
+    if (sql.includes('MAX(sort)')) return Promise.resolve({ m: 12 });
+    if (sql.includes('WHERE id = ?')) return Promise.resolve(null);
+    return Promise.resolve(null);
+  };
+  const outerGuard = () => {
+    if (options.requireExclusive) throw new Error('activation query used the outer database connection');
+  };
   return {
     statements,
     get transactions() { return transactions; },
+    get exclusiveTransactions() { return exclusiveTransactions; },
     sql: () => statements.map((s) => s.sql.replace(/\s+/g, ' ').trim()),
     runAsync: (sql: string, ...args: unknown[]) => {
-      statements.push({ sql, args });
-      if (sql.includes('INSERT OR IGNORE INTO categories')) {
-        const templateKey = args[6] as string;
-        if (options.conflictOnInsert) {
-          rowsByKey[templateKey] = options.conflictOnInsert;
-          return Promise.resolve({ changes: 0, lastInsertRowId: 0 });
-        }
-        rowsByKey[templateKey] = { id: args[0] as string, is_hidden: 0 };
-      }
-      return Promise.resolve({ changes: 1, lastInsertRowId: 1 });
+      outerGuard();
+      return run(sql, ...args);
     },
     getFirstAsync: (sql: string, ...args: unknown[]) => {
-      if (sql.includes('template_key = ?')) return Promise.resolve(rowsByKey[args[0] as string] ?? null);
-      if (sql.includes('MAX(sort)')) return Promise.resolve({ m: 12 });
-      if (sql.includes('WHERE id = ?')) return Promise.resolve(null);
-      return Promise.resolve(null);
+      outerGuard();
+      return first(sql, ...args);
     },
     getAllAsync: () => Promise.resolve([]),
     execAsync: (sql: string) => {
@@ -46,6 +59,10 @@ function fakeDb(
     withTransactionAsync: async (fn: () => Promise<void>) => {
       transactions += 1;
       await fn();
+    },
+    withExclusiveTransactionAsync: async (fn: (tx: { runAsync: typeof run; getFirstAsync: typeof first }) => Promise<void>) => {
+      exclusiveTransactions += 1;
+      await fn({ runAsync: run, getFirstAsync: first });
     },
   };
 }
@@ -86,13 +103,21 @@ it('activates a whole batch inside a single transaction', async () => {
   ]);
   expect(ids).toEqual(['opt-petrol', 'opt-car-maintenance', 'opt-parking-tolls']);
   expect(db.statements.filter((s) => s.sql.includes('INSERT OR IGNORE INTO categories'))).toHaveLength(3);
-  expect(db.transactions).toBe(1);
+  expect(db.exclusiveTransactions).toBe(1);
+  expect(db.transactions).toBe(0);
 });
 
 it('returns the concurrently inserted template row when its insert conflicts', async () => {
   const db = install(fakeDb({}, { conflictOnInsert: { id: 'race-winner', is_hidden: 0 } }));
   await expect(activateSuggestedCategories(['optional.car.petrol.v1'])).resolves.toEqual(['race-winner']);
   expect(db.sql()).toContain('INSERT OR IGNORE INTO categories (id, label, icon, hue, kind, is_default, sort, is_hidden, template_key) VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?)');
+});
+
+it('runs all activation queries through one exclusive transaction connection', async () => {
+  const db = install(fakeDb({}, { requireExclusive: true }));
+  await expect(activateSuggestedCategories(['optional.car.petrol.v1'])).resolves.toEqual(['opt-petrol']);
+  expect(db.exclusiveTransactions).toBe(1);
+  expect(db.transactions).toBe(0);
 });
 
 it('ignores a template key that is not in the catalogue', async () => {
