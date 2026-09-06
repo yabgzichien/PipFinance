@@ -1,20 +1,27 @@
 /**
- * Tracks one visible-sheet generation. Async work captures the generation returned by
- * `begin`; closing the sheet invalidates it so a late completion cannot affect a later open.
+ * Tracks committed visible-sheet generations. Async work captures the active generation;
+ * closing invalidates it so a late completion cannot affect a later opening.
  */
 export function createOpeningGuard() {
   let generation = 0;
+  let isOpen = false;
 
   return {
-    begin(): number {
-      generation += 1;
-      return generation;
-    },
-    invalidate(): void {
+    /** Call from a commit-safe visible=true lifecycle. */
+    open(): void {
+      isOpen = true;
       generation += 1;
     },
-    isCurrent(candidate: number): boolean {
-      return candidate === generation;
+    /** Call synchronously for an explicit close and from visible=false lifecycle. */
+    close(): void {
+      isOpen = false;
+      generation += 1;
+    },
+    beginOperation(): number | null {
+      return isOpen ? generation : null;
+    },
+    isCurrent(candidate: number | null): boolean {
+      return candidate !== null && isOpen && candidate === generation;
     },
   };
 }

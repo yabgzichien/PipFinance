@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OPTIONAL_GROUPS, searchOptionalCategories, type OptionalCategory } from '../data/optionalCategories';
@@ -57,21 +57,27 @@ export function AddCategorySheet({
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const openingGuard = useRef(createOpeningGuard());
-  const observedVisible = useRef(visible);
 
-  // Invalidate immediately when a parent changes `visible`; waiting for an effect would leave
-  // a window where a just-resolved promise could affect the next opening.
-  if (observedVisible.current !== visible) {
-    observedVisible.current = visible;
-    if (!visible) openingGuard.current.invalidate();
-  }
+  // Layout effects run after a committed visible change but before the frame is presented.
+  // That gives a programmatic close/reopen the same stale-work protection as a user close,
+  // without mutating refs during a render that React may later discard.
+  useLayoutEffect(() => {
+    if (visible) {
+      openingGuard.current.open();
+      setTab('suggested');
+      setQuery('');
+      setSelectedKeys([]);
+      setBusy(false);
+    } else {
+      openingGuard.current.close();
+    }
 
-  useEffect(() => {
-    if (!visible) return;
-    setTab('suggested');
-    setQuery('');
-    setSelectedKeys([]);
-    setBusy(false);
+    // Invalidate pending work if the sheet unmounts while visible. This cleanup is also
+    // safe under StrictMode's effect setup/cleanup replay because each committed setup
+    // owns the generation it invalidates on cleanup.
+    return () => {
+      openingGuard.current.close();
+    };
   }, [visible]);
 
   const language = isZh ? 'zh' : 'en';
@@ -94,13 +100,14 @@ export function AddCategorySheet({
   };
 
   const closeCurrentOpening = () => {
-    openingGuard.current.invalidate();
+    openingGuard.current.close();
     onClose();
   };
 
   const activateSelected = async () => {
     if (busy || selectedKeys.length === 0) return;
-    const operation = openingGuard.current.begin();
+    const operation = openingGuard.current.beginOperation();
+    if (operation === null) return;
     setBusy(true);
     let ids: string[];
     try {
@@ -121,7 +128,8 @@ export function AddCategorySheet({
 
   const showAgain = async (templateKey: string) => {
     if (busy) return;
-    const operation = openingGuard.current.begin();
+    const operation = openingGuard.current.beginOperation();
+    if (operation === null) return;
     setBusy(true);
     try {
       await activateSuggested([templateKey]);
