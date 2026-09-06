@@ -9,6 +9,11 @@ interface CatRow {
   kind: string;
   is_default: number;
   sort: number;
+  is_hidden: number | null;
+  template_key: string | null;
+  label_override: string | null;
+  icon_override: string | null;
+  hue_override: number | null;
 }
 
 function toCategory(r: CatRow): Category {
@@ -19,13 +24,13 @@ function toCategory(r: CatRow): Category {
     hue: r.hue,
     kind: r.kind === 'income' ? 'income' : 'expense',
     isDefault: !!r.is_default,
-    // These columns don't exist in the DB schema yet — a later task adds them. Until then every
-    // row resolves as visible, with no template identity and no overrides.
-    isHidden: false,
-    templateKey: null,
-    labelOverride: null,
-    iconOverride: null,
-    hueOverride: null,
+    // A row written before the 2026-09-06 migration answers NULL on every new column; every one
+    // of those reads as "no opinion", which is exactly the pre-migration behaviour.
+    isHidden: !!r.is_hidden,
+    templateKey: r.template_key ?? null,
+    labelOverride: r.label_override ?? null,
+    iconOverride: r.icon_override ?? null,
+    hueOverride: r.hue_override ?? null,
   };
 }
 

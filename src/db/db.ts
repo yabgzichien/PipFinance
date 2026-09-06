@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { ALL_SEED_CATEGORIES, CATEGORY_ID_REMAP, INCOME_SEED_IDS } from '../data/categories';
+import { STARTER_TEMPLATE_KEYS, SEED_BY_ID, isSuppliedDefaultLabel } from '../data/categoryTemplates';
 
 const DB_NAME = 'pip.db';
 
@@ -21,13 +22,18 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS categories (
-      id          TEXT PRIMARY KEY NOT NULL,
-      label       TEXT NOT NULL,
-      icon        TEXT NOT NULL,
-      hue         INTEGER NOT NULL,
-      kind        TEXT NOT NULL DEFAULT 'expense',
-      is_default  INTEGER NOT NULL DEFAULT 0,
-      sort        INTEGER NOT NULL DEFAULT 0
+      id             TEXT PRIMARY KEY NOT NULL,
+      label          TEXT NOT NULL,
+      icon           TEXT NOT NULL,
+      hue            INTEGER NOT NULL,
+      kind           TEXT NOT NULL DEFAULT 'expense',
+      is_default     INTEGER NOT NULL DEFAULT 0,
+      sort           INTEGER NOT NULL DEFAULT 0,
+      is_hidden      INTEGER NOT NULL DEFAULT 0,
+      template_key   TEXT,
+      label_override TEXT,
+      icon_override  TEXT,
+      hue_override   INTEGER
     );
     CREATE TABLE IF NOT EXISTS transactions (
       id           TEXT PRIMARY KEY NOT NULL,
@@ -236,6 +242,31 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     // column already present
   }
 
+  // Migration (2026-09-06, optional categories): the four pieces of metadata that let a supplied
+  // category be recognised, hidden, and personalised without any of those three interfering.
+  //
+  // `template_key` is the stable identity `is_default` could never be. `is_hidden` is a
+  // new-entry preference, NOT a delete — every historical read still sees the row. The three
+  // *_override columns hold explicit user choices, so the startup seed below can go back to
+  // being purely additive without losing anybody's rename.
+  for (const col of [
+    'is_hidden INTEGER NOT NULL DEFAULT 0',
+    'template_key TEXT',
+    'label_override TEXT',
+    'icon_override TEXT',
+    'hue_override INTEGER',
+  ]) {
+    try {
+      await db.execAsync(`ALTER TABLE categories ADD COLUMN ${col}`);
+    } catch {
+      // column already present
+    }
+  }
+  // Partial, so the many rows with no template key (every custom category) do not collide on NULL.
+  await db.execAsync(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_template ON categories (template_key) WHERE template_key IS NOT NULL'
+  );
+
   // Migration: a saved photo of the receipt that produced this transaction, kept only
   // when the user opts in on the scan's review screen.
   try {
@@ -307,6 +338,7 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
   await db.execAsync("UPDATE transactions SET amount = ABS(amount) WHERE type = 'expense' AND amount < 0");
 
   await migrateCategoryIds(db);
+  await migrateCategoryOverrides(db);
   await ensureSeedCategories(db);
   return db;
 }
@@ -363,16 +395,17 @@ async function ensureSeedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
 }
 
 /**
- * Insert every default category and fix up income kinds. Used both for the
- * idempotent startup seed (via ensureSeedCategories) and the full data reset
- * (where the categories table has just been emptied).
+ * Insert every default category, stamp its template key, and fix up income kinds.
  *
- * Skips any id a user has deliberately deleted (`deleted_default_categories`):
- * without this, a default category removed via `deleteCategory` would silently
- * reappear the next time the app is opened, since this seed step would otherwise
- * treat its absence as "never seeded" rather than "removed on purpose". A full
- * `resetAllData` clears that tombstone table first, so reset genuinely restores
- * every default.
+ * ADDITIVE ONLY. This used to upsert label/icon/hue over any row flagged is_default, which meant
+ * a renamed or re-iconed default silently reverted the next time the app was opened — the single
+ * biggest reason category customisation did not persist. Presentation now lives in the
+ * *_override columns (see migrateCategoryOverrides), so seeding has no business touching it.
+ *
+ * `sort` is still refreshed: it is ordering Pip owns, never something the user edits.
+ *
+ * Skips any id a user deliberately deleted (`deleted_default_categories`), so a removed default
+ * stays removed across restarts. A full `resetAllData` clears that tombstone table first.
  */
 async function seedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
   const deletedRows = await db.getAllAsync<{ id: string }>('SELECT id FROM deleted_default_categories');
@@ -381,27 +414,83 @@ async function seedCategories(db: SQLite.SQLiteDatabase): Promise<void> {
   let sort = 0;
   for (const c of ALL_SEED_CATEGORIES) {
     if (deletedIds.has(c.id)) continue;
-    // Upsert rather than INSERT OR IGNORE: the ids that survived the bookkeeping
-    // retune ('dining', 'transport', 'other') carry stale labels and sort order on
-    // an upgraded database, and defaults are never user-editable, so refreshing
-    // them in place is safe. Custom rows (is_default = 0) are left alone.
     await db.runAsync(
-      `INSERT INTO categories (id, label, icon, hue, kind, is_default, sort) VALUES (?, ?, ?, ?, ?, 1, ?)
-       ON CONFLICT(id) DO UPDATE SET label = excluded.label, icon = excluded.icon, hue = excluded.hue,
-         kind = excluded.kind, sort = excluded.sort
+      `INSERT INTO categories (id, label, icon, hue, kind, is_default, sort, template_key)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         kind = excluded.kind,
+         sort = excluded.sort,
+         template_key = COALESCE(categories.template_key, excluded.template_key)
        WHERE categories.is_default = 1`,
       c.id,
       c.label,
       c.icon,
       c.hue,
       c.kind,
-      sort
+      sort,
+      STARTER_TEMPLATE_KEYS[c.id] ?? null
     );
     sort += 1;
   }
   const placeholders = INCOME_SEED_IDS.map(() => '?').join(',');
   await db.runAsync(`UPDATE categories SET kind = 'income' WHERE id IN (${placeholders})`, ...INCOME_SEED_IDS);
 }
+
+const OVERRIDE_MIGRATION_KEY = 'cat_override_migration_v1';
+
+/**
+ * One-time (2026-09-06): promote recognisable stored presentation edits to explicit overrides.
+ *
+ * Runs BEFORE the first additive seed, while the stored row still reflects whatever the user
+ * last set. A stored label that matches any wording Pip has ever shipped for that id is a
+ * supplied default and is left alone; anything else is a deliberate rename and becomes a
+ * `label_override` so it survives the language switch that used to mask it.
+ *
+ * In practice most installs will have nothing to capture: the old seed overwrote presentation on
+ * every launch, so an edit made before the last restart is already gone. That loss is not
+ * recoverable and this deliberately does not guess at it — an uncertain stored label is left as
+ * the supplied default rather than pinned as a rename the user never made.
+ *
+ * Guarded by a meta flag rather than by inspecting the data, so it cannot re-run and re-interpret
+ * a label the user has since edited through the new path.
+ */
+async function migrateCategoryOverrides(db: SQLite.SQLiteDatabase): Promise<void> {
+  const done = await db.getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_meta WHERE key = ?',
+    OVERRIDE_MIGRATION_KEY
+  );
+  if (done) return;
+
+  const rows = await db.getAllAsync<{ id: string; label: string; icon: string; hue: number }>(
+    'SELECT id, label, icon, hue FROM categories WHERE is_default = 1'
+  );
+
+  for (const row of rows) {
+    const seed = SEED_BY_ID.get(row.id);
+    if (!seed) continue;
+    const labelEdited = !isSuppliedDefaultLabel(row.id, row.label);
+    const iconEdited = row.icon !== seed.icon;
+    const hueEdited = row.hue !== seed.hue;
+    if (!labelEdited && !iconEdited && !hueEdited) continue;
+    await db.runAsync(
+      `UPDATE categories
+          SET label_override = COALESCE(label_override, ?),
+              icon_override  = COALESCE(icon_override, ?),
+              hue_override   = COALESCE(hue_override, ?)
+        WHERE id = ?`,
+      labelEdited ? row.label : null,
+      iconEdited ? row.icon : null,
+      hueEdited ? row.hue : null,
+      row.id
+    );
+  }
+
+  await db.runAsync('INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)', OVERRIDE_MIGRATION_KEY, 'done');
+}
+
+/** Test seams: these two run only inside `init()` in production. */
+export const __seedCategoriesForTest = seedCategories;
+export const __migrateCategoryOverridesForTest = migrateCategoryOverrides;
 
 /**
  * Wipe every user table  transactions, learned merchants, the whole budget,
