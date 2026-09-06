@@ -10,6 +10,7 @@ import { nativeTransactionTotalsByCurrency, type FinancialReportData, type Month
 import { matchInstitution } from './institutions';
 import { readImageBytes } from './taxExport';
 import type { Commitment, CommitmentOccurrence } from './commitments';
+import type { Trip } from './trips';
 import type { Account, Category, ReliefTag, Transaction } from './types';
 
 export type ExportFormat = 'xlsx' | 'csv' | 'html' | 'pdf' | 'json' | 'receipts' | 'ewallet';
@@ -426,6 +427,7 @@ export function csvToHtmlTable(csvText: string): string {
 // ---------------------------------------------------------------------------
 
 export interface CommitmentExportExtra {
+  trips?: Trip[];
   commitments?: Commitment[];
   occurrences?: CommitmentOccurrence[];
   balanceEntries?: import('./types').BalanceEntry[];
@@ -480,6 +482,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
       source: t.source ?? 'manual',
       nativeAmount: t.nativeAmount ?? null,
       fxRate: t.fxRate ?? null,
+      tripId: t.tripId ?? null,
       createdAt: t.createdAt,
       receiptFile: t.receiptUri ? extra?.receiptFileByUri?.get(t.receiptUri) : undefined,
     }));
@@ -703,6 +706,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     accounts,
     transactions,
     transfers,
+    trips: extra?.trips ?? [],
     commitments,
     people: people.length > 0 ? people : undefined,
     splits: splits.length > 0 ? splits : undefined,

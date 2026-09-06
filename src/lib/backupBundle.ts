@@ -18,6 +18,7 @@ export type BackupSourceData = Pick<
   | 'categories'
   | 'accounts'
   | 'balanceEntries'
+  | 'trips'
   | 'commitments'
   | 'commitmentOccurrences'
   | 'people'
@@ -68,6 +69,7 @@ export async function buildBackupZip(data: BackupSourceData): Promise<Uint8Array
   ]);
 
   const extra: CommitmentExportExtra = {
+    trips: data.trips,
     commitments: data.commitments,
     occurrences: data.commitmentOccurrences,
     balanceEntries: data.balanceEntries,

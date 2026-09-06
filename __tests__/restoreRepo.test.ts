@@ -46,6 +46,7 @@ describe('restoreFromBackupPayload', () => {
     expect(wipe.sql).toContain('DELETE FROM transactions');
     expect(wipe.sql).toContain('DELETE FROM categories');
     expect(wipe.sql).toContain('DELETE FROM commitments');
+    expect(wipe.sql).toContain('DELETE FROM trips');
   });
 
   it('resolves a transaction receiptFile through the filename→URI map', async () => {
@@ -88,8 +89,27 @@ describe('restoreFromBackupPayload', () => {
     );
     const insert = db.statements.find((s) => s.sql.includes('INSERT INTO transactions'));
     // id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at,
-    // source, remark, receipt_uri, native_amount, fx_rate — receipt_uri is index 11.
+    // source, remark, receipt_uri, native_amount, fx_rate, trip_id — receipt_uri is index 11.
     expect(insert!.args[11]).toBeNull();
+    expect(insert!.args[14]).toBeNull();
+  });
+
+  it('inserts trips before their member transactions and restores membership by id', async () => {
+    const db = install(fakeDb());
+    await restoreFromBackupPayload(
+      {
+        trips: [{ id: 'trip-sg', name: 'Singapore', createdAt: '2026-09-01T00:00:00.000Z', archived: false, startDate: '2026-09-10', endDate: '2026-09-15' }],
+        transactions: [{ id: 't-trip', description: 'Hotel', amount: -400, tripId: 'trip-sg' }],
+      },
+      new Map()
+    );
+
+    const tripInsertIndex = db.statements.findIndex((statement) => statement.sql.includes('INSERT INTO trips'));
+    const txnInsertIndex = db.statements.findIndex((statement) => statement.sql.includes('INSERT INTO transactions'));
+    expect(tripInsertIndex).toBeGreaterThan(-1);
+    expect(tripInsertIndex).toBeLessThan(txnInsertIndex);
+    expect(db.statements[tripInsertIndex].args).toEqual(['trip-sg', 'Singapore', '2026-09-01T00:00:00.000Z', 0, '2026-09-10', '2026-09-15']);
+    expect(db.statements[txnInsertIndex].args[14]).toBe('trip-sg');
   });
 
   it('inserts commitments with the original id and merchant_key derived from the label', async () => {

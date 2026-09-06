@@ -9,6 +9,7 @@ import { validateBackupPayload } from '../src/db/restoreRepo';
 import { __seedCategoriesForTest } from '../src/db/db';
 import type { Account, BalanceEntry, Category, Transaction } from '../src/lib/types';
 import type { Commitment, CommitmentOccurrence } from '../src/lib/commitments';
+import type { Trip } from '../src/lib/trips';
 
 /** Builds a minimal full-backup fixture and returns the parsed `backup.json` payload, mirroring
  *  the zip-reading idiom above (`unzipSync` + `strFromU8`). `extra` accepts the same pieces
@@ -206,6 +207,32 @@ describe('validateBackupPayload', () => {
     expect(validateBackupPayload(null)).toBe(false);
     expect(validateBackupPayload('a string')).toBe(false);
     expect(validateBackupPayload({ transactions: 'not-an-array' })).toBe(false);
+    expect(validateBackupPayload({ trips: 'not-an-array' })).toBe(false);
+  });
+});
+
+describe('trips round-trip', () => {
+  const trip: Trip = {
+    id: 'trip-sg',
+    name: 'Singapore · September 2026',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    archived: false,
+    startDate: null,
+    endDate: null,
+  };
+
+  it('carries trips and transaction membership through a backup', () => {
+    const payload = buildBackupPayloadForTest(mockCategories, {
+      trips: [trip],
+      transactions: [makeTxn({ id: 'x1', tripId: 'trip-sg' })],
+    });
+
+    expect(payload.trips).toEqual([trip]);
+    expect(payload.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'x1', tripId: 'trip-sg' })]));
+  });
+
+  it('accepts an older backup with no trips key at all', () => {
+    expect(validateBackupPayload({ categories: [], transactions: [] })).toBe(true);
   });
 });
 

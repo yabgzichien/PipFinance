@@ -7,6 +7,7 @@
 // by the original id. See docs/superpowers/specs/2026-09-02-backup-restore-design.md.
 import { getDb, genId } from './db';
 import { merchantKey as toMerchantKey } from '../lib/normalize';
+import type { Trip } from '../lib/trips';
 
 /** Loosely-typed mirror of the `backup.json` shape `generateFullBackupZip` writes (itself an
  *  extension of `generateAdvancedImportJSON`'s payload). Every field is optional/defensively
@@ -31,6 +32,7 @@ export interface BackupPayload {
     hueOverride?: number | null;
   }>;
   deletedDefaultCategories?: string[];
+  trips?: Array<Partial<Trip>>;
   accounts?: any[];
   transactions?: any[];
   transfers?: any[];
@@ -76,6 +78,7 @@ export function validateBackupPayload(payload: unknown): payload is BackupPayloa
   if (p.categories !== undefined && !Array.isArray(p.categories)) return false;
   if (p.transactions !== undefined && !Array.isArray(p.transactions)) return false;
   if (p.accounts !== undefined && !Array.isArray(p.accounts)) return false;
+  if (p.trips !== undefined && !Array.isArray(p.trips)) return false;
   return true;
 }
 
@@ -97,6 +100,7 @@ export async function restoreFromBackupPayload(
   await db.withTransactionAsync(async () => {
     await db.execAsync(`
       DELETE FROM transactions;
+      DELETE FROM trips;
       DELETE FROM merchant_memory;
       DELETE FROM budget;
       DELETE FROM budget_allocation;
@@ -180,6 +184,23 @@ export async function restoreFromBackupPayload(
       }
     }
 
+    // ── Trips ────────────────────────────────────────────────────────────
+    // Membership is restored by the transaction inserts below, so rows must exist first for
+    // installs that enable foreign-key checking or add that constraint in a future migration.
+    for (const trip of payload.trips ?? []) {
+      if (!trip?.id || !trip?.name) continue;
+      await db.runAsync(
+        `INSERT INTO trips (id, name, created_at, archived, start_date, end_date)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        trip.id,
+        trip.name,
+        trip.createdAt || nowIso(),
+        trip.archived ? 1 : 0,
+        trip.startDate ?? null,
+        trip.endDate ?? null
+      );
+    }
+
     // ── Transactions + transfers ─────────────────────────────────────────
     for (const t of payload.transactions ?? []) {
       if (!t?.id) continue;
@@ -187,8 +208,8 @@ export async function restoreFromBackupPayload(
       const merchantRaw = t.description || 'Transaction';
       await db.runAsync(
         `INSERT INTO transactions
-           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate, trip_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         t.id,
         merchantRaw,
         toMerchantKey(merchantRaw),
@@ -202,7 +223,8 @@ export async function restoreFromBackupPayload(
         t.remark ?? null,
         receiptUri,
         typeof t.nativeAmount === 'number' ? t.nativeAmount : null,
-        typeof t.fxRate === 'number' ? t.fxRate : null
+        typeof t.fxRate === 'number' ? t.fxRate : null,
+        t.tripId ?? null
       );
     }
     for (const t of payload.transfers ?? []) {
