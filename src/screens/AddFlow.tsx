@@ -8,7 +8,7 @@ import { getAutoFillForMonth, recordAutoFill } from '../db/memoryRepo';
 import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
-import { resolveSuggestion } from '../lib/categorySuggestion';
+import { resolveSuggestion, shouldPreserveMerchantMemory } from '../lib/categorySuggestion';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
@@ -334,7 +334,25 @@ function AddFlowPhases({
     }
 
     try {
-      const { created, newLearned: learned } = await commitCategorized(items, assignments, batchSource, splitDrafts);
+      const memoryWritePolicies = items.map((item, i) =>
+        shouldPreserveMerchantMemory(
+          merchantKey(item.merchant),
+          memory,
+          entryCategories,
+          suggestions[i] ?? null,
+          assignments[i] ?? null
+        )
+          ? 'preserve'
+          : 'learn'
+      );
+      const { created, newLearned: learned } = await commitCategorized(
+        items,
+        assignments,
+        batchSource,
+        splitDrafts,
+        undefined,
+        memoryWritePolicies
+      );
       await applyReliefDetection(created, null);
       // If the whole batch was tagged to an account, move that account's balance
       // per saved row — direction derived from account kind + txn type (an expense

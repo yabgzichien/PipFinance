@@ -4,7 +4,7 @@
 // explicitly taken out of circulation.
 import { buildCategoryGuessPrompt, parseCategoryGuess } from '../src/llm/categoryGuessPrompt';
 import { parseQuickAddReply } from '../src/llm/quickAddPrompt';
-import { resolveSuggestion } from '../src/lib/categorySuggestion';
+import { resolveSuggestion, shouldPreserveMerchantMemory } from '../src/lib/categorySuggestion';
 
 const VISIBLE = [
   { id: 'food', label: 'Food', kind: 'expense' as const },
@@ -69,5 +69,25 @@ describe('learned memory vs hidden categories', () => {
 
   it('rejects a guess that names a hidden category', () => {
     expect(resolveSuggestion('shell', {}, visible, 'opt-petrol')).toBeNull();
+  });
+
+  it('preserves hidden learning when its fallback guess is saved unchanged', () => {
+    const memory = { shell: 'opt-petrol' };
+    const fallback = resolveSuggestion('shell', memory, visible, 'travelling');
+    expect(fallback).toEqual({ categoryId: 'travelling', source: 'guess' });
+    expect(shouldPreserveMerchantMemory('shell', memory, visible, fallback, 'travelling')).toBe(true);
+
+    const savedMemory = shouldPreserveMerchantMemory('shell', memory, visible, fallback, 'travelling')
+      ? memory
+      : { ...memory, shell: 'travelling' };
+    expect(resolveSuggestion('shell', savedMemory, [...visible, { id: 'opt-petrol', kind: 'expense' as const }], null)).toEqual({
+      categoryId: 'opt-petrol',
+      source: 'learned',
+    });
+  });
+
+  it('treats changing a hidden mapping fallback as an explicit correction', () => {
+    const fallback = resolveSuggestion('shell', { shell: 'opt-petrol' }, visible, 'travelling');
+    expect(shouldPreserveMerchantMemory('shell', { shell: 'opt-petrol' }, visible, fallback, 'food')).toBe(false);
   });
 });

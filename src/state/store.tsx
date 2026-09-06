@@ -85,6 +85,7 @@ import {
   type StreakFreezeState,
 } from '../lib/streak';
 import { monthLabel } from '../lib/dates';
+import type { MerchantMemoryWritePolicy } from '../lib/categorySuggestion';
 import { syncAllWidgets } from '../widget/syncWidgets';
 import {
   addCommitment as dbAddCommitment,
@@ -319,7 +320,9 @@ export interface AppData {
      *  `ownShare`, not the extracted amount, and the gross is kept on the split record. */
     splitDrafts?: (SplitDraft | null)[],
     /** Parallel to `items`: the saved receipt photo's URI for that row, or null. */
-    receiptUris?: (string | null)[]
+    receiptUris?: (string | null)[],
+    /** Parallel to `items`: preserve an existing merchant mapping for this saved row. */
+    memoryWritePolicies?: MerchantMemoryWritePolicy[]
   ) => Promise<{ created: Transaction[]; newLearned: NewLearned[] }>;
   /** Silently tags each created transaction against the current YA's relief schedule, using
    *  line-item keywords first (when `receipt` is given) and remembered merchant mappings
@@ -920,7 +923,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       assignments: (string | null)[],
       source: TxnSource = 'extracted',
       splitDrafts?: (SplitDraft | null)[],
-      receiptUris?: (string | null)[]
+      receiptUris?: (string | null)[],
+      memoryWritePolicies?: MerchantMemoryWritePolicy[]
     ) => {
       const newLearned: NewLearned[] = [];
       const toInsert: NewTxn[] = [];
@@ -939,7 +943,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         const draft = splitDrafts?.[i] ?? null;
 
         // Learn the merchant -> category for both expenses and income, only if merchant is non-empty.
-        if (key) {
+        // A receipt fallback can explicitly preserve a hidden learned target; all callers that
+        // omit the policy retain the default learning behavior.
+        if (key && memoryWritePolicies?.[i] !== 'preserve') {
           if (!(key in memory)) newLearned.push({ merchant: it.merchant, categoryId });
           await upsertMemory(key, categoryId);
         }

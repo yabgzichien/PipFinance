@@ -6,6 +6,9 @@ import type { CategorySuggestion, MemoryMap } from './types';
 
 type VisibleCategory = { id: string; kind: string };
 
+/** Whether saving a row should leave its existing merchant learning untouched. */
+export type MerchantMemoryWritePolicy = 'learn' | 'preserve';
+
 export function resolveSuggestion(
   merchantKey: string,
   memory: MemoryMap,
@@ -22,4 +25,20 @@ export function resolveSuggestion(
     return { categoryId: guess, source: 'guess' };
   }
   return null;
+}
+
+/**
+ * A hidden learned target must survive only when the user accepts its visible fallback guess
+ * unchanged. Any other saved category is an intentional correction and should retrain memory.
+ */
+export function shouldPreserveMerchantMemory(
+  merchantKey: string,
+  memory: MemoryMap,
+  visible: VisibleCategory[],
+  suggestion: CategorySuggestion | null,
+  assignment: string | null
+): boolean {
+  const learned = merchantKey ? memory[merchantKey] : undefined;
+  const learnedIsHidden = !!learned && !visible.some((category) => category.id === learned);
+  return learnedIsHidden && suggestion?.source === 'guess' && assignment === suggestion.categoryId;
 }
