@@ -61,6 +61,9 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   const iconChoices = kind === 'income' ? INCOME_ICONS : EXPENSE_ICONS;
   const list = useMemo(() => categories.filter((c) => c.kind === kind), [categories, kind]);
   const { visible: visibleCategories, hidden: hiddenCategories } = useMemo(() => partitionCategories(list), [list]);
+  const hideActionLabel = kind === 'income' ? t('hideFromNewIncome') : t('hideFromNewExpenses');
+  const hiddenSectionTitle = kind === 'income' ? t('hiddenIncomeSectionTitle') : t('hiddenSectionTitle');
+  const hiddenHistoryNote = kind === 'income' ? t('hiddenIncomeKeepsHistoryNote') : t('hiddenKeepsHistoryNote');
 
   const pickCustomIcon = async (setter: (uri: string) => void) => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -141,7 +144,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
       confirmAction(
         t('hideUsedByCommitmentTitle'),
         t('hideUsedByCommitmentBody').replace('{count}', String(usedBy)).replace('{label}', label),
-        t('hideFromNewExpenses'),
+        category.kind === 'income' ? t('hideFromNewIncome') : t('hideFromNewExpenses'),
         proceed
       );
       return;
@@ -209,7 +212,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                 <Pressable onPress={() => toggleEdit(c)} hitSlop={8} style={styles.editBtn} accessibilityRole="button" accessibilityLabel={`${t('editCategory')}: ${tCat(c)}`}>
                   <Icon name="pencil" size={16} color={colorTheme.ink2} />
                 </Pressable>
-                <Pressable onPress={() => { void hideCategory(c); }} hitSlop={8} style={styles.hideBtn} accessibilityRole="button" accessibilityLabel={`${t('hideFromNewExpenses')}: ${tCat(c)}`}>
+                <Pressable onPress={() => { void hideCategory(c); }} hitSlop={8} style={styles.hideBtn} accessibilityRole="button" accessibilityLabel={`${hideActionLabel}: ${tCat(c)}`}>
                   <Icon name="chevronDown" size={17} color={colorTheme.ink2} />
                 </Pressable>
                 <Pressable onPress={() => confirmDelete(c.id, tCat(c))} hitSlop={8} style={styles.delBtn} accessibilityRole="button" accessibilityLabel={`${isZh ? '删除分类' : 'Delete category'}: ${tCat(c)}`}>
@@ -284,10 +287,10 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                     </Pressable>
                   </View>
                   <View style={styles.editActions}>
-                    <Pressable onPress={() => setEditingId(null)} style={styles.editActionBtn} disabled={editBusy}>
+                    <Pressable onPress={() => setEditingId(null)} style={styles.editActionBtn} disabled={editBusy} accessibilityRole="button" accessibilityLabel={isZh ? '取消编辑分类' : 'Cancel editing category'}>
                       <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>{t('cancel')}</Text>
                     </Pressable>
-                    <Pressable onPress={() => { void saveEditedCategory(); }} style={styles.editActionBtn} disabled={editBusy} accessibilityRole="button" accessibilityLabel={t('save')}>
+                    <Pressable onPress={() => { void saveEditedCategory(); }} style={styles.editActionBtn} disabled={editBusy} accessibilityRole="button" accessibilityLabel={isZh ? '保存分类更改' : 'Save category changes'}>
                       <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Text>
                     </Pressable>
                   </View>
@@ -299,8 +302,8 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
 
         {hiddenCategories.length > 0 && (
           <View style={{ marginTop: 26 }}>
-            <Eyebrow style={{ marginBottom: 5 }}>{t('hiddenSectionTitle')}</Eyebrow>
-            <Text style={[styles.helperText, { color: colorTheme.ink2, marginBottom: 10 }]}>{t('hiddenKeepsHistoryNote')}</Text>
+            <Eyebrow style={{ marginBottom: 5 }}>{hiddenSectionTitle}</Eyebrow>
+            <Text style={[styles.helperText, { color: colorTheme.ink2, marginBottom: 10 }]}>{hiddenHistoryNote}</Text>
             <Card style={{ overflow: 'hidden' }}>
               {hiddenCategories.map((c, i) => (
                 <View key={c.id} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
@@ -361,7 +364,7 @@ const styles = StyleSheet.create({
   showAgainText: { fontFamily: uiFont(700), fontSize: 12 },
   editPanel: { padding: 15, paddingTop: 12, borderTopWidth: 1, gap: 12 },
   editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 18 },
-  editActionBtn: { paddingVertical: 4, paddingHorizontal: 4 },
+  editActionBtn: { minHeight: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   editActionText: { fontFamily: uiFont(700), fontSize: 13.5 },
   input: {
     flex: 1,

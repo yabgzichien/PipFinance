@@ -239,6 +239,8 @@ export interface Translations {
   addOneCategory: string;
   hiddenSectionTitle: string;
   hideFromNewExpenses: string;
+  hiddenIncomeSectionTitle: string;
+  hideFromNewIncome: string;
   showAgain: string;
   hiddenBadge: string;
   hideLastVisibleTitle: string;
@@ -247,6 +249,7 @@ export interface Translations {
   hideUsedByCommitmentBody: string;
   reviewRecurringPayments: string;
   hiddenKeepsHistoryNote: string;
+  hiddenIncomeKeepsHistoryNote: string;
   renameCategory: string;
   renameCategoryHint: string;
   activationFailedTitle: string;
