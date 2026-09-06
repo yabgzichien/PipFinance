@@ -27,8 +27,10 @@ export type SettingItemKey =
   | 'data_tax'
   | 'data_categories'
   | 'data_currencies'
+  | 'data_duitnow'
   | 'data_import'
   | 'data_export'
+  | 'data_backup'
   | 'data_tutorial'
   | 'danger_reset_all'
   | 'danger_reset_setup';
@@ -496,6 +498,38 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     ],
   },
   {
+    key: 'data_duitnow',
+    section: 'data',
+    sectionTitleEn: 'Data',
+    sectionTitleZh: '数据与管理',
+    titleEn: 'DuitNow QR Code',
+    titleZh: 'DuitNow 收款码',
+    keywords: [
+      'duitnow',
+      'duit now',
+      'qr',
+      'qr code',
+      'payment',
+      'split',
+      'pay',
+      'scan',
+      'receive',
+      'transfer',
+      'maybank',
+      'cimb',
+      'tng',
+      'touch n go',
+      'ewallet',
+      'bank',
+      '收款码',
+      '二维码',
+      '分账',
+      '收款',
+      '转账',
+      '支付',
+    ],
+  },
+  {
     key: 'data_import',
     section: 'data',
     sectionTitleEn: 'Data',
@@ -550,6 +584,30 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       '下载',
       '备份',
       '数据导出',
+    ],
+  },
+  {
+    key: 'data_backup',
+    section: 'data',
+    sectionTitleEn: 'Data',
+    sectionTitleZh: '数据与管理',
+    titleEn: 'Back Up & Restore',
+    titleZh: '备份与恢复',
+    keywords: [
+      'backup',
+      'restore',
+      'back up',
+      'cloud backup',
+      'google drive',
+      'icloud',
+      'recover',
+      'snapshot',
+      'sync',
+      '备份',
+      '恢复',
+      '云备份',
+      '同步',
+      '谷歌云端硬盘',
     ],
   },
   {

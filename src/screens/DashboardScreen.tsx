@@ -26,7 +26,7 @@ import { useAppData, type HeroPanel } from '../state/store';
 import { useNow } from '../state/useNow';
 import { useReducedMotion } from '../state/useReducedMotion';
 import { useAccent } from '../state/accent';
-import { useThemeColors } from '../state/colorScheme';
+import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { shadowCard, spacing, uiFont } from '../theme';
@@ -1085,11 +1085,13 @@ function CashFlowView({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const scheme = useResolvedScheme();
+  const isDark = scheme === 'dark';
   const { tCat, isZh } = useLanguage();
 
   const pieData = useMemo(
-    () => breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid })),
-    [breakdown, catById]
+    () => breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue, isDark).solid })),
+    [breakdown, catById, isDark]
   );
   const topCat = breakdown.length > 0 ? (catById[breakdown[0].catId] ?? fallback) : null;
   const topPct = topCat && spent > 0 ? Math.round((breakdown[0].amt / spent) * 100) : 0;

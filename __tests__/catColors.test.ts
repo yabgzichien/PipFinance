@@ -32,12 +32,22 @@ describe('catColorsForHue', () => {
     expect(c.solid).toMatch(HEX);
   });
 
-  it('bg tint is lighter than the solid color', () => {
+  it('bg tint is lighter than the solid color in light mode', () => {
     const c = catColorsForHue(330);
     expect(luminance(c.bg)).toBeGreaterThan(luminance(c.solid));
   });
 
-  it('memoizes (same reference for same hue)', () => {
+  it('fg is lighter than bg tint in dark mode', () => {
+    const c = catColorsForHue(330, true);
+    expect(c.bg).toMatch(HEX);
+    expect(c.fg).toMatch(HEX);
+    expect(c.solid).toMatch(HEX);
+    expect(luminance(c.fg)).toBeGreaterThan(luminance(c.bg));
+  });
+
+  it('memoizes (same reference for same hue and mode)', () => {
     expect(catColorsForHue(162)).toBe(catColorsForHue(162));
+    expect(catColorsForHue(162, true)).toBe(catColorsForHue(162, true));
+    expect(catColorsForHue(162, false)).not.toBe(catColorsForHue(162, true));
   });
 });

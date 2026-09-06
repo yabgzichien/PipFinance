@@ -1,12 +1,13 @@
 // src/screens/onboarding/ImportStep.tsx
-// Step 1 of the setup wizard (after PipIntro): asks if the user wants to import from
-// their previous money manager / spreadsheets / bank statements before doing manual setup.
-import React from 'react';
+// Step 1 of the setup wizard (after PipIntro): allows users to either restore a full
+// Pip backup (local .zip or Google Drive) or import from another money manager / spreadsheets.
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { Pip } from '../../components/Pip';
-import { Body, BtnLabel, Card, Eyebrow, PrimaryButton, Title } from '../../components/ui';
+import { RestoreBackupModal } from '../../components/RestoreBackupModal';
+import { Body, BtnLabel, PrimaryButton, Title } from '../../components/ui';
 import { useLanguage } from '../../i18n';
 import * as haptics from '../../lib/haptics';
 import { useAccent } from '../../state/accent';
@@ -21,19 +22,32 @@ export function ImportStep({
   onStartImport,
   onSkip,
   onContinue,
+  onLoadBackup,
 }: {
   hasImported: boolean;
   onStartImport: () => void;
   onSkip: () => void;
   onContinue: () => void;
+  onLoadBackup?: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t } = useLanguage();
 
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+
   const handleStartImport = () => {
     haptics.tap();
     onStartImport();
+  };
+
+  const handleOpenRestore = () => {
+    haptics.tap();
+    if (onLoadBackup) {
+      onLoadBackup();
+    } else {
+      setShowRestoreModal(true);
+    }
   };
 
   const handleSkip = () => {
@@ -47,99 +61,123 @@ export function ImportStep({
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={{
-        padding: spacing.lg,
-        paddingBottom: 140,
-        flexGrow: 1,
-        justifyContent: 'center',
-      }}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.hero}>
-        <FadeIn offset={14}>
-          <Pip size={PIP_SIZE} expr={hasImported ? 'happy' : 'curious'} float />
-        </FadeIn>
-        <FadeIn delay={stagger}>
-          <Title style={{ marginTop: spacing.base, textAlign: 'center' }}>
-            {hasImported ? t('importDoneTitle') : t('importSwitchTracker')}
-          </Title>
-        </FadeIn>
-        <FadeIn delay={stagger * 2}>
-          <Body color={colorTheme.ink2} style={styles.subtitle}>
-            {hasImported
-              ? t('importDoneSubtitle')
-              : t('importSwitchSubtitle')}
-          </Body>
-        </FadeIn>
-      </View>
+    <>
+      <ScrollView
+        contentContainerStyle={{
+          padding: spacing.lg,
+          paddingBottom: 140,
+          flexGrow: 1,
+          justifyContent: 'center',
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.hero}>
+          <FadeIn offset={14}>
+            <Pip size={PIP_SIZE} expr={hasImported ? 'happy' : 'curious'} float />
+          </FadeIn>
+          <FadeIn delay={stagger}>
+            <Title style={{ marginTop: spacing.base, textAlign: 'center' }}>
+              {hasImported ? t('importDoneTitle') : t('importOptionsTitle')}
+            </Title>
+          </FadeIn>
+          <FadeIn delay={stagger * 2}>
+            <Body color={colorTheme.ink2} style={styles.subtitle}>
+              {hasImported
+                ? t('importDoneSubtitle')
+                : t('importOptionsSubtitle')}
+            </Body>
+          </FadeIn>
+        </View>
 
-      <FadeIn delay={stagger * 3}>
-        <Card style={[styles.infoCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-          <Eyebrow style={{ marginBottom: 8, color: colorTheme.ink }}>{t('importWhatPipCanImport')}</Eyebrow>
-          <View style={styles.benefitRow}>
-            <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="receipt" size={15} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitTxnTitle')}</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitTxnDesc')}</Text>
-            </View>
-          </View>
+        {!hasImported ? (
+          <FadeIn delay={stagger * 3} style={styles.cardsContainer}>
+            {/* Option 1: Load Pip Backup */}
+            <Pressable
+              onPress={handleOpenRestore}
+              style={({ pressed }) => [
+                styles.optionRow,
+                {
+                  backgroundColor: colorTheme.surface,
+                  borderColor: colorTheme.line2,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('importLoadBackupTitle')}
+            >
+              <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
+                <Icon name="folder" size={18} color={theme.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionTitle, { color: colorTheme.ink }]}>
+                  {t('importLoadBackupTitle')}
+                </Text>
+                <Text style={[styles.optionDesc, { color: colorTheme.ink2 }]}>
+                  {t('importLoadBackupDesc')}
+                </Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+            </Pressable>
 
-          <View style={styles.benefitRow}>
-            <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="wallet" size={15} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitAccountsTitle')}</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitAccountsDesc')}</Text>
-            </View>
-          </View>
-
-          <View style={styles.benefitRow}>
-            <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
-              <Icon name="clock" size={15} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.benefitTitle, { color: colorTheme.ink }]}>{t('importBenefitRecurringTitle')}</Text>
-              <Text style={[styles.benefitDesc, { color: colorTheme.ink3 }]}>{t('importBenefitRecurringDesc')}</Text>
-            </View>
-          </View>
-
-          <View style={[styles.compatibleBox, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <Icon name="sparkles" size={13} color={theme.accent} />
-            <Text style={[styles.compatibleText, { color: colorTheme.ink2 }]}>
-              {t('importCompatibleText')}
-            </Text>
-          </View>
-        </Card>
-      </FadeIn>
-
-      <FadeIn delay={stagger * 4} style={styles.footer}>
-        {hasImported ? (
-          <>
-            <PrimaryButton onPress={handleContinue}>
-              <BtnLabel>{t('importContinue')}</BtnLabel>
-              <Icon name="arrowRight" size={18} color="#fff" />
-            </PrimaryButton>
+            {/* Option 2: Advanced Import */}
             <Pressable
               onPress={handleStartImport}
-              style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
+              style={({ pressed }) => [
+                styles.optionRow,
+                {
+                  backgroundColor: colorTheme.surface,
+                  borderColor: colorTheme.line2,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
               accessibilityRole="button"
-              accessibilityLabel={t('importSomethingElse')}
+              accessibilityLabel={t('importAdvancedTitle')}
             >
-              <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
-                {t('importSomethingElse')}
-              </Text>
+              <View style={[styles.badge, { backgroundColor: theme.accentTint }]}>
+                <Icon name="sparkles" size={18} color={theme.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.optionTitle, { color: colorTheme.ink }]}>
+                  {t('importAdvancedTitle')}
+                </Text>
+                <Text style={[styles.optionDesc, { color: colorTheme.ink2 }]}>
+                  {t('importAdvancedDesc')}
+                </Text>
+              </View>
+              <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
             </Pressable>
-          </>
-        ) : (
-          <>
-            <PrimaryButton onPress={handleStartImport}>
-              <Icon name="sparkles" size={18} color="#fff" />
-              <BtnLabel>{t('importFromOldTracker')}</BtnLabel>
-            </PrimaryButton>
+          </FadeIn>
+        ) : null}
+
+        <FadeIn delay={stagger * 4} style={styles.footer}>
+          {hasImported ? (
+            <>
+              <PrimaryButton onPress={handleContinue}>
+                <BtnLabel>{t('importContinue')}</BtnLabel>
+                <Icon name="arrowRight" size={18} color="#fff" />
+              </PrimaryButton>
+              <Pressable
+                onPress={handleStartImport}
+                style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={t('importSomethingElse')}
+              >
+                <Text style={[styles.skipText, { color: colorTheme.ink2 }]}>
+                  {t('importSomethingElse')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleOpenRestore}
+                style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={t('importOrRestoreBackup')}
+              >
+                <Text style={[styles.restoreAltText, { color: theme.accent }]}>
+                  {t('importOrRestoreBackup')}
+                </Text>
+              </Pressable>
+            </>
+          ) : (
             <Pressable
               onPress={handleSkip}
               style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
@@ -150,33 +188,49 @@ export function ImportStep({
                 {t('importNoDataStartFresh')}
               </Text>
             </Pressable>
-          </>
-        )}
-      </FadeIn>
-    </ScrollView>
+          )}
+        </FadeIn>
+      </ScrollView>
+
+      <RestoreBackupModal
+        visible={showRestoreModal}
+        onClose={() => setShowRestoreModal(false)}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginBottom: spacing.lg },
-  subtitle: { marginTop: spacing.sm, textAlign: 'center', lineHeight: 20, paddingHorizontal: spacing.sm },
-  infoCard: { padding: spacing.base, borderRadius: radius.md, borderWidth: 1, gap: 12, marginBottom: spacing.lg },
-  benefitRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  badge: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  benefitTitle: { fontFamily: uiFont(700), fontSize: 13.5 },
-  benefitDesc: { fontFamily: uiFont(500), fontSize: 12, marginTop: 1 },
-  compatibleBox: {
+  subtitle: { marginTop: spacing.xs, textAlign: 'center', lineHeight: 19, paddingHorizontal: spacing.sm },
+  cardsContainer: { gap: 12, marginBottom: spacing.xl },
+  optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: radius.sm,
+    gap: 14,
+    padding: 16,
+    borderRadius: radius.md,
     borderWidth: 1,
-    marginTop: 4,
   },
-  compatibleText: { fontFamily: uiFont(500), fontSize: 11.5, flex: 1, lineHeight: 16 },
-  footer: { gap: spacing.sm },
-  skipBtn: { alignItems: 'center', paddingVertical: 10 },
+  badge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 15,
+  },
+  optionDesc: {
+    fontFamily: uiFont(500),
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  footer: { gap: spacing.xs },
+  skipBtn: { alignItems: 'center', paddingVertical: 12 },
   skipPressed: { opacity: 0.55 },
   skipText: { fontFamily: uiFont(600), fontSize: 13.5 },
+  restoreAltText: { fontFamily: uiFont(600), fontSize: 13 },
 });

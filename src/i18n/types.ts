@@ -77,6 +77,9 @@ export interface Translations {
   learnedMerchantsCount: string;
   resetLearningTitle: string;
   resetLearningBody: string;
+  competenceMerchants: string;
+  competenceAutoRate: string;
+  competenceCoverage: string;
   budget: string;
   budgetSummary: string;
   noBudgetSet: string;
@@ -89,6 +92,7 @@ export interface Translations {
   currencies: string;
   advancedImport: string;
   financialReportsExport: string;
+  backupRestore: string;
   dangerZone: string;
   resetAllData: string;
   resetAllDataTitle: string;
@@ -343,6 +347,97 @@ export interface Translations {
   importSomethingElse: string;
   importFromOldTracker: string;
   importNoDataStartFresh: string;
+  importOptionsTitle: string;
+  importOptionsSubtitle: string;
+  importLoadBackupTitle: string;
+  importLoadBackupDesc: string;
+  importLoadBackupBtn: string;
+  importReturningUserPill: string;
+  importAdvancedTitle: string;
+  importAdvancedDesc: string;
+  importAdvancedBtn: string;
+  importOtherAppsPill: string;
+  importOrRestoreBackup: string;
+
+  // Advanced Import screen
+  advImportOpenApp: string;
+  advImportDoneGreeting: string;
+  advImportTxnClause: string;
+  advImportSkippedClause: string;
+  advImportAccClause: string;
+  advImportTransferClause: string;
+  advImportCommitmentClause: string;
+  advImportSplitClause: string;
+  advImportFoundAccPhrase: string;
+  advImportFoundTxnPhrase: string;
+  advImportFoundSummary: string;
+  advImportGuideIntro: string;
+  advImportTxnCategoriesNote: string;
+  advImportAccountsVisibleNote: string;
+  advImportContinueSetup: string;
+  advImportDoneBtn: string;
+  advImportSavingData: string;
+  advImportTryAgain: string;
+  advImportUpdateBalancesTitle: string;
+  advImportUpdateBalancesDesc: string;
+  advImportAccSelectedCount: string;
+  advImportAssetLegend: string;
+  advImportLiabilityLegend: string;
+  advImportContinueReviewTxns: string;
+  advImportImportAccounts: string;
+  advImportBackToPaste: string;
+  advImportStep1Title: string;
+  advImportCopyPromptA11y: string;
+  advImportPromptCopied: string;
+  advImportCopyPromptBtn: string;
+  advImportPasteHint: string;
+  advImportOpenInLabel: string;
+  advImportThinkingModeTip: string;
+  advImportThinkingModeBold: string;
+  advImportCoversTitle: string;
+  advImportCoversTxns: string;
+  advImportCoversBalances: string;
+  advImportCoversInvestments: string;
+  advImportCoversLiabilities: string;
+  advImportPromptPreview: string;
+  advImportPromptA11y: string;
+  advImportLongPressHint: string;
+  advImportStep2Title: string;
+  advImportPasteResultHint: string;
+  advImportUploadA11y: string;
+  advImportReadingFile: string;
+  advImportUploadBtn: string;
+  advImportOrPasteBelow: string;
+  advImportPasteJsonA11y: string;
+  advImportParseReview: string;
+  advImportErrCouldNotReadFile: string;
+  advImportErrPasteFirst: string;
+  advImportErrEmptyJson: string;
+  advImportErrInvalidJson: string;
+
+  restoreModalTitle: string;
+  restoreModalSubtitle: string;
+  restoreFromFileTitle: string;
+  restoreFromFileDesc: string;
+  restoreFromFileBtn: string;
+  restoreFromCloudTitle: string;
+  restoreFromCloudDesc: string;
+  restoreFromCloudNotConfigured: string;
+  restoreConnectGoogleBtn: string;
+  restoreLatestBackupBtn: string;
+  restoreConnectedAs: string;
+  restoreNotConnected: string;
+  restoreConfirmTitle: string;
+  restoreConfirmBody: string;
+  restoreConfirmBtn: string;
+  restoreSuccessTitle: string;
+  restoreSuccessBody: string;
+  restoreFailedTitle: string;
+  restoreNoBackupFound: string;
+  restoreInvalidFile: string;
+  restoreCantReadFile: string;
+  restoreICloudComingSoon: string;
+  restoreRestoring: string;
   wizardExpectedIncomeOptional: string;
   wizardCategories: string;
   wizardBudgetInstruction: string;
@@ -384,4 +479,46 @@ export interface Translations {
   quickAddNoAmount: string;
   quickAddForeignBatch: string;
   quickAddForeignBatchTitle: string;
+
+  // Sending a split (Saved screen > Send the split)
+  splitShareCta: string;
+  splitShareTitle: string;
+  splitShareSub: string;
+  splitShareSubWithPhoto: string;
+  splitShareEveryone: string;
+  splitShareEveryoneSub: string;
+  splitShareCopiedTitle: string;
+  splitSharePasteHint: string;
+  splitShareCopiedBody: string;
+  splitShareFailedTitle: string;
+  splitShareFailedBody: string;
+
+  // Chasing what you are owed (Owed screen > Send a reminder)
+  owedRemindCta: string;
+  owedRemindTitle: string;
+  owedRemindSub: string;
+  owedRemindEverything: string;
+
+  // DuitNow QR & viral bill sharing
+  duitNowTitle: string;
+  duitNowDesc: string;
+  duitNowUploadBtn: string;
+  duitNowChangeBtn: string;
+  duitNowRemoveBtn: string;
+  duitNowActiveBadge: string;
+  duitNowRemoveTitle: string;
+  duitNowRemoveBody: string;
+  duitNowAttachQrToggle: string;
+  duitNowQrAttached: string;
+  duitNowTipNoQr: string;
+  splitSharePasteHintQr: string;
+
+  // Owed screen search and settlement
+  searchOwedPlaceholder: string;
+  noMatchingOwed: string;
+  undoSettleTitle: string;
+  undoSettleMsg: string;
+  reopen: string;
+  allSettled: string;
 }
+

@@ -62,6 +62,48 @@ export const OWED_REMINDER_MINUTE = 5;
 /** How many future one-shots to keep armed. One week of daily cover. */
 export const PLAN_HORIZON = 7;
 
+// --- The log ladder's decay ------------------------------------------------------------------
+//
+// The log nudge escalates in tone as the gap widens (see `logReminderBody`), and for a while
+// that is the right trade: days 1-14 are when the habit is still forming and a nudge actually
+// moves someone. Past that it stops earning anything. Somebody three weeks gone left for a
+// reason that has nothing to do with this app, and a sharper joke every single night reads as
+// nagging, which costs the notification permission outright — and with it the owed and
+// commitment nudges, which are the two that carry real stakes.
+//
+// So tone escalates while FREQUENCY DECAYS. The two must move in opposite directions; holding
+// a nightly ping against the top of the copy ladder is the combination that gets an app muted.
+
+/** Gap thresholds, in days of silence, at which the ladder widens its step. Ordered. Each is a
+ *  floor rather than an exact step: a user on the weekly cadence is never pulled *in* to a
+ *  three-day rhythm, because their chosen cadence always wins (see `decayStep`). */
+const LOG_DECAY_TIERS: { afterDays: number; step: number }[] = [
+  { afterDays: 7, step: 3 },
+  { afterDays: 21, step: 14 },
+];
+
+/** The gap at which the copy stops escalating and switches register to win-back. Shares the
+ *  second decay tier's boundary so tone and rhythm change on the same day. */
+export const LOG_WINBACK_DAYS = 21;
+
+/** Days of silence past which the log nudge stops entirely, until something is logged again.
+ *  Two months out the app is off the home screen and another notification is not what brings
+ *  someone back; continuing to fire only buys an uninstall. */
+export const LOG_GIVE_UP_DAYS = 60;
+
+/** Hard ceiling on log rungs. The decay makes the ladder span weeks rather than a week, and
+ *  the OS caps total pending local notifications (64 on iOS) across every kind at once. */
+export const LOG_MAX_RUNGS = 14;
+
+/** How wide the next step should be at a given gap, never tighter than the chosen cadence. */
+function decayStep(gapDays: number, cadenceStep: number): number {
+  let step = cadenceStep;
+  for (const tier of LOG_DECAY_TIERS) {
+    if (gapDays >= tier.afterDays) step = Math.max(cadenceStep, tier.step);
+  }
+  return step;
+}
+
 /** How often to chase an unpaid friend once their debt has aged past `AGING_DAYS`. */
 const OWED_CADENCE_DAYS = 7;
 
@@ -75,6 +117,14 @@ export interface ReminderPlanEntry {
   title: string;
   body: string;
   kind: ReminderKind;
+  /**
+   * App-icon badge to set when this one fires, or undefined to leave the icon alone.
+   *
+   * Only the kinds backed by a countable, clearable backlog carry one — see `badgeCountOn`.
+   * The log nudge deliberately never does: there is no item behind it, so a badge would light
+   * permanently for exactly the people it is trying to reach and train them to ignore it.
+   */
+  badge?: number;
 }
 
 /**
@@ -192,21 +242,27 @@ export interface LogReminderInput {
  * A user who has never logged anything is anchored on today rather than nudged immediately.
  */
 export function planLogReminders(input: LogReminderInput, now: Date): ReminderPlanEntry[] {
-  const step = cadenceDays(input.cadence);
-  if (step === null) return [];
+  const cadenceStep = cadenceDays(input.cadence);
+  if (cadenceStep === null) return [];
 
   const hour = input.fireHour ?? REMINDER_HOUR;
   const minute = input.fireMinute ?? 0;
 
   const today = localDayNumber(now);
   const anchor = input.lastLoggedDay ?? today;
-  const first = firstFutureDay(anchor + step, step, hour, minute, now);
 
   const out: ReminderPlanEntry[] = [];
-  for (let i = 0; i < PLAN_HORIZON; i++) {
-    const day = first + i * step;
+  let day = firstFutureDay(anchor + cadenceStep, cadenceStep, hour, minute, now);
+
+  for (let i = 0; i < LOG_MAX_RUNGS; i++) {
+    // The taper is measured from the anchor, so a user who has never logged is walked down the
+    // same ramp from their first launch rather than getting the full nightly run. Their *copy*
+    // still comes from the null branch below — they have nothing to be reminded of the gap in.
+    const gap = day - anchor;
+    if (gap > LOG_GIVE_UP_DAYS) break;
+
     // Each rung states the gap as it will actually stand on the evening it fires, not as it
-    // stands now, so the last one in the ladder is not a week out of date when it arrives.
+    // stands now, so the last one in the ladder is not weeks out of date when it arrives.
     const daysSince = input.lastLoggedDay === null ? null : day - input.lastLoggedDay;
     out.push({
       at: atLocalTime(day, hour, minute),
@@ -214,6 +270,8 @@ export function planLogReminders(input: LogReminderInput, now: Date): ReminderPl
       body: logReminderBody(daysSince),
       kind: 'log',
     });
+
+    day += decayStep(gap, cadenceStep);
   }
   return out;
 }
@@ -267,9 +325,24 @@ function logReminderSelfAware(daysSince: number): string {
   return `${daysSince} days since your last log. Pip's been rehearsing this notification and even it thinks it's a bit much at this point.`;
 }
 
+/**
+ * Copy for a user who has properly lapsed, past `LOG_WINBACK_DAYS`.
+ *
+ * The escalation stops here and the register changes exactly once. Someone three weeks gone is
+ * not going to be charmed back by a sharper version of the joke that did not work at day ten —
+ * what recovers them is being told the thing they built is intact and that rejoining is one
+ * small action, not a backlog. So: no gap-shaming, no bit, no streak to rebuild.
+ */
+function logWinBackBody(daysSince: number): string {
+  return daysSince % 2 === 0
+    ? `It has been ${daysSince} days, and everything you logged before that is still here exactly as you left it. One transaction picks the thread back up.`
+    : `${daysSince} days away. Nothing to catch up on and no streak to rebuild — add whatever you last spent and Pip takes it from there.`;
+}
+
 /** The log nudge's copy. `daysSince` is null when nothing has ever been logged. Escalates in
- *  four tiers as the gap widens, mild to done, rotating the top two tiers against a self-aware
- *  fallback rather than always performing the bit. */
+ *  three tiers as the gap widens, mild to pointed, rotating the top tier against a self-aware
+ *  fallback rather than always performing the bit — then hands off to `logWinBackBody`, which
+ *  drops the act entirely once the user is genuinely gone rather than merely slipping. */
 export function logReminderBody(daysSince: number | null): string {
   if (daysSince === null) {
     return 'You have not logged anything yet. Add your first transaction and I will start keeping track.';
@@ -283,14 +356,12 @@ export function logReminderBody(daysSince: number | null): string {
   if (daysSince <= 9) {
     return `${daysSince} days since you touched this app. Bestie your own money is ghosting you and you're the one doing it.`;
   }
-  if (daysSince <= 20) {
+  if (daysSince <= LOG_WINBACK_DAYS) {
     return daysSince % 2 === 0
       ? `${daysSince} days. This isn't tracking anymore, this is a missing persons case.`
       : logReminderSelfAware(daysSince);
   }
-  return daysSince % 2 === 0
-    ? `${daysSince} days. Pip has stopped expecting anything from you. This is acceptance now, not anger.`
-    : logReminderSelfAware(daysSince);
+  return logWinBackBody(daysSince);
 }
 
 // --- Recurring commitments (bills + DCA investments) ------------------------------------
@@ -517,4 +588,55 @@ export function owedReminderBody(debts: PersonDebt[], daysAhead = 0, display: Re
   }
   const lead = `${top.name} has owed you ${amount} for ${days} days. Pip isn't even going to make a joke about this one. That's how bad it's gotten.`;
   return `${lead}${owedOthersSuffix(rest)}`;
+}
+
+// --- App-icon badge ---------------------------------------------------------------------------
+//
+// A badge makes one specific promise: N things are waiting for you, and dealing with them makes
+// the number go away. Only the two backlog-shaped reminders can keep that promise — an aged debt
+// and an overdue bill are both countable and both cleared by a definite action in the app.
+//
+// The log nudge cannot, which is why it never sets one. There is no item behind it, so its badge
+// would sit lit permanently for exactly the users it exists to reach, and a badge that never
+// clears is a badge the user stops seeing — then mutes, taking the two that mattered with it.
+//
+// Nothing here reads the clock. The count is asked for as of a given day so one function serves
+// both callers: the live number to push to the icon now, and the number each scheduled
+// notification should carry for the day it will actually fire.
+
+export interface BadgeCountInput {
+  /** Mirrors the reminder toggles: a source the user switched off must not badge them either. */
+  owedEnabled: boolean;
+  debts: PersonDebt[];
+  commitmentEnabled: boolean;
+  occurrences: CommitmentReminderRow[];
+  /** Day number the ages in `debts` are stated relative to. */
+  today: number;
+}
+
+/**
+ * How many things are waiting on the user as of `day`: debts aged into chase territory, plus
+ * bills past their due date and still unresolved.
+ *
+ * Upcoming bills are deliberately left out. A bill due in three weeks is not waiting on anybody,
+ * and counting it would put a permanent floor under the badge that no action could clear —
+ * the same trap the log nudge is kept out of the count to avoid.
+ */
+export function badgeCountOn(day: number, input: BadgeCountInput): number {
+  let count = 0;
+
+  if (input.owedEnabled) {
+    // `oldestDays` is stated as of `today`, so a debt still short of the threshold now can
+    // cross it by the evening a rung scheduled for `day` actually fires.
+    const ageing = day - input.today;
+    count += input.debts.filter((d) => d.oldestDays + ageing >= AGING_DAYS).length;
+  }
+
+  if (input.commitmentEnabled) {
+    count += input.occurrences.filter(
+      (o) => o.status === 'scheduled' && dayNumberOf(o.dueDate) < day
+    ).length;
+  }
+
+  return count;
 }

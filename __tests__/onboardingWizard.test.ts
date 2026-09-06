@@ -237,6 +237,18 @@ describe('onboardingWizard', () => {
       expect(translate('zh', 'wizardNotificationsTitle')).toBe('通知提醒');
       expect(translate('en', 'wizardWidgetTitle')).toBe('Widget');
       expect(translate('zh', 'wizardWidgetTitle')).toBe('小组件');
+
+      // Import step choices
+      expect(translate('en', 'importOptionsTitle')).toBe('Bring in your data');
+      expect(translate('zh', 'importOptionsTitle')).toBe('迁入已有数据');
+      expect(translate('en', 'importLoadBackupTitle')).toBe('Restore Pip backup');
+      expect(translate('zh', 'importLoadBackupTitle')).toBe('恢复 Pip 备份');
+      expect(translate('en', 'importLoadBackupBtn')).toBe('Load backup');
+      expect(translate('zh', 'importLoadBackupBtn')).toBe('恢复备份');
+      expect(translate('en', 'importAdvancedTitle')).toBe('Advanced import');
+      expect(translate('zh', 'importAdvancedTitle')).toBe('高级导入');
+      expect(translate('en', 'importAdvancedBtn')).toBe('Import from other app');
+      expect(translate('zh', 'importAdvancedBtn')).toBe('从其他应用导入');
     });
   });
 });

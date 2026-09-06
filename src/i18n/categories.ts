@@ -8,6 +8,10 @@ export const DEFAULT_CATEGORY_TRANSLATIONS: Record<string, Record<SupportedLangu
     en: 'Food',
     zh: '餐饮美食',
   },
+  shopping: {
+    en: 'Shopping',
+    zh: '购物消费',
+  },
   entertainment: {
     en: 'Entertainment',
     zh: '休闲娱乐',

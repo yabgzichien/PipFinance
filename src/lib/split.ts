@@ -468,6 +468,10 @@ export interface OpenShare {
   owed?: number;
   /** Amount already paid against this share. */
   paid?: number;
+  /** Status of the share ('open' | 'settled' | 'written_off'). */
+  status?: ShareStatus;
+  /** Local file URI of the parent transaction's saved receipt photo, if any. */
+  receiptUri?: string | null;
 }
 
 /** An extracted inbound row that might be someone paying you back. */
@@ -542,12 +546,22 @@ export function groupOpenSharesByPerson(open: OpenShare[], today: string): Perso
     }
     entry.total = fromCents(toCents(entry.total) + toCents(share.outstanding));
     entry.shares.push(share);
-    entry.oldestDays = Math.max(entry.oldestDays, daysBetween(share.billDate, today) ?? 0);
+    if (share.status !== 'settled') {
+      entry.oldestDays = Math.max(entry.oldestDays, daysBetween(share.billDate, today) ?? 0);
+    }
   }
   for (const entry of map.values()) {
-    entry.shares.sort((a, b) => (a.billDate ?? '').localeCompare(b.billDate ?? ''));
+    entry.shares.sort((a, b) => {
+      const aSettled = a.status === 'settled' ? 1 : 0;
+      const bSettled = b.status === 'settled' ? 1 : 0;
+      if (aSettled !== bSettled) return aSettled - bSettled;
+      return (a.billDate ?? '').localeCompare(b.billDate ?? '');
+    });
   }
-  return [...map.values()].sort((a, b) => b.total - a.total);
+  return [...map.values()].sort((a, b) => {
+    if (b.total !== a.total) return b.total - a.total;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /** The age of the oldest unpaid bill across everyone, or 0 when nobody owes you. */

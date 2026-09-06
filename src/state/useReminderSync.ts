@@ -18,16 +18,19 @@ import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { ratesFromCache } from '../lib/fx';
 import {
+  badgeCountOn,
   capDailyReminders,
   inferredFireHour,
+  localDayNumber,
   planCommitmentReminders,
   planLogReminders,
   planOwedReminders,
+  type BadgeCountInput,
   type ReminderKind,
 } from '../lib/reminders';
 import { groupOpenSharesByPerson, oldestOverdueDays } from '../lib/split';
 import { lastActiveDay } from '../lib/streak';
-import { configureNotifications, syncScheduledReminders } from '../notifications';
+import { configureNotifications, setBadgeCount, syncScheduledReminders } from '../notifications';
 import { useAppData } from './store';
 
 /**
@@ -112,13 +115,32 @@ export function useReminderSync(): void {
         // Hard cap of two reminders a day, enforced across every kind combined (item 3), then
         // split back out by kind for the notification adapter's existing plan shape.
         const capped = capDailyReminders(merged);
-        const byKind = (kind: ReminderKind) => capped.filter((e) => e.kind === kind);
+
+        // The app-icon badge counts what is genuinely waiting on the user: debts old enough to
+        // chase, plus bills already past due. The log nudge is left out on purpose — see the
+        // badge section of lib/reminders.ts for why a habit nudge must never light the icon.
+        const badgeInput: BadgeCountInput = {
+          owedEnabled: owedReminderEnabled,
+          debts,
+          commitmentEnabled: commitmentReminderEnabled,
+          occurrences: commitmentRows,
+          today: localDayNumber(now),
+        };
+
+        // Each save-class rung carries the count as it will stand on the evening it fires, so
+        // the icon stays honest for a user who has not opened the app in days. `setBadgeCount`
+        // below then corrects it from live state the moment they do.
+        const withBadges = capped.map((e) =>
+          e.kind === 'log' ? e : { ...e, badge: badgeCountOn(localDayNumber(e.at), badgeInput) }
+        );
+        const byKind = (kind: ReminderKind) => withBadges.filter((e) => e.kind === kind);
 
         await syncScheduledReminders({
           log: byKind('log'),
           owed: byKind('owed'),
           commitment: byKind('commitment'),
         });
+        await setBadgeCount(badgeCountOn(badgeInput.today, badgeInput));
       } catch {
         /* reminders are a convenience; never let them break a screen */
       }

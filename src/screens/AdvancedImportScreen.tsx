@@ -73,6 +73,7 @@ import {
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { ImportReviewScreen } from './ImportReviewScreen';
 
@@ -90,6 +91,7 @@ const LLM_LINKS = [
 
 function LLMChip({ label, url, emoji }: { label: string; url: string; emoji: string }) {
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   return (
     <Pressable
       onPress={() => Linking.openURL(url)}
@@ -99,7 +101,7 @@ function LLMChip({ label, url, emoji }: { label: string; url: string; emoji: str
         { opacity: pressed ? 0.82 : 1 },
       ]}
       accessibilityRole="link"
-      accessibilityLabel={`Open ${label}`}
+      accessibilityLabel={t('advImportOpenApp', { label })}
     >
       <Text style={styles.llmEmoji}>{emoji}</Text>
       <Text style={[styles.llmLabel, { color: colorTheme.ink }]}>{label}</Text>
@@ -205,6 +207,7 @@ export function AdvancedImportScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { t } = useLanguage();
   const { commitCategorized, recordBalanceLink, refreshAll, setHoldingCost, updateHoldingQuantity, importParsedCommitments } = useAppData();
 
   const [phase, setPhase] = useState<Phase>('guide');
@@ -272,7 +275,7 @@ export function AdvancedImportScreen({
       setPhase('pasting');
       handlePasteImport(text);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't read that file.");
+      setError(e instanceof Error ? e.message : t('advImportErrCouldNotReadFile'));
       setPhase('error');
     } finally {
       setPickingFile(false);
@@ -283,7 +286,7 @@ export function AdvancedImportScreen({
   const handlePasteImport = (text?: string) => {
     const trimmed = (text ?? jsonText).trim();
     if (!trimmed) {
-      setError('Paste the JSON from the AI response first.');
+      setError(t('advImportErrPasteFirst'));
       setPhase('error');
       return;
     }
@@ -313,7 +316,7 @@ export function AdvancedImportScreen({
         !pBudget &&
         !pRelief
       ) {
-        setError('The JSON had no transactions or accounts. Check that you pasted the full reply.');
+        setError(t('advImportErrEmptyJson'));
         setPhase('error');
         return;
       }
@@ -352,7 +355,7 @@ export function AdvancedImportScreen({
     } catch (e) {
       setError(
         e instanceof SyntaxError
-          ? "That doesn't look like valid JSON. Make sure you pasted the entire block from the AI."
+          ? t('advImportErrInvalidJson')
           : String(e),
       );
       setPhase('error');
@@ -663,7 +666,7 @@ export function AdvancedImportScreen({
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title="Advanced Import" onBack={onClose} />
+        <TopBar title={t('importAdvancedTitle')} onBack={onClose} />
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -677,20 +680,29 @@ export function AdvancedImportScreen({
           <BubbleText>
             {phase === 'done' ? (
               <>
-                Done!
-                {txnCount > 0 && <> Imported <B>{txnCount} transaction{txnCount === 1 ? '' : 's'}</B>{txnSkipped > 0 ? <> (skipped <B>{txnSkipped}</B> dup{txnSkipped === 1 ? '' : 's'})</> : ''}.</>}
-                {accCount > 0 && <> Added <B>{accCount} account{accCount === 1 ? '' : 's'}</B> to Net Worth.</>}
-                {transferCount > 0 && <> Logged <B>{transferCount} transfer{transferCount === 1 ? '' : 's'}</B>.</>}
-                {commitmentCount > 0 && <> Set up <B>{commitmentCount} recurring commitment{commitmentCount === 1 ? '' : 's'}</B>.</>}
-                {splitCount > 0 && <> Restored <B>{splitCount} bill split{splitCount === 1 ? '' : 's'}</B>.</>}
+                {t('advImportDoneGreeting')}
+                {txnCount > 0 && (
+                  <>
+                    {' '}
+                    <B>{t('advImportTxnClause', { count: txnCount })}</B>
+                    {txnSkipped > 0 ? <> <B>{t('advImportSkippedClause', { count: txnSkipped })}</B></> : ''}.
+                  </>
+                )}
+                {accCount > 0 && <> <B>{t('advImportAccClause', { count: accCount })}</B>.</>}
+                {transferCount > 0 && <> <B>{t('advImportTransferClause', { count: transferCount })}</B>.</>}
+                {commitmentCount > 0 && <> <B>{t('advImportCommitmentClause', { count: commitmentCount })}</B>.</>}
+                {splitCount > 0 && <> <B>{t('advImportSplitClause', { count: splitCount })}</B>.</>}
               </>
             ) : phase === 'accountReview' ? (
               <>
-                Found <B>{parsedAccounts.length}</B> account{parsedAccounts.length === 1 ? '' : 's'} and <B>{parsedTxns.length}</B> transaction{parsedTxns.length === 1 ? '' : 's'}. Untick any accounts you don't want, then continue to review the transactions.
+                {t('advImportFoundSummary', {
+                  accPhrase: t('advImportFoundAccPhrase', { count: parsedAccounts.length }),
+                  txnPhrase: t('advImportFoundTxnPhrase', { count: parsedTxns.length }),
+                })}
               </>
             ) : (
               <>
-                Got a long PDF or spreadsheet? Copy the prompt, open your favourite AI, attach your files, and paste the JSON back.
+                {t('advImportGuideIntro')}
               </>
             )}
           </BubbleText>
@@ -702,19 +714,19 @@ export function AdvancedImportScreen({
             <Card style={{ padding: 16, marginTop: 18, gap: 10 }}>
               {txnCount > 0 && (
                 <Text style={[styles.doneText, { color: colorTheme.ink2 }]}>
-                  Transaction categories were filled in from what Pip has learned. Tweak them in your transactions list.
+                  {t('advImportTxnCategoriesNote')}
                 </Text>
               )}
               {accCount > 0 && (
                 <Text style={[styles.doneText, { color: colorTheme.ink2 }]}>
-                  Accounts are now visible in <B>Net Worth</B>. Tap any account there to update balances over time.
+                  {t('advImportAccountsVisibleNote', { netWorth: t('netWorthTitle') })}
                 </Text>
               )}
             </Card>
             <View style={{ marginTop: 22 }}>
               <PrimaryButton onPress={() => { (onSuccess ?? onClose)(); }}>
                 <Icon name={isWizard ? 'arrowRight' : 'check'} size={18} color="#fff" stroke={2.4} />
-                <BtnLabel>{isWizard ? 'Continue setup' : 'Done'}</BtnLabel>
+                <BtnLabel>{isWizard ? t('advImportContinueSetup') : t('advImportDoneBtn')}</BtnLabel>
               </PrimaryButton>
             </View>
           </>
@@ -724,7 +736,7 @@ export function AdvancedImportScreen({
         {phase === 'saving' && (
           <Card style={[styles.busyCard, { marginTop: 18 }]}>
             <ActivityIndicator color={theme.accent} />
-            <Text style={[styles.busyText, { color: colorTheme.ink2 }]}>Saving your data…</Text>
+            <Text style={[styles.busyText, { color: colorTheme.ink2 }]}>{t('advImportSavingData')}</Text>
           </Card>
         )}
 
@@ -740,7 +752,7 @@ export function AdvancedImportScreen({
             <View style={{ marginTop: 14 }}>
               <PrimaryButton onPress={() => setPhase('pasting')}>
                 <Icon name="chevronLeft" size={18} color="#fff" />
-                <BtnLabel>Try again</BtnLabel>
+                <BtnLabel>{t('advImportTryAgain')}</BtnLabel>
               </PrimaryButton>
             </View>
           </>
@@ -771,25 +783,28 @@ export function AdvancedImportScreen({
                   </Pressable>
                   <Pressable style={{ flex: 1 }} onPress={() => setUpdateAccountBalances((prev) => !prev)}>
                     <Text style={[styles.accName, { color: colorTheme.ink }]}>
-                      Update asset & liability balances
+                      {t('advImportUpdateBalancesTitle')}
                     </Text>
                     <Text style={[styles.accMeta, { color: colorTheme.ink3, marginTop: 2 }]}>
-                      Apply imported income and expenses to adjust asset and liability account balances
+                      {t('advImportUpdateBalancesDesc')}
                     </Text>
                   </Pressable>
                 </Card>
               )}
 
               <Eyebrow style={{ marginBottom: 12 }}>
-                {parsedAccounts.filter((a) => a.include).length} of {parsedAccounts.length} accounts selected
+                {t('advImportAccSelectedCount', {
+                  selected: parsedAccounts.filter((a) => a.include).length,
+                  total: parsedAccounts.length,
+                })}
               </Eyebrow>
 
               {/* Legend */}
               <View style={styles.legendRow}>
                 <View style={[styles.kindDot, { backgroundColor: theme.accent }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Asset</Text>
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>{t('advImportAssetLegend')}</Text>
                 <View style={[styles.kindDot, { backgroundColor: colorTheme.amber, marginLeft: 12 }]} />
-                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>Liability (outstanding balance)</Text>
+                <Text style={[styles.legendText, { color: colorTheme.ink2 }]}>{t('advImportLiabilityLegend')}</Text>
               </View>
 
               <Card style={{ padding: 14, marginTop: 10 }}>
@@ -804,16 +819,16 @@ export function AdvancedImportScreen({
               {parsedTxns.length > 0 ? (
                 <PrimaryButton onPress={() => setPhase('txnReview')}>
                   <Icon name="chevronRight" size={18} color="#fff" />
-                  <BtnLabel>Continue — Review {parsedTxns.length} transaction{parsedTxns.length === 1 ? '' : 's'}</BtnLabel>
+                  <BtnLabel>{t('advImportContinueReviewTxns', { count: parsedTxns.length })}</BtnLabel>
                 </PrimaryButton>
               ) : (
                 <PrimaryButton onPress={() => void commitAll([], [])}>
                   <Icon name="check" size={18} color="#fff" stroke={2.4} />
-                  <BtnLabel>Import {parsedAccounts.filter((a) => a.include).length} account{parsedAccounts.filter((a) => a.include).length === 1 ? '' : 's'}</BtnLabel>
+                  <BtnLabel>{t('advImportImportAccounts', { count: parsedAccounts.filter((a) => a.include).length })}</BtnLabel>
                 </PrimaryButton>
               )}
               <Pressable onPress={() => setPhase('pasting')} style={styles.backLink}>
-                <Text style={[styles.backLinkText, { color: colorTheme.ink3 }]}>← Back to paste</Text>
+                <Text style={[styles.backLinkText, { color: colorTheme.ink3 }]}>{t('advImportBackToPaste')}</Text>
               </Pressable>
             </View>
           </>
@@ -825,7 +840,7 @@ export function AdvancedImportScreen({
             {/* Step 1 */}
             <View style={styles.stepHeader}>
               <View style={[styles.stepBadge, { backgroundColor: theme.accent }]}><Text style={styles.stepNum}>1</Text></View>
-              <Text style={[styles.stepTitle, { color: colorTheme.ink }]}>Copy Prompt</Text>
+              <Text style={[styles.stepTitle, { color: colorTheme.ink }]}>{t('advImportStep1Title')}</Text>
             </View>
 
             <Card style={{ padding: 18, gap: 14 }}>
@@ -837,20 +852,20 @@ export function AdvancedImportScreen({
                   pressed && { opacity: 0.88 },
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Copy prompt to clipboard"
+                accessibilityLabel={t('advImportCopyPromptA11y')}
               >
                 <Icon name="receipt" size={18} color={theme.accent} />
                 <Text style={[styles.copyBtnText, { color: theme.accent }]}>
-                  {copied ? '✓ Prompt copied!' : 'Copy Prompt'}
+                  {copied ? t('advImportPromptCopied') : t('advImportCopyPromptBtn')}
                 </Text>
               </Pressable>
 
               <Text style={[styles.copyHint, { color: colorTheme.ink2 }]}>
-                Paste the prompt and attach your file(s): statements, spreadsheets, or any financial export. Multiple files are fine.
+                {t('advImportPasteHint')}
               </Text>
 
               <View>
-                <Text style={[styles.openInLabel, { color: colorTheme.ink3 }]}>Open in</Text>
+                <Text style={[styles.openInLabel, { color: colorTheme.ink3 }]}>{t('advImportOpenInLabel')}</Text>
                 <View style={styles.llmRow}>
                   {LLM_LINKS.map((l) => <LLMChip key={l.label} {...l} />)}
                 </View>
@@ -859,18 +874,18 @@ export function AdvancedImportScreen({
               <View style={[styles.tipRow, { backgroundColor: `${colorTheme.amber}12` }]}>
                 <Icon name="sparkles" size={13} color={colorTheme.amber} />
                 <Text style={[styles.tipText, { color: colorTheme.ink2 }]}>
-                  For large or multi-page files, enable <B>thinking / reasoning mode</B> for best results.
+                  {t('advImportThinkingModeTip', { thinkingMode: t('advImportThinkingModeBold') })}
                 </Text>
               </View>
 
               {/* What gets imported summary */}
               <View style={[styles.coversBox, { backgroundColor: colorTheme.surface2 }]}>
-                <Text style={[styles.coversTitle, { color: colorTheme.ink2 }]}>The prompt covers:</Text>
+                <Text style={[styles.coversTitle, { color: colorTheme.ink2 }]}>{t('advImportCoversTitle')}</Text>
                 {[
-                  'Transactions (expenses, income)',
-                  'Cash & savings account balances',
-                  'Investments (stocks, crypto, unit trusts)',
-                  'Liabilities (loans, credit cards, BNPL)',
+                  t('advImportCoversTxns'),
+                  t('advImportCoversBalances'),
+                  t('advImportCoversInvestments'),
+                  t('advImportCoversLiabilities'),
                 ].map((line) => (
                   <View key={line} style={styles.coversRow}>
                     <Text style={[styles.coversDot, { color: theme.accent }]}>✓</Text>
@@ -881,7 +896,7 @@ export function AdvancedImportScreen({
 
               {/* Prompt preview */}
               <View>
-                <Eyebrow style={{ marginBottom: 8 }}>Prompt preview</Eyebrow>
+                <Eyebrow style={{ marginBottom: 8 }}>{t('advImportPromptPreview')}</Eyebrow>
                 <View style={[styles.promptBox, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
                   <TextInput
                     multiline
@@ -890,11 +905,11 @@ export function AdvancedImportScreen({
                     value={prompt}
                     style={[styles.promptText, { color: colorTheme.ink2 }]}
                     scrollEnabled={false}
-                    accessibilityLabel="Prompt text, selectable"
+                    accessibilityLabel={t('advImportPromptA11y')}
                   />
                 </View>
                 <Text style={[styles.promptNote, { color: colorTheme.ink3 }]}>
-                  Long-press to select all and copy if the button above doesn't work.
+                  {t('advImportLongPressHint')}
                 </Text>
               </View>
             </Card>
@@ -909,12 +924,12 @@ export function AdvancedImportScreen({
             {/* Step 2 */}
             <View style={styles.stepHeader}>
               <View style={[styles.stepBadge, { backgroundColor: theme.accent }]}><Text style={styles.stepNum}>2</Text></View>
-              <Text style={[styles.stepTitle, { color: colorTheme.ink }]}>Import Result</Text>
+              <Text style={[styles.stepTitle, { color: colorTheme.ink }]}>{t('advImportStep2Title')}</Text>
             </View>
 
             <Card style={{ padding: 18, gap: 14 }}>
               <Text style={[styles.copyHint, { color: colorTheme.ink2 }]}>
-                Copy the entire JSON block from the AI and paste it below, or upload a saved .json file.
+                {t('advImportPasteResultHint')}
               </Text>
 
               <Pressable
@@ -926,7 +941,7 @@ export function AdvancedImportScreen({
                   (pressed || pickingFile) && { opacity: 0.85 },
                 ]}
                 accessibilityRole="button"
-                accessibilityLabel="Upload a JSON file from your device"
+                accessibilityLabel={t('advImportUploadA11y')}
               >
                 {pickingFile ? (
                   <ActivityIndicator color={theme.accent} size="small" />
@@ -934,21 +949,21 @@ export function AdvancedImportScreen({
                   <Icon name="upload" size={17} color={colorTheme.ink} />
                 )}
                 <Text style={[styles.copyBtnText, { color: colorTheme.ink }]}>
-                  {pickingFile ? 'Reading file…' : 'Upload JSON File'}
+                  {pickingFile ? t('advImportReadingFile') : t('advImportUploadBtn')}
                 </Text>
               </Pressable>
 
               <View style={styles.arrowRow}>
                 <View style={[styles.arrowLine, { backgroundColor: colorTheme.line }]} />
-                <Text style={[styles.orText, { color: colorTheme.ink3 }]}>or paste below</Text>
+                <Text style={[styles.orText, { color: colorTheme.ink3 }]}>{t('advImportOrPasteBelow')}</Text>
                 <View style={[styles.arrowLine, { backgroundColor: colorTheme.line }]} />
               </View>
 
               <TextInput
                 multiline
                 value={jsonText}
-                onChangeText={(t) => {
-                  setJsonText(t);
+                onChangeText={(txt) => {
+                  setJsonText(txt);
                   setPhase((prev) => (prev === 'guide' ? 'pasting' : prev));
                 }}
                 placeholder={'{\n  "transactions": [ … ],\n  "accounts": [ … ]\n}'}
@@ -961,12 +976,12 @@ export function AdvancedImportScreen({
                 autoCorrect={false}
                 autoCapitalize="none"
                 spellCheck={false}
-                accessibilityLabel="Paste JSON here"
+                accessibilityLabel={t('advImportPasteJsonA11y')}
               />
 
               <PrimaryButton onPress={() => handlePasteImport()}>
                 <Icon name="check" size={18} color="#fff" stroke={2.4} />
-                <BtnLabel>Parse & Review</BtnLabel>
+                <BtnLabel>{t('advImportParseReview')}</BtnLabel>
               </PrimaryButton>
             </Card>
           </>

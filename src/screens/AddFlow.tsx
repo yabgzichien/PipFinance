@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { PipWearsHat } from '../components/Pip';
 import { BubbleText, PipSays } from '../components/ui';
@@ -17,6 +17,7 @@ import { resolveQuickAdd } from '../lib/quickAdd';
 import type { QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
 import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
+import { workingsFromReceipt } from '../lib/splitMessage';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource, type TxnType } from '../lib/types';
 import { useAppData, type NewLearned } from '../state/store';
 import { useBackHandler } from '../state/useBackHandler';
@@ -108,6 +109,14 @@ function AddFlowPhases({
   const [cached, setCached] = useState<ExtractedTxn[] | undefined>(undefined);
   const [linkId, setLinkId] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<ReceiptSplitResult | null>(null);
+
+  /** The itemized receipt's surcharge breakdown, kept alive for the Saved screen's share
+   *  message. The `splits` table has nowhere to store it, so this is the only window in which
+   *  the message can show the service charge and SST behind each person's amount. */
+  const splitWorkings = useMemo(() => {
+    const state = receiptResult?.resumeState;
+    return state ? workingsFromReceipt(state.lines, state.surcharges) : null;
+  }, [receiptResult]);
   // Set once ReceiptScanScreen actually reads the picked image, so backing out to the kind
   // question and choosing "receipt" again reuses the read instead of paying for another one.
   const [cachedReceipt, setCachedReceipt] = useState<ScannedReceipt | null>(null);
@@ -502,6 +511,14 @@ function AddFlowPhases({
     );
   }
   return (
-    <SavedScreen result={result} newLearned={newLearned} catById={catById} elapsedMs={extractElapsedMs} autoFill={autoFill} onDone={onClose} />
+    <SavedScreen
+      result={result}
+      newLearned={newLearned}
+      catById={catById}
+      elapsedMs={extractElapsedMs}
+      autoFill={autoFill}
+      splitWorkings={splitWorkings}
+      onDone={onClose}
+    />
   );
 }

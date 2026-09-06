@@ -22,6 +22,7 @@ import {
   upsertSnapshot,
 } from '../db/budgetRepo';
 import { resetAllData as dbResetAllData } from '../db/db';
+import { restoreFromBackupZip } from '../lib/backupRestore';
 import {
   addAccount as dbAddAccount,
   addBalanceEntry as dbAddBalanceEntry,
@@ -47,6 +48,7 @@ import {
   listShares as dbListShares,
   listSplits as dbListSplits,
   recordPayment as dbRecordPayment,
+  revertPayment as dbRevertPayment,
   renamePerson as dbRenamePerson,
   writeOffShare as dbWriteOffShare,
 } from '../db/splitRepo';
@@ -74,8 +76,7 @@ import {
   type StreakFreezeState,
 } from '../lib/streak';
 import { monthLabel } from '../lib/dates';
-import { syncStreakWidget } from '../widget/syncStreakWidget';
-import { syncQuickRecordWidget } from '../widget/syncQuickRecordWidget';
+import { syncAllWidgets } from '../widget/syncWidgets';
 import {
   addCommitment as dbAddCommitment,
   archiveCommitment as dbArchiveCommitment,
@@ -144,6 +145,7 @@ const TUTORIAL_SCAN_DONE_KEY = 'tutorial_scan_done';
 const TUTORIAL_MANUAL_DONE_KEY = 'tutorial_manual_done';
 const TUTORIAL_DISMISSED_KEY = 'tutorial_dismissed';
 const EXPLORE_TASKS_DONE_KEY = 'explore_tasks_done';
+const DUITNOW_QR_KEY = 'duitnow_qr_uri';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
@@ -246,7 +248,7 @@ async function reconcileReceivable(
 
 export type HeroPanel = 'cashflow' | 'spent' | 'left' | 'networth';
 
-interface AppData {
+export interface AppData {
   ready: boolean;
   categories: Category[];
   catById: Record<string, Category>;
@@ -317,6 +319,8 @@ interface AppData {
   /** Unsettled shares joined with the person and the bill behind them, ready to match a
    *  repayment against or to list on the Owed screen. */
   openShares: OpenShare[];
+  /** All shares (open and settled) joined with person and bill context, for full traceability. */
+  allOwedShares: OpenShare[];
   /** Remember a name (or return the one already saved under it, case-insensitively). */
   addPerson: (name: string) => Promise<Person>;
   renamePerson: (id: string, name: string) => Promise<void>;
@@ -334,6 +338,8 @@ interface AppData {
     matchedMerchant: string | null,
     accountId: string | null
   ) => Promise<void>;
+  /** Undo settlement of a share, reopening the debt. */
+  unsettleShare: (shareId: string) => Promise<void>;
   /** Give up on a share: the uncollected money becomes the payer's own expense after all. */
   writeOffShare: (shareId: string) => Promise<void>;
   saveTransactionEdits: (
@@ -345,6 +351,9 @@ interface AppData {
   saveBudget: (income: number, allocations: Record<string, number>) => Promise<void>;
   resetBudget: () => Promise<void>;
   resetAllData: () => Promise<void>;
+  /** Destructively replaces all app data with the contents of a backup zip (Settings > Back
+   *  Up & Restore). Callers must confirm with the user before calling this. */
+  restoreFromBackup: (zipBytes: Uint8Array) => Promise<void>;
   /** Wipe all data AND reset onboarding so the setup wizard re-appears. */
   resetToOnboarding: () => Promise<void>;
   /** Monthly pay-yourself-first commitment. Motivation only. */
@@ -466,6 +475,10 @@ interface AppData {
   unpayCommitment: (occurrenceId: string) => Promise<void>;
   /** Mark a scheduled occurrence as not applicable this month. No ledger effect. */
   skipCommitment: (occurrenceId: string) => Promise<void>;
+
+  // --- DuitNow QR for viral bill splitting ---
+  duitNowQrUri: string | null;
+  setDuitNowQrUri: (uri: string | null) => Promise<void>;
 }
 
 const Ctx = createContext<AppData | null>(null);
@@ -501,9 +514,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
   const [tasksDone, setTasksDoneState] = useState<ExploreTaskId[]>([]);
+  const [duitNowQrUri, setDuitNowQrUriState] = useState<string | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, duitNowQrRaw] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -533,7 +547,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         dbListSplits(),
         dbListShares(),
         dbListPayments(),
+        getMeta(DUITNOW_QR_KEY),
       ]);
+    setDuitNowQrUriState(duitNowQrRaw || null);
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
     setReminderCadenceState(isReminderCadence(reminderCadenceRaw) ? reminderCadenceRaw : 'off');
@@ -685,8 +701,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       .join('')}`;
     if (lastWidgetPayload.current === payload) return;
     lastWidgetPayload.current = payload;
-    syncStreakWidget(transactions).catch(() => {});
-    syncQuickRecordWidget(transactions).catch(() => {});
+    syncAllWidgets(transactions).catch(() => {});
   }, [ready, transactions]);
 
   // Spend a banked freeze the moment it's actually needed (docs/ui-engagement-plan.md Step 4).
@@ -772,8 +787,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return map;
   }, [categories]);
 
-  /** Open shares, joined once here so the matching and the Owed screen read the same rows. */
-  const openShares = useMemo<OpenShare[]>(() => {
+  /** All shares (open and settled) joined with person and bill context, for full traceability on the Owed screen. */
+  const allOwedShares = useMemo<OpenShare[]>(() => {
     const txnById: Record<string, Transaction> = {};
     for (const t of transactions) txnById[t.id] = t;
     const splitById: Record<string, Split> = {};
@@ -782,7 +797,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     for (const p of people) personById[p.id] = p;
 
     return shares
-      .filter((s) => s.status === 'open')
+      .filter((s) => s.status === 'open' || s.status === 'settled')
       .map((s) => {
         const split = splitById[s.splitId];
         const txn = txnById[split?.txnId ?? ''];
@@ -800,10 +815,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           gross: split?.gross ?? txn?.amount ?? outstanding(s),
           owed: s.owed,
           paid: s.paid,
+          status: s.status,
+          receiptUri: txn?.receiptUri ?? null,
         };
-      })
-      .filter((s) => s.outstanding > 0);
+      });
   }, [shares, splits, transactions, people]);
+
+  /** Open shares, joined once here so the matching and the Owed screen read the same rows. */
+  const openShares = useMemo<OpenShare[]>(() => {
+    return allOwedShares.filter((s) => s.status === 'open' && s.outstanding > 0);
+  }, [allOwedShares]);
 
   // Value per account: qty × live price for holdings, else its latest balance entry.
   const accountValues = useMemo(
@@ -1115,6 +1136,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setStreakPausedSinceDayState(null);
   }, []);
 
+  const setDuitNowQrUri = useCallback(async (uri: string | null) => {
+    await setMeta(DUITNOW_QR_KEY, uri ?? '');
+    setDuitNowQrUriState(uri);
+  }, []);
+
   const resetBudget = useCallback(async () => {
     await clearBudget();
     setIncome(0);
@@ -1129,6 +1155,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setMeta(TUTORIAL_DISMISSED_KEY, 'false'),
       setMeta(EXPLORE_TASKS_DONE_KEY, '[]'),
     ]);
+    await refreshAll();
+  }, [refreshAll]);
+
+  const restoreFromBackup = useCallback(async (zipBytes: Uint8Array) => {
+    await restoreFromBackupZip(zipBytes);
     await refreshAll();
   }, [refreshAll]);
 
@@ -1657,6 +1688,34 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   /**
+   * Undo settlement of a share: rolls the share back to 'open' and reverses any balance added
+   * to the destination account.
+   */
+  const unsettleShare = useCallback(
+    async (shareId: string) => {
+      const share = shares.find((s) => s.id === shareId);
+      const split = share ? splits.find((sp) => sp.id === share.splitId) : undefined;
+      const result = await dbRevertPayment(shareId);
+      if (result && result.accountId && result.revertedAmount > 0) {
+        let rates: Record<string, number> | null = null;
+        try {
+          rates = ratesFromCache(await listFxRates());
+        } catch {
+          // ignore rate error if falling back
+        }
+        const revertedMyr =
+          split && split.currency !== BASE_CURRENCY && split.fxRate != null
+            ? receivableMyr(result.revertedAmount, split.fxRate)
+            : result.revertedAmount;
+        const nativeAmt = rates ? nativeForAccount(revertedMyr, result.accountId, rates) : revertedMyr;
+        await recordBalanceLink(result.accountId, nativeAmt, 'subtract', todayKey());
+      }
+      await refreshSplitState();
+    },
+    [shares, splits, recordBalanceLink, nativeForAccount, refreshSplitState]
+  );
+
+  /**
    * Tick a commitment occurrence as paid. Always tries to match an existing ledger row first
    * (same merchant, amount within 5%, dated within a week of the due date) so a bill the user
    * already logged manually — or one that lands via a later bank-statement import — never gets
@@ -2011,15 +2070,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     shares,
     splitPayments,
     openShares,
+    allOwedShares,
     addPerson,
     renamePerson,
     splitTransaction,
     unsplitTransaction,
     settleShare,
+    unsettleShare,
     writeOffShare,
     saveBudget,
     resetBudget,
     resetAllData,
+    restoreFromBackup,
     resetToOnboarding,
     reminderCadence,
     setReminderCadence,
@@ -2066,6 +2128,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     payCommitment,
     unpayCommitment,
     skipCommitment,
+    duitNowQrUri,
+    setDuitNowQrUri,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

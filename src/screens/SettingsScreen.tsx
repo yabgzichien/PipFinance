@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { saveDuitNowQrImage, deleteDuitNowQrImage } from '../lib/duitNow';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
@@ -26,13 +28,13 @@ import { motionSettingLabel, MOTION_SETTINGS } from '../theme/motion';
 
 type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
-export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onOpenBackup, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onOpenBackup?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
   const { t, formatCadence, formatMotion, isZh } = useLanguage();
-  const { memory, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
+  const { memory, coverage, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
   const [search, setSearch] = useState('');
@@ -116,6 +118,8 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     (Boolean(onOpenCurrencySettings) && matchingKeys.has('data_currencies')) ||
     (Boolean(onAdvancedImport) && matchingKeys.has('data_import')) ||
     (Boolean(onOpenExport) && matchingKeys.has('data_export')) ||
+    (Boolean(onOpenBackup) && matchingKeys.has('data_backup')) ||
+    matchingKeys.has('data_duitnow') ||
     matchingKeys.has('data_tutorial');
 
   const hasVisibleDangerCard =
@@ -295,6 +299,9 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   <Text style={[styles.providerName, { color: colorTheme.ink }]}>
                     {t('learnedMerchantsCount', { count: learnedCount })}
                   </Text>
+                  <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
+                    {t('competenceCoverage', { days: coverage.daysCovered, window: coverage.windowDays })}
+                  </Text>
                 </View>
                 <Pressable onPress={resetLearned} disabled={learnedCount === 0} style={styles.resetBtn}>
                   <Icon name="trash" size={16} color={learnedCount === 0 ? colorTheme.ink3 : '#b3261e'} />
@@ -398,6 +405,8 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                 </Pressable>
               )}
 
+              {matchingKeys.has('data_duitnow') && <DuitNowSettingCard />}
+
               {onAdvancedImport && matchingKeys.has('data_import') && (
                 <Pressable
                   onPress={onAdvancedImport}
@@ -423,6 +432,21 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('financialReportsExport')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+
+              {onOpenBackup && matchingKeys.has('data_backup') && (
+                <Pressable
+                  onPress={onOpenBackup}
+                  style={({ pressed }) => [styles.providerRow, styles.migrateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="shield" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('backupRestore')}</Text>
                   </View>
                   <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
                 </Pressable>
@@ -929,6 +953,143 @@ function ProviderCard({
   );
 }
 
+/** DuitNow QR code settings card: upload, preview, replace, or remove personal QR code */
+function DuitNowSettingCard() {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { duitNowQrUri, setDuitNowQrUri } = useAppData();
+  const { t, isZh } = useLanguage();
+  const [busy, setBusy] = useState(false);
+
+  const pickImage = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        notify(
+          isZh ? '需要权限' : 'Permission needed',
+          isZh ? '请允许访问相册以上传 DuitNow 收款码。' : 'Allow photo access to upload your DuitNow QR code.'
+        );
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.85,
+      });
+      if (!res.canceled && res.assets && res.assets[0]?.uri) {
+        const sourceUri = res.assets[0].uri;
+        const mime = res.assets[0].mimeType ?? 'image/png';
+        const savedUri = saveDuitNowQrImage(sourceUri, mime);
+        if (duitNowQrUri) {
+          deleteDuitNowQrImage(duitNowQrUri);
+        }
+        await setDuitNowQrUri(savedUri);
+        notify(
+          isZh ? '已保存 DuitNow 收款码' : 'DuitNow QR saved',
+          isZh ? '分摊账单时将自动附带此收款码。' : 'Your QR code will be attached when sharing split bills.'
+        );
+      }
+    } catch {
+      notify(
+        isZh ? '上传失败' : 'Upload failed',
+        isZh ? '无法保存收款码，请重试。' : 'Could not save your QR code. Please try again.'
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeQr = () => {
+    confirmAction(
+      t('duitNowRemoveTitle'),
+      t('duitNowRemoveBody'),
+      t('duitNowRemoveBtn'),
+      async () => {
+        deleteDuitNowQrImage(duitNowQrUri);
+        await setDuitNowQrUri(null);
+      }
+    );
+  };
+
+  return (
+    <Card style={{ padding: 16, gap: 12 }}>
+      <View style={styles.providerRow}>
+        <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+          <Icon name="scan" size={17} color={theme.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('duitNowTitle')}</Text>
+          <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
+            {duitNowQrUri ? (isZh ? '已设置 · 分享分摊时自动附带' : 'Active · attached to bill splits') : (isZh ? '未设置' : 'Not set')}
+          </Text>
+        </View>
+        {duitNowQrUri && (
+          <View style={[styles.duitNowActivePill, { backgroundColor: theme.accentTint }]}>
+            <Icon name="check" size={12} color={theme.accent} stroke={2.4} />
+            <Text style={[styles.duitNowActiveText, { color: theme.onTint }]}>{isZh ? '已生效' : 'Active'}</Text>
+          </View>
+        )}
+      </View>
+
+      <Text style={[styles.fieldValue, { color: colorTheme.ink2, fontSize: 13, lineHeight: 18 }]}>
+        {t('duitNowDesc')}
+      </Text>
+
+      {duitNowQrUri ? (
+        <View style={[styles.duitNowPreviewRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+          <Image source={{ uri: duitNowQrUri }} style={[styles.duitNowThumb, { borderColor: colorTheme.line }]} resizeMode="cover" />
+          <View style={{ flex: 1, gap: 8 }}>
+            <Pressable
+              onPress={pickImage}
+              disabled={busy}
+              style={({ pressed }) => [
+                styles.duitNowActionBtn,
+                { backgroundColor: theme.accentTint, borderColor: theme.accentSoft },
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Icon name="gallery" size={14} color={theme.accent} />
+              <Text style={[styles.duitNowActionText, { color: theme.accent }]}>{t('duitNowChangeBtn')}</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={removeQr}
+              style={({ pressed }) => [
+                styles.duitNowActionBtn,
+                { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                pressed && { opacity: 0.85 },
+              ]}
+            >
+              <Icon name="trash" size={14} color="#b3261e" />
+              <Text style={[styles.duitNowActionText, { color: '#b3261e' }]}>{t('duitNowRemoveBtn')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          onPress={pickImage}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.duitNowUploadBtn,
+            { backgroundColor: theme.accentTint, borderColor: theme.accentSoft },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={theme.accent} />
+          ) : (
+            <>
+              <Icon name="gallery" size={16} color={theme.accent} />
+              <Text style={[styles.duitNowUploadBtnText, { color: theme.accent }]}>{t('duitNowUploadBtn')}</Text>
+            </>
+          )}
+        </Pressable>
+      )}
+    </Card>
+  );
+}
+
 function ReadonlyField({ label, children }: { label: string; children: React.ReactNode }) {
   const colorTheme = useThemeColors();
   return (
@@ -1074,4 +1235,59 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     textAlign: 'center',
   },
+  duitNowActivePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  duitNowActiveText: {
+    fontFamily: uiFont(700),
+    fontSize: 11,
+  },
+  duitNowPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  duitNowThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    backgroundColor: '#fff',
+  },
+  duitNowActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  duitNowActionText: {
+    fontFamily: uiFont(600),
+    fontSize: 13,
+  },
+  duitNowUploadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  duitNowUploadBtnText: {
+    fontFamily: uiFont(700),
+    fontSize: 14,
+  },
 });
+

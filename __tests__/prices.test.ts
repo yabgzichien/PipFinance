@@ -67,6 +67,12 @@ describe('matchedCommodities', () => {
     expect(matchedCommodities('gold')).toEqual([{ id: 'GC=F', ticker: 'Gold', name: 'Gold', type: 'COMMODITY' }]);
     expect(matchedCommodities('SILV').map((c) => c.id)).toEqual(['SI=F']);
   });
+  it('matches Chinese aliases and ticker symbols', () => {
+    expect(matchedCommodities('黄金').map((c) => c.id)).toEqual(['GC=F']);
+    expect(matchedCommodities('白银').map((c) => c.id)).toEqual(['SI=F']);
+    expect(matchedCommodities('GC').map((c) => c.id)).toEqual(['GC=F']);
+    expect(matchedCommodities('SI').map((c) => c.id)).toEqual(['SI=F']);
+  });
   it('matches nothing for other commodities', () => {
     expect(matchedCommodities('oil')).toEqual([]);
     expect(matchedCommodities('')).toEqual([]);

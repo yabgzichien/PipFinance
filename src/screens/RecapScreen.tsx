@@ -9,6 +9,7 @@ import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from
 import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import {
+  autoCategorizedRate,
   availableMonths,
   categoryComparisons,
   computeAdherence,
@@ -286,6 +287,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
   const allocations = snapshot?.allocations ?? {};
   const adherence = useMemo(() => computeAdherence(allocations, spentByCat), [allocations, spentByCat]);
   const merchantsKnown = Object.keys(memory).length;
+  const autoRate = useMemo(() => autoCategorizedRate(transactions, month), [transactions, month]);
   const comparisons = useMemo(() => categoryComparisons(transactions, month), [transactions, month]);
   const showComparisons = useMemo(() => hasComparisonData(transactions, month), [transactions, month]);
 
@@ -501,6 +503,27 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           </View>
         )}
 
+        {merchantsKnown > 0 && (
+          <View style={[styles.competenceCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+            <View style={[styles.exportIconWrap, { backgroundColor: theme.accentTint }]}>
+              <Icon name="sparkles" size={18} color={theme.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>
+                {t('competenceMerchants', { count: merchantsKnown })}
+              </Text>
+              {autoRate !== null && (
+                <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
+                  {t('competenceAutoRate', { pct: autoRate })}
+                </Text>
+              )}
+              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
+                {t('competenceCoverage', { days: coverage.daysCovered, window: coverage.windowDays })}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {onOpenExport && (
           <Pressable
             onPress={() => onOpenExport(month)}
@@ -626,7 +649,17 @@ const styles = StyleSheet.create({
   listCard: { marginHorizontal: 16, marginTop: 4, borderRadius: 20, overflow: 'hidden' },
 
   // competence feedback
-  competenceCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  competenceCard: {
+    marginHorizontal: 16,
+    marginTop: 18,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    ...shadowCard,
+  },
   competenceStat: { flex: 1, alignItems: 'center' },
   competenceVal: { fontFamily: numFont(700), fontSize: 19 },
   competenceLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 2, textAlign: 'center' },

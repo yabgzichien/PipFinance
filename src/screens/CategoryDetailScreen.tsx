@@ -15,7 +15,7 @@ import { fmtMoney } from '../lib/format';
 import type { Category, Transaction } from '../lib/types';
 import { EXPENSE_ICONS, INCOME_ICONS, isCustomIcon } from './CategoriesScreen';
 import { useAccent } from '../state/accent';
-import { useThemeColors } from '../state/colorScheme';
+import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
@@ -75,6 +75,8 @@ export function CategoryDetailScreen({
   const { width: winWidth } = useWindowDimensions();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const scheme = useResolvedScheme();
+  const isDark = scheme === 'dark';
   const { t, tCat, formatMonthLabel, formatShortDate, isZh } = useLanguage();
   const { transactions, categories, catById, updateCategoryIcon, updateCategoryLabel } = useAppData();
   const dc = useDisplayCurrency();
@@ -197,7 +199,7 @@ export function CategoryDetailScreen({
       >
         {siblings.map((c) => {
           const on = c.id === activeId;
-          const col = catColorsForHue(c.hue);
+          const col = catColorsForHue(c.hue, isDark);
           return (
             <Pressable
               key={c.id}

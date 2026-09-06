@@ -46,7 +46,13 @@ export const COMMODITIES: TickerResult[] = [
 export function matchedCommodities(query: string): TickerResult[] {
   const s = query.trim().toLowerCase();
   if (!s) return [];
-  return COMMODITIES.filter((c) => c.name.toLowerCase().includes(s));
+  const goldMatch = s.includes('gold') || s.includes('黄金') || s.includes('金') || s === 'gc';
+  const silverMatch = s.includes('silver') || s.includes('白银') || s.includes('银') || s === 'si';
+  return COMMODITIES.filter((c) => {
+    if (c.id === 'GC=F' && goldMatch) return true;
+    if (c.id === 'SI=F' && silverMatch) return true;
+    return c.name.toLowerCase().includes(s);
+  });
 }
 
 /** The holding sub-category implied by a Yahoo quote type. */

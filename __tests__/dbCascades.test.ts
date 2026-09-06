@@ -8,7 +8,7 @@ jest.mock('../src/db/db', () => {
 import { adjustHoldingCost, adjustHoldingQuantity } from '../src/db/accountsRepo';
 import { deleteCategory } from '../src/db/categoriesRepo';
 import { listOccurrencesByTxnIds } from '../src/db/commitmentsRepo';
-import { recordPayment } from '../src/db/splitRepo';
+import { recordPayment, revertPayment } from '../src/db/splitRepo';
 
 interface Statement {
   sql: string;
@@ -189,5 +189,43 @@ describe('recordPayment', () => {
   it('is null for a share that does not exist', async () => {
     install(fakeDb());
     expect(await recordPayment('nope', 30, '2026-08-10', 'declared', null, null)).toBeNull();
+  });
+});
+
+describe('revertPayment', () => {
+  const share = {
+    id: 's1',
+    split_id: 'sp1',
+    person_id: 'p1',
+    owed: 30,
+    paid: 30,
+    status: 'settled',
+    created_at: '2026-08-01T00:00:00.000Z',
+    written_off_txn_id: null,
+  };
+
+  it('reverts the payment and restores the share to open status', async () => {
+    const payment = { id: 'pmt1', amount: 30, account_id: 'cash' };
+    const db = install(
+      fakeDb({
+        first: { 'FROM split_shares': share },
+        all: { 'FROM split_payments': [payment] },
+      })
+    );
+    const result = await revertPayment('s1');
+    expect(result?.revertedAmount).toBe(30);
+    expect(result?.accountId).toBe('cash');
+    const deletePmt = db.statements.find((s) => s.sql.includes('DELETE FROM split_payments'));
+    expect(deletePmt).toBeDefined();
+    const updateShare = db.statements.find((s) => s.sql.includes('UPDATE split_shares'));
+    expect(updateShare?.args).toEqual([0, 'open', 's1']);
+  });
+
+  it('handles shares with no payment records by setting them to open', async () => {
+    const db = install(fakeDb({ all: { 'FROM split_payments': [] } }));
+    const result = await revertPayment('s1');
+    expect(result).toBeNull();
+    const updateShare = db.statements.find((s) => s.sql.includes('UPDATE split_shares'));
+    expect(updateShare?.args).toEqual(['s1']);
   });
 });

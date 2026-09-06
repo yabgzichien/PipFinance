@@ -52,6 +52,7 @@ Testpdfscan.pdf
 .env*
 
 # local scratch / scans (not for the repo)
+GDGDevFest/
 Random/
 docs/.obsidian/
 AppStoreScreenshot.zip

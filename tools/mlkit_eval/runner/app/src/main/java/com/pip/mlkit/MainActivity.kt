@@ -37,8 +37,8 @@ class MainActivity : Activity() {
 
     private fun runBenchmark() {
         val imagesDir = File("/data/local/tmp/images_test")
-        val outputFile = File("/data/local/tmp/images_test/mlkit_results.json")
-        val doneFile = File("/data/local/tmp/images_test/BENCHMARK_FINISHED")
+        val outputFile = File(filesDir, "mlkit_results.json")
+        val doneFile = File(filesDir, "BENCHMARK_FINISHED")
 
         if (doneFile.exists()) doneFile.delete()
 
@@ -64,22 +64,17 @@ class MainActivity : Activity() {
             }
 
             Log.i("MLKitBench", "Processing ${file.name} (${file.length()} bytes)...")
-            val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, boundsOptions)
-            val maxDim = maxOf(boundsOptions.outWidth, boundsOptions.outHeight)
-            var sampleSize = 1
-            while (maxDim / (sampleSize * 2) >= 1200) {
-                sampleSize *= 2
-            }
+            // Full resolution, no downsampling  isolating whether the earlier ~1200px cap
+            // was the source of the garbled OCR reads, per the request to re-test at full res.
             val decodeOptions = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
+                inSampleSize = 1
             }
             val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
             if (bitmap == null) {
                 Log.e("MLKitBench", "Failed to decode bitmap: ${file.name}")
                 continue
             }
-            Log.i("MLKitBench", "  Decoded bitmap: ${bitmap.width}x${bitmap.height} (sampleSize=$sampleSize)")
+            Log.i("MLKitBench", "  Decoded bitmap: ${bitmap.width}x${bitmap.height} (full resolution)")
 
             val inputImage = InputImage.fromBitmap(bitmap, 0)
 

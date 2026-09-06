@@ -12,7 +12,7 @@ import { categoryComparisons, hasComparisonData } from '../lib/recap';
 import type { Category, TxnType } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
-import { useThemeColors } from '../state/colorScheme';
+import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { shadowToggle, uiFont } from '../theme';
@@ -23,6 +23,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const scheme = useResolvedScheme();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
   const { transactions, catById, markTaskDone } = useAppData();
   const dc = useDisplayCurrency();
@@ -46,7 +47,7 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
       .sort((a, b) => b.amt - a.amt);
   }, [monthTxns, kind, dc]);
 
-  const pieData = breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue).solid }));
+  const pieData = breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue, scheme === 'dark').solid }));
 
   // You versus your own last month (docs/ui-engagement-plan.md Step 5, §2.6). Expense-only,
   // matching spentByCategory; only shown once real history exists on both sides.

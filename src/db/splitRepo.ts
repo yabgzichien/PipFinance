@@ -274,6 +274,39 @@ export async function recordPayment(
 }
 
 /**
+ * Revert the most recent payment recorded against a share and roll the share's status back to 'open'.
+ * Returns the reverted amount and account id so any linked account balance can be reversed.
+ */
+export async function revertPayment(
+  shareId: string
+): Promise<{ revertedAmount: number; accountId: string | null } | null> {
+  const db = await getDb();
+  const payments = await db.getAllAsync<{ id: string; amount: number; account_id: string | null }>(
+    'SELECT id, amount, account_id FROM split_payments WHERE share_id = ? ORDER BY created_at DESC',
+    shareId
+  );
+  if (!payments || payments.length === 0) {
+    await db.runAsync("UPDATE split_shares SET paid = 0, status = 'open' WHERE id = ?", shareId);
+    return null;
+  }
+
+  const lastPayment = payments[0];
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM split_payments WHERE id = ?', lastPayment.id);
+    const remaining = await db.getFirstAsync<{ sumPaid: number }>(
+      'SELECT COALESCE(SUM(amount), 0) as sumPaid FROM split_payments WHERE share_id = ?',
+      shareId
+    );
+    const sumPaid = remaining?.sumPaid ?? 0;
+    const share = await db.getFirstAsync<ShareRow>('SELECT * FROM split_shares WHERE id = ? LIMIT 1', shareId);
+    const owed = share ? share.owed : 0;
+    const status = sumPaid >= owed && owed > 0 ? 'settled' : 'open';
+    await db.runAsync('UPDATE split_shares SET paid = ?, status = ? WHERE id = ?', sumPaid, status, shareId);
+  });
+  return { revertedAmount: lastPayment.amount, accountId: lastPayment.account_id };
+}
+
+/**
  * Give up on a share. The caller has already written the expense transaction that the
  * uncollected money really was, and passes its id in so the write-off stays traceable.
  */

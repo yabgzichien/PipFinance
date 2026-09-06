@@ -109,13 +109,15 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
       .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
   }, [commitmentOccurrences, selectedMonth]);
 
-  // Overdue occurrences (scheduled with due date before today)
+  const [paidOverdueIds, setPaidOverdueIds] = useState<Set<string>>(new Set());
+
+  // Overdue occurrences (scheduled or recently settled in this session with due date before today)
   const overdue = useMemo(
     () =>
       commitmentOccurrences
-        .filter((o) => o.status === 'scheduled' && o.dueDate < today)
+        .filter((o) => (o.status === 'scheduled' || paidOverdueIds.has(o.id)) && o.dueDate < today)
         .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
-    [commitmentOccurrences, today]
+    [commitmentOccurrences, today, paidOverdueIds]
   );
   const overdueIds = useMemo(() => new Set(overdue.map((o) => o.id)), [overdue]);
 
@@ -170,19 +172,34 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
 
   const handleToggle = async (o: CommitmentOccurrence) => {
     if (o.status === 'paid' || o.status === 'late') {
+      const doUnpay = async () => {
+        setPaidOverdueIds((prev) => {
+          const next = new Set(prev);
+          next.delete(o.id);
+          return next;
+        });
+        await unpayCommitment(o.id);
+      };
       if (o.txnCreated) {
         confirmAction(
           isZh ? '撤销此笔支付？' : 'Undo this payment?',
           isZh ? '这将删除由此自动创建的交易记录，并恢复账户扣款余额。' : 'This removes the transaction it created and restores the account balance it moved.',
           isZh ? '撤销' : 'Undo',
-          () => unpayCommitment(o.id)
+          doUnpay
         );
       } else {
-        await unpayCommitment(o.id);
+        await doUnpay();
       }
       return;
     }
     if (o.status !== 'scheduled') return;
+
+    const doPay = async () => {
+      if (o.dueDate < today) {
+        setPaidOverdueIds((prev) => new Set(prev).add(o.id));
+      }
+      await payCommitment(o.id);
+    };
 
     const match = previewCommitmentMatch(o.id);
     const c = commitmentById.get(o.commitmentId);
@@ -193,10 +210,10 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
           ? `在 ${shortDate(match.date ?? match.createdAt)} 发现 ${match.merchantRaw || c.label} · ${fmtMoney(match.nativeAmount ?? match.amount, match.currency)}。是否关联至此账单，而不是创建新流水？`
           : `${match.merchantRaw || c.label} · ${fmtMoney(match.nativeAmount ?? match.amount, match.currency)} on ${shortDate(match.date ?? match.createdAt)}. Link it to this bill instead of logging a new one?`,
         isZh ? '关联交易' : 'Link it',
-        async () => { await payCommitment(o.id); }
+        doPay
       );
     } else {
-      await payCommitment(o.id);
+      await doPay();
     }
   };
 
@@ -517,7 +534,7 @@ function OccurrenceRow({
       {/* Checkbox (taps toggle paid/unpaid) */}
       <Pressable
         onPress={(e) => { e.stopPropagation?.(); onToggle(); }}
-        hitSlop={6}
+        hitSlop={10}
         accessibilityLabel={checked ? 'Mark unpaid' : 'Mark paid'}
         style={[
           styles.checkbox,

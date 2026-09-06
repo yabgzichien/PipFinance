@@ -3,21 +3,22 @@ import type { Category } from '../lib/types';
 type SeedCategory = Omit<Category, 'isDefault'>;
 
 /**
- * Default EXPENSE categories (onboarding-wizard retune, 2026-08-21).
+ * Default EXPENSE categories.
  *
- * Shrunk from the prior 12-category COICOP-aligned set to 7 plain-language buckets,
- * so a first-time user in the setup wizard picks from a short list instead of a
- * bookkeeping taxonomy. This intentionally drops COICOP division alignment: nothing
- * in the app compares these buckets against an external taxonomy any more.
+ * 8 plain-language buckets, so a first-time user in the setup wizard picks
+ * from a short list instead of a bookkeeping taxonomy. This intentionally
+ * drops COICOP division alignment: nothing in the app compares these buckets
+ * against an external taxonomy any more.
  */
 export const EXPENSE_CATEGORIES: SeedCategory[] = [
-  { id: 'food', label: 'Food', icon: 'cart', hue: 162, kind: 'expense' },
+  { id: 'food', label: 'Food', icon: 'burger', hue: 162, kind: 'expense' },
+  { id: 'shopping', label: 'Shopping', icon: 'cart', hue: 42, kind: 'expense' },
   { id: 'entertainment', label: 'Entertainment', icon: 'play', hue: 305, kind: 'expense' },
   { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense' },
-  { id: 'travelling', label: 'Travelling', icon: 'fuel', hue: 248, kind: 'expense' },
+  { id: 'travelling', label: 'Travelling', icon: 'car', hue: 248, kind: 'expense' },
   { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense' },
   { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense' },
-  { id: 'phone-bill', label: 'Phone Bill', icon: 'signal', hue: 355, kind: 'expense' },
+  { id: 'phone-bill', label: 'Phone Bill', icon: 'phone', hue: 355, kind: 'expense' },
 ];
 
 /**
@@ -64,11 +65,10 @@ export const INCOME_SEED_IDS = INCOME_CATEGORIES.map((c) => c.id);
  *    a receivable  so it lands on `other-income` rather than an earnings line.
  */
 export const CATEGORY_ID_REMAP: Record<string, string> = {
-  // expense (pre-2026-08-07 ids, pointed directly at their 2026-08-21 destination)
+  // expense (pre-2026-08-07 ids, pointed directly at their destination)
   fuel: 'travelling',
   groceries: 'food',
   coffee: 'food',
-  shopping: 'other',
   health: 'other',
   fun: 'entertainment',
   bills: 'rental',

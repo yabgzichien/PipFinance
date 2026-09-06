@@ -14,8 +14,8 @@ import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { radius, shadowToggle, uiFont } from '../theme';
 
-export const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'utensils', 'car', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
-export const INCOME_ICONS: IconName[] = ['wallet', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
+export const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'burger', 'utensils', 'car', 'phone', 'cash', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
+export const INCOME_ICONS: IconName[] = ['wallet', 'cash', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
 const HUE_CHOICES = [12, 42, 70, 120, 162, 200, 248, 286, 330];
 
 /** Whether an icon value is a custom photo URI rather than a named icon. */

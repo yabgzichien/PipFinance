@@ -21,22 +21,45 @@ export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutM
  */
 export async function fetchYahooJson(targetUrl: string, timeoutMs = 7000): Promise<any | null> {
   if (Platform.OS === 'web') {
-    // Browsers block direct Yahoo Finance calls due to CORS.
-    // Try reliable CORS proxies in order:
-    const candidateUrls = [
-      `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
-      `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(targetUrl)}`,
-      targetUrl,
-    ];
+    const fallbackTarget = targetUrl.includes('query1.finance.yahoo.com')
+      ? targetUrl.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')
+      : null;
+
+    // Try endpoints in order:
+    // 1. Same-origin local dev server (/api/yahoo?url=...) or production serverless proxy
+    // 2. Reliable CORS proxies (proxy.cors.sh)
+    // 3. Fallback direct URLs
+    const candidateUrls: string[] = [];
+
+    if (typeof window !== 'undefined' && window.location) {
+      candidateUrls.push(`/api/yahoo?url=${encodeURIComponent(targetUrl)}`);
+    }
+
+    candidateUrls.push(`https://proxy.cors.sh/${targetUrl}`);
+    if (fallbackTarget) {
+      candidateUrls.push(`https://proxy.cors.sh/${fallbackTarget}`);
+    }
+
+    candidateUrls.push(targetUrl);
+    if (fallbackTarget) {
+      candidateUrls.push(fallbackTarget);
+    }
 
     for (const url of candidateUrls) {
       try {
-        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, timeoutMs);
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, Math.min(timeoutMs, 4000));
         if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          // Ignore HTML fallback pages (e.g. SPA index.html)
+          if (contentType.includes('text/html')) {
+            continue;
+          }
           const text = await res.text();
           if (text && text.trim().startsWith('{')) {
-            return JSON.parse(text);
+            const data = JSON.parse(text);
+            if (!data.error) {
+              return data;
+            }
           }
         }
       } catch {
@@ -46,8 +69,8 @@ export async function fetchYahooJson(targetUrl: string, timeoutMs = 7000): Promi
     return null;
   }
 
-  // Native / Node: direct fetch with desktop User-Agent header
-  const headers = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
+  // Native / Node: direct fetch with Accept header
+  const headers = { Accept: 'application/json' };
   try {
     const res = await fetchWithTimeout(targetUrl, { headers }, timeoutMs);
     if (res.ok) {

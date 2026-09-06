@@ -683,5 +683,44 @@ describe('OpenShare enriched fields', () => {
     expect(grouped[0].shares[1].paid).toBe(20.0);
     expect(grouped[0].shares[1].owed).toBe(40.0);
   });
+
+  it('handles settled shares without counting towards open debt or aging days, keeping settled items traceable', () => {
+    const shares: OpenShare[] = [
+      {
+        shareId: 's_settled',
+        personId: 'p1',
+        personName: 'Ali',
+        outstanding: 0,
+        billDate: '2026-05-01', // old date
+        merchant: 'Old Settled Bill',
+        owed: 50.0,
+        paid: 50.0,
+        status: 'settled',
+      },
+      {
+        shareId: 's_open',
+        personId: 'p1',
+        personName: 'Ali',
+        outstanding: 25.0,
+        billDate: '2026-06-10', // 5 days old
+        merchant: 'New Open Bill',
+        owed: 25.0,
+        paid: 0,
+        status: 'open',
+      },
+    ];
+
+    const grouped = groupOpenSharesByPerson(shares, TODAY);
+    expect(grouped).toHaveLength(1);
+    // Total should only sum open shares
+    expect(grouped[0].total).toBe(25.0);
+    // Oldest days should only reflect open share (5 days, NOT the old settled bill from May)
+    expect(grouped[0].oldestDays).toBe(5);
+    // Both shares are retained for traceability
+    expect(grouped[0].shares).toHaveLength(2);
+    // Open share comes first, settled share comes second
+    expect(grouped[0].shares[0].shareId).toBe('s_open');
+    expect(grouped[0].shares[1].shareId).toBe('s_settled');
+  });
 });
 

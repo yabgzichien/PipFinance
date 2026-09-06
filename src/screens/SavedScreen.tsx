@@ -1,15 +1,17 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { FadeIn, useEasedFrom } from '../components/Motion';
 import { Pip } from '../components/Pip';
+import { SendMessageSheet, type SendMessageOption } from '../components/SendMessageSheet';
 import { Amount, Body, BtnLabel, Card, CatBadge, Caption, Display, Eyebrow, PrimaryButton } from '../components/ui';
 import { fmtMoney, readTimeLabel } from '../lib/format';
 import { payoff } from '../lib/haptics';
 import type { AutoFillStats } from '../lib/recommend';
 import { payoff as playChime } from '../lib/sound';
-import { outstanding } from '../lib/split';
+import { outstanding, sharesFromSplit } from '../lib/split';
+import { buildGroupMessage, buildPersonMessage, type SplitMessageInput, type SplitWorkings } from '../lib/splitMessage';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -27,11 +29,17 @@ export function SavedScreen({
   catById,
   elapsedMs = null,
   autoFill = null,
+  splitWorkings = null,
   onDone,
 }: {
   result: Transaction[];
   newLearned: NewLearned[];
   catById: Record<string, Category>;
+  /** The surcharge breakdown behind an itemized receipt split, for the shareable message.
+   *  Never persisted (the `splits` table holds only the total, the payer's share, and the
+   *  method), so it can only reach the message on the save that produced it. Null for every
+   *  other path, which then shares amounts without a surcharge breakdown. */
+  splitWorkings?: SplitWorkings | null;
   /** Real extraction round-trip in ms (docs/ui-engagement-plan.md Step 2), null for a save
    *  that never ran a live extraction (manual entry, receipt scan). Renders nothing then. */
   elapsedMs?: number | null;
@@ -46,7 +54,8 @@ export function SavedScreen({
   const colorTheme = useThemeColors();
   const { t, tCat, isZh } = useLanguage();
   const pop = useRef(new Animated.Value(0)).current;
-  const { splits, shares } = useAppData();
+  const { splits, shares, people, duitNowQrUri } = useAppData();
+  const [sendOpen, setSendOpen] = useState(false);
   const dc = useDisplayCurrency();
   const hasResults = result.length > 0;
 
@@ -78,6 +87,85 @@ export function SavedScreen({
     for (const split of splits) map[split.txnId] = openBySplit[split.id] ?? 0;
     return map;
   }, [splits, shares]);
+
+  /**
+   * The split this save produced, packaged for the share message, or null when nothing was
+   * split. Null is the common case, and it is what keeps this screen unchanged for the
+   * ordinary "RM 20 on food" save: no button, no extra row, nothing.
+   *
+   * `shares` splits persist only the amounts, so the portions behind them are recovered by
+   * replay. When that recovery fails the portions stay undefined and the message drops its
+   * rate line rather than inventing one.
+   */
+  const sendable = useMemo((): { input: SplitMessageInput; receiptUri: string | null } | null => {
+    const nameById = Object.fromEntries(people.map((p) => [p.id, p.name]));
+    for (const txn of result) {
+      const split = splits.find((s) => s.txnId === txn.id);
+      if (!split) continue;
+      const open = shares.filter((s) => s.splitId === split.id && s.status === 'open');
+      if (open.length === 0) continue;
+
+      const flat = open.map((s) => ({ personId: s.personId, owed: s.owed }));
+      const portions =
+        split.method === 'shares' ? sharesFromSplit(split.gross, split.ownShare, flat) : null;
+
+      return {
+        input: {
+          merchant: txn.merchantRaw || '',
+          gross: split.gross,
+          currency: split.currency,
+          method: split.method,
+          ownShare: split.ownShare,
+          shares: open.map((s) => ({
+            personId: s.personId,
+            name: nameById[s.personId] ?? '',
+            owed: s.owed,
+            portions: portions?.weights[s.personId],
+          })),
+          selfPortions: portions?.selfWeight,
+          workings: splitWorkings,
+          isZh,
+          hasDuitNowQr: Boolean(duitNowQrUri),
+        },
+        receiptUri: txn.receiptUri ?? null,
+      };
+    }
+    return null;
+  }, [result, splits, shares, people, splitWorkings, isZh, duitNowQrUri]);
+
+  /** Everyone at once, then each friend on their own. */
+  const sendOptions = useMemo((): SendMessageOption[] => {
+    if (!sendable) return [];
+    const { input, receiptUri } = sendable;
+    return [
+      {
+        key: 'group',
+        label: t('splitShareEveryone'),
+        sub: t('splitShareEveryoneSub'),
+        icon: 'gift',
+        build: (opts?: { hasDuitNowQr?: boolean }) =>
+          buildGroupMessage({
+            ...input,
+            hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
+          }),
+        receiptUri,
+      },
+      ...input.shares.map((s): SendMessageOption => ({
+        key: s.personId,
+        label: s.name,
+        sub: fmtMoney(s.owed, input.currency),
+        build: (opts?: { hasDuitNowQr?: boolean }) =>
+          buildPersonMessage(
+            {
+              ...input,
+              hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
+            },
+            s.personId
+          ),
+        receiptUri,
+      })),
+    ];
+  }, [sendable, t]);
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -191,10 +279,39 @@ export function SavedScreen({
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 }, { paddingBottom: insets.bottom + 16 }]}>
+        {/* Secondary on purpose: this screen's job is still "you are finished", and Done stays
+            the primary. Absent entirely unless this save split a bill, so the ordinary save
+            keeps the footer it has always had. */}
+        {sendable && (
+          <Pressable
+            onPress={() => setSendOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('splitShareCta')}
+            style={({ pressed }) => [
+              styles.sendBtn,
+              // accentTint fill with onTint copy: the pairing accent.tsx documents for text on a
+              // tint. accentInk here would be dark-on-dark in dark mode (~2:1, fails AA), which
+              // is exactly the theme this screen is most often seen in.
+              { borderColor: theme.accentSoft, backgroundColor: theme.accentTint, opacity: pressed ? 0.75 : 1 },
+            ]}
+          >
+            <Icon name="share" size={16} color={theme.onTint} />
+            <Text style={[styles.sendLabel, { color: theme.onTint }]}>{t('splitShareCta')}</Text>
+          </Pressable>
+        )}
         <PrimaryButton onPress={onDone}>
           <BtnLabel>{t('done')}</BtnLabel>
         </PrimaryButton>
       </View>
+
+      <SendMessageSheet
+        visible={sendOpen}
+        title={t('splitShareTitle')}
+        subtitle={sendable?.receiptUri ? t('splitShareSubWithPhoto') : t('splitShareSub')}
+        options={sendOptions}
+        duitNowQrUri={duitNowQrUri}
+        onClose={() => setSendOpen(false)}
+      />
     </View>
   );
 }
@@ -222,6 +339,17 @@ const styles = StyleSheet.create({
   learnMerchant: { fontFamily: uiFont(700), fontSize: 13.5, flexShrink: 1 },
   learnCat: { fontFamily: uiFont(600), fontSize: 13.5 },
   learnFoot: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 11 },
+  sendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 46,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    marginBottom: 10,
+  },
+  sendLabel: { fontFamily: uiFont(700), fontSize: 14.5 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 11 },
   divider: { borderTopWidth: 1 },
   merchant: { fontFamily: uiFont(600), fontSize: 14 },

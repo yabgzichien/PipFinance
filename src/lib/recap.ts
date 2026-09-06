@@ -47,6 +47,41 @@ export function spentByCategory(txns: Transaction[], mk: string): Record<string,
   return out;
 }
 
+/** The `date` when present, otherwise `createdAt`  same fallback as `txnMonthKey`, kept at
+ *  the same precision (full ISO string) so same-day transactions compare stably. */
+function txnDay(t: Pick<Transaction, 'date' | 'createdAt'>): string {
+  return t.date ?? t.createdAt;
+}
+
+/**
+ * Share of a month's expenses whose merchant Pip already knew before that transaction  a
+ * proxy for "categorized without the user picking a category by hand," since the category
+ * source (learned/AI guess/manual) isn't persisted per transaction. A merchant counts as
+ * already known if any other transaction for the same merchantKey happened earlier; the
+ * transaction that first introduces a merchant never counts toward its own rate.
+ * Returns null when the month has no expenses, so callers can hide the stat instead of
+ * showing a meaningless 0%.
+ */
+export function autoCategorizedRate(txns: Transaction[], mk: string): number | null {
+  const firstSeen = new Map<string, string>();
+  for (const t of txns) {
+    if (!t.merchantKey) continue;
+    const day = txnDay(t);
+    const prev = firstSeen.get(t.merchantKey);
+    if (!prev || day < prev) firstSeen.set(t.merchantKey, day);
+  }
+
+  const monthExpenses = txns.filter((t) => t.type === 'expense' && txnMonthKey(t) === mk);
+  if (monthExpenses.length === 0) return null;
+
+  const known = monthExpenses.filter((t) => {
+    const first = firstSeen.get(t.merchantKey);
+    return !!first && first < txnDay(t);
+  }).length;
+
+  return Math.round((known / monthExpenses.length) * 100);
+}
+
 /**
  * How well spending stuck to the budget: how many budgeted categories stayed
  * within allocation, and a ranked list of those that went over.

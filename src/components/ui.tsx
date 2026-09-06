@@ -5,7 +5,7 @@ import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmtDecimals } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
 import { useAccent } from '../state/accent';
-import { useThemeColors } from '../state/colorScheme';
+import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useReducedMotion } from '../state/useReducedMotion';
 import { colors, numFont, platformShadow, radius, shadowCard, type, uiFont } from '../theme';
 import { duration as motionDuration, easing as motionEasing } from '../theme/motion';
@@ -130,7 +130,10 @@ export function CatBadge({
   size?: number;
   rad?: number;
 }) {
-  const col = catColorsForHue(category.hue);
+  const scheme = useResolvedScheme();
+  const isDark = scheme === 'dark';
+  const colorTheme = useThemeColors();
+  const col = catColorsForHue(category.hue, isDark);
   const isCustomImage = category.icon && (
     category.icon.startsWith('data:') ||
     category.icon.startsWith('file:') ||
@@ -145,6 +148,8 @@ export function CatBadge({
         height: size,
         borderRadius: rad,
         backgroundColor: col.bg,
+        borderWidth: isDark ? 1 : 0,
+        borderColor: isDark ? colorTheme.line2 : 'transparent',
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',

@@ -4,6 +4,7 @@
 // assume accounts already exist, which a fresh install doesn't have yet.
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AddCategoryModal } from '../../components/AddCategoryModal';
 import { Icon } from '../../components/Icon';
 import { FadeIn } from '../../components/Motion';
 import { BtnLabel, CategoryChip, Eyebrow, PrimaryButton } from '../../components/ui';
@@ -31,6 +32,7 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
   const [categoryId, setCategoryId] = useState(DEFAULT_EXPENSE_ID);
   const [addedCount, setAddedCount] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
 
   const amount = Math.max(0, parseFloat(amountText.replace(/[^0-9.]/g, '')) || 0);
   const dueDay = Math.min(31, Math.max(1, parseInt(dueDayText, 10) || 1));
@@ -97,6 +99,14 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
         ))}
       </View>
 
+      <Pressable
+        onPress={() => setAddingCategory(true)}
+        style={[styles.addCatRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}
+      >
+        <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+        <Text style={[styles.addCatText, { color: theme.accent }]}>{t('wizardNewCategory')}</Text>
+      </Pressable>
+
       {addedCount > 0 && (
         // Keyed on the count so every subsequent add replays the confirmation, rather than
         // silently changing a number on a banner that is already sitting there.
@@ -131,6 +141,16 @@ export function RecurringPaymentStep({ onNext, onSkip }: { onNext: () => void; o
           </Text>
         </Pressable>
       </View>
+
+      <AddCategoryModal
+        visible={addingCategory}
+        kind="expense"
+        onClose={() => setAddingCategory(false)}
+        onCreated={(id) => {
+          setCategoryId(id);
+          setAddingCategory(false);
+        }}
+      />
     </ScrollView>
   );
 }
@@ -149,6 +169,8 @@ const styles = StyleSheet.create({
   dueDayInput: { width: 40, fontFamily: numFont(700), fontSize: 22, textAlign: 'center', padding: 0 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
   gridCell: { width: '50%', paddingHorizontal: 5, paddingBottom: 10 },
+  addCatRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: radius.sm, borderWidth: 1, borderStyle: 'dashed' },
+  addCatText: { fontFamily: uiFont(600), fontSize: 13.5 },
   addedBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: spacing.sm, borderRadius: radius.sm, borderWidth: 1, marginTop: spacing.sm },
   addedText: { fontFamily: uiFont(600), fontSize: 13 },
   footer: { marginTop: spacing.lg, gap: spacing.sm },

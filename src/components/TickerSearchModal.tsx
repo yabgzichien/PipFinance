@@ -39,7 +39,7 @@ export function TickerSearchModal({
   useEffect(() => {
     if (!visible) return;
     const q = query.trim();
-    if (q.length < 2) {
+    if (q.length < 1) {
       setResults([]);
       setBusy(false);
       return;
@@ -108,7 +108,7 @@ export function TickerSearchModal({
                 </Pressable>
               );
             })}
-            {!busy && query.trim().length >= 2 && results.length === 0 && (
+            {!busy && query.trim().length >= 1 && results.length === 0 && (
               <Text style={[styles.empty, { color: colorTheme.ink2 }]}>
                 {isZh ? `未找到与“${query.trim()}”匹配的结果。` : `No matches for “${query.trim()}”.`}
               </Text>

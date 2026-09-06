@@ -299,6 +299,13 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     // column already present
   }
 
+  // Data repair: a backup-restore bug once wrote signed amounts straight into `amount` for
+  // expense rows instead of normalizing to the always-positive convention every other write
+  // path relies on (sign is meant to live in `type` alone). Devices that restored a backup
+  // before the fix are left with negative expense amounts, which corrupts every downstream
+  // sum (recap totals, category breakdowns). Idempotent: a no-op once every row is repaired.
+  await db.execAsync("UPDATE transactions SET amount = ABS(amount) WHERE type = 'expense' AND amount < 0");
+
   await migrateCategoryIds(db);
   await ensureSeedCategories(db);
   return db;

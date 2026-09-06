@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AccountLinkField } from '../components/AccountLinkField';
+import { AddAccountModal } from '../components/AddAccountModal';
 import { AddCategoryModal } from '../components/AddCategoryModal';
-import { CalcBadge } from '../components/CalcBadge';
-import { CurrencyChip } from '../components/CurrencyChip';
-import { Icon } from '../components/Icon';
+import { AmountSheet } from '../components/AmountSheet';
+import { BrandLogo, matchBrand } from '../components/BrandLogo';
+import { MoreDetails } from '../components/MoreDetails';
+import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { TourAnchor } from '../components/TourAnchor';
 import { BtnLabel, BubbleText, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
@@ -13,20 +15,60 @@ import { getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/c
 import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
-import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
-import { BASE_CURRENCY, deriveNative, isMultiCurrency, round2 } from '../lib/currency';
-import { cleanCalcInput, evaluateExpression } from '../lib/calc';
+import { CLASS_BY_ID, defaultLinkEffect, type LinkEffect } from '../lib/networth';
+import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
+import { evaluateExpression } from '../lib/calc';
 import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmtMoney } from '../lib/format';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { tap } from '../lib/haptics';
 import { SplitSheet } from '../components/SplitSheet';
-import type { Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
+import { matchInstitution } from '../lib/institutions';
+import type { Account, Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
+
+/**
+ * Score accounts to prioritize payment methods in order:
+ * 1. Cash accounts
+ * 2. Bank accounts
+ * 3. E-wallet accounts
+ * 4. Other Cash & Bank class accounts
+ * 5. Other asset accounts
+ */
+function getAccountPriority(a: Account): number {
+  const nameLower = a.name.toLowerCase().trim();
+  const inst = matchInstitution(a.name);
+
+  // 1. Cash accounts
+  if (nameLower === 'cash' || a.name === '现金' || nameLower.includes('cash') || nameLower.includes('现金')) {
+    return 1;
+  }
+  // 2. Bank accounts
+  if (inst?.kind === 'bank' || nameLower.includes('bank') || nameLower.includes('银行')) {
+    return 2;
+  }
+  // 3. E-wallet accounts
+  if (
+    inst?.kind === 'ewallet' ||
+    nameLower.includes('wallet') ||
+    nameLower.includes('tng') ||
+    nameLower.includes('touch') ||
+    nameLower.includes('grab') ||
+    nameLower.includes('boost') ||
+    nameLower.includes('pay')
+  ) {
+    return 3;
+  }
+  // 4. Other Cash & Bank class accounts
+  if (a.cls === 'cash') {
+    return 4;
+  }
+  return 5;
+}
 
 export function ManualEntryScreen({
   categories,
@@ -89,8 +131,14 @@ export function ManualEntryScreen({
   const [cat, setCat] = useState<string | null>(initialCategoryId);
   const [remark, setRemark] = useState('');
   const [adding, setAdding] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [split, setSplit] = useState<SplitDraft | null>(initialSplit);
   const [splitting, setSplitting] = useState(false);
+  const [amountOpen, setAmountOpen] = useState(false);
+  // The date is a chip row by default; the raw ISO field is revealed only when the user picks
+  // a day that isn't today or yesterday, which is where the typing cost was actually going.
+  const [dateEditing, setDateEditing] = useState(false);
 
   // Currencies active for this user, the sticky entry-currency default, and cached rates to
   // convert against. Loaded once on mount; MYR-only until then, so nothing here changes the
@@ -129,6 +177,19 @@ export function ManualEntryScreen({
   const assetAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'asset'), [accounts]);
   const liabilityAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'liability'), [accounts]);
 
+  // Liquid asset accounts (cash, bank accounts, e-wallets), prioritizing cash, bank, or ewallet accounts
+  const paymentAccounts = useMemo(() => {
+    const active = accounts.filter((a) => !a.archived);
+    const assets = active.filter((a) => a.kind === 'asset' && a.cls !== 'receivable' && a.cls !== 'illiquid');
+    const list = assets.length > 0 ? assets : active.filter((a) => a.cls !== 'receivable');
+    return [...list].sort((a, b) => {
+      const pA = getAccountPriority(a);
+      const pB = getAccountPriority(b);
+      if (pA !== pB) return pA - pB;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+  }, [accounts]);
+
   // Default to a cash account (prefer an existing one); seeds and creates a "Cash" account if none exist.
   const defaultAcctId = useMemo(() => {
     const act = assetAccounts.length > 0 ? assetAccounts : accounts.filter((a) => !a.archived);
@@ -137,6 +198,20 @@ export function ManualEntryScreen({
 
   const [fromAccountId, setFromAccountId] = useState<string | null>(defaultAcctId);
   const [toAccountId, setToAccountId] = useState<string | null>(null);
+
+  // Display maximum 5 accounts. If the currently selected account is not among the top 5,
+  // swap it into the 5th slot so the user always sees their active selection.
+  const visibleAccounts = useMemo(() => {
+    if (paymentAccounts.length <= 5) return paymentAccounts;
+    const top = paymentAccounts.slice(0, 5);
+    if (fromAccountId && !top.some((a) => a.id === fromAccountId)) {
+      const selected = paymentAccounts.find((a) => a.id === fromAccountId);
+      if (selected) {
+        return [...paymentAccounts.slice(0, 4), selected];
+      }
+    }
+    return top;
+  }, [paymentAccounts, fromAccountId]);
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
   const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
@@ -147,56 +222,29 @@ export function ManualEntryScreen({
   const mergeOpacity = useRef(new Animated.Value(1)).current;
   const [isMerging, setIsMerging] = useState(false);
 
-  const handleMerge = () => {
-    if (!calc.isExpression || calc.result == null || calc.result <= 0) return;
-    const finalValue = decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals);
+  /**
+   * Commit an amount chosen in the keypad sheet, with the old merge animation retargeted: the
+   * squeeze-then-bloom used to celebrate collapsing "12+8" into 20 inline. The sheet does that
+   * collapse now, so the pop plays here as the new figure lands on the row — the payoff moment
+   * survives the move, it just fires on a different event.
+   */
+  const applyAmount = (text: string) => {
     const useNative = Platform.OS !== 'web';
 
     setIsMerging(true);
     tap();
 
-    // Phase 1: Numbers converge/squeeze inward
     Animated.parallel([
-      Animated.timing(mergeScaleX, {
-        toValue: 0.82,
-        duration: 80,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: useNative,
-      }),
-      Animated.timing(mergeScaleY, {
-        toValue: 0.88,
-        duration: 80,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: useNative,
-      }),
-      Animated.timing(mergeOpacity, {
-        toValue: 0.35,
-        duration: 80,
-        useNativeDriver: useNative,
-      }),
+      Animated.timing(mergeScaleX, { toValue: 0.82, duration: 80, easing: Easing.in(Easing.ease), useNativeDriver: useNative }),
+      Animated.timing(mergeScaleY, { toValue: 0.88, duration: 80, easing: Easing.in(Easing.ease), useNativeDriver: useNative }),
+      Animated.timing(mergeOpacity, { toValue: 0.35, duration: 80, useNativeDriver: useNative }),
     ]).start(() => {
-      // Switch text to merged result
-      setAmountText(finalValue);
+      setAmountText(text);
 
-      // Phase 2: Pop & Bloom outward with spring bounce into final number
       Animated.parallel([
-        Animated.spring(mergeScaleX, {
-          toValue: 1,
-          tension: 180,
-          friction: 6,
-          useNativeDriver: useNative,
-        }),
-        Animated.spring(mergeScaleY, {
-          toValue: 1,
-          tension: 180,
-          friction: 6,
-          useNativeDriver: useNative,
-        }),
-        Animated.timing(mergeOpacity, {
-          toValue: 1,
-          duration: 140,
-          useNativeDriver: useNative,
-        }),
+        Animated.spring(mergeScaleX, { toValue: 1, tension: 180, friction: 6, useNativeDriver: useNative }),
+        Animated.spring(mergeScaleY, { toValue: 1, tension: 180, friction: 6, useNativeDriver: useNative }),
+        Animated.timing(mergeOpacity, { toValue: 1, duration: 140, useNativeDriver: useNative }),
       ]).start(() => {
         setIsMerging(false);
       });
@@ -205,6 +253,19 @@ export function ManualEntryScreen({
 
   const dateTrimmed = dateText.trim();
   const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
+
+  const today = todayISO();
+  // Built from local date parts (todayISO reads getFullYear/getMonth/getDate), not toISOString,
+  // so a user in UTC+8 doesn't get "yesterday" landing two days back late in the evening.
+  const yesterday = todayISO(new Date(Date.now() - 86_400_000));
+  /** True when the date is neither chip, so the third chip shows the date instead of "Other". */
+  const otherDate = dateEditing || (dateTrimmed !== today && dateTrimmed !== yesterday);
+
+  const pickDate = (iso: string) => {
+    setDateText(iso);
+    setDateEditing(false);
+    setDateFocused(false);
+  };
 
   const fromAccount = fromAccountId ? accounts.find((a) => a.id === fromAccountId) ?? null : null;
   const fromConvertible =
@@ -243,6 +304,15 @@ export function ManualEntryScreen({
   // after splitting it), so it is dropped rather than silently applied to a different number.
   const activeSplit =
     split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
+
+  /** What the collapsed More details row reports. */
+  const detailsSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (merchant.trim()) parts.push(merchant.trim());
+    if (toAccount) parts.push(toAccount.name);
+    if (remark.trim()) parts.push(isZh ? '有备注' : 'remark added');
+    return parts.length > 0 ? parts.join(' · ') : (isZh ? '更多选填项' : 'More options');
+  }, [merchant, toAccount, remark, isZh]);
 
   const save = async () => {
     if (!canSave || !cat || !validDate || rate == null) return;
@@ -320,12 +390,13 @@ export function ManualEntryScreen({
 
         <Eyebrow style={{ marginBottom: 8 }}>{t('amount')}</Eyebrow>
         <TourAnchor id="tour_amount_field" activeId={activeTourAnchor}>
-          <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            {isMultiCurrency(activeCurrencies) ? (
-              <CurrencyChip value={currency} active={activeCurrencies} onChange={changeCurrency} />
-            ) : (
-              <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
-            )}
+          <Pressable
+            onPress={() => setAmountOpen(true)}
+            style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+            accessibilityRole="button"
+            accessibilityLabel={isZh ? '输入金额' : 'Enter amount'}
+          >
+            <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
             <Animated.View
               style={{
                 flex: 1,
@@ -334,33 +405,19 @@ export function ManualEntryScreen({
                 transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
               }}
             >
-              <TextInput
-                value={amountText}
-                onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
-                onSubmitEditing={handleMerge}
-                keyboardType="numbers-and-punctuation"
-                placeholder={decimals === 0 ? '0' : '0.00'}
-                placeholderTextColor={colorTheme.ink3}
+              <Text
                 style={[
                   styles.amountInput,
-                  { color: isMerging ? theme.accent : colorTheme.ink },
+                  { color: isMerging ? theme.accent : amount > 0 ? colorTheme.ink : colorTheme.ink3 },
                 ]}
-              />
+                numberOfLines={1}
+              >
+                {amount > 0 ? amountText : decimals === 0 ? '0' : '0.00'}
+              </Text>
             </Animated.View>
-            {calc.isExpression && calc.result != null && calc.result > 0 && (
-              <CalcBadge
-                result={calc.result}
-                decimals={decimals}
-                onApply={handleMerge}
-              />
-            )}
-          </View>
+            <Icon name="pencil" size={17} color={colorTheme.ink3} />
+          </Pressable>
         </TourAnchor>
-        {calc.isExpression && calc.result != null && calc.result > 0 && (
-          <Text style={[styles.calcHint, { color: theme.accent }]}>
-            = {currency} {decimals === 0 ? String(Math.round(calc.result)) : calc.result.toFixed(decimals)}
-          </Text>
-        )}
         {currency !== BASE_CURRENCY && rate != null && (
           <Text style={[styles.fxHint, { color: colorTheme.ink3 }]}>≈ {fmtMoney(amount * rate, BASE_CURRENCY)}</Text>
         )}
@@ -395,59 +452,80 @@ export function ManualEntryScreen({
         )}
 
         <TourAnchor id="tour_account_field" activeId={activeTourAnchor}>
-          <View style={{ marginTop: 18 }}>
-            <AccountLinkField
-              accounts={assetAccounts.length > 0 ? assetAccounts : accounts}
-              selectedId={fromAccountId}
-              onSelect={setFromAccountId}
-              label={type === 'expense' ? (isZh ? '扣款账户' : 'Pay from') : (isZh ? '存入账户' : 'Deposit into')}
-              required
-            />
+          <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>
+            {type === 'expense' ? (isZh ? '扣款账户' : 'Pay from') : (isZh ? '存入账户' : 'Deposit into')}
+          </Eyebrow>
+          <View style={styles.accountChips}>
+            {visibleAccounts.map((a) => {
+              const on = fromAccountId === a.id;
+              const brand = matchBrand(a.name);
+              return (
+                <Pressable
+                  key={a.id}
+                  onPress={() => {
+                    tap();
+                    setFromAccountId(a.id);
+                  }}
+                  style={[
+                    styles.accountChip,
+                    {
+                      backgroundColor: on ? theme.accentTint : colorTheme.surface,
+                      borderColor: on ? theme.accentSoft : colorTheme.line,
+                    },
+                  ]}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={a.name}
+                >
+                  {brand ? (
+                    <BrandLogo brand={brand} size={16} />
+                  ) : a.icon ? (
+                    <Image source={{ uri: a.icon }} style={{ width: 16, height: 16, borderRadius: 4 }} />
+                  ) : (
+                    <Icon
+                      name={(CLASS_BY_ID[a.cls]?.icon ?? 'wallet') as IconName}
+                      size={15}
+                      color={on ? theme.accent : colorTheme.ink2}
+                    />
+                  )}
+                  <Text
+                    style={[
+                      styles.accountChipText,
+                      { color: on ? theme.accent : colorTheme.ink2 },
+                      on && { fontFamily: uiFont(700) },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {a.name}
+                  </Text>
+                  {on && <Icon name="check" size={13} color={theme.accent} stroke={2.4} />}
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => setAccountPickerOpen(true)}
+              style={[
+                styles.accountChip,
+                {
+                  borderColor: colorTheme.line,
+                  backgroundColor: colorTheme.surface,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={isZh ? '选择其他账户' : 'More accounts'}
+            >
+              <Text style={[styles.accountChipText, { color: colorTheme.ink2 }]}>
+                {isZh ? '更多' : 'More'}
+              </Text>
+              <Icon name="chevronDown" size={13} color={colorTheme.ink3} />
+            </Pressable>
           </View>
         </TourAnchor>
 
-        {type === 'expense' && (
-          <View style={{ marginTop: 18 }}>
-            <AccountLinkField
-              accounts={liabilityAccounts}
-              selectedId={toAccountId}
-              onSelect={setToAccountId}
-              label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
-              infoEntry="reduce_liability"
-            />
-          </View>
-        )}
-
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
-        <TextInput
-          value={dateFocused ? dateText : validDate ? formatFullDate(validDate) : dateText}
-          onChangeText={setDateText}
-          onFocus={() => setDateFocused(true)}
-          onBlur={() => setDateFocused(false)}
-          onSubmitEditing={() => setDateFocused(false)}
-          selectTextOnFocus
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor={colorTheme.ink3}
-          keyboardType="numbers-and-punctuation"
-          style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-        />
-        {!validDate && (
-          <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
-            {isZh ? '请输入有效日期 (YYYY-MM-DD)' : 'Enter a valid date (YYYY-MM-DD)'}
-          </Text>
-        )}
-
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>
-          {type === 'income' ? (isZh ? '收入来源（选填）' : 'Source (optional)') : (isZh ? '商家名称（选填）' : 'Merchant (optional)')}
-        </Eyebrow>
-        <TextInput
-          value={merchant}
-          onChangeText={setMerchant}
-          placeholder={type === 'income' ? (isZh ? '例如：工资' : 'e.g. Salary') : (isZh ? '例如：Jaya Grocer' : 'e.g. Jaya Grocer')}
-          placeholderTextColor={colorTheme.ink3}
-          style={[styles.textInputSm, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-        />
-
+        {/* Category sits directly under the amount because those are the only two fields the
+            user must actually supply — canSave's other two (date, account) are pre-filled. It
+            used to be below merchant and both account pickers, which put the second required
+            field under the fold and left the save button looking broken until you scrolled. */}
         <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{t('category')}</Eyebrow>
         <TourAnchor id="tour_category_grid" activeId={activeTourAnchor}>
           <View style={styles.grid}>
@@ -465,15 +543,100 @@ export function ManualEntryScreen({
           </View>
         </TourAnchor>
 
-        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Eyebrow>
-        <TextInput
-          value={remark}
-          onChangeText={setRemark}
-          placeholder={isZh ? '例如：和同事吃午餐' : 'e.g. Lunch with a supplier'}
-          placeholderTextColor={colorTheme.ink3}
-          style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-          multiline
-        />
+        <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{t('date')}</Eyebrow>
+        <View style={styles.dateChips}>
+          {[
+            { iso: today, label: isZh ? '今天' : 'Today' },
+            { iso: yesterday, label: isZh ? '昨天' : 'Yesterday' },
+          ].map((d) => {
+            const on = !dateEditing && dateTrimmed === d.iso;
+            return (
+              <Pressable
+                key={d.iso}
+                onPress={() => pickDate(d.iso)}
+                style={[
+                  styles.dateChip,
+                  { backgroundColor: on ? theme.accentTint : colorTheme.surface, borderColor: on ? theme.accentSoft : colorTheme.line },
+                ]}
+              >
+                <Text style={[styles.dateChipText, { color: on ? theme.accent : colorTheme.ink2 }]}>{d.label}</Text>
+              </Pressable>
+            );
+          })}
+          <Pressable
+            onPress={() => setDateEditing(true)}
+            style={[
+              styles.dateChip,
+              styles.dateChipWide,
+              { backgroundColor: otherDate ? theme.accentTint : colorTheme.surface, borderColor: otherDate ? theme.accentSoft : colorTheme.line },
+            ]}
+          >
+            <Text style={[styles.dateChipText, { color: otherDate ? theme.accent : colorTheme.ink2 }]} numberOfLines={1}>
+              {validDate && otherDate ? formatFullDate(validDate) : isZh ? '其他日期' : 'Other'}
+            </Text>
+            <Icon name="pencil" size={13} color={otherDate ? theme.accent : colorTheme.ink3} />
+          </Pressable>
+        </View>
+        {/* The raw ISO field is still the editor — keeping it preserves isValidIsoDate and its
+            error state — but it now only appears for a date the two chips can't express. */}
+        {dateEditing && (
+          <>
+            <TextInput
+              value={dateFocused ? dateText : validDate ? formatFullDate(validDate) : dateText}
+              onChangeText={setDateText}
+              onFocus={() => setDateFocused(true)}
+              onBlur={() => setDateFocused(false)}
+              onSubmitEditing={() => setDateFocused(false)}
+              selectTextOnFocus
+              autoFocus
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colorTheme.ink3}
+              keyboardType="numbers-and-punctuation"
+              style={[styles.textInput, { marginTop: 10, backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+            />
+            {!validDate && (
+              <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
+                {isZh ? '请输入有效日期 (YYYY-MM-DD)' : 'Enter a valid date (YYYY-MM-DD)'}
+              </Text>
+            )}
+          </>
+        )}
+
+        <MoreDetails summary={detailsSummary} defaultOpen={!!initialMerchant}>
+          {/* Only offered to users who actually have a loan to pay down. */}
+          {type === 'expense' && liabilityAccounts.length > 0 && (
+            <View style={{ marginBottom: 14 }}>
+              <AccountLinkField
+                accounts={liabilityAccounts}
+                selectedId={toAccountId}
+                onSelect={setToAccountId}
+                label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
+                infoEntry="reduce_liability"
+              />
+            </View>
+          )}
+
+          <Eyebrow style={{ marginTop: type === 'expense' && liabilityAccounts.length > 0 ? 6 : 0, marginBottom: 8 }}>
+            {type === 'income' ? (isZh ? '收入来源（选填）' : 'Source (optional)') : (isZh ? '商家名称（选填）' : 'Merchant (optional)')}
+          </Eyebrow>
+          <TextInput
+            value={merchant}
+            onChangeText={setMerchant}
+            placeholder={type === 'income' ? (isZh ? '例如：工资' : 'e.g. Salary') : (isZh ? '例如：Jaya Grocer' : 'e.g. Jaya Grocer')}
+            placeholderTextColor={colorTheme.ink3}
+            style={[styles.textInputSm, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+          />
+
+          <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>{isZh ? '备注（选填）' : 'Remark (optional)'}</Eyebrow>
+          <TextInput
+            value={remark}
+            onChangeText={setRemark}
+            placeholder={isZh ? '例如：和同事吃午餐' : 'e.g. Lunch with a supplier'}
+            placeholderTextColor={colorTheme.ink3}
+            style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+            multiline
+          />
+        </MoreDetails>
       </ScrollView>
 
       <View style={[styles.footer, { backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2, paddingBottom: insets.bottom + 16 }]}>
@@ -488,6 +651,17 @@ export function ManualEntryScreen({
       </View>
       </KeyboardAvoidingView>
 
+      <AmountSheet
+        visible={amountOpen}
+        value={amountText}
+        currency={currency}
+        activeCurrencies={activeCurrencies}
+        decimals={decimals}
+        onChangeCurrency={changeCurrency}
+        onApply={applyAmount}
+        onClose={() => setAmountOpen(false)}
+      />
+
       <AddCategoryModal
         visible={adding}
         kind={type}
@@ -497,6 +671,80 @@ export function ManualEntryScreen({
           setAdding(false);
         }}
       />
+
+      <AddAccountModal
+        visible={addingAccount}
+        onClose={() => setAddingAccount(false)}
+        onCreated={(id) => {
+          setFromAccountId(id);
+          setAddingAccount(false);
+        }}
+      />
+
+      {/* Full account picker modal when user taps "More" */}
+      <Modal visible={accountPickerOpen} transparent animationType="fade" onRequestClose={() => setAccountPickerOpen(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setAccountPickerOpen(false)} />
+        <View style={styles.menuWrap} pointerEvents="box-none">
+          <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
+            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>
+              {type === 'expense' ? (isZh ? '选择扣款账户' : 'Select payment account') : (isZh ? '选择存入账户' : 'Select deposit account')}
+            </Text>
+            <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
+              {paymentAccounts.map((a) => {
+                const on = fromAccountId === a.id;
+                const brand = matchBrand(a.name);
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => {
+                      tap();
+                      setFromAccountId(a.id);
+                      setAccountPickerOpen(false);
+                    }}
+                    style={[styles.accountMenuItem, on && { backgroundColor: theme.accentTint }]}
+                  >
+                    {brand ? (
+                      <BrandLogo brand={brand} size={18} />
+                    ) : a.icon ? (
+                      <Image source={{ uri: a.icon }} style={{ width: 18, height: 18, borderRadius: 4 }} />
+                    ) : (
+                      <Icon
+                        name={(CLASS_BY_ID[a.cls]?.icon ?? 'wallet') as IconName}
+                        size={16}
+                        color={on ? theme.accent : colorTheme.ink2}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.accountMenuText,
+                        { color: colorTheme.ink },
+                        on && { color: theme.onTint, fontFamily: uiFont(700) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {a.name}
+                    </Text>
+                    {on && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
+            <Pressable
+              onPress={() => {
+                setAccountPickerOpen(false);
+                setAddingAccount(true);
+              }}
+              style={styles.accountMenuItem}
+            >
+              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+              <Text style={[styles.accountMenuText, { color: theme.accent, fontFamily: uiFont(600) }]}>
+                {isZh ? '创建新账户' : 'Create new account'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <SplitSheet
         visible={splitting}
@@ -541,9 +789,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   dateHintBad: { color: '#c5402f' },
+  dateChips: { flexDirection: 'row', gap: 8 },
+  dateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  // The third chip carries a full date ("3 Sep 2026"), so it takes the slack rather than
+  // letting a long formatted date squeeze the two fixed chips.
+  dateChipWide: { flex: 1 },
+  dateChipText: { fontFamily: uiFont(600), fontSize: 13 },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 14 },
   fxHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
-  calcHint: { fontFamily: numFont(600), fontSize: 13, marginTop: 6, marginLeft: 2 },
   rm: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: { flex: 1, minWidth: 0, fontFamily: numFont(700), fontSize: 24, paddingVertical: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
@@ -563,5 +825,30 @@ const styles = StyleSheet.create({
   splitRowOff: { opacity: 0.6 },
   splitTitle: { fontFamily: uiFont(700), fontSize: 13.5 },
   splitSub: { fontFamily: uiFont(500), fontSize: 11.5, marginTop: 2 },
+  accountChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  accountChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 10,
+    paddingHorizontal: 13,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  accountChipText: { fontFamily: uiFont(600), fontSize: 13, maxWidth: 180 },
+  accountAddChip: { borderStyle: 'dashed' },
+  menuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
+  menuWrap: { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
+  menu: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    paddingVertical: 8,
+    maxHeight: '70%',
+  },
+  menuTitle: { fontFamily: uiFont(700), fontSize: 13, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
+  menuScroll: { flexGrow: 0 },
+  menuDivider: { height: StyleSheet.hairlineWidth, marginVertical: 4 },
+  accountMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 13 },
+  accountMenuText: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: 1 },
 });

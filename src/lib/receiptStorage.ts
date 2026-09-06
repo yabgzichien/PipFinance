@@ -22,6 +22,15 @@ export function saveReceiptImage(sourceUri: string, mime: string): string {
   return dest.uri;
 }
 
+/** Writes raw image bytes (e.g. unzipped from a backup archive) into permanent storage and
+ *  returns the new URI. Used by backup restore, which has bytes in memory rather than a
+ *  source file the OS picker handed us. */
+export function saveReceiptImageBytes(bytes: Uint8Array, mime: string): string {
+  const dest = new File(receiptsDir(), receiptFileName(mime));
+  dest.write(bytes);
+  return dest.uri;
+}
+
 /** Removes a previously saved receipt photo. Safe to call on a URI that no longer exists,
  *  or on a platform (web) that never wrote one. */
 export function deleteReceiptImage(uri: string): void {

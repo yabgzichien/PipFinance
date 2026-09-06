@@ -1,5 +1,6 @@
 // __tests__/recap.test.ts
 import {
+  autoCategorizedRate,
   availableMonths,
   categoryComparisons,
   computeAdherence,
@@ -144,6 +145,35 @@ describe('categoryComparisons', () => {
 
   it('returns nothing for two empty months', () => {
     expect(categoryComparisons([], '2026-06')).toEqual([]);
+  });
+});
+
+describe('autoCategorizedRate', () => {
+  it('counts an expense as auto-categorized when its merchant has an earlier transaction', () => {
+    const txns = [
+      txn({ merchantKey: 'starbucks', date: '2026-05-01' }), // first seen last month
+      txn({ merchantKey: 'starbucks', date: '2026-06-05' }), // repeat this month -> known
+      txn({ merchantKey: 'new-cafe', date: '2026-06-06' }), // first time ever -> not known
+    ];
+    expect(autoCategorizedRate(txns, '2026-06')).toBe(50);
+  });
+
+  it('does not count same-day first occurrences as known', () => {
+    const txns = [txn({ merchantKey: 'new-cafe', date: '2026-06-06' })];
+    expect(autoCategorizedRate(txns, '2026-06')).toBe(0);
+  });
+
+  it('ignores income when computing the rate', () => {
+    const txns = [
+      txn({ merchantKey: 'employer', type: 'income', date: '2026-05-01' }),
+      txn({ merchantKey: 'employer', type: 'income', date: '2026-06-01' }),
+      txn({ merchantKey: 'new-cafe', type: 'expense', date: '2026-06-06' }),
+    ];
+    expect(autoCategorizedRate(txns, '2026-06')).toBe(0);
+  });
+
+  it('returns null when the month has no expenses', () => {
+    expect(autoCategorizedRate([], '2026-06')).toBeNull();
   });
 });
 

@@ -4,9 +4,9 @@ import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AddAccountModal } from '../components/AddAccountModal';
 import { Icon, type IconName } from '../components/Icon';
 import { CalcBadge } from '../components/CalcBadge';
-import { CurrencyChip } from '../components/CurrencyChip';
 import { InstitutionBadge } from '../components/InstitutionBadge';
 import { BrandBadge } from '../components/BrandBadge';
 import { matchBrand, matchCrypto } from '../components/BrandLogo';
@@ -16,10 +16,10 @@ import { ScanBalanceButton } from '../components/ScanBalanceButton';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { InfoButton } from '../components/InfoButton';
 import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../components/ui';
-import { getActiveCurrencies, getEntryCurrency, refreshFxRates } from '../db/currencyRepo';
+import { refreshFxRates } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
-import { BASE_CURRENCY, isMultiCurrency, round2 } from '../lib/currency';
+import { BASE_CURRENCY, round2 } from '../lib/currency';
 import { cleanCalcInput, evaluateExpression } from '../lib/calc';
 import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
@@ -41,7 +41,7 @@ import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCur
 import { groupHoldings, holdingProfit, isHolding, subFromType, toQuantityUnitPrice, typeFromSub, type HoldingGroup, type TickerResult } from '../lib/prices';
 import { todayISO } from '../lib/duplicates';
 import { searchInvestments } from '../prices';
-import type { Account, AccountKind, PriceQuote } from '../lib/types';
+import type { Account, PriceQuote } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -884,511 +884,6 @@ function AccountRow({
   );
 }
 
-/** Add a new account: kind → class → name → opening value, or a live holding (optionally preset to a ticker). */
-function AddAccountModal({ visible, preset, onClose }: { visible: boolean; preset?: TickerResult | null; onClose: () => void }) {
-  const insets = useSafeAreaInsets();
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
-  const { addAccount, addHolding, markTaskDone } = useAppData();
-  const [kind, setKind] = useState<AccountKind>('asset');
-  const [cls, setCls] = useState('cash');
-  const [name, setName] = useState('');
-  const [valueText, setValueText] = useState('');
-  const [holdingMode, setHoldingMode] = useState(false);
-  const [coin, setCoin] = useState<TickerResult | null>(null);
-  const [qtyText, setQtyText] = useState('');
-  const [costText, setCostText] = useState('');
-  const [rateText, setRateText] = useState('');
-  const [rateMode, setRateMode] = useState<'appreciation' | 'depreciation'>('depreciation');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [customIcon, setCustomIcon] = useState<string | null>(null);
-  // A manually-created account's own currency (holdings stay MYR-only, priced via quotesMYR).
-  const [currency, setCurrency] = useState<string>(BASE_CURRENCY);
-  const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
-
-  const reset = () => {
-    setKind('asset'); setCls('cash'); setName(''); setValueText('');
-    setHoldingMode(false); setCoin(null); setQtyText(''); setCostText(''); setRateText('');
-    setRateMode('depreciation');
-    setCustomIcon(null); setCurrency(BASE_CURRENCY);
-  };
-  const close = () => { reset(); onClose(); };
-
-  // On open, either preset to a specific ticker ("add another lot") or start fresh. Also
-  // (re)loads the active-currency list each time the sheet opens, mirroring ManualEntryScreen.
-  useEffect(() => {
-    if (!visible) return;
-    if (preset) {
-      setKind('asset'); setCls('investments'); setHoldingMode(true);
-      setCoin(preset); setName(''); setValueText(''); setQtyText(''); setCostText(''); setRateText(''); setRateMode('depreciation'); setCustomIcon(null);
-    } else {
-      reset();
-    }
-    getActiveCurrencies().then(setActiveCurrencies);
-    // Seed the picker with the currency the user actually banks in, not ringgit. Defaulting
-    // to MYR here is how someone whose default currency is SGD ends up with SGD spending
-    // draining an account the whole app then labels "RM".
-    getEntryCurrency().then(setCurrency);
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const switchKind = (k: AccountKind) => {
-    setKind(k);
-    const firstCls = classesFor(k)[0]?.id ?? 'cash';
-    setCls(firstCls);
-    setHoldingMode(firstCls === 'investments');
-  };
-
-  const isInvest = kind === 'asset' && cls === 'investments';
-  const isHoldingType = isInvest && holdingMode;
-  const isIlliquid = kind === 'asset' && cls === 'illiquid';
-  const pickedSub = coin ? subFromType(coin.type) : null;
-  const qtyUnit = pickedSub === 'commodity' ? 'g' : coin?.ticker ?? '';
-  const qtyLabel = pickedSub === 'commodity' ? 'Grams' : pickedSub === 'stock' ? 'Shares' : 'Quantity';
-  const quantity = Math.max(0, parseFloat(qtyText.replace(/[^0-9.]/g, '')) || 0);
-
-  const valueDecimals = decimalsFor(currency);
-  const valueCalc = useMemo(() => evaluateExpression(valueText, valueDecimals), [valueText, valueDecimals]);
-  const value = Math.max(0, valueCalc.result ?? 0);
-
-  const mergeScaleX = useRef(new Animated.Value(1)).current;
-  const mergeScaleY = useRef(new Animated.Value(1)).current;
-  const mergeOpacity = useRef(new Animated.Value(1)).current;
-  const [isMergingValue, setIsMergingValue] = useState(false);
-
-  const handleMergeValue = () => {
-    if (!valueCalc.isExpression || valueCalc.result == null || valueCalc.result <= 0) return;
-    const finalValue = valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals);
-    const useNative = Platform.OS !== 'web';
-
-    setIsMergingValue(true);
-    tap();
-
-    // Phase 1: Numbers converge/squeeze inward
-    Animated.parallel([
-      Animated.timing(mergeScaleX, {
-        toValue: 0.82,
-        duration: 80,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: useNative,
-      }),
-      Animated.timing(mergeScaleY, {
-        toValue: 0.88,
-        duration: 80,
-        easing: Easing.in(Easing.ease),
-        useNativeDriver: useNative,
-      }),
-      Animated.timing(mergeOpacity, {
-        toValue: 0.35,
-        duration: 80,
-        useNativeDriver: useNative,
-      }),
-    ]).start(() => {
-      setValueText(finalValue);
-
-      // Phase 2: Bloom outward with spring bounce into final number
-      Animated.parallel([
-        Animated.spring(mergeScaleX, {
-          toValue: 1,
-          tension: 180,
-          friction: 6,
-          useNativeDriver: useNative,
-        }),
-        Animated.spring(mergeScaleY, {
-          toValue: 1,
-          tension: 180,
-          friction: 6,
-          useNativeDriver: useNative,
-        }),
-        Animated.timing(mergeOpacity, {
-          toValue: 1,
-          duration: 140,
-          useNativeDriver: useNative,
-        }),
-      ]).start(() => {
-        setIsMergingValue(false);
-      });
-    });
-  };
-
-  const canSave = isHoldingType ? !!coin && quantity > 0 : name.trim().length > 0;
-
-  const pickCoin = (c: TickerResult) => {
-    setCoin(c);
-    if (!name.trim()) setName(c.name);
-    setSearchOpen(false);
-  };
-
-  const pickCustomIcon = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      base64: true,
-      quality: 0.5,
-    });
-    if (!res.canceled && res.assets?.length) {
-      const a = res.assets[0];
-      const dataUri = a.base64 ? `data:${a.mimeType ?? 'image/jpeg'};base64,${a.base64}` : a.uri;
-      setCustomIcon(dataUri);
-    }
-  };
-
-  const save = async () => {
-    if (!canSave) return;
-    const rateVal = rateText.trim() ? parseFloat(rateText.replace(/[^0-9.]/g, '')) || null : null;
-    if (isHoldingType && coin) {
-      const sub = subFromType(coin.type);
-      const ticker = sub === 'commodity' ? 'g' : coin.ticker; // gold/silver measured in grams
-      const cost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
-      await addHolding(name.trim() || coin.name, sub, coin.id, ticker, Math.round(quantity * 1e8) / 1e8, cost, customIcon, rateVal);
-    } else if (isIlliquid) {
-      const parsedCost = costText.trim() ? Math.round((parseFloat(costText.replace(/[^0-9.]/g, '')) || 0) * 100) / 100 : null;
-      const numRate = rateText.trim() ? parseFloat(rateText.replace(/[^0-9.]/g, '')) : null;
-      const finalRate = numRate != null && Number.isFinite(numRate) ? (rateMode === 'depreciation' ? -Math.abs(numRate) : Math.abs(numRate)) : null;
-      await addAccount(name.trim(), 'asset', 'illiquid', Math.round(value * 100) / 100, todayISO(), customIcon, currency, finalRate, parsedCost);
-    } else {
-      await addAccount(name.trim(), kind, cls, Math.round(value * 100) / 100, todayISO(), customIcon, currency, isInvest ? rateVal : null);
-    }
-    void markTaskDone('account');
-    close();
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <Pressable style={styles.backdrop} onPress={close} />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.sheetAvoider}
-        pointerEvents="box-none"
-      >
-      <View style={[styles.sheetCard, { paddingBottom: insets.bottom + 18, backgroundColor: colorTheme.bg }]}>
-        <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
-        <View style={styles.sheetHead}>
-          <Text style={[styles.sheetTitle, { color: colorTheme.ink }]}>New account</Text>
-          <Pressable onPress={close} hitSlop={8}><Icon name="x" size={20} color={colorTheme.ink2} /></Pressable>
-        </View>
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <View style={[styles.toggle, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-            {(['asset', 'liability'] as AccountKind[]).map((k) => {
-              const on = kind === k;
-              return (
-                <Pressable
-                  key={k}
-                  onPress={() => switchKind(k)}
-                  style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: theme.accentTint }]}
-                >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      { color: colorTheme.ink2 },
-                      on && styles.toggleTextOn,
-                      on && { color: theme.accent },
-                    ]}
-                  >
-                    {k === 'asset' ? (isZh ? '资产' : 'Assets') : (isZh ? '负债' : 'Liabilities')}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>Type</Text>
-          <View style={styles.classGrid}>
-            {classesFor(kind).map((c) => {
-              const on = cls === c.id;
-              return (
-                <Pressable
-                  key={c.id}
-                  onPress={() => {
-                    setCls(c.id);
-                    if (c.id === 'investments') setHoldingMode(true);
-                  }}
-                  style={[styles.classChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && [styles.classChipOn, { borderColor: theme.accent, backgroundColor: theme.accentTint }]]}
-                >
-                  <Icon name={c.icon as IconName} size={15} color={on ? theme.accent : colorTheme.ink3} />
-                  <Text style={[styles.classChipText, { color: colorTheme.ink2 }, on && { color: theme.onTint }]}>{c.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {isInvest && (
-            <View style={[styles.toggle, { marginTop: 18, marginBottom: 0, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-              {([[true, 'Live holding'], [false, 'Manual value']] as const).map(([m, label]) => {
-                const on = holdingMode === m;
-                return (
-                  <Pressable
-                    key={label}
-                    onPress={() => { setHoldingMode(m); setCoin(null); }}
-                    style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
-                  >
-                    <Text
-                      style={[
-                        styles.toggleText,
-                        { color: colorTheme.ink2 },
-                        on && styles.toggleTextOn,
-                        on && { color: colorTheme.ink },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-
-          {isHoldingType ? (
-            <>
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Investment</Text>
-              <Pressable onPress={() => setSearchOpen(true)} style={[styles.pickerBtn, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Icon name="search" size={16} color={theme.accent} />
-                <Text style={[styles.pickerText, { color: colorTheme.ink }, !coin && { color: colorTheme.ink2 }]} numberOfLines={1}>
-                  {coin ? `${coin.name} · ${qtyUnit}` : 'Search crypto, stocks, gold or silver…'}
-                </Text>
-              </Pressable>
-
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{qtyLabel}</Text>
-              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <TextInput value={qtyText} onChangeText={setQtyText} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
-                {coin ? <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{qtyUnit}</Text> : null}
-              </View>
-
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '持仓成本 / 买入总额 (选填)' : 'Invested amount (optional)'}</Text>
-              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
-                <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder={isZh ? '买入成本' : 'cost of investment'} placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
-              </View>
-
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '年化收益率 / APR (选填)' : 'Interest rate (optional)'}</Text>
-              <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <TextInput value={rateText} onChangeText={setRateText} keyboardType="decimal-pad" placeholder="APR" placeholderTextColor={colorTheme.ink3} style={[styles.compactInput, { color: colorTheme.ink }]} />
-                <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>%</Text>
-              </View>
-
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '账户名称 (选填)' : 'Name (optional)'}</Text>
-              <TextInput value={name} onChangeText={setName} placeholder={isZh ? '例如：我的持仓' : 'e.g. My holding'} placeholderTextColor={colorTheme.ink3} style={[styles.textInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]} />
-            </>
-          ) : (
-            <>
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
-                {cls === 'illiquid' ? (isZh ? '资产名称' : 'Asset name') : (isZh ? '账户名称' : 'Account')}
-              </Text>
-              <InstitutionField
-                value={name}
-                onChangeText={setName}
-                placeholder={
-                  kind === 'asset'
-                    ? cls === 'illiquid'
-                      ? isZh
-                        ? '例如：2022 本田思域、满家乐公寓'
-                        : 'e.g. 2022 Honda Civic, Mont Kiara Condo'
-                      : isZh
-                        ? '例如：TnG 电子钱包、Maybank'
-                        : 'e.g. TnG eWallet, Maybank FD'
-                    : isZh
-                      ? '例如：Porsche 车贷 / 信用卡'
-                      : 'e.g. Porsche, Car Loan'
-                }
-                onPick={(inst) => {
-                  if (inst.kind === 'auto') {
-                    if (kind === 'liability') setCls('car');
-                    else setCls('illiquid');
-                  } else if (kind === 'asset') {
-                    setCls('cash');
-                  }
-                }}
-              />
-
-              <View style={[styles.labelRow, { marginTop: 18 }]}>
-                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
-                  {cls === 'illiquid'
-                    ? isZh
-                      ? '当前市值'
-                      : 'Market value'
-                    : kind === 'asset'
-                      ? isZh
-                        ? '当前金额'
-                        : 'Current value'
-                      : isZh
-                        ? '待还金额'
-                        : 'Outstanding amount'}
-                </Text>
-                <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
-              </View>
-              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                {isMultiCurrency(activeCurrencies) ? (
-                  <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
-                ) : (
-                  <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
-                )}
-                <Animated.View
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    opacity: mergeOpacity,
-                    transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
-                  }}
-                >
-                  <TextInput
-                    value={valueText}
-                    onChangeText={(t) => setValueText(cleanCalcInput(t, valueDecimals > 0))}
-                    onSubmitEditing={handleMergeValue}
-                    keyboardType="numbers-and-punctuation"
-                    placeholder={valueDecimals === 0 ? '0' : '0.00'}
-                    placeholderTextColor={colorTheme.ink3}
-                    style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
-                  />
-                </Animated.View>
-                {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
-                  <CalcBadge
-                    result={valueCalc.result}
-                    decimals={valueDecimals}
-                    onApply={handleMergeValue}
-                  />
-                )}
-              </View>
-              {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
-                <Text style={[styles.calcHint, { color: theme.accent }]}>
-                  = {currency} {valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals)}
-                </Text>
-              )}
-
-              {isIlliquid && (
-                <>
-                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
-                    {isZh ? '购置成本 (选填)' : 'Cost of asset (optional)'}
-                  </Text>
-                  <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                    <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
-                    <TextInput
-                      value={costText}
-                      onChangeText={setCostText}
-                      keyboardType="decimal-pad"
-                      placeholder="0.00"
-                      placeholderTextColor={colorTheme.ink3}
-                      style={[styles.amountInput, { color: colorTheme.ink }]}
-                    />
-                  </View>
-
-                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
-                    {isZh ? '预估年化增值/折旧率 (选填)' : 'ETA appreciation / depreciation % (optional)'}
-                  </Text>
-                  <View style={[styles.toggle, { marginTop: 6, marginBottom: 8, backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-                    {([
-                      ['appreciation', isZh ? '+ 增值' : '+ Appreciation'],
-                      ['depreciation', isZh ? '− 折旧' : '− Depreciation'],
-                    ] as const).map(([m, label]) => {
-                      const on = rateMode === m;
-                      return (
-                        <Pressable
-                          key={m}
-                          onPress={() => setRateMode(m)}
-                          style={[styles.toggleBtn, on && styles.toggleBtnOn, on && { backgroundColor: colorTheme.surface }]}
-                        >
-                          <Text
-                            style={[
-                              styles.toggleText,
-                              { color: colorTheme.ink2 },
-                              on && styles.toggleTextOn,
-                              on && { color: m === 'appreciation' ? theme.accent : colorTheme.ink },
-                            ]}
-                          >
-                            {label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                  <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, width: 160 }]}>
-                    <TextInput
-                      value={rateText}
-                      onChangeText={setRateText}
-                      keyboardType="decimal-pad"
-                      placeholder={rateMode === 'depreciation' ? '10.0' : '5.0'}
-                      placeholderTextColor={colorTheme.ink3}
-                      style={[styles.compactInput, { color: colorTheme.ink }]}
-                    />
-                    <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>% / yr</Text>
-                  </View>
-                </>
-              )}
-
-              {isInvest && (
-                <>
-                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Interest rate (optional)</Text>
-                  <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                    <TextInput value={rateText} onChangeText={setRateText} keyboardType="decimal-pad" placeholder="APR" placeholderTextColor={colorTheme.ink3} style={[styles.compactInput, { color: colorTheme.ink }]} />
-                    <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>%</Text>
-                  </View>
-                </>
-              )}
-            </>
-          )}
-
-          {/* Custom icon picker */}
-          <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>Custom Icon (Optional)</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 }}>
-            <Pressable
-              onPress={pickCustomIcon}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                backgroundColor: colorTheme.surface2,
-                borderWidth: 1.5,
-                borderColor: customIcon ? theme.accent : colorTheme.line,
-                borderRadius: radius.sm,
-                paddingVertical: 10,
-                paddingHorizontal: 16,
-              }}
-            >
-              {customIcon ? (
-                <Image source={{ uri: customIcon }} style={{ width: 20, height: 20, borderRadius: 4 }} />
-              ) : (
-                <Icon name="image" size={18} color={theme.accent} />
-              )}
-              <Text style={{ fontSize: 13, fontFamily: uiFont(700), color: theme.accent }}>
-                {customIcon ? 'Change icon' : 'Choose from gallery'}
-              </Text>
-            </Pressable>
-            {customIcon && (
-              <Pressable
-                onPress={() => setCustomIcon(null)}
-                style={{
-                  padding: 8,
-                  borderRadius: 8,
-                  backgroundColor: '#fff0ef',
-                }}
-              >
-                <Icon name="trash" size={16} color={colorTheme.red} />
-              </Pressable>
-            )}
-          </View>
-
-          <View style={{ marginTop: 22 }}>
-            <PrimaryButton onPress={save} disabled={!canSave} height={52}>
-              <Icon name="check" size={18} color="#fff" stroke={2.4} />
-              <BtnLabel>{isHoldingType ? 'Add holding' : 'Add account'}</BtnLabel>
-            </PrimaryButton>
-          </View>
-        </ScrollView>
-      </View>
-      </KeyboardAvoidingView>
-
-      <TickerSearchModal
-        visible={searchOpen}
-        title="Search investments"
-        placeholder="BTC, AAPL, 1155.KL, Gold…"
-        search={searchInvestments}
-        onPick={pickCoin}
-        onClose={() => setSearchOpen(false)}
-      />
-    </Modal>
-  );
-}
-
 /** The combined view of one symbol's lots: totals + each lot (tap to modify) + add another. */
 function HoldingGroupSheet({
   lots,
@@ -1642,7 +1137,7 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
           name: newName,
           cls: 'investments',
           icon: customIcon,
-          interestRate: parsedRate,
+          interestRate: null,
           sub,
           symbol: holdingCoin.id,
           ticker,
@@ -1668,7 +1163,7 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
         name: newName,
         cls: account.cls,
         icon: customIcon,
-        interestRate: parsedRate,
+        interestRate: null,
         sub,
         symbol,
         ticker,
@@ -1750,12 +1245,6 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
               <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
                 <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
                 <TextInput value={costText} onChangeText={setCostText} keyboardType="decimal-pad" placeholder={isZh ? '买入成本' : 'cost of investment'} placeholderTextColor={colorTheme.ink3} style={[styles.amountInput, { color: colorTheme.ink }]} />
-              </View>
-
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '年化收益率 / APR (选填)' : 'Interest rate (optional)'}</Text>
-              <View style={[styles.compactInputRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <TextInput value={rateText} onChangeText={setRateText} keyboardType="decimal-pad" placeholder="APR" placeholderTextColor={colorTheme.ink3} style={[styles.compactInput, { color: colorTheme.ink }]} />
-                <Text style={[styles.compactUnit, { color: colorTheme.ink2 }]}>%</Text>
               </View>
 
               <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '账户名称' : 'Name'}</Text>

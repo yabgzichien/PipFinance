@@ -40,6 +40,10 @@ export async function configureNotifications(): Promise<void> {
       shouldShowBanner: true,
       shouldShowList: true,
       shouldPlaySound: true,
+      // Stays false deliberately. `true` makes the OS *increment* the badge per delivered
+      // notification, which only ever goes up: pay the bill in the app and the icon still says
+      // 3 forever. Every badge this app shows is an absolute count computed from live state
+      // instead — see `badgeCountOn` and the per-entry `badge` below.
       shouldSetBadge: false,
     }),
   });
@@ -49,6 +53,10 @@ export async function configureNotifications(): Promise<void> {
       name: 'Reminders',
       importance: Notifications.AndroidImportance.DEFAULT,
       sound: 'default',
+      // Lets the launcher draw its dot for a reminder sitting in the tray. Android badging is
+      // launcher-dependent either way — Samsung and Nova honour counts, the Pixel launcher
+      // shows a dot and ignores the number — so iOS is where the count actually lands.
+      showBadge: true,
     });
   }
 }
@@ -96,6 +104,11 @@ export async function syncScheduledReminders(plan: ReminderPlan): Promise<void> 
         title: entry.title,
         body: entry.body,
         data: { [PIP_REMINDER]: kind },
+        // Omitted, not undefined: a payload carrying no badge key leaves the icon exactly as it
+        // is, which is what the log nudge wants. Spreading `{ badge: undefined }` would be the
+        // same at the JS level but is worth keeping explicit, since the distinction between
+        // "set it to nothing" and "do not touch it" is the whole reason log rungs stay bare.
+        ...(entry.badge === undefined ? {} : { badge: entry.badge }),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -104,6 +117,18 @@ export async function syncScheduledReminders(plan: ReminderPlan): Promise<void> 
       },
     });
   }
+}
+
+/**
+ * Push an absolute badge count to the app icon.
+ *
+ * Called on every reminder sync rather than only when something is added, so the number
+ * self-heals: settle the last debt and the next sync pushes 0, whatever the last delivered
+ * notification happened to leave behind. iOS offers no way to read the current badge back, so
+ * an absolute write from live state is the only version of this that stays correct.
+ */
+export async function setBadgeCount(count: number): Promise<void> {
+  await Notifications.setBadgeCountAsync(Math.max(0, count));
 }
 
 /** Every reminder currently armed. Diagnostics only; nothing in the app depends on it. */

@@ -9,9 +9,18 @@ function getMascotStreakSvg(streak: number = 0): string {
   const streakStr = String(streak);
   const pillW = streakStr.length >= 3 ? 40 : streakStr.length === 2 ? 34 : 28;
   const pillX = streakStr.length >= 3 ? 34 : streakStr.length === 2 ? 38 : 42;
-  const textX = streakStr.length >= 3 ? 59 : streakStr.length === 2 ? 59 : 58;
-  const flameX = pillX + 3;
   const flameY = 41;
+
+  // Center the flame + number as a single cluster inside the pill. Pinning
+  // the flame to a fixed offset (pillX + 3) left uneven padding — the
+  // cluster sat visibly left-of-center, worst for the common 1-digit case.
+  const FLAME_W = 12.5; // rendered width of the flame icon at scale(0.16)
+  const FLAME_GAP = 2; // gap between flame icon and streak number
+  const CHAR_W = 6.5; // approx glyph width at font-size 10.5 / font-weight 800
+  const textW = CHAR_W * streakStr.length;
+  const contentX = pillX + (pillW - (FLAME_W + FLAME_GAP + textW)) / 2;
+  const flameX = contentX;
+  const textX = contentX + FLAME_W + FLAME_GAP + textW / 2;
 
   return `
 <svg width="76" height="64" viewBox="0 0 76 64" fill="none" xmlns="http://www.w3.org/2000/svg">

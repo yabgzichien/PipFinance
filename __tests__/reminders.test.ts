@@ -1,4 +1,5 @@
 import {
+  badgeCountOn,
   cadenceDays,
   cadenceLabel,
   capDailyReminders,
@@ -7,6 +8,9 @@ import {
   isReminderCadence,
   localDayNumber,
   logReminderBody,
+  LOG_GIVE_UP_DAYS,
+  LOG_MAX_RUNGS,
+  LOG_WINBACK_DAYS,
   MIN_HISTORY_FOR_INFERRED_HOUR,
   owedReminderBody,
   OWED_REMINDER_MINUTE,
@@ -15,6 +19,7 @@ import {
   PLAN_HORIZON,
   REMINDER_HOUR,
   reminderClass,
+  type CommitmentReminderRow,
   type ReminderCadence,
   type ReminderPlanEntry,
 } from '../src/lib/reminders';
@@ -131,11 +136,11 @@ describe('planLogReminders', () => {
     expect(weekly[1].at).toEqual(at(24, REMINDER_HOUR));
   });
 
-  it('arms a full horizon, every entry in the future and on the hour', () => {
+  it('arms every entry in the future and on the hour', () => {
     const now = at(10, 12);
     for (const cadence of ['daily', 'weekly'] as ReminderCadence[]) {
       const plan = planLogReminders({ cadence, lastLoggedDay: day10 - 5 }, now);
-      expect(plan).toHaveLength(PLAN_HORIZON);
+      expect(plan.length).toBeGreaterThan(0);
       for (const entry of plan) {
         expect(entry.at.getTime()).toBeGreaterThan(now.getTime());
         expect(entry.at.getHours()).toBe(REMINDER_HOUR);
@@ -162,6 +167,57 @@ describe('planLogReminders', () => {
   it('every rung is tagged as the log kind', () => {
     const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 }, at(10, 12));
     expect(plan.every((e) => e.kind === 'log')).toBe(true);
+  });
+});
+
+describe('planLogReminders decay ladder', () => {
+  const day10 = localDayNumber(at(10, 12));
+
+  /** Whole days between consecutive rungs — the taper is entirely a statement about these. */
+  function gaps(plan: ReminderPlanEntry[]): number[] {
+    return plan.slice(1).map((e, i) => localDayNumber(e.at) - localDayNumber(plan[i].at));
+  }
+
+  it('holds the chosen cadence while the gap is still inside the first week', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 }, at(10, 12));
+    expect(gaps(plan).slice(0, 6)).toEqual([1, 1, 1, 1, 1, 1]);
+  });
+
+  it('tapers to every third day once the gap has opened past a week', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 - 10 }, at(10, 12));
+    expect(gaps(plan).slice(0, 4)).toEqual([3, 3, 3, 3]);
+  });
+
+  it('stretches to a fortnight once the gap passes three weeks', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 - 25 }, at(10, 12));
+    expect(gaps(plan)).toEqual([14, 14]);
+  });
+
+  it('stops nudging entirely once the silence passes the give-up mark', () => {
+    const lastLoggedDay = day10 - LOG_GIVE_UP_DAYS - 1;
+    expect(planLogReminders({ cadence: 'daily', lastLoggedDay }, at(10, 12))).toEqual([]);
+  });
+
+  it('never nudges more often than the cadence the user actually chose', () => {
+    const plan = planLogReminders({ cadence: 'weekly', lastLoggedDay: day10 - 10 }, at(10, 12));
+    expect(plan.length).toBeGreaterThan(1);
+    for (const gap of gaps(plan)) expect(gap).toBeGreaterThanOrEqual(7);
+  });
+
+  it('tapers a never-logged user off the same way, counting from their first launch', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: null }, at(10, 12));
+    expect(gaps(plan).slice(0, 6)).toEqual([1, 1, 1, 1, 1, 1]);
+    expect(gaps(plan).slice(6, 8)).toEqual([3, 3]);
+  });
+
+  it('keeps the never-logged invitation intact instead of running them up the ladder', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: null }, at(10, 12));
+    expect(plan.every((e) => e.body === logReminderBody(null))).toBe(true);
+  });
+
+  it('caps the ladder so it cannot eat the OS pending-notification budget', () => {
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 }, at(10, 12));
+    expect(plan.length).toBeLessThanOrEqual(LOG_MAX_RUNGS);
   });
 });
 
@@ -277,9 +333,76 @@ describe('logReminderBody', () => {
     expect(logReminderBody(11)).toContain('rehearsing this notification');
   });
 
-  it('rotates the done tier between the escalated line and a self-aware fallback', () => {
-    expect(logReminderBody(22)).toContain('acceptance now');
-    expect(logReminderBody(23)).toContain('rehearsing this notification');
+  it('holds the heavy tier right up to the win-back boundary', () => {
+    expect(logReminderBody(LOG_WINBACK_DAYS)).toContain('rehearsing this notification');
+  });
+
+  it('drops the guilt for a properly lapsed user and offers a way back in', () => {
+    const body = logReminderBody(LOG_WINBACK_DAYS + 1);
+    expect(body).toContain('still here');
+    expect(body).not.toContain('ghosting');
+    expect(body).not.toContain('missing persons case');
+  });
+
+  it('never jokes at the expense of a lapsed user, however long they have been gone', () => {
+    const jabs = [/ghosting/i, /missing persons/i, /stopped expecting/i, /bit much/i];
+    for (let d = LOG_WINBACK_DAYS + 1; d <= 90; d++) {
+      for (const re of jabs) expect(logReminderBody(d)).not.toMatch(re);
+    }
+  });
+});
+
+describe('badgeCountOn', () => {
+  const today = localDayNumber(at(10, 12));
+  const base = { owedEnabled: true, commitmentEnabled: true, debts: [], occurrences: [], today };
+
+  function occ(over: Partial<CommitmentReminderRow> = {}): CommitmentReminderRow {
+    return { dueDate: '2026-06-05', amount: 100, label: 'Rent', status: 'scheduled', ...over };
+  }
+
+  it('is zero when nothing is waiting on the user', () => {
+    expect(badgeCountOn(today, base)).toBe(0);
+  });
+
+  it('counts a debt only once it has aged into something worth chasing', () => {
+    const input = { ...base, debts: [debt({ oldestDays: AGING_DAYS - 1 })] };
+    expect(badgeCountOn(today, input)).toBe(0);
+    expect(badgeCountOn(today + 1, input)).toBe(1);
+  });
+
+  it('counts a bill only once it is actually past due, not merely upcoming', () => {
+    const input = { ...base, occurrences: [occ({ dueDate: '2026-06-12' })] };
+    expect(badgeCountOn(today, input)).toBe(0);
+    expect(badgeCountOn(today + 3, input)).toBe(1);
+  });
+
+  it('ignores a bill the user has already dealt with', () => {
+    const input = { ...base, occurrences: [occ({ dueDate: '2026-06-01', status: 'paid' as const })] };
+    expect(badgeCountOn(today, input)).toBe(0);
+  });
+
+  it('leaves out a source the user has switched off', () => {
+    const input = { ...base, owedEnabled: false, debts: [debt({ oldestDays: 30 })] };
+    expect(badgeCountOn(today, input)).toBe(0);
+  });
+
+  it('sums aged debts and overdue bills into the one number on the icon', () => {
+    const input = {
+      ...base,
+      debts: [debt({ personId: 'p1', oldestDays: 30 }), debt({ personId: 'p2', oldestDays: 20 })],
+      occurrences: [occ({ dueDate: '2026-06-01' })],
+    };
+    expect(badgeCountOn(today, input)).toBe(3);
+  });
+});
+
+describe('the log nudge never touches the badge', () => {
+  // A badge promises "N things are waiting, and clearing them clears it". The log reminder has
+  // no countable item behind it, so it must leave whatever the icon is showing alone.
+  it('leaves every log rung badgeless', () => {
+    const day10 = localDayNumber(at(10, 12));
+    const plan = planLogReminders({ cadence: 'daily', lastLoggedDay: day10 }, at(10, 12));
+    expect(plan.every((e) => e.badge === undefined)).toBe(true);
   });
 });
 

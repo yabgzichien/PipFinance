@@ -32,3 +32,7 @@ export async function syncScheduledReminders(_plan: ReminderPlan): Promise<void>
 export async function listScheduledReminders(): Promise<{ kind: string; at: string }[]> {
   return [];
 }
+
+export async function setBadgeCount(_count: number): Promise<void> {
+  /* no app icon to badge on web */
+}

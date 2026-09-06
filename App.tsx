@@ -38,6 +38,7 @@ import { ExportScreen } from './src/screens/ExportScreen';
 import { CommitmentsScreen } from './src/screens/CommitmentsScreen';
 import { TaxScreen } from './src/screens/TaxScreen';
 import { CurrencySettingsScreen } from './src/screens/CurrencySettingsScreen';
+import { BackupScreen } from './src/screens/BackupScreen';
 import { GlossaryModal } from './src/components/InfoButton';
 import { AppAlertModal } from './src/components/AppAlertModal';
 import { TourSpotlight, type TourStepInfo } from './src/components/TourSpotlight';
@@ -50,8 +51,8 @@ import { AppDataProvider, useAppData } from './src/state/store';
 import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
-import { syncStreakWidget } from './src/widget/syncStreakWidget';
-import { syncQuickRecordWidget } from './src/widget/syncQuickRecordWidget';
+import { useCloudBackupSync } from './src/state/useCloudBackupSync';
+import { syncAllWidgets } from './src/widget/syncWidgets';
 import type { TxnType } from './src/lib/types';
 import { backTargetFor, type Screen } from './src/lib/screenNav';
 import { EXPLORE_TASKS, type ExploreTaskId } from './src/lib/tasks';
@@ -220,6 +221,8 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   // Global rather than per-screen: the reminder ladder has to be re-armed whenever the app is
   // opened or a transaction is saved, and neither is tied to any one screen. No-ops on web.
   useReminderSync();
+  // Silent Google Drive auto-backup (Android only), re-checked whenever the app foregrounds.
+  useCloudBackupSync();
   const [screen, setScreen] = useState<Screen>('home');
   // Owed is reachable from both Home and Activity, so back has to return where it came from.
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
@@ -580,8 +583,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   useEffect(() => {
     const appStateSub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        syncStreakWidget().catch(() => {});
-        syncQuickRecordWidget().catch(() => {});
+        syncAllWidgets().catch(() => {});
       }
     });
     return () => appStateSub.remove();
@@ -703,11 +705,13 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setCurrencyOrigin('settings');
             setScreen('currencySettings');
           }}
+          onOpenBackup={() => setScreen('backup')}
           taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />
       )}
       {screen === 'advancedImport' && <AdvancedImportScreen onClose={goBack} />}
+      {screen === 'backup' && <BackupScreen onBack={goBack} />}
       {screen === 'export' && (
         <ExportScreen
           initialMonth={exportMonth}

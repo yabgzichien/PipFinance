@@ -1,0 +1,379 @@
+{
+  "vision": {
+    "1000105419.jpg": {
+      "latency_ms": 5750.2,
+      "prompt_tokens": 1479,
+      "completion_tokens": 171,
+      "total_tokens": 1650,
+      "payload_bytes": 2185829,
+      "parsed": {
+        "merchant": "NS PLT",
+        "currency": "MYR",
+        "items": [
+          {
+            "label": "A15",
+            "amount": 12.0,
+            "quantity": null
+          },
+          {
+            "label": "A18",
+            "amount": 14.0,
+            "quantity": null
+          }
+        ],
+        "subtotal": 26.0,
+        "serviceCharge": null,
+        "tax": 0.0,
+        "total": 26.0,
+        "discount": {
+          "amount": 0.0,
+          "timing": "after"
+        }
+      }
+    },
+    "1000105421.jpg": {
+      "latency_ms": 3035.1,
+      "prompt_tokens": 1494,
+      "completion_tokens": 211,
+      "total_tokens": 1705,
+      "payload_bytes": 1755597,
+      "parsed": {
+        "merchant": "THE ML KITCHEN (SEPANG) SDN. BHD",
+        "currency": "MYR",
+        "items": [
+          {
+            "label": "Mala Soup",
+            "amount": 32.45,
+            "quantity": 0.59
+          },
+          {
+            "label": "Rice",
+            "amount": 2.0,
+            "quantity": 1
+          },
+          {
+            "label": "Rice",
+            "amount": 2.0,
+            "quantity": 1
+          }
+        ],
+        "subtotal": 36.4,
+        "serviceCharge": null,
+        "tax": null,
+        "total": 34.58,
+        "discount": {
+          "amount": 1.82,
+          "timing": "after"
+        }
+      }
+    },
+    "1000105423.jpg": {
+      "latency_ms": 3374.5,
+      "prompt_tokens": 1477,
+      "completion_tokens": 818,
+      "total_tokens": 2295,
+      "payload_bytes": 493237,
+      "parsed": {
+        "merchant": "ECONSAVE CASH & CARRY (SPG) SDN BHD",
+        "currency": "MYR",
+        "items": [
+          {
+            "label": "KOBIS BULAT LOCAL",
+            "amount": 0.91,
+            "quantity": 1
+          },
+          {
+            "label": "DELIFISH SMALL FRI",
+            "amount": 3.2,
+            "quantity": 1
+          },
+          {
+            "label": "C.KIMCHAM (+-100G)",
+            "amount": 0.99,
+            "quantity": 1
+          },
+          {
+            "label": "C.KIMCHAM (+-100G)",
+            "amount": 0.99,
+            "quantity": 1
+          },
+          {
+            "label": "C.KIMCHAM (+-100G)",
+            "amount": 0.99,
+            "quantity": 1
+          },
+          {
+            "label": "SHRIMP PASTE",
+            "amount": 9.9,
+            "quantity": 1
+          },
+          {
+            "label": "ANCHOR CHEDDAR CHE",
+            "amount": 9.45,
+            "quantity": 1
+          },
+          {
+            "label": "KNIFE CLAS LIGHT S",
+            "amount": 5.8,
+            "quantity": 1
+          },
+          {
+            "label": "LACT B/YOG SBRRY",
+            "amount": 4.79,
+            "quantity": 1
+          },
+          {
+            "label": "NR 3IN1 ORI 14X28G",
+            "amount": 8.9,
+            "quantity": 1
+          },
+          {
+            "label": "(PS) MI SEDAAP GOR",
+            "amount": 4.45,
+            "quantity": 1
+          },
+          {
+            "label": "MS INS SOTO 5X75G",
+            "amount": 5.2,
+            "quantity": 1
+          },
+          {
+            "label": "MILO 400G",
+            "amount": 9.8,
+            "quantity": 1
+          },
+          {
+            "label": "GARDENIA ORI CLAS",
+            "amount": 2.85,
+            "quantity": 1
+          },
+          {
+            "label": "100PLUS 1.5L",
+            "amount": 2.89,
+            "quantity": 1
+          },
+          {
+            "label": "T/MORAH POTONG",
+            "amount": 4.42,
+            "quantity": 1
+          },
+          {
+            "label": "PLASTIC BAG",
+            "amount": 0.2,
+            "quantity": 1
+          },
+          {
+            "label": "PLASTIC BAG",
+            "amount": 0.2,
+            "quantity": 1
+          },
+          {
+            "label": "PLASTIC BAG",
+            "amount": 0.2,
+            "quantity": 1
+          }
+        ],
+        "subtotal": 76.24,
+        "serviceCharge": null,
+        "tax": null,
+        "total": 76.25,
+        "discount": null
+      }
+    },
+    "tngscreenshot.png": {
+      "latency_ms": 2674.2,
+      "prompt_tokens": 1224,
+      "completion_tokens": 395,
+      "total_tokens": 1619,
+      "payload_bytes": 691810,
+      "parsed": {
+        "transactions": [
+          {
+            "merchant": "GOLDEN BITE FOODS",
+            "amount": 5.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "NAN SAN HWAN",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "BBT KOPITIAM",
+            "amount": 1.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "MUHAMAD FADERILAH SUHAIMI BIN AZAM",
+            "amount": 7.5,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "CHATHERINE WIJAYA",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "in",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "FONG YAN YAN",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "in",
+            "date": "2026-08-20"
+          }
+        ]
+      }
+    }
+  },
+  "ocr_plus_cheap": {
+    "1000105419.jpg": {
+      "latency_ms": 730.0,
+      "prompt_tokens": 586,
+      "completion_tokens": 136,
+      "total_tokens": 722,
+      "payload_bytes": 2018,
+      "parsed": {
+        "merchant": "IADAR aSJRIA",
+        "currency": "MYR",
+        "items": [],
+        "subtotal": null,
+        "serviceCharge": null,
+        "tax": null,
+        "total": 26.0,
+        "discount": null
+      }
+    },
+    "1000105421.jpg": {
+      "latency_ms": 792.8,
+      "prompt_tokens": 699,
+      "completion_tokens": 268,
+      "total_tokens": 967,
+      "payload_bytes": 2441,
+      "parsed": {
+        "merchant": "THE ML KITCHEN (SEPANG) SDN. BHD",
+        "currency": "MYR",
+        "items": [
+          {
+            "label": "麻辣烫 Mala Soup",
+            "amount": 2.59,
+            "quantity": 1
+          },
+          {
+            "label": "白饭 Rice",
+            "amount": 32.4,
+            "quantity": 1
+          }
+        ],
+        "subtotal": 36,
+        "serviceCharge": null,
+        "tax": null,
+        "total": 34.5,
+        "discount": {
+          "amount": 1.82,
+          "timing": "before"
+        }
+      }
+    },
+    "1000105423.jpg": {
+      "latency_ms": 586.2,
+      "prompt_tokens": 1085,
+      "completion_tokens": 55,
+      "total_tokens": 1140,
+      "payload_bytes": 3166,
+      "parsed": {
+        "merchant": null,
+        "currency": "MYR",
+        "items": [],
+        "subtotal": null,
+        "serviceCharge": null,
+        "tax": null,
+        "total": null,
+        "discount": null
+      }
+    },
+    "tngscreenshot.png": {
+      "latency_ms": 1024.5,
+      "prompt_tokens": 683,
+      "completion_tokens": 519,
+      "total_tokens": 1202,
+      "payload_bytes": 2241,
+      "parsed": {
+        "transactions": [
+          {
+            "merchant": "GOLDEN BITE FOODS",
+            "amount": 5.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "Transfer to NAN SAN HWAN",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "BBT KOPITIAM",
+            "amount": 1.0,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "MUHAMAD FADERILAH",
+            "amount": 7.5,
+            "currency": "MYR",
+            "direction": "out",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "CHATHERINE",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "in",
+            "date": "2026-08-20"
+          },
+          {
+            "merchant": "FONG YAN YAN",
+            "amount": 8.0,
+            "currency": "MYR",
+            "direction": "in",
+            "date": "2026-08-20"
+          }
+        ]
+      }
+    }
+  },
+  "mlkit_raw": {
+    "1000105419.jpg": {
+      "latency_ms": 2303.875433,
+      "text_chars": 162,
+      "spatial_text": "IADAR aSJRIA\n1正ALA0R\nTABLE    13\nDATE    23/08/20.6\n13:17 0)\nAMOUNT\n120D    12 0C\n14 00\n( 00\n0.00\nTOTAL    26.00\nC:ASH    26.00\nCHANGE    0.00\nC30AマTRE TIFRNABLE,"
+    },
+    "1000105421.jpg": {
+      "latency_ms": 1577.745135,
+      "text_chars": 388,
+      "spatial_text": "票据号:5R\nTHE ML KITCHEN (\nSEPANG) SDN. BHD\n20240103498    (1\n559348-H)\n2026-08-23 19:15:59\n操作员:吴俎\n订单号: 178748371930616\n名称    重/数量(kg)单价 小计\n麻辣烫 Mala Soup\n|白饭 Rice    0.59 55 32.4    1    的22-\n白饭Rice 1\n总数    2.59\n原价    36.\n优惠    -1.82\n应收    34.5E\n女付i记长34.58\nTHE ML KITCHEN ( SEPANG) SDN BH\n202401013498(1559348-H)\nJAL AN SUNSURIA, BANDAR SUNSSURI    R-G-38, BELL AVENUE.\n900. SEPANG. SELANGOR"
+    },
+    "1000105423.jpg": {
+      "latency_ms": 5205.757995,
+      "text_chars": 1250,
+      "spatial_text": "Aa以A.11AAK MIu\n「EC    APNAII N1AWAR心AN KIP NIRA    SPG\nAOAWARISAN SLPANQ,43900 PARO\n3t00298 19 37\nCashe d0/082 IHAMARAI\nRecei    Descnpton    Oly Ant(RM)\nHEM0B050000J00\n1a0 to、8SRIIATIOCA\nI1EM#95556426200373\nDEIFISHH SMALL FRI\nITEM #644546188333\nCKMCHAM (+100G)\nTEM #6944546161I331\nKpens    C KIMCHAM (+100G)    hcomi\nEM#6944546168333\n0.99\nCKIMCHAM (+-100G)\nITEM # 9555501478342\n9.90\nSHRIMP PASTE\nITEM # 9415007016908    1    945\nANCHOR CHEDDAR CHE\nITEM # 95560467 00127    1    5.80\nKNIFE CLAS LIGHTS\n73    ITEM #9555995800209\n4.79\nLACT BIYOG SBRRY\nITEM #9556001307729\n890\nNR 3IN1 ORI 14X28G\nVour    ITEM # 8998868810889    below\n4.45 4\n(PS) MI SEDAAP GOR\nITEM # 8998866606196\n5.20 4\nMS INS SOTO 5X75G\nITEM #9556001004559    1    9.80\nMILO 400G\nITEM # 9556231111110\nGARDENIA ORI CLAS    2.85\nITEM # 955657031 2131\n2 89\n100PLUS1.5L    Enter\nITEM # 2045520000300    1    442\nT/MORAH POTONG\nITEM # 9555348700866    0.20\nPLASTIC BAG\nITEM #9555348700966    0 20\nPLASTIC BAG\nher E    ITEM # 9555348700866    1    0 20    Trave\nPLASTIC BAG\nSUBTOTAL    76.24\nROUNDING ADJ\nTOTAL    /6 25\nPayinant\nSUBTOTAL    76 24\nROUNDING ADJ.    )01\nTOTAL:    76.25\nonalll    Payment :\nDUITNOW QR    76.25\nMID: 11340\nTxn Ref 11340-03 1788176301237-\n073820-bt\nTotal    7625"
+    },
+    "tngscreenshot.png": {
+      "latency_ms": 4416.844214,
+      "text_chars": 1382,
+      "spatial_text": "12:16 回@o回回    86%\nUpdates 50 new)\nHistory\n23 Jul 26 - 21 Aug 26 v    Send to email\n20 Aug, 20:25\nand more    GOLDEN BITE FOODS    -RM5.00\noins: We ve Received Your Applicat    DuitNow QR    0 points\nkofyour Google Account data zich    Base on August\nere among the first to register yo\n20 Aug, 20:23\nTransfer to NAN SAN HWAN    -RM8.00\noration filed with Ive performance    Transfer to Wallet\norkshop Upcoming Opening Cer    Kcking off the MU\nber t 2026 (Us. Eastern Time) /St    20 Aug, 20:17\nBBT KOPITIAM    -RM1.00\nated, YANG ZI CHIENYANG\nDuitNow QR TNGD    +1 points\nhon login for #slaynercoy\nd from in -Flght Theft ALWAYS bey    tatal imes. DO N\n20 Aug, 20:03\nMUHAMAD FADERILAH    -RM7.50\nSUHAIMI BIN AZAM    +7 points\nar Yang Z This is a final reminder    Payment    hat inforrmation by\nYou have recelved RM 2280.00 in    ntfor more info or\nemidnight to keep going!\n20 Aug, 13:07\nMotorcycle Insurance/Takaful sic    Vou are a Mayban\nReceive from CHATHERINE    +RM8.00\nckathon Discord and Join a Tear    cessfuly register\nWIJAYA\nDuitNow Received\ngame or Puzzle before midnight\ned ls your Savings Account Staten    20 Aug, 12:40    flename represer\nReceive from FONG YAN YAN    +RM8.00\nn KK (keevankO 4@gmail.com ) h    Block sender Goo:\ntion\"- Keevan KK shared a spreac    Home    Transfer    Activity    Profile    uathlon DG Task\nnCommitee Orientation Commit    tand set up y"
+    }
+  }
+}
