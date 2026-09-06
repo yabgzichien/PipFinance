@@ -4,10 +4,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { BtnLabel, Card, CatBadge, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
-import { NoFallbackCategoryError } from '../db/categoriesRepo';
+import { AddCategorySheet } from '../components/AddCategorySheet';
+import { LastVisibleCategoryError, NoFallbackCategoryError } from '../db/categoriesRepo';
 import { catColorsForHue } from '../lib/catColors';
+import { resolveCategoryPresentation } from '../lib/categoryPresentation';
 import { confirmAction, notify } from '../lib/platformAlert';
-import type { TxnType } from '../lib/types';
+import type { Category, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -17,6 +19,14 @@ import { radius, shadowToggle, uiFont } from '../theme';
 export const EXPENSE_ICONS: IconName[] = ['home', 'cart', 'burger', 'utensils', 'car', 'phone', 'cash', 'signal', 'heart', 'book', 'bag', 'play', 'shield', 'receipt', 'dots'];
 export const INCOME_ICONS: IconName[] = ['wallet', 'cash', 'store', 'car', 'gift', 'trending', 'percent', 'sparkles', 'return', 'dots'];
 const HUE_CHOICES = [12, 42, 70, 120, 162, 200, 248, 286, 330];
+
+/** Keep a hidden category's row intact while removing it from the visible management list. */
+export function partitionCategories<T extends Pick<Category, 'isHidden'>>(categories: T[]): { visible: T[]; hidden: T[] } {
+  return {
+    visible: categories.filter((category) => !category.isHidden),
+    hidden: categories.filter((category) => category.isHidden),
+  };
+}
 
 /** Whether an icon value is a custom photo URI rather than a named icon. */
 export function isCustomIcon(icon: string): boolean {
@@ -28,21 +38,29 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, isZh } = useLanguage();
-  const { categories, addCategory, deleteCategory, updateCategoryIcon } = useAppData();
+  const {
+    categories,
+    commitments,
+    deleteCategory,
+    setCategoryHidden,
+    updateCategoryHue,
+    updateCategoryIcon,
+    updateCategoryLabel,
+  } = useAppData();
 
   const [kind, setKind] = useState<TxnType>('expense');
-  const [name, setName] = useState('');
-  const [icon, setIcon] = useState<string>('cart');
-  const [hue, setHue] = useState(162);
-  const [busy, setBusy] = useState(false);
+  const [addSheetVisible, setAddSheetVisible] = useState(false);
 
-  // Which existing category's picture is being edited, and the icon/photo chosen so far.
+  // Which existing category is being edited, and its presentation overrides chosen so far.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editIcon, setEditIcon] = useState<string>('cart');
+  const [editLabel, setEditLabel] = useState('');
+  const [editHue, setEditHue] = useState(162);
   const [editBusy, setEditBusy] = useState(false);
 
   const iconChoices = kind === 'income' ? INCOME_ICONS : EXPENSE_ICONS;
   const list = useMemo(() => categories.filter((c) => c.kind === kind), [categories, kind]);
+  const { visible: visibleCategories, hidden: hiddenCategories } = useMemo(() => partitionCategories(list), [list]);
 
   const pickCustomIcon = async (setter: (uri: string) => void) => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -59,44 +77,76 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // When switching kind, default the icon to one valid for that kind.
+  // Close an open editor when switching lists so we never save changes onto a row the user cannot see.
   useEffect(() => {
-    setIcon(kind === 'income' ? 'wallet' : 'cart');
     setEditingId(null);
   }, [kind]);
 
-  const canAdd = name.trim().length > 0 && !busy;
+  const displayCategory = (category: Category): Category => ({
+    ...category,
+    ...resolveCategoryPresentation(category, isZh ? 'zh' : 'en'),
+  });
 
-  const submit = async () => {
-    if (!canAdd) return;
-    setBusy(true);
-    try {
-      await addCategory(name.trim(), icon, hue, kind);
-      setName('');
-      setHue(162);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleEdit = (id: string, currentIcon: string) => {
-    if (editingId === id) {
+  const toggleEdit = (category: Category) => {
+    if (editingId === category.id) {
       setEditingId(null);
       return;
     }
-    setEditingId(id);
-    setEditIcon(currentIcon);
+    const presentation = resolveCategoryPresentation(category, isZh ? 'zh' : 'en');
+    setEditingId(category.id);
+    setEditIcon(presentation.icon);
+    setEditLabel(category.labelOverride ?? '');
+    setEditHue(presentation.hue);
   };
 
-  const saveEditedIcon = async () => {
+  const saveEditedCategory = async () => {
     if (!editingId || editBusy) return;
+    const category = categories.find((entry) => entry.id === editingId);
+    if (!category) return;
+    const presentation = resolveCategoryPresentation(category, isZh ? 'zh' : 'en');
     setEditBusy(true);
     try {
-      await updateCategoryIcon(editingId, editIcon);
+      await Promise.all([
+        editIcon !== presentation.icon ? updateCategoryIcon(editingId, editIcon) : Promise.resolve(),
+        editHue !== presentation.hue ? updateCategoryHue(editingId, editHue) : Promise.resolve(),
+        editLabel.trim() !== (category.labelOverride ?? '') ? updateCategoryLabel(editingId, editLabel) : Promise.resolve(),
+      ]);
       setEditingId(null);
     } finally {
       setEditBusy(false);
     }
+  };
+
+  const hideCategory = async (category: Category) => {
+    const label = tCat(category);
+    const usedBy = commitments.filter((commitment) => !commitment.archived && commitment.categoryId === category.id).length;
+    const proceed = async () => {
+      try {
+        await setCategoryHidden(category.id, true);
+      } catch (error) {
+        if (error instanceof LastVisibleCategoryError) {
+          notify(
+            t('hideLastVisibleTitle'),
+            t('hideLastVisibleBody')
+              .replace('{label}', label)
+              .replace(/\{kind\}/g, error.kind === 'income' ? (isZh ? '收入' : 'income') : (isZh ? '支出' : 'expense'))
+          );
+          return;
+        }
+        throw error;
+      }
+    };
+
+    if (usedBy > 0) {
+      confirmAction(
+        t('hideUsedByCommitmentTitle'),
+        t('hideUsedByCommitmentBody').replace('{count}', String(usedBy)).replace('{label}', label),
+        t('hideFromNewExpenses'),
+        proceed
+      );
+      return;
+    }
+    await proceed();
   };
 
   const confirmDelete = (id: string, label: string) => {
@@ -142,35 +192,74 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
           })}
         </View>
 
-        {/* existing */}
+        {/* visible categories */}
         <Eyebrow style={{ marginBottom: 10 }}>
           {isZh ? `您的${kind === 'expense' ? '支出' : '收入'}分类` : `Your ${kind} categories`}
         </Eyebrow>
         <Card style={{ overflow: 'hidden' }}>
-          {list.map((c, i) => (
+          {visibleCategories.map((c, i) => (
             <View key={c.id}>
               <View style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
-                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Change ${tCat(c)}'s picture`}>
-                  <CatBadge category={c} size={38} />
+                <Pressable onPress={() => toggleEdit(c)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`${t('editCategory')}: ${tCat(c)}`}>
+                  <CatBadge category={displayCategory(c)} size={38} />
                 </Pressable>
                 <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                   {tCat(c)}
                 </Text>
-                <Pressable onPress={() => toggleEdit(c.id, c.icon)} hitSlop={8} style={styles.editBtn}>
+                <Pressable onPress={() => toggleEdit(c)} hitSlop={8} style={styles.editBtn} accessibilityRole="button" accessibilityLabel={`${t('editCategory')}: ${tCat(c)}`}>
                   <Icon name="pencil" size={16} color={colorTheme.ink2} />
                 </Pressable>
-                <Pressable onPress={() => confirmDelete(c.id, tCat(c))} hitSlop={8} style={styles.delBtn}>
+                <Pressable onPress={() => { void hideCategory(c); }} hitSlop={8} style={styles.hideBtn} accessibilityRole="button" accessibilityLabel={`${t('hideFromNewExpenses')}: ${tCat(c)}`}>
+                  <Icon name="chevronDown" size={17} color={colorTheme.ink2} />
+                </Pressable>
+                <Pressable onPress={() => confirmDelete(c.id, tCat(c))} hitSlop={8} style={styles.delBtn} accessibilityRole="button" accessibilityLabel={`${isZh ? '删除分类' : 'Delete category'}: ${tCat(c)}`}>
                   <Icon name="trash" size={17} color="#b3261e" />
                 </Pressable>
               </View>
 
               {editingId === c.id && (
                 <View style={[styles.editPanel, { backgroundColor: colorTheme.surface2, borderTopColor: colorTheme.line2 }]}>
+                  <View style={{ gap: 5 }}>
+                    <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{t('renameCategory')}</Text>
+                    <TextInput
+                      value={editLabel}
+                      onChangeText={setEditLabel}
+                      placeholder={tCat(c)}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.input, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+                      maxLength={22}
+                      accessibilityLabel={t('renameCategory')}
+                    />
+                    <Text style={[styles.helperText, { color: colorTheme.ink2 }]}>{t('renameCategoryHint')}</Text>
+                  </View>
+
+                  <View style={{ gap: 9 }}>
+                    <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{t('categoryColor')}</Text>
+                    <View style={styles.choiceWrap}>
+                      {HUE_CHOICES.map((hue) => {
+                        const selected = hue === editHue;
+                        return (
+                          <Pressable
+                            key={hue}
+                            onPress={() => setEditHue(hue)}
+                            style={[styles.hueChoice, { backgroundColor: catColorsForHue(hue).solid }, selected && [styles.hueChoiceOn, { borderColor: colorTheme.ink }]]}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected }}
+                            accessibilityLabel={`${t('categoryColor')} ${hue}`}
+                          >
+                            {selected && <Icon name="check" size={14} color="#fff" stroke={2.6} />}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{t('categoryIcon')}</Text>
                   <View style={styles.choiceWrap}>
                     {iconChoices.map((ic) => {
                       const on = ic === editIcon;
                       return (
-                        <Pressable key={ic} onPress={() => setEditIcon(ic)} style={[styles.iconChoice, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && { borderColor: theme.accent, backgroundColor: theme.accentTint }]}>
+                        <Pressable key={ic} onPress={() => setEditIcon(ic)} style={[styles.iconChoice, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && { borderColor: theme.accent, backgroundColor: theme.accentTint }]} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={`${t('categoryIcon')}: ${ic}`}>
                           <Icon name={ic} size={20} color={on ? theme.accent : colorTheme.ink2} stroke={1.9} />
                         </Pressable>
                       );
@@ -183,6 +272,8 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                         isCustomIcon(editIcon) && { borderColor: theme.accent, backgroundColor: theme.accentTint },
                         { minWidth: 68, flexDirection: 'row', gap: 4, paddingHorizontal: 6 },
                       ]}
+                      accessibilityRole="button"
+                      accessibilityLabel={isZh ? '从相册选择图标' : 'Choose an icon from your gallery'}
                     >
                       {isCustomIcon(editIcon) ? (
                         <Image source={{ uri: editIcon }} style={{ width: 22, height: 22, borderRadius: 4 }} resizeMode="cover" />
@@ -196,7 +287,7 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
                     <Pressable onPress={() => setEditingId(null)} style={styles.editActionBtn} disabled={editBusy}>
                       <Text style={[styles.editActionText, { color: colorTheme.ink2 }]}>{t('cancel')}</Text>
                     </Pressable>
-                    <Pressable onPress={saveEditedIcon} style={styles.editActionBtn} disabled={editBusy}>
+                    <Pressable onPress={() => { void saveEditedCategory(); }} style={styles.editActionBtn} disabled={editBusy} accessibilityRole="button" accessibilityLabel={t('save')}>
                       <Text style={[styles.editActionText, { color: theme.accent }]}>{editBusy ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Text>
                     </Pressable>
                   </View>
@@ -206,74 +297,42 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
           ))}
         </Card>
 
-        {/* add new */}
-        <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>
-          {isZh ? `添加${kind === 'expense' ? '支出' : '收入'}分类` : `Add a ${kind} category`}
-        </Eyebrow>
-        <Card style={{ padding: 16, gap: 16 }}>
-          <View style={styles.previewRow}>
-            <CatBadge category={{ id: 'new', label: name, icon, hue, kind, isDefault: false, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null }} size={44} />
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder={isZh ? (kind === 'income' ? '例如：兼职副业' : '分类名称') : (kind === 'income' ? 'e.g. Freelance' : 'Category name')}
-              placeholderTextColor={colorTheme.ink3}
-              style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
-              maxLength={22}
-            />
-          </View>
-
-          <View style={{ gap: 9 }}>
-            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{isZh ? '图标' : 'Icon'}</Text>
-            <View style={styles.choiceWrap}>
-              {iconChoices.map((ic) => {
-                const on = ic === icon;
-                return (
-                  <Pressable key={ic} onPress={() => setIcon(ic)} style={[styles.iconChoice, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }, on && { borderColor: theme.accent, backgroundColor: theme.accentTint }]}>
-                    <Icon name={ic} size={20} color={on ? theme.accent : colorTheme.ink2} stroke={1.9} />
+        {hiddenCategories.length > 0 && (
+          <View style={{ marginTop: 26 }}>
+            <Eyebrow style={{ marginBottom: 5 }}>{t('hiddenSectionTitle')}</Eyebrow>
+            <Text style={[styles.helperText, { color: colorTheme.ink2, marginBottom: 10 }]}>{t('hiddenKeepsHistoryNote')}</Text>
+            <Card style={{ overflow: 'hidden' }}>
+              {hiddenCategories.map((c, i) => (
+                <View key={c.id} style={[styles.row, i > 0 && [styles.divider, { borderTopColor: colorTheme.line2 }]]}>
+                  <CatBadge category={displayCategory(c)} size={38} />
+                  <View style={styles.hiddenCopy}>
+                    <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(c)}</Text>
+                    <Text style={[styles.hiddenBadge, { color: colorTheme.ink2 }]}>{t('hiddenBadge')}</Text>
+                  </View>
+                  <Pressable onPress={() => { void setCategoryHidden(c.id, false); }} style={[styles.showAgainBtn, { borderColor: theme.accent, backgroundColor: theme.accentTint }]} accessibilityRole="button" accessibilityLabel={`${t('showAgain')}: ${tCat(c)}`}>
+                    <Text style={[styles.showAgainText, { color: theme.accent }]}>{t('showAgain')}</Text>
                   </Pressable>
-                );
-              })}
-              <Pressable
-                onPress={() => pickCustomIcon(setIcon)}
-                style={[
-                  styles.iconChoice,
-                  { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line },
-                  isCustomIcon(icon) && { borderColor: theme.accent, backgroundColor: theme.accentTint },
-                  { minWidth: 68, flexDirection: 'row', gap: 4, paddingHorizontal: 6 }
-                ]}
-              >
-                {isCustomIcon(icon) ? (
-                  <Image source={{ uri: icon }} style={{ width: 22, height: 22, borderRadius: 4 }} resizeMode="cover" />
-                ) : (
-                  <Icon name="image" size={17} color={theme.accent} stroke={2.0} />
-                )}
-                <Text style={{ fontSize: 10, fontFamily: uiFont(700), color: theme.accent }}>{isZh ? '相册' : 'Gallery'}</Text>
-              </Pressable>
-            </View>
+                </View>
+              ))}
+            </Card>
           </View>
+        )}
 
-          <View style={{ gap: 9 }}>
-            <Text style={[styles.pickLabel, { color: colorTheme.ink2 }]}>{isZh ? '颜色' : 'Color'}</Text>
-            <View style={styles.choiceWrap}>
-              {HUE_CHOICES.map((h) => {
-                const on = h === hue;
-                return (
-                  <Pressable key={h} onPress={() => setHue(h)} style={[styles.hueChoice, { backgroundColor: catColorsForHue(h).solid }, on && [styles.hueChoiceOn, { borderColor: colorTheme.ink }]]}>
-                    {on && <Icon name="check" size={14} color="#fff" stroke={2.6} />}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-
-          <PrimaryButton onPress={submit} disabled={!canAdd} height={50}>
+        <View style={{ marginTop: 26 }}>
+          <PrimaryButton onPress={() => setAddSheetVisible(true)} height={50}>
             <Icon name="plus" size={18} color="#fff" stroke={2.2} />
-            <BtnLabel>{isZh ? `添加${kind === 'expense' ? '支出' : '收入'}分类` : `Add ${kind} category`}</BtnLabel>
+            <BtnLabel>{t('addCategory')}</BtnLabel>
           </PrimaryButton>
-        </Card>
+        </View>
       </ScrollView>
       </KeyboardAvoidingView>
+      <AddCategorySheet
+        visible={addSheetVisible}
+        kind={kind}
+        onClose={() => setAddSheetVisible(false)}
+        onCreated={() => setAddSheetVisible(false)}
+        onActivated={() => setAddSheetVisible(false)}
+      />
     </View>
   );
 }
@@ -293,15 +352,20 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
   divider: { borderTopWidth: 1 },
   rowLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },
+  hiddenCopy: { flex: 1, minWidth: 0, gap: 2 },
+  hiddenBadge: { fontFamily: uiFont(700), fontSize: 11.5 },
   delBtn: { padding: 6 },
   editBtn: { padding: 6 },
+  hideBtn: { padding: 6 },
+  showAgainBtn: { minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  showAgainText: { fontFamily: uiFont(700), fontSize: 12 },
   editPanel: { padding: 15, paddingTop: 12, borderTopWidth: 1, gap: 12 },
   editActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 18 },
   editActionBtn: { paddingVertical: 4, paddingHorizontal: 4 },
   editActionText: { fontFamily: uiFont(700), fontSize: 13.5 },
-  previewRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   input: {
     flex: 1,
+    minHeight: 44,
     borderWidth: 1,
     borderRadius: radius.sm,
     paddingHorizontal: 13,
@@ -310,6 +374,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   pickLabel: { fontFamily: uiFont(600), fontSize: 12.5 },
+  helperText: { fontFamily: uiFont(500), fontSize: 12.5, lineHeight: 17 },
   choiceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
   iconChoice: {
     width: 42,
@@ -319,6 +384,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hueChoice: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  hueChoice: { width: 44, height: 44, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   hueChoiceOn: { borderWidth: 2.5 },
 });
