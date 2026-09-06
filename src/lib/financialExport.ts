@@ -464,6 +464,10 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
   const accountNameById = new Map(data.accounts.map((a) => [a.id, a.name]));
 
   const txnsToUse = extra?.allTransactions ?? data.transactions;
+  // `generateAdvancedImportJSON` also powers the plain Advanced Import download. Trips are a
+  // full-backup extension with no plain-import counterpart, so their explicit presence marks
+  // the richer, round-trippable backup shape without changing the ordinary export contract.
+  const includesTrips = extra?.trips !== undefined;
 
   const transactions = txnsToUse
     .filter((t) => t.type !== 'transfer')
@@ -482,7 +486,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
       source: t.source ?? 'manual',
       nativeAmount: t.nativeAmount ?? null,
       fxRate: t.fxRate ?? null,
-      tripId: t.tripId ?? null,
+      ...(includesTrips ? { tripId: t.tripId ?? null } : {}),
       createdAt: t.createdAt,
       receiptFile: t.receiptUri ? extra?.receiptFileByUri?.get(t.receiptUri) : undefined,
     }));
@@ -706,7 +710,7 @@ export function generateAdvancedImportJSON(data: FinancialReportData, extra?: Co
     accounts,
     transactions,
     transfers,
-    trips: extra?.trips ?? [],
+    ...(includesTrips ? { trips: extra!.trips } : {}),
     commitments,
     people: people.length > 0 ? people : undefined,
     splits: splits.length > 0 ? splits : undefined,
@@ -2193,7 +2197,10 @@ export function generateFullBackupZip(
   const items = buildReceiptExportList(allTransactions, data.categories, reliefTags);
   const receiptFileByUri = new Map(items.map((i) => [i.imageUri, i.fileName]));
 
-  const backupJson = generateAdvancedImportJSON(data, { ...extra, allTransactions, receiptFileByUri });
+  // A full backup always owns a trip collection, including the empty array. That explicit
+  // marker keeps trip membership in its transaction rows while ordinary JSON exports remain
+  // free of a grouping their importer does not yet restore.
+  const backupJson = generateAdvancedImportJSON(data, { ...extra, trips: extra.trips ?? [], allTransactions, receiptFileByUri });
 
   const zipEntries: Record<string, Uint8Array> = {};
   zipEntries['backup.json'] = strToU8(backupJson);

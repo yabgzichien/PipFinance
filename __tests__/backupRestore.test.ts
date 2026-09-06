@@ -180,9 +180,14 @@ describe('generateFullBackupZip', () => {
 
   it('does not add receiptFile to the plain Advanced Import JSON export (no receiptFileByUri)', () => {
     const { generateAdvancedImportJSON } = require('../src/lib/financialExport');
-    const json = JSON.parse(generateAdvancedImportJSON(bundle, extra));
+    const json = JSON.parse(generateAdvancedImportJSON(bundle, {
+      ...extra,
+      allTransactions: [receiptTxn, plainTxn].map((transaction) => ({ ...transaction, tripId: 'trip-sg' })),
+    }));
     const txnRow = json.transactions.find((t: any) => t.id === 'txn-receipt');
     expect(txnRow.receiptFile).toBeUndefined();
+    expect(txnRow.tripId).toBeUndefined();
+    expect(json.trips).toBeUndefined();
   });
 });
 
@@ -229,6 +234,12 @@ describe('trips round-trip', () => {
 
     expect(payload.trips).toEqual([trip]);
     expect(payload.transactions).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'x1', tripId: 'trip-sg' })]));
+  });
+
+  it('keeps an explicitly empty trip collection in a full backup', () => {
+    const payload = buildBackupPayloadForTest(mockCategories, { transactions: [makeTxn({ id: 'no-trips', tripId: null })], trips: [] });
+    expect(payload.trips).toEqual([]);
+    expect(payload.transactions[0].tripId).toBeNull();
   });
 
   it('accepts an older backup with no trips key at all', () => {
