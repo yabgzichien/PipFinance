@@ -46,8 +46,11 @@ describe('computeTripTotals', () => {
     expect(out.recordedExpenses).toBe(100);
   });
 
-  it('counts a split bill once, at the personal share the row already stores', () => {
-    // splits.gross holds the full RM120 bill; the transaction carries the RM40 own share.
+  it('sums the personal share the transaction already carries (splits are not consulted here)', () => {
+    // This is an assertion of interface intent, not a regression guard. The function receives only
+    // Transaction[], and Transaction carries only ownShare (splits.gross lives on the separate Split
+    // record), so double-counting is prevented structurally by the type, not by this assertion.
+    // If the input ever widens to include split records, this test must be upgraded to a real guard.
     const out = computeTripTotals([txn({ amount: 40 })], 'trip-sg', convert);
     expect(out.recordedExpenses).toBe(40);
   });
