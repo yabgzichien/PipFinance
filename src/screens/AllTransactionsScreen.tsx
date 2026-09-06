@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
+import { TripPickerModal } from '../components/TripPickerModal';
 import { Icon } from '../components/Icon';
 import { TransactionFilterModal } from '../components/TransactionFilterModal';
 import { Amount, Card, CatBadge, Eyebrow, IconButton, TopBar } from '../components/ui';
@@ -161,7 +162,7 @@ export function AllTransactionsScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, categories, catById, removeMany, splits, shares, openShares } = useAppData();
+  const { transactions, categories, catById, removeMany, setTransactionsTrip, splits, shares, openShares } = useAppData();
 
   // `search` is what the box shows and must update on the keystroke; `query` is what the
   // ledger is filtered against and lags it by a beat. Filtering thousands of rows on every
@@ -200,6 +201,7 @@ export function AllTransactionsScreen({
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [tripPickerOpen, setTripPickerOpen] = useState(false);
 
   const filtered = !!filterCategoryId;
   const filterCat = filterCategoryId ? catById[filterCategoryId] ?? fallback : null;
@@ -301,6 +303,13 @@ export function AllTransactionsScreen({
         cancelSelect();
       }
     );
+  };
+  const attachSelectedToTrip = async (tripId: string | null) => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    await setTransactionsTrip(ids, tripId);
+    setTripPickerOpen(false);
+    cancelSelect();
   };
   // Stable across renders so `TxnRow`'s memo actually holds while the user types or scrolls.
   const onRowPress = useCallback(
@@ -433,6 +442,9 @@ export function AllTransactionsScreen({
             <Text style={[styles.selectTitle, { color: colorTheme.ink }]}>
               {isZh ? `已选择 ${selected.size} 项` : `${selected.size} selected`}
             </Text>
+            <Pressable onPress={() => setTripPickerOpen(true)} hitSlop={8} style={styles.tripAction} disabled={selected.size === 0} accessibilityRole="button" accessibilityLabel={t('addToTrip')}>
+              <Icon name="pin" size={19} color={selected.size === 0 ? colorTheme.ink3 : theme.accent} />
+            </Pressable>
             <Pressable onPress={deleteSelected} hitSlop={8} style={styles.delAction} disabled={selected.size === 0}>
               <Icon name="trash" size={20} color={selected.size === 0 ? colorTheme.ink3 : '#b3261e'} />
             </Pressable>
@@ -512,6 +524,11 @@ export function AllTransactionsScreen({
       />
 
       <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
+      <TripPickerModal
+        visible={tripPickerOpen}
+        onClose={() => setTripPickerOpen(false)}
+        onSelect={(tripId) => { void attachSelectedToTrip(tripId); }}
+      />
       <TransactionFilterModal
         visible={filterOpen}
         onClose={() => setFilterOpen(false)}
@@ -536,6 +553,7 @@ const styles = StyleSheet.create({
   selectBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 6 },
   selectTitle: { flex: 1, fontFamily: uiFont(700), fontSize: 18 },
   delAction: { width: 42, height: 42, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  tripAction: { width: 42, height: 42, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tripsChip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1 },
   tripsChipText: { fontFamily: uiFont(700), fontSize: 13 },

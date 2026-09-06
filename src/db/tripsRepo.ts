@@ -2,6 +2,10 @@ import { genId, getDb } from './db';
 import type { Trip } from '../lib/trips';
 import { updateTransactionTrip } from './txnRepo';
 
+// SQLite's usual 999-parameter ceiling includes the value assigned to `trip_id`. Leave room
+// below it so an app build with a lower configured limit still handles a long Activity selection.
+export const TRIP_MEMBERSHIP_BATCH_SIZE = 900;
+
 interface TripRow {
   id: string;
   name: string;
@@ -81,12 +85,17 @@ export async function setTransactionTrip(txnId: string, tripId: string | null): 
 /**
  * Attach or detach many transactions at once — what the Activity multi-select hands over.
  *
- * One statement rather than a loop: a bulk attach that failed halfway would leave the trip
- * total showing a number that matches neither what the user selected nor what they had before.
+ * Each chunk remains inside one transaction: a long selection must not exceed SQLite's bind
+ * limit, and a failed later chunk must not leave membership only half-updated.
  */
 export async function setTransactionsTrip(txnIds: string[], tripId: string | null): Promise<void> {
   if (txnIds.length === 0) return;
   const db = await getDb();
-  const placeholders = txnIds.map(() => '?').join(',');
-  await db.runAsync(`UPDATE transactions SET trip_id = ? WHERE id IN (${placeholders})`, tripId, ...txnIds);
+  await db.withTransactionAsync(async () => {
+    for (let offset = 0; offset < txnIds.length; offset += TRIP_MEMBERSHIP_BATCH_SIZE) {
+      const batch = txnIds.slice(offset, offset + TRIP_MEMBERSHIP_BATCH_SIZE);
+      const placeholders = batch.map(() => '?').join(',');
+      await db.runAsync(`UPDATE transactions SET trip_id = ? WHERE id IN (${placeholders})`, tripId, ...batch);
+    }
+  });
 }

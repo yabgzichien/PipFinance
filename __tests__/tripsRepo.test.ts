@@ -141,6 +141,18 @@ describe('setTransactionsTrip', () => {
     await setTransactionsTrip([], 't1');
     expect(db.statements).toHaveLength(0);
   });
+
+  it('batches a large selection so one SQLite statement never exceeds the bind limit', async () => {
+    const db = install(fakeDb());
+    const ids = Array.from({ length: 901 }, (_, index) => `txn-${index}`);
+
+    await setTransactionsTrip(ids, 't1');
+
+    const writes = db.statements.filter((s) => s.sql.includes('SET trip_id'));
+    expect(writes).toHaveLength(2);
+    expect(writes.flatMap((write) => write.args.slice(1))).toEqual(ids);
+    expect(writes.every((write) => write.args.length <= 901)).toBe(true);
+  });
 });
 
 describe('setTransactionTrip', () => {

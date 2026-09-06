@@ -23,6 +23,7 @@ import { AddCategoryModal } from './AddCategoryModal';
 import { CalcBadge } from './CalcBadge';
 import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
+import { TripPickerModal } from './TripPickerModal';
 import { BtnLabel, CategoryChip, PrimaryButton } from './ui';
 import { Icon } from './Icon';
 import { currencyPrefix, fmtMoney } from '../lib/format';
@@ -34,7 +35,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh, tCat } = useLanguage();
+  const { isZh, t, tCat } = useLanguage();
   const {
     categories,
     accounts,
@@ -46,6 +47,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     people,
     splitTransaction,
     unsplitTransaction,
+    trips,
+    setTransactionTrip,
   } = useAppData();
 
   const [amountText, setAmountText] = useState('');
@@ -57,6 +60,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [toAccountId, setToAccountId] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState(false);
+  const [tripPickerOpen, setTripPickerOpen] = useState(false);
+  const [tripId, setTripId] = useState<string | null>(null);
   // Cached rates, refreshed each time a transaction is opened for editing: needed to convert
   // this row's MYR-equivalent into a linked account's own currency (Task 9), since
   // `balance_entries.value` is native to the account rather than always MYR.
@@ -79,6 +84,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setToAccountId(null);
       setSplitting(false);
       setViewingReceipt(false);
+      setTripPickerOpen(false);
+      setTripId(txn.tripId ?? null);
       listFxRates().then((fx) => setRates(ratesFromCache(fx)));
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -223,6 +230,11 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
     // re-derives the MYR column itself from the row's own frozen rate.
     await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
+    // Trip membership is optional and applies only to an expense. Switching a previously-linked
+    // row to income or transfer deliberately clears the stale membership rather than leaving a
+    // non-expense attached to a trip whose totals can never include it.
+    const nextTripId = type === 'expense' ? tripId : null;
+    if (nextTripId !== (txn.tripId ?? null)) await setTransactionTrip(txn.id, nextTripId);
     // The row's MYR-equivalent, converted at the row's own frozen rate (never today's), used
     // both for its own bookkeeping and, below, as the starting point for converting into the
     // linked account's own currency.
@@ -246,6 +258,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   };
 
   const currentCat = categories.find((c) => c.id === (cat ?? txn.categoryId));
+  const currentTrip = trips.find((trip) => trip.id === tripId) ?? null;
   const currentCatLabel =
     (currentCat ? tCat(currentCat) : null) ??
     (txn.type === 'income' ? (isZh ? '收入' : 'Income') : txn.type === 'transfer' ? (isZh ? '转账' : 'Transfer') : (isZh ? '支出' : 'Expense'));
@@ -405,6 +418,25 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           />
 
           {type === 'expense' && (
+            <>
+              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{isZh ? '更多详情' : 'More details'}</Text>
+              <Pressable
+                onPress={() => setTripPickerOpen(true)}
+                style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, marginTop: 0 }]}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('tripsTitle')}: ${currentTrip?.name ?? t('noTrip')}`}
+              >
+                <Icon name="pin" size={18} color={theme.accent} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.splitTitle, { color: colorTheme.ink }]}>{t('tripsTitle')}</Text>
+                  <Text style={[styles.splitSub, { color: colorTheme.ink2 }]} numberOfLines={1}>{currentTrip?.name ?? t('noTrip')}</Text>
+                </View>
+                <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+              </Pressable>
+            </>
+          )}
+
+          {type === 'expense' && (
             <Pressable
               onPress={() => setSplitting(true)}
               style={[styles.splitRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
@@ -476,6 +508,13 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           setCat(id);
           setAdding(false);
         }}
+      />
+
+      <TripPickerModal
+        visible={tripPickerOpen}
+        selectedId={tripId}
+        onClose={() => setTripPickerOpen(false)}
+        onSelect={setTripId}
       />
 
       {/* Splitting saves and closes on its own: it rewrites the row's amount, so leaving the
