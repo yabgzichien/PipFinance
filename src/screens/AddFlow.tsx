@@ -92,7 +92,7 @@ function AddFlowPhases({
   onAmountValidChange,
   onCategoryChosen,
 }: AddFlowProps) {
-  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, categories, catById, applyReliefDetection, markTaskDone } = useAppData();
+  const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, entryCategories, catById, applyReliefDetection, markTaskDone } = useAppData();
   const colorTheme = useThemeColors();
   const { t } = useLanguage();
 
@@ -211,7 +211,7 @@ function AddFlowPhases({
     const [llm, active] = await Promise.all([getLLM(), getActiveCurrencies()]);
     const drafts = await resolveQuickAdd(text, {
       memory,
-      categories,
+      categories: entryCategories,
       activeCurrencies: active,
       today: todayISO(),
       llm,
@@ -294,7 +294,7 @@ function AddFlowPhases({
       const guessed = await withTimeout(
         llm.guessCategories({
           items: missing.map((i) => ({ index: i, merchant: items[i].merchant, amount: items[i].amount, method: items[i].method, kind: items[i].type })),
-          categories: categories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
         }),
         GUESS_TIMEOUT_MS
       );
@@ -465,7 +465,7 @@ function AddFlowPhases({
     return (
       <ManualEntryScreen
         key={quickPrefill ? `quick:${quickPrefill.label}:${quickPrefill.amount}` : 'manual'}
-        categories={categories}
+        categories={entryCategories}
         onBack={backFromManualOrSplit}
         onComplete={onManualComplete}
         // Three ways in, three honest titles: a scanned receipt lands here already filled in, the
@@ -503,7 +503,7 @@ function AddFlowPhases({
       <CategorizeScreen
         extracted={extracted}
         suggestions={suggestions}
-        categories={categories}
+        categories={entryCategories}
         linkId={linkId}
         onBack={backFromCategorize}
         onComplete={onCategorized}

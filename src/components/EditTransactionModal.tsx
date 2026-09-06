@@ -108,7 +108,14 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     .join(', ');
 
 
-  const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
+  // Preserve an existing hidden assignment while otherwise presenting only categories that
+  // remain available for entry.
+  const grid = useMemo(() => {
+    const visible = categories.filter((c) => c.kind === type && !c.isHidden);
+    const current = categories.find((c) => c.id === txn?.categoryId);
+    if (current && current.kind === type && current.isHidden) return [current, ...visible];
+    return visible;
+  }, [categories, type, txn?.categoryId]);
 
   const decimals = decimalsFor(txn?.currency ?? BASE_CURRENCY);
   const currencyLabel = currencyPrefix(txn?.currency ?? BASE_CURRENCY);
@@ -190,7 +197,13 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     setType(t);
     setCat((prev) => {
       const c = categories.find((x) => x.id === prev);
-      return c && c.kind === t ? prev : t === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID;
+      if (c && c.kind === t) return prev;
+      const fallbackId = t === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID;
+      const fallback = categories.find((x) => x.id === fallbackId);
+      // A default may itself have been hidden. Pick another visible category of the right kind
+      // rather than moving a transaction into a category removed from entry.
+      if (fallback && !fallback.isHidden) return fallbackId;
+      return categories.find((x) => x.kind === t && !x.isHidden)?.id ?? fallbackId;
     });
   };
 

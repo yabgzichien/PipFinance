@@ -1,0 +1,43 @@
+// The model is handed a list of category ids and asked to pick one. A hidden category must not
+// be in that list, and — separately — must be rejected if it comes back anyway, because a stale
+// prompt or a hallucinated id would otherwise route a new expense into a category the user has
+// explicitly taken out of circulation.
+import { buildCategoryGuessPrompt, parseCategoryGuess } from '../src/llm/categoryGuessPrompt';
+import { parseQuickAddReply } from '../src/llm/quickAddPrompt';
+
+const VISIBLE = [
+  { id: 'food', label: 'Food', kind: 'expense' as const },
+  { id: 'travelling', label: 'Transport', kind: 'expense' as const },
+];
+
+const SHELL = { index: 0, merchant: 'Shell', amount: 80, method: null, kind: 'expense' as const };
+
+describe('category guess options', () => {
+  it('never mentions a category the caller left out', () => {
+    const prompt = buildCategoryGuessPrompt([SHELL], VISIBLE);
+    expect(prompt).toContain('food');
+    expect(prompt).not.toContain('opt-petrol');
+  });
+
+  it('rejects a response naming a category outside the supplied options', () => {
+    const out = parseCategoryGuess('{"0":"opt-petrol"}', [SHELL], VISIBLE);
+    expect(out[0]).toBeNull();
+  });
+
+  it('accepts a response naming a supplied option', () => {
+    const out = parseCategoryGuess('{"0":"travelling"}', [SHELL], VISIBLE);
+    expect(out[0]).toBe('travelling');
+  });
+});
+
+describe('quick add options', () => {
+  it('drops a category id outside the supplied options', () => {
+    const parsed = parseQuickAddReply(
+      '{"items":[{"label":"Shell","amount":80,"type":"expense","categoryId":"opt-petrol"}]}',
+      VISIBLE,
+      ['MYR'],
+      '2026-09-06'
+    );
+    expect(parsed[0]?.categoryId ?? null).toBeNull();
+  });
+});
