@@ -205,6 +205,14 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     CREATE TABLE IF NOT EXISTS deleted_default_categories (
       id  TEXT PRIMARY KEY NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS trips (
+      id          TEXT PRIMARY KEY NOT NULL,
+      name        TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      archived    INTEGER NOT NULL DEFAULT 0,
+      start_date  TEXT,
+      end_date    TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_txn_created ON transactions (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_split_txn ON splits (txn_id);
     CREATE INDEX IF NOT EXISTS idx_share_split ON split_shares (split_id);
@@ -338,6 +346,20 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     await db.execAsync('ALTER TABLE commitment_occurrences ADD COLUMN fx_rate REAL');
   } catch {
     // column already present
+  }
+
+  // Migration (2026-09-06, trips): optional membership of a named trip. Nullable and unindexed
+  // against nothing else — a trip is a second, orthogonal grouping, so the transaction keeps its
+  // spending category and its month, and every existing total is unchanged by definition.
+  try {
+    await db.execAsync('ALTER TABLE transactions ADD COLUMN trip_id TEXT');
+  } catch {
+    // column already present
+  }
+  try {
+    await db.execAsync('CREATE INDEX IF NOT EXISTS idx_txn_trip ON transactions (trip_id)');
+  } catch {
+    // index already present
   }
 
   // Data repair: a backup-restore bug once wrote signed amounts straight into `amount` for
@@ -516,6 +538,7 @@ export async function resetAllData(): Promise<void> {
   await db.withTransactionAsync(async () => {
     await db.execAsync(`
       DELETE FROM transactions;
+      DELETE FROM trips;
       DELETE FROM merchant_memory;
       DELETE FROM budget;
       DELETE FROM budget_allocation;

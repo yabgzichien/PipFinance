@@ -86,6 +86,11 @@ export interface Transaction {
   nativeAmount?: number | null;
   /** MYR per 1 unit of `currency`, frozen when the row was written. Null for MYR rows. */
   fxRate?: number | null;
+  /** The trip this transaction is a member of, if any. A second, orthogonal grouping on top of
+   *  category and date — never inferred from either. Optional for the same reason `remark` is:
+   *  existing fixtures and callers predate the field; the DB and repo always resolve it to a
+   *  real value (string or null). */
+  tripId?: string | null;
 }
 
 export type ReliefOrigin = 'auto' | 'commitment' | 'manual';

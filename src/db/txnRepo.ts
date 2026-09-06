@@ -17,6 +17,7 @@ interface TxnRow {
   receipt_uri: string | null;
   native_amount: number | null;
   fx_rate: number | null;
+  trip_id: string | null;
 }
 
 function toTxn(r: TxnRow): Transaction {
@@ -35,6 +36,7 @@ function toTxn(r: TxnRow): Transaction {
     receiptUri: r.receipt_uri,
     nativeAmount: r.native_amount ?? null,
     fxRate: r.fx_rate ?? null,
+    tripId: r.trip_id ?? null,
   };
 }
 
@@ -52,6 +54,8 @@ export interface NewTxn {
   currency?: string;
   /** MYR per 1 native unit. Required when `currency` is not 'MYR'. */
   fxRate?: number | null;
+  /** The trip to attach this transaction to at creation time, if any. */
+  tripId?: string | null;
 }
 
 export async function listTransactions(limit?: number): Promise<Transaction[]> {
@@ -84,8 +88,8 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
       const derived = deriveMyr(it.amount, currency, it.fxRate ?? null);
       await db.runAsync(
         `INSERT INTO transactions
-           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate, trip_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         it.merchantRaw,
         it.merchantKey,
@@ -99,7 +103,8 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
         remark,
         receiptUri,
         derived.nativeAmount,
-        derived.fxRate
+        derived.fxRate,
+        it.tripId ?? null
       );
       created.push({
         id,
@@ -116,6 +121,7 @@ export async function addTransactions(items: NewTxn[]): Promise<Transaction[]> {
         receiptUri,
         nativeAmount: derived.nativeAmount,
         fxRate: derived.fxRate,
+        tripId: it.tripId ?? null,
       });
     }
   });
@@ -154,6 +160,13 @@ export async function updateTransactionAmount(id: string, entered: number): Prom
 export async function updateTransactionCategory(id: string, categoryId: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE transactions SET category_id = ? WHERE id = ?', categoryId, id);
+}
+
+/** Move a transaction into a trip, or out of every trip. Explicit by design: dates can suggest
+ *  candidates but never decide membership, so nothing here infers a trip from a date range. */
+export async function updateTransactionTrip(id: string, tripId: string | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE transactions SET trip_id = ? WHERE id = ?', tripId, id);
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
