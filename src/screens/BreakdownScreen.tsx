@@ -17,7 +17,7 @@ import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { shadowToggle, uiFont } from '../theme';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void; onOpenCategory: (categoryId: string) => void }) {
   const insets = useSafeAreaInsets();

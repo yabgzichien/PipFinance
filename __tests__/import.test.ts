@@ -14,7 +14,20 @@ import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID, EXPENSE_CATEGORIES } from '../sr
 import { DROP, type Category, type ExtractedTxn, type MemoryMap, type Transaction } from '../src/lib/types';
 
 function cat(over: Partial<Category>): Category {
-  return { id: 'dining', label: 'Dining', icon: 'utensils', hue: 20, kind: 'expense', isDefault: false, ...over };
+  return {
+    id: 'dining',
+    label: 'Dining',
+    icon: 'utensils',
+    hue: 20,
+    kind: 'expense',
+    isDefault: false,
+    isHidden: false,
+    templateKey: null,
+    labelOverride: null,
+    iconOverride: null,
+    hueOverride: null,
+    ...over,
+  };
 }
 
 function item(over: Partial<ExtractedTxn>): ExtractedTxn {
@@ -238,7 +251,15 @@ describe('pendingLabel / resolvePending', () => {
 });
 
 describe('the JinQuan tracker case, against the real seed categories', () => {
-  const cats: Category[] = EXPENSE_CATEGORIES.map((c) => ({ ...c, isDefault: true }));
+  const cats: Category[] = EXPENSE_CATEGORIES.map((c) => ({
+    ...c,
+    isDefault: true,
+    isHidden: false,
+    templateKey: null,
+    labelOverride: null,
+    iconOverride: null,
+    hueOverride: null,
+  }));
   const catById: Record<string, Category> = Object.fromEntries(cats.map((c) => [c.id, c]));
 
   // The real label mix from the 2026 workbook: 397 rows over 7 spellings.

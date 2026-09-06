@@ -2,6 +2,16 @@ import type { Category } from '../lib/types';
 
 type SeedCategory = Omit<Category, 'isDefault'>;
 
+/** Every seed row ships with no overrides and is visible; templateKey wiring lands in a later
+ *  task, so it stays null here for now. */
+const SEED_DEFAULTS = {
+  isHidden: false,
+  templateKey: null,
+  labelOverride: null,
+  iconOverride: null,
+  hueOverride: null,
+} as const;
+
 /**
  * Default EXPENSE categories.
  *
@@ -11,14 +21,14 @@ type SeedCategory = Omit<Category, 'isDefault'>;
  * against an external taxonomy any more.
  */
 export const EXPENSE_CATEGORIES: SeedCategory[] = [
-  { id: 'food', label: 'Food', icon: 'burger', hue: 162, kind: 'expense' },
-  { id: 'shopping', label: 'Shopping', icon: 'cart', hue: 42, kind: 'expense' },
-  { id: 'entertainment', label: 'Entertainment', icon: 'play', hue: 305, kind: 'expense' },
-  { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense' },
-  { id: 'travelling', label: 'Travelling', icon: 'car', hue: 248, kind: 'expense' },
-  { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense' },
-  { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense' },
-  { id: 'phone-bill', label: 'Phone Bill', icon: 'phone', hue: 355, kind: 'expense' },
+  { id: 'food', label: 'Food', icon: 'burger', hue: 162, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'shopping', label: 'Shopping', icon: 'cart', hue: 42, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'entertainment', label: 'Entertainment', icon: 'play', hue: 305, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'travelling', label: 'Travelling', icon: 'car', hue: 248, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'phone-bill', label: 'Phone Bill', icon: 'phone', hue: 355, kind: 'expense', ...SEED_DEFAULTS },
 ];
 
 /**
@@ -28,9 +38,9 @@ export const EXPENSE_CATEGORIES: SeedCategory[] = [
  * those three revenue lines very differently.
  */
 export const INCOME_CATEGORIES: SeedCategory[] = [
-  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 152, kind: 'income' },
-  { id: 'allowance', label: 'Allowance', icon: 'gift', hue: 120, kind: 'income' },
-  { id: 'other-income', label: 'Other Income', icon: 'dots', hue: 200, kind: 'income' },
+  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 152, kind: 'income', ...SEED_DEFAULTS },
+  { id: 'allowance', label: 'Allowance', icon: 'gift', hue: 120, kind: 'income', ...SEED_DEFAULTS },
+  { id: 'other-income', label: 'Other Income', icon: 'dots', hue: 200, kind: 'income', ...SEED_DEFAULTS },
 ];
 
 /** id of the generic income category used as a fallback for income rows. */

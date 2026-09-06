@@ -21,7 +21,7 @@ import { useAppData, type NewLearned } from '../state/store';
 import { uiFont } from '../theme';
 import { duration as motionDuration, stagger } from '../theme/motion';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 export function SavedScreen({
   result,

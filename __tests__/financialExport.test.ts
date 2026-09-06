@@ -72,9 +72,9 @@ function makeEntry(over: Partial<BalanceEntry>): BalanceEntry {
 }
 
 const mockCategories: Category[] = [
-  { id: 'salary', label: 'Monthly Salary', icon: 'wallet', hue: 150, kind: 'income', isDefault: true },
-  { id: 'transport', label: 'Transport & Fuel', icon: 'car', hue: 240, kind: 'expense', isDefault: true },
-  { id: 'food', label: 'Food & Groceries', icon: 'cart', hue: 160, kind: 'expense', isDefault: true },
+  { id: 'salary', label: 'Monthly Salary', icon: 'wallet', hue: 150, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'transport', label: 'Transport & Fuel', icon: 'car', hue: 240, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'food', label: 'Food & Groceries', icon: 'cart', hue: 160, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
 ];
 
 describe('generateExcelWorkbook', () => {
@@ -417,7 +417,7 @@ describe('generateAdvancedImportJSON — version 2 additions', () => {
     ];
     const v3Categories: Category[] = [
       ...mockCategories,
-      { id: 'cat_pet', label: 'Pet Care', icon: 'paw', hue: 120, kind: 'expense', isDefault: false },
+      { id: 'cat_pet', label: 'Pet Care', icon: 'paw', hue: 120, kind: 'expense', isDefault: false, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
     ];
     const v3Bundle = buildFinancialReportBundle(v3Txns, v3Categories, v3Accounts, v3Entries, period, 'Nurul');
 

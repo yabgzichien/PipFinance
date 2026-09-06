@@ -19,6 +19,13 @@ function toCategory(r: CatRow): Category {
     hue: r.hue,
     kind: r.kind === 'income' ? 'income' : 'expense',
     isDefault: !!r.is_default,
+    // These columns don't exist in the DB schema yet — a later task adds them. Until then every
+    // row resolves as visible, with no template identity and no overrides.
+    isHidden: false,
+    templateKey: null,
+    labelOverride: null,
+    iconOverride: null,
+    hueOverride: null,
   };
 }
 
@@ -67,7 +74,19 @@ export async function addCategory(
     kind,
     sortRow?.m ?? 0
   );
-  return { id, label: label.trim(), icon, hue, kind, isDefault: false };
+  return {
+    id,
+    label: label.trim(),
+    icon,
+    hue,
+    kind,
+    isDefault: false,
+    isHidden: false,
+    templateKey: null,
+    labelOverride: null,
+    iconOverride: null,
+    hueOverride: null,
+  };
 }
 
 /** Change a category's icon/picture in place  a named icon (see Icon.tsx) or a

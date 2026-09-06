@@ -18,7 +18,7 @@ import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 // Hues for categories the import wants to create, cycled so a batch of new
 // labels does not come out all the same colour. Matches AddCategoryModal.
@@ -122,6 +122,11 @@ export function ImportReviewScreen({
         hue: NEW_CAT_HUES[i % NEW_CAT_HUES.length],
         kind: l.kind,
         isDefault: false,
+        isHidden: false,
+        templateKey: null,
+        labelOverride: null,
+        iconOverride: null,
+        hueOverride: null,
       })),
     [newLabels]
   );

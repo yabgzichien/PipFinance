@@ -29,7 +29,7 @@ import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { numFont, platformShadow, shadowCard, uiFont } from '../theme';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 // ── Design tints (from the approved mockup) ───────────────────────────────────
 // warn/caution are fixed hexes rather than colorTheme.amber: amber is a shared structural

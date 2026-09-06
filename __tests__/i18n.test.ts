@@ -25,9 +25,9 @@ describe('i18n Translation Dictionary Parity', () => {
 
 describe('Category Localization', () => {
   it('localizes default income categories correctly in Simplified Chinese', () => {
-    const salaryCat: Category = { id: 'salary', label: 'Salary', icon: 'wallet', hue: 140, kind: 'income', isDefault: true };
-    const allowanceCat: Category = { id: 'allowance', label: 'Allowance', icon: 'gift', hue: 160, kind: 'income', isDefault: true };
-    const otherIncomeCat: Category = { id: 'other-income', label: 'Other Income', icon: 'plus', hue: 180, kind: 'income', isDefault: true };
+    const salaryCat: Category = { id: 'salary', label: 'Salary', icon: 'wallet', hue: 140, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
+    const allowanceCat: Category = { id: 'allowance', label: 'Allowance', icon: 'gift', hue: 160, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
+    const otherIncomeCat: Category = { id: 'other-income', label: 'Other Income', icon: 'plus', hue: 180, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
     expect(getCategoryLabel(salaryCat, 'zh')).toBe('工资薪金');
     expect(getCategoryLabel(allowanceCat, 'zh')).toBe('津贴补贴');
@@ -54,6 +54,11 @@ describe('Category Localization', () => {
       hue: 200,
       kind: 'expense',
       isDefault: false,
+      isHidden: false,
+      templateKey: null,
+      labelOverride: null,
+      iconOverride: null,
+      hueOverride: null,
     };
 
     expect(getCategoryLabel(customCat, 'en')).toBe('My Custom Category');

@@ -102,7 +102,7 @@ describe('onboardingRestore', () => {
 
   describe('Backup Peek & Verification for Onboarding Restore', () => {
     const categories: Category[] = [
-      { id: 'food', label: 'Food', icon: 'cart', hue: 160, kind: 'expense', isDefault: true },
+      { id: 'food', label: 'Food', icon: 'cart', hue: 160, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
     ];
     const accounts: Account[] = [
       {

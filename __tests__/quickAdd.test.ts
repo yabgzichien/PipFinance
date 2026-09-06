@@ -3,9 +3,9 @@ import { merchantKey } from '../src/lib/normalize';
 import type { Category, MemoryMap } from '../src/lib/types';
 
 const categories: Category[] = [
-  { id: 'food', label: 'Food', icon: 'gift', hue: 20, kind: 'expense', isDefault: true },
-  { id: 'transport', label: 'Transport', icon: 'gift', hue: 40, kind: 'expense', isDefault: true },
-  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 140, kind: 'income', isDefault: true },
+  { id: 'food', label: 'Food', icon: 'gift', hue: 20, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'transport', label: 'Transport', icon: 'gift', hue: 40, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 140, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
 ];
 
 function deps(over: Partial<QuickAddDeps> = {}): QuickAddDeps {

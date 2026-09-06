@@ -22,9 +22,9 @@ function txn(over: Partial<Transaction>): Transaction {
 }
 
 const mockCategories: Category[] = [
-  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 150, kind: 'income', isDefault: true },
-  { id: 'dining', label: 'Dining', icon: 'utensils', hue: 25, kind: 'expense', isDefault: true },
-  { id: 'housing', label: 'Housing', icon: 'home', hue: 200, kind: 'expense', isDefault: true },
+  { id: 'salary', label: 'Salary', icon: 'wallet', hue: 150, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'dining', label: 'Dining', icon: 'utensils', hue: 25, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'housing', label: 'Housing', icon: 'home', hue: 200, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
 ];
 
 // A 4-month ledger with a stable "Astro" bill each month, so detectObligations has evidence

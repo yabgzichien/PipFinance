@@ -32,7 +32,7 @@ import { useLanguage } from '../i18n';
 import { shadowCard, spacing, uiFont } from '../theme';
 import { duration as motionDuration } from '../theme/motion';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 /** Days of inactivity before the header mascot goes `sleepy` (docs/ui-engagement-plan.md
  *  Step 3). Matches the streak's own grace window (1 day) plus a few more so this fires only

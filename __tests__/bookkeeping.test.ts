@@ -58,11 +58,11 @@ function makeEntry(over: Partial<BalanceEntry>): BalanceEntry {
 }
 
 const mockCategories: Category[] = [
-  { id: 'employment-income', label: 'Salary Income', icon: 'wallet', hue: 150, kind: 'income', isDefault: true },
-  { id: 'gig-income', label: 'Gig Deliveries', icon: 'car', hue: 130, kind: 'income', isDefault: true },
-  { id: 'food', label: 'Food & Groceries', icon: 'cart', hue: 160, kind: 'expense', isDefault: true },
-  { id: 'transport', label: 'Transport & Fuel', icon: 'car', hue: 240, kind: 'expense', isDefault: true },
-  { id: 'housing', label: 'Housing & Rent', icon: 'home', hue: 200, kind: 'expense', isDefault: true },
+  { id: 'employment-income', label: 'Salary Income', icon: 'wallet', hue: 150, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'gig-income', label: 'Gig Deliveries', icon: 'car', hue: 130, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'food', label: 'Food & Groceries', icon: 'cart', hue: 160, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'transport', label: 'Transport & Fuel', icon: 'car', hue: 240, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'housing', label: 'Housing & Rent', icon: 'home', hue: 200, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
 ];
 
 describe('buildReportPeriod', () => {

@@ -27,7 +27,7 @@ function txnDateOnly(t: Transaction): string {
   return (t.date ?? t.createdAt).slice(0, 10);
 }
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 /** How long typing has to pause before the whole ledger is re-filtered. Long enough that a
  *  normal typing cadence runs the filter once instead of once per letter, short enough that

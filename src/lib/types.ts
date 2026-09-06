@@ -42,11 +42,24 @@ export interface ExtractedTxn {
  * separates expense categories from income (money-received) categories. */
 export interface Category {
   id: string;
+  /** The base stored label. For a supplied category this is Pip's wording; for a custom one it
+   *  is what the user typed. Never the place a rename lands — that is `labelOverride`. */
   label: string;
   icon: string;
   hue: number;
   kind: TxnType;
   isDefault: boolean;
+  /** Hidden from new-entry choices and LLM options. History, reports, existing budget
+   *  allocations and snapshots keep the category regardless. Never means deleted. */
+  isHidden: boolean;
+  /** Stable identity of a supplied starter or catalogue entry, independent of display label.
+   *  Null for user-created categories. Unique across the table when present. */
+  templateKey: string | null;
+  /** Explicit user presentation overrides. Null means "no opinion, use the supplied value".
+   *  These outrank translations, which is what makes a rename survive a language switch. */
+  labelOverride: string | null;
+  iconOverride: string | null;
+  hueOverride: number | null;
 }
 
 /** A persisted transaction. */

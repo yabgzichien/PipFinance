@@ -21,7 +21,7 @@ import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { platformShadow, spacing, type as typeScale } from '../theme';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
 // Rail geometry — fixed per-chip widths so the "scroll the active one into view" math below
 // (index * pitch) stays exact regardless of which chip is currently larger/bolder.

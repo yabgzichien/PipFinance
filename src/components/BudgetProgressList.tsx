@@ -10,7 +10,7 @@ import { uiFont } from '../theme';
 import { Card, CatBadge } from './ui';
 import { Icon } from './Icon';
 
-const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true };
+const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 export const STATUS_COLOR = { ok: '#1f8a5b', caution: '#ca8a04', warn: '#ea580c', over: '#c5402f' } as const;
 
 /**

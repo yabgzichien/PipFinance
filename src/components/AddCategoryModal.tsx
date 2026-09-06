@@ -94,7 +94,7 @@ export function AddCategoryModal({
           </View>
 
           <View style={styles.previewRow}>
-            <CatBadge category={{ id: 'new', label: name, icon, hue, kind, isDefault: false }} size={44} />
+            <CatBadge category={{ id: 'new', label: name, icon, hue, kind, isDefault: false, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null }} size={44} />
             <TextInput
               value={name}
               onChangeText={setName}
