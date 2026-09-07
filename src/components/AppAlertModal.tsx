@@ -38,6 +38,20 @@ export function AppAlertModal() {
     }
   };
 
+  const handleNeutral = async () => {
+    if (request.kind !== 'confirm' || !request.neutralAction || confirmingRef.current) return;
+    const action = request.neutralAction.onPress;
+    confirmingRef.current = true;
+    setBusy(true);
+    try {
+      await action();
+    } finally {
+      confirmingRef.current = false;
+      setBusy(false);
+      dismiss();
+    }
+  };
+
   return (
     <Modal visible transparent animationType="fade" onRequestClose={dismiss}>
       <Pressable style={styles.backdrop} onPress={busy ? undefined : dismiss} />
@@ -50,23 +64,35 @@ export function AppAlertModal() {
           {request.message ? <Text style={[styles.message, { color: colorTheme.ink2 }]}>{request.message}</Text> : null}
 
           {request.kind === 'confirm' ? (
-            <View style={styles.row}>
-              <Pressable
-                onPress={dismiss}
-                disabled={busy}
-                style={({ pressed }) => [styles.btn, styles.btnCancel, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }, (pressed || busy) && { opacity: 0.85 }]}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.btnCancelText, { color: colorTheme.ink2 }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleConfirm}
-                disabled={busy}
-                style={({ pressed }) => [styles.btn, styles.btnDanger, { backgroundColor: colorTheme.red }, (pressed || busy) && { opacity: 0.9 }]}
-                accessibilityRole="button"
-              >
-                {busy ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Text style={styles.btnDangerText}>{request.confirmLabel}</Text>}
-              </Pressable>
+            <View style={styles.confirmActions}>
+              {request.neutralAction ? (
+                <Pressable
+                  onPress={handleNeutral}
+                  disabled={busy}
+                  style={({ pressed }) => [styles.btn, styles.btnNeutral, { borderColor: theme.accent }, (pressed || busy) && { opacity: 0.85 }]}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.btnNeutralText, { color: theme.accentInk }]}>{request.neutralAction.label}</Text>
+                </Pressable>
+              ) : null}
+              <View style={styles.row}>
+                <Pressable
+                  onPress={dismiss}
+                  disabled={busy}
+                  style={({ pressed }) => [styles.btn, styles.btnCancel, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }, (pressed || busy) && { opacity: 0.85 }]}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.btnCancelText, { color: colorTheme.ink2 }]}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={handleConfirm}
+                  disabled={busy}
+                  style={({ pressed }) => [styles.btn, styles.btnDanger, { backgroundColor: colorTheme.red }, (pressed || busy) && { opacity: 0.9 }]}
+                  accessibilityRole="button"
+                >
+                  {busy ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Text style={styles.btnDangerText}>{request.confirmLabel}</Text>}
+                </Pressable>
+              </View>
             </View>
           ) : (
             <Pressable onPress={dismiss} style={({ pressed }) => [styles.btn, styles.btnOk, { backgroundColor: theme.accentInk }, pressed && { opacity: 0.9 }]} accessibilityRole="button">
@@ -101,10 +127,13 @@ const styles = StyleSheet.create({
   iconCircleDanger: {},
   title: { fontFamily: uiFont(800), fontSize: 17, textAlign: 'center', marginBottom: 6 },
   message: { fontFamily: uiFont(500), fontSize: 13, textAlign: 'center', lineHeight: 19, marginBottom: 18 },
-  row: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 4 },
+  confirmActions: { gap: 10, width: '100%', marginTop: 4 },
+  row: { flexDirection: 'row', gap: 10, width: '100%' },
   btn: { flex: 1, height: 46, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   btnCancel: { borderWidth: 1 },
   btnCancelText: { fontFamily: uiFont(700), fontSize: 14 },
+  btnNeutral: { width: '100%', borderWidth: 1 },
+  btnNeutralText: { fontFamily: uiFont(700), fontSize: 14 },
   btnDanger: {},
   btnDangerText: { fontFamily: uiFont(700), fontSize: 14, color: colors.onAccent },
   btnOk: { width: '100%', marginTop: 4 },

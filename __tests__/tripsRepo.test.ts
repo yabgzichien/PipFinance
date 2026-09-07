@@ -20,7 +20,16 @@ interface Statement {
   args: unknown[];
 }
 
-function fakeDb(rows: { first?: Record<string, unknown>; all?: Record<string, unknown[]> } = {}) {
+interface FakeTransactionRow {
+  id: string;
+  type: 'expense' | 'income' | 'transfer';
+  tripId: string | null;
+}
+
+function fakeDb(
+  rows: { first?: Record<string, unknown>; all?: Record<string, unknown[]> } = {},
+  transactions: FakeTransactionRow[] = []
+) {
   const statements: Statement[] = [];
   const pick = <T,>(table: Record<string, T> | undefined, sql: string): T | undefined => {
     if (!table) return undefined;
@@ -32,6 +41,15 @@ function fakeDb(rows: { first?: Record<string, unknown>; all?: Record<string, un
     sql: () => statements.map((s) => s.sql.replace(/\s+/g, ' ').trim()),
     runAsync: (sql: string, ...args: unknown[]) => {
       statements.push({ sql, args });
+      if (sql.includes('UPDATE transactions SET trip_id = ? WHERE id IN')) {
+        const [tripId, ...ids] = args as [string | null, ...string[]];
+        const expenseOnly = /\btype\s*=\s*'expense'/.test(sql);
+        for (const transaction of transactions) {
+          if (ids.includes(transaction.id) && (!expenseOnly || transaction.type === 'expense')) {
+            transaction.tripId = tripId;
+          }
+        }
+      }
       return Promise.resolve({ changes: 1, lastInsertRowId: 1 });
     },
     getFirstAsync: (sql: string, ..._args: unknown[]) => Promise.resolve(pick(rows.first, sql) ?? null),
@@ -41,6 +59,7 @@ function fakeDb(rows: { first?: Record<string, unknown>; all?: Record<string, un
       return Promise.resolve();
     },
     withTransactionAsync: (fn: () => Promise<void>) => fn(),
+    transactions,
   };
 }
 
@@ -128,6 +147,23 @@ describe('deleteTrip', () => {
 });
 
 describe('setTransactionsTrip', () => {
+  it('attaches only expenses when a bulk selection contains income and transfers', async () => {
+    const transactions: FakeTransactionRow[] = [
+      { id: 'expense', type: 'expense', tripId: null },
+      { id: 'income', type: 'income', tripId: null },
+      { id: 'transfer', type: 'transfer', tripId: null },
+    ];
+    const db = install(fakeDb({}, transactions));
+
+    await setTransactionsTrip(['expense', 'income', 'transfer'], 't1');
+
+    expect(db.transactions).toEqual([
+      { id: 'expense', type: 'expense', tripId: 't1' },
+      { id: 'income', type: 'income', tripId: null },
+      { id: 'transfer', type: 'transfer', tripId: null },
+    ]);
+  });
+
   it('attaches many transactions in one transaction', async () => {
     const db = install(fakeDb());
     await setTransactionsTrip(['a', 'b', 'c'], 't1');

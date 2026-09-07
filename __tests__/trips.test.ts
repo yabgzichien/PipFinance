@@ -2,7 +2,7 @@
 // The totals contract is the whole of Trips that can be wrong quietly. Every case here is one
 // the spec names explicitly, and each has a way of producing a plausible-looking number that is
 // not the number the user means.
-import { computeTripTotals, inheritedTripId } from '../src/lib/trips';
+import { computeTripTotals, expenseIdsFromSelection, expensesForTrip, inheritedTripId } from '../src/lib/trips';
 import type { Transaction } from '../src/lib/types';
 
 // Stand-in for useDisplayCurrency().convertTxn: MYR passes through, SGD is 3.5.
@@ -85,6 +85,29 @@ describe('computeTripTotals', () => {
 
   it('an empty trip totals zero rather than throwing', () => {
     expect(computeTripTotals([], 'trip-sg', convert)).toEqual({ recordedExpenses: 0, txnCount: 0, byCategory: [] });
+  });
+});
+
+describe('expensesForTrip', () => {
+  it('keeps stale income and transfer memberships out of a trip transaction list', () => {
+    const expense = txn({ id: 'expense' });
+    const income = txn({ id: 'income', type: 'income' });
+    const transfer = txn({ id: 'transfer', type: 'transfer' });
+
+    expect(expensesForTrip([expense, income, transfer], 'trip-sg')).toEqual([expense]);
+  });
+});
+
+describe('expenseIdsFromSelection', () => {
+  it('keeps the bulk trip action scoped to selected expenses', () => {
+    const transactions = [
+      txn({ id: 'expense' }),
+      txn({ id: 'income', type: 'income' }),
+      txn({ id: 'transfer', type: 'transfer' }),
+    ];
+
+    expect(expenseIdsFromSelection(transactions, new Set(['expense', 'income', 'transfer']))).toEqual(['expense']);
+    expect(expenseIdsFromSelection(transactions, new Set(['income', 'transfer']))).toEqual([]);
   });
 });
 

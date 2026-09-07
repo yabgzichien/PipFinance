@@ -738,7 +738,15 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           onBack={goBack}
         />
       )}
-      {screen === 'categories' && <CategoriesScreen onBack={goBack} />}
+      {screen === 'categories' && (
+        <CategoriesScreen
+          onBack={goBack}
+          onReviewCommitments={() => {
+            setCommitmentsOrigin('categories');
+            setScreen('commitments');
+          }}
+        />
+      )}
       {screen === 'transactions' && (
         <AllTransactionsScreen
           filterCategoryId={txnFilter}

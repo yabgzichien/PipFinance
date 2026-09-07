@@ -95,7 +95,11 @@ export async function setTransactionsTrip(txnIds: string[], tripId: string | nul
     for (let offset = 0; offset < txnIds.length; offset += TRIP_MEMBERSHIP_BATCH_SIZE) {
       const batch = txnIds.slice(offset, offset + TRIP_MEMBERSHIP_BATCH_SIZE);
       const placeholders = batch.map(() => '?').join(',');
-      await db.runAsync(`UPDATE transactions SET trip_id = ? WHERE id IN (${placeholders})`, tripId, ...batch);
+      await db.runAsync(
+        `UPDATE transactions SET trip_id = ? WHERE id IN (${placeholders}) AND type = 'expense'`,
+        tripId,
+        ...batch
+      );
     }
   });
 }

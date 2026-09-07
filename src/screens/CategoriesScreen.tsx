@@ -33,7 +33,19 @@ export function isCustomIcon(icon: string): boolean {
   return icon.startsWith('data:') || icon.startsWith('file:') || icon.startsWith('content:') || icon.startsWith('http') || icon.startsWith('/');
 }
 
-export function CategoriesScreen({ onBack }: { onBack: () => void }) {
+/** Keep reviewing linked recurring payments distinct from confirming the category hide. */
+export function recurringCategoryHideActions(
+  reviewLabel: string,
+  onConfirm: () => void | Promise<void>,
+  onReview: () => void | Promise<void>
+) {
+  return {
+    onConfirm,
+    neutralAction: { label: reviewLabel, onPress: onReview },
+  };
+}
+
+export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () => void; onReviewCommitments: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -141,11 +153,13 @@ export function CategoriesScreen({ onBack }: { onBack: () => void }) {
     };
 
     if (usedBy > 0) {
+      const actions = recurringCategoryHideActions(t('reviewRecurringPayments'), proceed, onReviewCommitments);
       confirmAction(
         t('hideUsedByCommitmentTitle'),
         t('hideUsedByCommitmentBody').replace('{count}', String(usedBy)).replace('{label}', label),
         category.kind === 'income' ? t('hideFromNewIncome') : t('hideFromNewExpenses'),
-        proceed
+        actions.onConfirm,
+        actions.neutralAction
       );
       return;
     }

@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLanguage } from '../i18n';
-import { tripsForPicker } from '../lib/tripPicker';
+import { createOpeningGuard } from '../lib/openingGuard';
+import { createTripForOpening, tripsForPicker } from '../lib/tripPicker';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
@@ -34,11 +35,25 @@ export function TripPickerModal({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
+  const openingGuard = useRef(createOpeningGuard());
+
+  useLayoutEffect(() => {
+    if (visible) {
+      openingGuard.current.open();
+      setSaving(false);
+    } else {
+      openingGuard.current.close();
+    }
+    return () => {
+      openingGuard.current.close();
+    };
+  }, [visible]);
 
   const offeredTrips = useMemo(() => tripsForPicker(trips, showArchived), [trips, showArchived]);
   const archivedCount = useMemo(() => trips.filter((trip) => trip.archived).length, [trips]);
 
   const close = () => {
+    openingGuard.current.close();
     setCreating(false);
     setName('');
     setShowArchived(false);
@@ -54,12 +69,12 @@ export function TripPickerModal({
     const trimmed = name.trim();
     if (!trimmed || saving) return;
     setSaving(true);
-    try {
-      const trip = await addTrip(trimmed);
-      choose(trip.id);
-    } finally {
-      setSaving(false);
-    }
+    await createTripForOpening(
+      openingGuard.current,
+      () => addTrip(trimmed),
+      choose,
+      () => setSaving(false)
+    );
   };
 
   if (!visible) return <Modal visible={false} transparent />;

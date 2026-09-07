@@ -9,7 +9,7 @@ import { Amount, Body, Card, Caption, CatBadge, Eyebrow, IconButton, Label, Prim
 import { fmtMoney } from '../lib/format';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
-import { computeTripTotals } from '../lib/trips';
+import { computeTripTotals, expensesForTrip } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -233,7 +233,7 @@ export function TripDetailScreen({
 
   const trip = trips.find((tr) => tr.id === tripId);
 
-  const tripTxns = useMemo(() => transactions.filter((tx) => tx.tripId === tripId), [transactions, tripId]);
+  const tripTxns = useMemo(() => expensesForTrip(transactions, tripId), [transactions, tripId]);
   const totals = useMemo(() => computeTripTotals(transactions, tripId, dc.convertTxn), [transactions, tripId, dc]);
   const sortedTxns = useMemo(
     () => [...tripTxns].sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt)),

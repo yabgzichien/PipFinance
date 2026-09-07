@@ -14,6 +14,7 @@ import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
+import { expenseIdsFromSelection } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
 import type { AccentTheme } from '../state/accent';
 import { useAccent } from '../state/accent';
@@ -202,6 +203,10 @@ export function AllTransactionsScreen({
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tripPickerOpen, setTripPickerOpen] = useState(false);
+  const selectedExpenseIds = useMemo(
+    () => expenseIdsFromSelection(transactions, selected),
+    [transactions, selected]
+  );
 
   const filtered = !!filterCategoryId;
   const filterCat = filterCategoryId ? catById[filterCategoryId] ?? fallback : null;
@@ -305,7 +310,7 @@ export function AllTransactionsScreen({
     );
   };
   const attachSelectedToTrip = async (tripId: string | null) => {
-    const ids = [...selected];
+    const ids = selectedExpenseIds;
     if (ids.length === 0) return;
     await setTransactionsTrip(ids, tripId);
     setTripPickerOpen(false);
@@ -442,8 +447,8 @@ export function AllTransactionsScreen({
             <Text style={[styles.selectTitle, { color: colorTheme.ink }]}>
               {isZh ? `已选择 ${selected.size} 项` : `${selected.size} selected`}
             </Text>
-            <Pressable onPress={() => setTripPickerOpen(true)} hitSlop={8} style={styles.tripAction} disabled={selected.size === 0} accessibilityRole="button" accessibilityLabel={t('addToTrip')}>
-              <Icon name="pin" size={19} color={selected.size === 0 ? colorTheme.ink3 : theme.accent} />
+            <Pressable onPress={() => setTripPickerOpen(true)} hitSlop={8} style={styles.tripAction} disabled={selectedExpenseIds.length === 0} accessibilityRole="button" accessibilityLabel={t('addToTrip')}>
+              <Icon name="pin" size={19} color={selectedExpenseIds.length === 0 ? colorTheme.ink3 : theme.accent} />
             </Pressable>
             <Pressable onPress={deleteSelected} hitSlop={8} style={styles.delAction} disabled={selected.size === 0}>
               <Icon name="trash" size={20} color={selected.size === 0 ? colorTheme.ink3 : '#b3261e'} />

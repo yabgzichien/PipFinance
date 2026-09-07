@@ -12,7 +12,14 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 export type AlertRequest =
   | { kind: 'notify'; title: string; message?: string }
-  | { kind: 'confirm'; title: string; message: string; confirmLabel: string; onConfirm: () => void | Promise<void> };
+  | {
+      kind: 'confirm';
+      title: string;
+      message: string;
+      confirmLabel: string;
+      onConfirm: () => void | Promise<void>;
+      neutralAction?: { label: string; onPress: () => void | Promise<void> };
+    };
 
 interface AlertHostCtx {
   request: AlertRequest | null;

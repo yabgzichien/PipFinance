@@ -3,7 +3,7 @@ jest.mock('expo-audio', () => ({
   setAudioModeAsync: jest.fn(),
 }));
 
-import { partitionCategories } from '../src/screens/CategoriesScreen';
+import { partitionCategories, recurringCategoryHideActions } from '../src/screens/CategoriesScreen';
 import type { Category } from '../src/lib/types';
 
 const category = (id: string, isHidden: boolean): Category => ({
@@ -27,5 +27,20 @@ describe('partitionCategories', () => {
 
     expect(result.visible.map((entry) => entry.id)).toEqual(['food']);
     expect(result.hidden).toEqual([hidden]);
+  });
+});
+
+describe('recurringCategoryHideActions', () => {
+  it('reviews linked payments without hiding, while preserving the separate hide confirmation', () => {
+    const hide = jest.fn();
+    const review = jest.fn();
+    const actions = recurringCategoryHideActions('Review recurring payments', hide, review);
+
+    actions.neutralAction.onPress();
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(hide).not.toHaveBeenCalled();
+
+    actions.onConfirm();
+    expect(hide).toHaveBeenCalledTimes(1);
   });
 });

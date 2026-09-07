@@ -21,6 +21,17 @@ export interface TripTotals {
   byCategory: { categoryId: string; amount: number }[];
 }
 
+/** Expense rows that legitimately belong in a trip's detail and totals. Keeping this predicate
+ * shared prevents legacy or corrupt income/transfer memberships from leaking into the drill-down. */
+export function expensesForTrip(txns: Transaction[], tripId: string): Transaction[] {
+  return txns.filter((txn) => txn.tripId === tripId && txn.type === 'expense');
+}
+
+/** The portion of an Activity multi-selection that the trip action can operate on. */
+export function expenseIdsFromSelection(txns: Transaction[], selected: ReadonlySet<string>): string[] {
+  return txns.filter((txn) => selected.has(txn.id) && txn.type === 'expense').map((txn) => txn.id);
+}
+
 /**
  * What a trip cost, as RECORDED EXPENSES — the sum of the expense rows linked to it.
  *
@@ -59,7 +70,7 @@ export function computeTripTotals(
   tripId: string,
   convert: (t: { amount: number; currency: string; nativeAmount?: number | null }) => number
 ): TripTotals {
-  const mine = txns.filter((t) => t.tripId === tripId && t.type === 'expense');
+  const mine = expensesForTrip(txns, tripId);
 
   const byCat = new Map<string, number>();
   let recordedExpenses = 0;
