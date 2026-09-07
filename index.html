@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pip: Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2.5rem 1.25rem 5rem;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e6e6; background: #111; }
+    a { color: #6db3ff; }
+  }
+  h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+  .updated { color: #767676; font-size: 0.9rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.25rem; }
+  ul { padding-left: 1.25rem; }
+  li { margin-bottom: 0.5rem; }
+  a { color: #1f8a5b; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border: 1px solid #d8d8d8; vertical-align: top; font-size: 0.95rem; }
+  @media (prefers-color-scheme: dark) { th, td { border-color: #333; } }
+  th { background: rgba(31,138,91,0.08); }
+  code { font-size: 0.9em; }
+</style>
+</head>
+<body>
+
+<h1>Privacy Policy for Pip</h1>
+<p class="updated">Last updated: September 7, 2026</p>
+
+<p>Pip ("the app", "we", "us") is a personal budgeting and expense-tracking app. This policy explains what data
+the app handles, where it's stored, and who else (if anyone) sees it.</p>
+
+<h2>1. Data stored on your device</h2>
+<p>Pip is built to work primarily on-device. Your transactions, budgets, commitments, net worth entries, and
+category tags are stored locally in a SQLite database on your phone, using your device's secure storage where
+appropriate. You don't need to create an account or provide any API keys to use the app: Pip has no server
+that stores your financial data, and no copy of your data lives on our infrastructure.</p>
+
+<h2>2. Data you choose to share with third-party services</h2>
+<p>Some optional features send specific data to third-party providers in order to work. These only run when you
+use the corresponding feature (e.g. scanning a receipt or turning on cloud backup).</p>
+
+<table>
+<tr><th>Feature</th><th>What's sent</th><th>Sent to</th><th>Purpose</th></tr>
+<tr>
+  <td>Receipt / statement / document scanning</td>
+  <td>The photo or document image you capture or import, and any text extracted from it</td>
+  <td>Groq, OpenRouter, and/or Google Gemini (AI providers used to read and structure the document)</td>
+  <td>Automatically extract transaction details (amount, date, merchant, category) so you don't have to type them in</td>
+</tr>
+<tr>
+  <td>Cloud backup</td>
+  <td>A backup archive containing your full Pip database: transactions, accounts, budgets, commitments, net worth entries, people and split bills, and any receipt images you have attached</td>
+  <td><strong>Your own Google Drive account</strong>, in Drive's hidden application-data folder</td>
+  <td>Let you restore your data on a new phone. The backup goes to your own Drive, not to us: we never receive or hold a copy</td>
+</tr>
+<tr>
+  <td>Currency &amp; asset prices</td>
+  <td>No personal data, only requests for exchange rates or market prices</td>
+  <td>Public market-data and exchange-rate APIs</td>
+  <td>Show up-to-date FX rates and holdings values</td>
+</tr>
+</table>
+
+<p>These providers process the data to return a result to the app and are not used by us for advertising. We do
+not control their retention practices; see their own privacy policies for details on how long they retain
+API request data.</p>
+
+<p><strong>More on cloud backup.</strong> This feature is off until you turn it on and sign in to Google. Pip asks
+Google for the narrowest possible permission — access limited to a hidden folder that Pip itself creates. Pip
+cannot see, read, or modify any other file in your Drive. The backup is stored under your own Google account
+and is governed by Google's terms and your own Drive settings; you can delete it at any time from within Pip or
+by revoking Pip's access in your Google account settings.</p>
+
+<h2>3. Crash diagnostics</h2>
+<p>When Pip crashes or hits an internal error, it sends an anonymous technical report so the problem can be
+found and fixed. This is the only data Pip transmits that you did not explicitly ask it to send, so here is
+exactly what it contains.</p>
+
+<p><strong>What is sent:</strong> the type of error (for example <code>TypeError</code>), the location in Pip's
+own program code where it occurred, the app version, your device model and operating system version, and a
+randomly generated installation identifier.</p>
+
+<p><strong>What is never sent:</strong> your transactions, amounts, balances, merchant names, category names,
+receipts, photos, notes, contacts, or any other content you have entered or captured. Where an internal error
+message could contain such details, Pip removes them on the device before the report is sent, and for errors
+raised inside features that handle your financial data Pip discards the error message entirely and reports only
+a fixed label naming the feature.</p>
+
+<p><strong>The installation identifier</strong> is a random value generated on your phone. It is not derived from
+your device's hardware, advertising ID, phone number, email, or any other identifier, and it is not linked to
+you personally. Its only purpose is to distinguish one phone crashing repeatedly from many phones each crashing
+once. If you turn crash diagnostics off, this identifier is deleted; if you later turn it back on, a new
+unrelated one is generated.</p>
+
+<p><strong>Turning it off:</strong> crash diagnostics are on by default and can be switched off at any time in
+<strong>Settings → Data → Crash Diagnostics</strong>. When off, nothing is transmitted at all.</p>
+
+<p>Crash reports are processed on our behalf by Sentry (Functional Software, Inc.), whose servers are located in
+the United States. Reports are used solely to diagnose and fix faults in the app. They are not used for
+advertising, profiling, analytics, or any commercial purpose, and they are not sold or shared with anyone else.</p>
+
+<h2>4. What we don't do</h2>
+<ul>
+  <li>We don't sell your data.</li>
+  <li>We don't run advertising or ad-tracking SDKs.</li>
+  <li>We don't use behavioural or usage analytics. Pip does not record which screens you visit, what you tap, how long you use the app, or how you navigate it.</li>
+  <li>We don't require you to create an account or provide your identity to use the app.</li>
+</ul>
+
+<h2>5. Device permissions</h2>
+<ul>
+  <li><strong>Camera / Photo library:</strong> to capture or import a receipt, statement, or e-Invoice image. Only used when you actively choose to scan or attach something.</li>
+  <li><strong>Notifications:</strong> for reminders (e.g. logging a transaction, upcoming commitments). Notifications are scheduled and delivered entirely on-device.</li>
+  <li><strong>Google account access (optional):</strong> requested only if you turn on cloud backup, and limited to Pip's own hidden folder in your Drive.</li>
+</ul>
+
+<h2>6. Your control over your data</h2>
+<p>Because your data lives on your device, you can delete it at any time by removing entries in the app or
+uninstalling the app, which erases the local database. In addition:</p>
+<ul>
+  <li>If you have used cloud backup, delete the backup from within Pip, or revoke Pip's access to your Google account at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+  <li>If you want no crash reports sent, switch off <strong>Settings → Data → Crash Diagnostics</strong>.</li>
+  <li>If you used a document-scanning feature, review section 2 for what may have already been sent to a third-party provider for that specific request.</li>
+</ul>
+
+<h2>7. Children's privacy</h2>
+<p>Pip is not directed at children under 13, and we do not knowingly collect data from them.</p>
+
+<h2>8. Changes to this policy</h2>
+<p>If this policy changes, we'll update the "Last updated" date above. Continued use of the app after changes
+means you accept the revised policy.</p>
+
+<h2>9. Contact</h2>
+<p>Questions about this policy or your data can be sent to
+<a href="mailto:zichienyang@gmail.com">zichienyang@gmail.com</a>.</p>
+
+</body>
+</html>
