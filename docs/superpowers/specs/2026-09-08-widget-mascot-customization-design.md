@@ -275,6 +275,8 @@ Modified:
 - `src/widget/QuickRecordWidget.tsx` — config-driven layout, three cases
 - `src/widget/{widgetTask,syncQuickRecordWidget,syncStreakWidget}.tsx` — read and pass config
 - `app.json` — `minWidth` 110→150dp, `minHeight` 40→50dp
+- `src/state/store.tsx` — `widgetMascotConfig` state and setter, following the
+  existing preference pattern (`store.tsx:558`, `:570`, `:616`, `:1263`, `:2259`)
 - `src/lib/screenNav.ts`, `App.tsx`, `src/lib/settingsSearch.ts`,
   `src/screens/SettingsScreen.tsx`
 - `src/i18n/types.ts`, `src/i18n/translations/{en,zh}.ts`
