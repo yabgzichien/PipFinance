@@ -50,7 +50,8 @@ Pip is a privacy-first, 100% on-device personal finance and budgeting applicatio
 
 ### 10. Privacy & Security
 - **100% On-Device**: All transactions, accounts, budgets, and receipts live in a local SQLite database (`expo-sqlite`).
-- **No Accounts Required**: No signup, no login credentials, no analytics trackers, and no external server syncing.
+- **No Accounts Required**: No signup, no login credentials, and no external server syncing.
+- **No Behavioural Analytics**: Pip does not track what you tap, which screens you visit, or how you use the app. The only thing that ever leaves the device is an anonymous crash report — the error's type and the code location that broke, never your transactions, amounts, merchants, or receipts. Reports carry a random install ID with no link to your identity, and you can turn them off entirely in **Settings → Data → Crash Diagnostics**. See [`src/lib/diagnostics.ts`](src/lib/diagnostics.ts) and [`src/lib/diagnosticsScrub.ts`](src/lib/diagnosticsScrub.ts) — those two files are the complete surface of what can be transmitted.
 
 ---
 
@@ -128,6 +129,23 @@ Add your API keys (optional for local manual use; required for AI screenshot sca
 EXPO_PUBLIC_GROQ_API_KEY="gsk_..."
 EXPO_PUBLIC_GEMINI_API_KEY="AIzaSy..."
 ```
+
+#### Crash diagnostics (optional)
+Leave `EXPO_PUBLIC_SENTRY_DSN` unset and crash reporting never initializes — local dev and source
+builds stay completely silent. To enable it for a release build:
+```env
+EXPO_PUBLIC_SENTRY_DSN="https://...@...ingest.sentry.io/..."
+```
+Release builds additionally need these three at **build time only** (never bundled into the app)
+so JS stack traces are readable instead of minified. Without them the reports arrive useless:
+```env
+SENTRY_ORG="your-org-slug"
+SENTRY_PROJECT="your-project-slug"
+SENTRY_AUTH_TOKEN="sntrys_..."
+```
+What can be transmitted is defined entirely by [`src/lib/diagnostics.ts`](src/lib/diagnostics.ts)
+and [`src/lib/diagnosticsScrub.ts`](src/lib/diagnosticsScrub.ts). No other module imports the
+Sentry SDK, and handled errors are reported by tag only — their messages never leave the device.
 
 ### Running the App
 ```bash

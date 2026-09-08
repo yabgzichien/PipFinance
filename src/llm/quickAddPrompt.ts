@@ -135,6 +135,7 @@ export function parseQuickAddReply(
       date,
       currency,
       categoryId,
+      categorySource: categoryId ? 'guess' : null,
     });
   }
 

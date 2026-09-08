@@ -5,7 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon, type IconName } from '../components/Icon';
 import { BtnLabel, Card, CatBadge, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
 import { AddCategorySheet } from '../components/AddCategorySheet';
-import { LastVisibleCategoryError, NoFallbackCategoryError } from '../db/categoriesRepo';
+import { DeleteCategorySheet } from '../components/DeleteCategorySheet';
+import { OverflowMenu } from '../components/OverflowMenu';
+import { InvalidReplacementCategoryError, LastVisibleCategoryError, NoFallbackCategoryError } from '../db/categoriesRepo';
 import { catColorsForHue } from '../lib/catColors';
 import { resolveCategoryPresentation } from '../lib/categoryPresentation';
 import { confirmAction, notify } from '../lib/platformAlert';
@@ -26,6 +28,21 @@ export function partitionCategories<T extends Pick<Category, 'isHidden'>>(catego
     visible: categories.filter((category) => !category.isHidden),
     hidden: categories.filter((category) => category.isHidden),
   };
+}
+
+/**
+ * How much of the user's history a deletion would re-file: the transactions filed under the
+ * category plus the live recurring bills pointing at it. Zero means the destination genuinely
+ * does not matter and the user need not be asked for one.
+ */
+export function deletionImpact(
+  transactions: { categoryId?: string | null }[],
+  commitments: { categoryId?: string | null; archived?: boolean }[],
+  categoryId: string
+): number {
+  const txns = transactions.filter((txn) => txn.categoryId === categoryId).length;
+  const bills = commitments.filter((bill) => !bill.archived && bill.categoryId === categoryId).length;
+  return txns + bills;
 }
 
 /** Whether an icon value is a custom photo URI rather than a named icon. */
@@ -53,6 +70,7 @@ export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () =
   const {
     categories,
     commitments,
+    transactions,
     deleteCategory,
     setCategoryHidden,
     updateCategoryHue,
@@ -62,6 +80,8 @@ export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () =
 
   const [kind, setKind] = useState<TxnType>('expense');
   const [addSheetVisible, setAddSheetVisible] = useState(false);
+  /** The category whose deletion is waiting on the user choosing where its history goes. */
+  const [deleting, setDeleting] = useState<Category | null>(null);
 
   // Which existing category is being edited, and its presentation overrides chosen so far.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -166,26 +186,45 @@ export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () =
     await proceed();
   };
 
-  const confirmDelete = (id: string, label: string) => {
-    confirmAction(
-      isZh ? '删除分类？' : 'Delete category?',
-      isZh ? `确定要删除“${label}”吗？其所属交易将转移至其他分类。` : `Remove “${label}”? Transactions move to another category and its learning is cleared.`,
-      isZh ? '删除' : 'Delete',
-      async () => {
-        try {
-          await deleteCategory(id);
-        } catch (e) {
-          if (e instanceof NoFallbackCategoryError) {
-            notify(
-              isZh ? '请先添加其他分类' : 'Add another category first',
-              isZh ? `“${label}”是您唯一的${e.kind === 'income' ? '收入' : '支出'}分类。请先添加新分类后再删除。` : `“${label}” is your only ${e.kind} category, so there's nowhere to move its transactions. Add another ${e.kind} category, then delete this one.`
-            );
-            return;
-          }
-          throw e;
-        }
+  /** Shared failure handling for both deletion paths. */
+  const runDelete = async (id: string, label: string, replacementId?: string) => {
+    try {
+      await deleteCategory(id, replacementId);
+    } catch (e) {
+      if (e instanceof NoFallbackCategoryError) {
+        notify(
+          isZh ? '请先添加其他分类' : 'Add another category first',
+          isZh ? `“${label}”是您唯一的${e.kind === 'income' ? '收入' : '支出'}分类。请先添加新分类后再删除。` : `“${label}” is your only ${e.kind} category, so there's nowhere to move its transactions. Add another ${e.kind} category, then delete this one.`
+        );
+        return;
       }
-    );
+      if (e instanceof InvalidReplacementCategoryError) {
+        notify(
+          isZh ? '无法转移到该分类' : "That category can't take them",
+          isZh ? '请选择另一个同类型的分类。' : 'Pick another category of the same kind and try again.'
+        );
+        return;
+      }
+      throw e;
+    }
+  };
+
+  const confirmDelete = (category: Category, label: string) => {
+    const moving = deletionImpact(transactions, commitments, category.id);
+    const candidates = list.filter((entry) => entry.id !== category.id);
+
+    // Nothing is filed here, so nothing about the user's history changes and there is no
+    // meaningful choice to offer — the plain confirmation is the honest one.
+    if (moving === 0 || candidates.length === 0) {
+      confirmAction(
+        isZh ? '删除分类？' : 'Delete category?',
+        isZh ? `确定要删除“${label}”吗？` : `Remove “${label}”? Its learned merchants are cleared.`,
+        isZh ? '删除' : 'Delete',
+        () => { void runDelete(category.id, label); }
+      );
+      return;
+    }
+    setDeleting(category);
   };
 
   return (
@@ -223,15 +262,18 @@ export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () =
                 <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>
                   {tCat(c)}
                 </Text>
-                <Pressable onPress={() => toggleEdit(c)} hitSlop={8} style={styles.editBtn} accessibilityRole="button" accessibilityLabel={`${t('editCategory')}: ${tCat(c)}`}>
-                  <Icon name="pencil" size={16} color={colorTheme.ink2} />
-                </Pressable>
-                <Pressable onPress={() => { void hideCategory(c); }} hitSlop={8} style={styles.hideBtn} accessibilityRole="button" accessibilityLabel={`${hideActionLabel}: ${tCat(c)}`}>
-                  <Icon name="chevronDown" size={17} color={colorTheme.ink2} />
-                </Pressable>
-                <Pressable onPress={() => confirmDelete(c.id, tCat(c))} hitSlop={8} style={styles.delBtn} accessibilityRole="button" accessibilityLabel={`${isZh ? '删除分类' : 'Delete category'}: ${tCat(c)}`}>
-                  <Icon name="trash" size={17} color="#b3261e" />
-                </Pressable>
+                {/* One trigger, three named actions. The row used to carry an edit pencil, an
+                    unlabelled chevron meaning "hide" and a red trash icon, which put management
+                    louder than the category itself and left hiding undiscoverable. */}
+                <OverflowMenu
+                  title={tCat(c)}
+                  accessibilityLabel={`${isZh ? '更多操作' : 'More actions'}: ${tCat(c)}`}
+                  actions={[
+                    { label: t('editCategory'), icon: 'pencil', onPress: () => toggleEdit(c) },
+                    { label: hideActionLabel, icon: 'chevronDown', onPress: () => { void hideCategory(c); } },
+                    { label: isZh ? '删除分类' : 'Delete category', icon: 'trash', destructive: true, onPress: () => confirmDelete(c, tCat(c)) },
+                  ]}
+                />
               </View>
 
               {editingId === c.id && (
@@ -350,6 +392,17 @@ export function CategoriesScreen({ onBack, onReviewCommitments }: { onBack: () =
         onCreated={() => setAddSheetVisible(false)}
         onActivated={() => setAddSheetVisible(false)}
       />
+      <DeleteCategorySheet
+        category={deleting}
+        candidates={deleting ? list.filter((entry) => entry.id !== deleting.id) : []}
+        movingCount={deleting ? deletionImpact(transactions, commitments, deleting.id) : 0}
+        onCancel={() => setDeleting(null)}
+        onConfirm={(replacementId) => {
+          const target = deleting;
+          setDeleting(null);
+          if (target) void runDelete(target.id, tCat(target), replacementId);
+        }}
+      />
     </View>
   );
 }
@@ -371,9 +424,6 @@ const styles = StyleSheet.create({
   rowLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 15 },
   hiddenCopy: { flex: 1, minWidth: 0, gap: 2 },
   hiddenBadge: { fontFamily: uiFont(700), fontSize: 11.5 },
-  delBtn: { padding: 6 },
-  editBtn: { padding: 6 },
-  hideBtn: { padding: 6 },
   showAgainBtn: { minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   showAgainText: { fontFamily: uiFont(700), fontSize: 12 },
   editPanel: { padding: 15, paddingTop: 12, borderTopWidth: 1, gap: 12 },

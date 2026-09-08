@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AccountLinkField } from '../components/AccountLinkField';
 import { AddAccountModal } from '../components/AddAccountModal';
-import { AddCategoryModal } from '../components/AddCategoryModal';
+import { AddCategorySheet } from '../components/AddCategorySheet';
+import { TripPickerModal } from '../components/TripPickerModal';
 import { AmountSheet } from '../components/AmountSheet';
 import { BrandLogo, matchBrand } from '../components/BrandLogo';
 import { MoreDetails } from '../components/MoreDetails';
@@ -11,25 +11,33 @@ import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { TourAnchor } from '../components/TourAnchor';
 import { BtnLabel, BubbleText, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
-import { getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
+import { activateCurrency, getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { CLASS_BY_ID, defaultLinkEffect, type LinkEffect } from '../lib/networth';
 import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
 import { evaluateExpression } from '../lib/calc';
+import { visibleChoices } from '../lib/chipRow';
 import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmtMoney } from '../lib/format';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { tap } from '../lib/haptics';
 import { SplitSheet } from '../components/SplitSheet';
 import { matchInstitution } from '../lib/institutions';
-import type { Account, Category, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
+import { useModalHandoff } from '../lib/modalHandoff';
+import { tripsForPicker } from '../lib/tripPicker';
+import type { Account, Category, CategorySuggestion, ExtractedTxn, SplitDraft, TxnType } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
+
+/** How many "Pay from" accounts get a chip before the rest move behind "More". */
+const MAX_ACCOUNT_CHIPS = 5;
+/** The same cap for the optional rows in More details, which also spend a slot on "None". */
+const MAX_OPTIONAL_CHIPS = 4;
 
 /**
  * Score accounts to prioritize payment methods in order:
@@ -82,7 +90,9 @@ export function ManualEntryScreen({
   initialType = null,
   initialDate = null,
   initialCategoryId = null,
+  initialCategorySource = null,
   initialSplit = null,
+  initialTripId = null,
   isTutorial = false,
   activeTourAnchor = null,
   onAmountValidChange,
@@ -90,7 +100,7 @@ export function ManualEntryScreen({
 }: {
   categories: Category[];
   onBack: () => void;
-  onComplete: (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => void;
+  onComplete: (item: ExtractedTxn, categoryId: string, split: SplitDraft | null, tripId: string | null) => void;
   /** Overrides the top-bar title when the caller knows how the user got here. */
   title?: string;
   /** Framed as the standalone Split action rather than a plain manual entry. */
@@ -105,7 +115,14 @@ export function ManualEntryScreen({
   initialType?: TxnType | null;
   initialDate?: string | null;
   initialCategoryId?: string | null;
+  /** Why `initialCategoryId` was picked — 'learned'/'guess' if auto-assigned, null if there's no
+   *  prefill or it's a plain default. Drives the "AI guess"/"Learned" badge on that category's
+   *  chip so the user can see it wasn't a manual pick. */
+  initialCategorySource?: CategorySuggestion['source'] | null;
   initialSplit?: SplitDraft | null;
+  /** Prefills the optional trip — set when entry was opened from a trip's own "Add expense".
+   *  The user can still change or clear it here; whatever they leave is what `onComplete` reports. */
+  initialTripId?: string | null;
   /** When true, formats Pip's speech bubble to guide the new user through manual entry. */
   isTutorial?: boolean;
   activeTourAnchor?: string | null;
@@ -120,7 +137,7 @@ export function ManualEntryScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, formatFullDate, isZh } = useLanguage();
-  const { accounts, recordBalanceLink, ensureDefaultAccount } = useAppData();
+  const { accounts, recordBalanceLink, ensureDefaultAccount, trips } = useAppData();
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
   const [amountText, setAmountText] = useState(
     initialAmount ? initialAmount.toFixed(decimalsFor(initialCurrency ?? BASE_CURRENCY)) : ''
@@ -129,12 +146,25 @@ export function ManualEntryScreen({
   const [dateFocused, setDateFocused] = useState(false);
   const [type, setType] = useState<TxnType>(initialType ?? 'expense');
   const [cat, setCat] = useState<string | null>(initialCategoryId);
+  // Whether the user has picked/cleared a category themselves. Gates the effect below, which
+  // syncs `cat` to `initialCategoryId` as it arrives — for the receipt-scan path this resolves
+  // asynchronously (an LLM round-trip) after this screen has already mounted with nothing
+  // prefilled, so a plain useState initializer alone would miss it.
+  const [catTouched, setCatTouched] = useState(false);
   const [remark, setRemark] = useState('');
   const [adding, setAdding] = useState(false);
   const [addingAccount, setAddingAccount] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [liabilityPickerOpen, setLiabilityPickerOpen] = useState(false);
+  const [addingLiability, setAddingLiability] = useState(false);
+  const { request: requestLiabilitySheet, onDismiss: onLiabilityPickerDismissed } = useModalHandoff();
+  // "Create new account" swaps the picker modal for the new-account sheet; on iOS the second
+  // has to wait for the first to finish dismissing or it is never presented at all.
+  const { request: requestAccountSheet, onDismiss: onAccountPickerDismissed } = useModalHandoff();
   const [split, setSplit] = useState<SplitDraft | null>(initialSplit);
   const [splitting, setSplitting] = useState(false);
+  const [tripId, setTripId] = useState<string | null>(initialTripId);
+  const [tripPickerOpen, setTripPickerOpen] = useState(false);
   const [amountOpen, setAmountOpen] = useState(false);
   // The date is a chip row by default; the raw ISO field is revealed only when the user picks
   // a day that isn't today or yesterday, which is where the typing cost was actually going.
@@ -149,7 +179,15 @@ export function ManualEntryScreen({
 
   useEffect(() => {
     (async () => {
-      const [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
+      let [active, entry, fx] = await Promise.all([getActiveCurrencies(), getEntryCurrency(), listFxRates()]);
+      // A receipt scan hands back whatever currency it read off the paper, which may not
+      // be one the user has ever entered before. Activate it here rather than leaving the
+      // amount stuck on an inactive currency with no cached rate and no way to save.
+      if (initialCurrency && !active.includes(initialCurrency)) {
+        if (await activateCurrency(initialCurrency)) {
+          [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
+        }
+      }
       setActiveCurrencies(active);
       if (initialCurrency) {
         setCurrency(initialCurrency);
@@ -166,6 +204,14 @@ export function ManualEntryScreen({
   const changeCurrency = async (code: string) => {
     setCurrency(code);
     await setEntryCurrency(code);
+  };
+
+  // CurrencyChip's "Add currency" already persisted the activation before calling this  a
+  // refetch (rather than appending to local state) is what picks up its freshly cached FX rate.
+  const onCurrencyActivated = async () => {
+    const [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
+    setActiveCurrencies(active);
+    setRates(ratesFromCache(fx));
   };
 
   const decimals = decimalsFor(currency);
@@ -199,19 +245,20 @@ export function ManualEntryScreen({
   const [fromAccountId, setFromAccountId] = useState<string | null>(defaultAcctId);
   const [toAccountId, setToAccountId] = useState<string | null>(null);
 
-  // Display maximum 5 accounts. If the currently selected account is not among the top 5,
-  // swap it into the 5th slot so the user always sees their active selection.
-  const visibleAccounts = useMemo(() => {
-    if (paymentAccounts.length <= 5) return paymentAccounts;
-    const top = paymentAccounts.slice(0, 5);
-    if (fromAccountId && !top.some((a) => a.id === fromAccountId)) {
-      const selected = paymentAccounts.find((a) => a.id === fromAccountId);
-      if (selected) {
-        return [...paymentAccounts.slice(0, 4), selected];
-      }
-    }
-    return top;
-  }, [paymentAccounts, fromAccountId]);
+  const visibleAccounts = useMemo(() => visibleChoices(paymentAccounts, fromAccountId, MAX_ACCOUNT_CHIPS), [paymentAccounts, fromAccountId]);
+
+  // The two optional rows inside More details are capped tighter than "Pay from": each also
+  // carries a "None" chip and a "More" chip, so four options is what still reads as a row
+  // rather than a wall.
+  const visibleLiabilities = useMemo(
+    () => visibleChoices(liabilityAccounts, toAccountId, MAX_OPTIONAL_CHIPS),
+    [liabilityAccounts, toAccountId]
+  );
+
+  // Current trips only. Archived travel stays behind "More", which is where TripPickerModal
+  // already offers it for a late charge.
+  const currentTrips = useMemo(() => tripsForPicker(trips, false), [trips]);
+  const visibleTrips = useMemo(() => visibleChoices(currentTrips, tripId, MAX_OPTIONAL_CHIPS), [currentTrips, tripId]);
 
   const grid = useMemo(() => categories.filter((c) => c.kind === type), [categories, type]);
   const calc = useMemo(() => evaluateExpression(amountText, decimals), [amountText, decimals]);
@@ -285,10 +332,19 @@ export function ManualEntryScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cat]);
 
+  // Picks up a receipt-scan category suggestion that resolves after mount (see catTouched above).
+  // Quick-add's prefill is already resolved before this screen mounts, so this is a no-op there.
+  useEffect(() => {
+    if (catTouched || !initialCategoryId || cat === initialCategoryId) return;
+    setCat(initialCategoryId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCategoryId, catTouched]);
+
   const switchType = (t: TxnType) => {
     if (t === type) return;
     setType(t);
     setCat(null);
+    setCatTouched(true);
   };
 
   // Seed the required account selection once accounts are known, creating a
@@ -305,14 +361,20 @@ export function ManualEntryScreen({
   const activeSplit =
     split && Math.abs(split.gross - round2(amount)) < 0.005 ? split : null;
 
+  /** The trip this entry will join, if any. Expense-only: trips group spending. */
+  const currentTrip = useMemo(() => (tripId ? trips.find((trip) => trip.id === tripId) ?? null : null), [tripId, trips]);
+
   /** What the collapsed More details row reports. */
   const detailsSummary = useMemo(() => {
     const parts: string[] = [];
     if (merchant.trim()) parts.push(merchant.trim());
     if (toAccount) parts.push(toAccount.name);
+    // Named rather than counted: an attached trip changes which total this row lands in, so a
+    // collapsed More details must not be able to hide it.
+    if (type === 'expense' && currentTrip) parts.push(currentTrip.name);
     if (remark.trim()) parts.push(isZh ? '有备注' : 'remark added');
     return parts.length > 0 ? parts.join(' · ') : (isZh ? '更多选填项' : 'More options');
-  }, [merchant, toAccount, remark, isZh]);
+  }, [merchant, toAccount, currentTrip, type, remark, isZh]);
 
   const save = async () => {
     if (!canSave || !cat || !validDate || rate == null) return;
@@ -348,7 +410,9 @@ export function ManualEntryScreen({
       await recordBalanceLink(toAccountId, toAmt, 'subtract', validDate);
     }
 
-    onComplete(item, cat, activeSplit);
+    // Income is never trip spending, so an entry toggled to income drops the trip rather than
+    // carrying a stale one into a total that excludes it anyway.
+    onComplete(item, cat, activeSplit, type === 'expense' ? tripId : null);
   };
 
   return (
@@ -456,69 +520,23 @@ export function ManualEntryScreen({
             {type === 'expense' ? (isZh ? '扣款账户' : 'Pay from') : (isZh ? '存入账户' : 'Deposit into')}
           </Eyebrow>
           <View style={styles.accountChips}>
-            {visibleAccounts.map((a) => {
-              const on = fromAccountId === a.id;
-              const brand = matchBrand(a.name);
-              return (
-                <Pressable
-                  key={a.id}
-                  onPress={() => {
-                    tap();
-                    setFromAccountId(a.id);
-                  }}
-                  style={[
-                    styles.accountChip,
-                    {
-                      backgroundColor: on ? theme.accentTint : colorTheme.surface,
-                      borderColor: on ? theme.accentSoft : colorTheme.line,
-                    },
-                  ]}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  accessibilityLabel={a.name}
-                >
-                  {brand ? (
-                    <BrandLogo brand={brand} size={16} />
-                  ) : a.icon ? (
-                    <Image source={{ uri: a.icon }} style={{ width: 16, height: 16, borderRadius: 4 }} />
-                  ) : (
-                    <Icon
-                      name={(CLASS_BY_ID[a.cls]?.icon ?? 'wallet') as IconName}
-                      size={15}
-                      color={on ? theme.accent : colorTheme.ink2}
-                    />
-                  )}
-                  <Text
-                    style={[
-                      styles.accountChipText,
-                      { color: on ? theme.accent : colorTheme.ink2 },
-                      on && { fontFamily: uiFont(700) },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {a.name}
-                  </Text>
-                  {on && <Icon name="check" size={13} color={theme.accent} stroke={2.4} />}
-                </Pressable>
-              );
-            })}
-            <Pressable
+            {visibleAccounts.map((a) => (
+              <ChoiceChip
+                key={a.id}
+                label={a.name}
+                on={fromAccountId === a.id}
+                onPress={() => {
+                  tap();
+                  setFromAccountId(a.id);
+                }}
+              >
+                <AccountChipIcon account={a} on={fromAccountId === a.id} />
+              </ChoiceChip>
+            ))}
+            <MoreChip
               onPress={() => setAccountPickerOpen(true)}
-              style={[
-                styles.accountChip,
-                {
-                  borderColor: colorTheme.line,
-                  backgroundColor: colorTheme.surface,
-                },
-              ]}
-              accessibilityRole="button"
               accessibilityLabel={isZh ? '选择其他账户' : 'More accounts'}
-            >
-              <Text style={[styles.accountChipText, { color: colorTheme.ink2 }]}>
-                {isZh ? '更多' : 'More'}
-              </Text>
-              <Icon name="chevronDown" size={13} color={colorTheme.ink3} />
-            </Pressable>
+            />
           </View>
         </TourAnchor>
 
@@ -531,7 +549,15 @@ export function ManualEntryScreen({
           <View style={styles.grid}>
             {grid.map((c) => (
               <View key={c.id} style={styles.gridCell}>
-                <CategoryChip category={c} selected={cat === c.id} suggested={false} onPress={() => setCat(c.id)} />
+                <CategoryChip
+                  category={c}
+                  selected={cat === c.id}
+                  suggested={initialCategorySource && c.id === initialCategoryId ? initialCategorySource : false}
+                  onPress={() => {
+                    setCat(c.id);
+                    setCatTouched(true);
+                  }}
+                />
               </View>
             ))}
             <View style={styles.gridCell}>
@@ -603,20 +629,91 @@ export function ManualEntryScreen({
         )}
 
         <MoreDetails summary={detailsSummary} defaultOpen={!!initialMerchant}>
+          {/* The two pickers lead: they are the fields that change which totals this row lands
+              in, and as chip rows they are answerable at a glance. Merchant and remark are
+              free text and can wait below them. */}
+
           {/* Only offered to users who actually have a loan to pay down. */}
           {type === 'expense' && liabilityAccounts.length > 0 && (
-            <View style={{ marginBottom: 14 }}>
-              <AccountLinkField
-                accounts={liabilityAccounts}
-                selectedId={toAccountId}
-                onSelect={setToAccountId}
-                label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
-                infoEntry="reduce_liability"
-              />
-            </View>
+            <>
+              <View style={styles.optionalLabelRow}>
+                <Eyebrow>{isZh ? '抵扣负债（选填）' : 'Reduce liability (optional)'}</Eyebrow>
+                <InfoButton entry="reduce_liability" />
+              </View>
+              <View style={styles.accountChips}>
+                <ChoiceChip
+                  label={isZh ? '无' : 'None'}
+                  on={!toAccountId}
+                  onPress={() => {
+                    tap();
+                    setToAccountId(null);
+                  }}
+                />
+                {visibleLiabilities.map((a) => (
+                  <ChoiceChip
+                    key={a.id}
+                    label={a.name}
+                    on={toAccountId === a.id}
+                    onPress={() => {
+                      tap();
+                      setToAccountId(a.id);
+                    }}
+                  >
+                    <AccountChipIcon account={a} on={toAccountId === a.id} />
+                  </ChoiceChip>
+                ))}
+                {/* Always offered, like the trip row's: the picker is also where a loan the user
+                    hasn't recorded yet gets created. */}
+                <MoreChip
+                  onPress={() => setLiabilityPickerOpen(true)}
+                  accessibilityLabel={isZh ? '选择其他负债账户' : 'More liability accounts'}
+                />
+              </View>
+            </>
           )}
 
-          <Eyebrow style={{ marginTop: type === 'expense' && liabilityAccounts.length > 0 ? 6 : 0, marginBottom: 8 }}>
+          {/* Optional trip. Same picker as the transaction editor behind "More", so attaching a
+              trip while recording an expense costs nothing more than fixing it afterwards used
+              to. Expenses only: trips group spending, not income. */}
+          {type === 'expense' && (
+            <>
+              <Eyebrow style={{ marginTop: liabilityAccounts.length > 0 ? 18 : 0, marginBottom: 8 }}>
+                {isZh ? '行程（选填）' : 'Trip (optional)'}
+              </Eyebrow>
+              <View style={styles.accountChips}>
+                <ChoiceChip
+                  label={t('noTrip')}
+                  on={!tripId}
+                  onPress={() => {
+                    tap();
+                    setTripId(null);
+                  }}
+                />
+                {visibleTrips.map((trip) => (
+                  <ChoiceChip
+                    key={trip.id}
+                    label={trip.name}
+                    on={tripId === trip.id}
+                    accessibilityLabel={`${t('tripsTitle')}: ${trip.name}`}
+                    onPress={() => {
+                      tap();
+                      setTripId(trip.id);
+                    }}
+                  >
+                    <Icon name="pin" size={15} color={tripId === trip.id ? theme.accent : colorTheme.ink2} />
+                  </ChoiceChip>
+                ))}
+                {/* Always offered: the picker is also where a new trip gets created, and where
+                    an archived one can be reached for a late charge. */}
+                <MoreChip
+                  onPress={() => setTripPickerOpen(true)}
+                  accessibilityLabel={isZh ? '选择其他行程' : 'More trips'}
+                />
+              </View>
+            </>
+          )}
+
+          <Eyebrow style={{ marginTop: type === 'expense' ? 18 : 0, marginBottom: 8 }}>
             {type === 'income' ? (isZh ? '收入来源（选填）' : 'Source (optional)') : (isZh ? '商家名称（选填）' : 'Merchant (optional)')}
           </Eyebrow>
           <TextInput
@@ -658,18 +755,37 @@ export function ManualEntryScreen({
         activeCurrencies={activeCurrencies}
         decimals={decimals}
         onChangeCurrency={changeCurrency}
+        onCurrencyActivated={onCurrencyActivated}
         onApply={applyAmount}
         onClose={() => setAmountOpen(false)}
       />
 
-      <AddCategoryModal
+      {/* The same catalogue Settings offers, not a custom-name-only form: someone recording
+          petrol should be able to switch Petrol on right here rather than leaving a half-typed
+          expense to go hunting in Settings. The draft survives because this is an overlay. */}
+      <AddCategorySheet
         visible={adding}
         kind={type}
         onClose={() => setAdding(false)}
         onCreated={(id) => {
           setCat(id);
+          setCatTouched(true);
           setAdding(false);
         }}
+        onActivated={(ids) => {
+          if (ids.length > 0) {
+            setCat(ids[0]);
+            setCatTouched(true);
+          }
+          setAdding(false);
+        }}
+      />
+
+      <TripPickerModal
+        visible={tripPickerOpen}
+        selectedId={tripId}
+        onClose={() => setTripPickerOpen(false)}
+        onSelect={setTripId}
       />
 
       <AddAccountModal
@@ -681,8 +797,107 @@ export function ManualEntryScreen({
         }}
       />
 
+      {/* The liability row's overflow, and the one place a loan can be created mid-entry. */}
+      <Modal
+        visible={liabilityPickerOpen}
+        transparent
+        animationType="fade"
+        onDismiss={onLiabilityPickerDismissed}
+        onRequestClose={() => setLiabilityPickerOpen(false)}
+      >
+        <Pressable style={styles.menuBackdrop} onPress={() => setLiabilityPickerOpen(false)} />
+        <View style={styles.menuWrap} pointerEvents="box-none">
+          <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
+            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>
+              {isZh ? '选择抵扣负债账户' : 'Select liability account'}
+            </Text>
+            <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
+              <Pressable
+                onPress={() => {
+                  tap();
+                  setToAccountId(null);
+                  setLiabilityPickerOpen(false);
+                }}
+                style={[styles.accountMenuItem, !toAccountId && { backgroundColor: theme.accentTint }]}
+              >
+                <View style={{ width: 16 }} />
+                <Text
+                  style={[
+                    styles.accountMenuText,
+                    { color: colorTheme.ink },
+                    !toAccountId && { color: theme.onTint, fontFamily: uiFont(700) },
+                  ]}
+                >
+                  {isZh ? '无' : 'None'}
+                </Text>
+                {!toAccountId && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
+              </Pressable>
+              {liabilityAccounts.map((a) => {
+                const on = toAccountId === a.id;
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => {
+                      tap();
+                      setToAccountId(a.id);
+                      setLiabilityPickerOpen(false);
+                    }}
+                    style={[styles.accountMenuItem, on && { backgroundColor: theme.accentTint }]}
+                  >
+                    <AccountChipIcon account={a} on={on} />
+                    <Text
+                      style={[
+                        styles.accountMenuText,
+                        { color: colorTheme.ink },
+                        on && { color: theme.onTint, fontFamily: uiFont(700) },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {a.name}
+                    </Text>
+                    {on && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
+            <Pressable
+              onPress={() => {
+                // Same iOS ordering constraint as the payment picker — see useModalHandoff.
+                setLiabilityPickerOpen(false);
+                requestLiabilitySheet(() => setAddingLiability(true));
+              }}
+              style={styles.accountMenuItem}
+            >
+              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
+              <Text style={[styles.accountMenuText, { color: theme.accent, fontFamily: uiFont(600) }]}>
+                {isZh ? '创建新负债账户' : 'Create new liability account'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Opens straight on the Liabilities tab: reaching it from this row has already answered
+          which side of the balance sheet the new account sits on. */}
+      <AddAccountModal
+        visible={addingLiability}
+        initialKind="liability"
+        onClose={() => setAddingLiability(false)}
+        onCreated={(id) => {
+          setToAccountId(id);
+          setAddingLiability(false);
+        }}
+      />
+
       {/* Full account picker modal when user taps "More" */}
-      <Modal visible={accountPickerOpen} transparent animationType="fade" onRequestClose={() => setAccountPickerOpen(false)}>
+      <Modal
+        visible={accountPickerOpen}
+        transparent
+        animationType="fade"
+        onDismiss={onAccountPickerDismissed}
+        onRequestClose={() => setAccountPickerOpen(false)}
+      >
         <Pressable style={styles.menuBackdrop} onPress={() => setAccountPickerOpen(false)} />
         <View style={styles.menuWrap} pointerEvents="box-none">
           <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
@@ -732,8 +947,10 @@ export function ManualEntryScreen({
             <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
             <Pressable
               onPress={() => {
+                // The sheet only opens once this picker has actually finished dismissing —
+                // see useModalHandoff for why opening it here directly never showed on iOS.
                 setAccountPickerOpen(false);
-                setAddingAccount(true);
+                requestAccountSheet(() => setAddingAccount(true));
               }}
               style={styles.accountMenuItem}
             >
@@ -764,6 +981,87 @@ export function ManualEntryScreen({
   );
 }
 
+/**
+ * One option in a capped chip row. Shared by "Pay from", "Reduce liability" and "Trip" so the
+ * three rows cannot drift apart: the selected state is the same tint, weight and check mark
+ * wherever the user meets it.
+ */
+function ChoiceChip({
+  label,
+  on,
+  onPress,
+  accessibilityLabel,
+  children,
+}: {
+  label: string;
+  on: boolean;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  /** Leading glyph — an account's brand logo or class icon, a trip's pin. */
+  children?: React.ReactNode;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.accountChip,
+        {
+          backgroundColor: on ? theme.accentTint : colorTheme.surface,
+          borderColor: on ? theme.accentSoft : colorTheme.line,
+        },
+      ]}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: on }}
+      accessibilityLabel={accessibilityLabel ?? label}
+    >
+      {children}
+      <Text
+        style={[styles.accountChipText, { color: on ? theme.accent : colorTheme.ink2 }, on && { fontFamily: uiFont(700) }]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      {on && <Icon name="check" size={13} color={theme.accent} stroke={2.4} />}
+    </Pressable>
+  );
+}
+
+/** The chip that hands the row's overflow to a full picker. Never carries a selected state —
+ *  whatever is selected has already displaced a chip in the row (see visibleChoices). */
+function MoreChip({ onPress, accessibilityLabel }: { onPress: () => void; accessibilityLabel: string }) {
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.accountChip, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <Text style={[styles.accountChipText, { color: colorTheme.ink2 }]}>{isZh ? '更多' : 'More'}</Text>
+      <Icon name="chevronDown" size={13} color={colorTheme.ink3} />
+    </Pressable>
+  );
+}
+
+/** An account's own mark: its bank's logo, its custom icon, or its class glyph. */
+function AccountChipIcon({ account, on }: { account: Account; on: boolean }) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const brand = matchBrand(account.name);
+  if (brand) return <BrandLogo brand={brand} size={16} />;
+  if (account.icon) return <Image source={{ uri: account.icon }} style={{ width: 16, height: 16, borderRadius: 4 }} />;
+  return (
+    <Icon
+      name={(CLASS_BY_ID[account.cls]?.icon ?? 'wallet') as IconName}
+      size={15}
+      color={on ? theme.accent : colorTheme.ink2}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, marginBottom: 18, borderWidth: 1 },
@@ -788,6 +1086,8 @@ const styles = StyleSheet.create({
     fontFamily: uiFont(600),
     fontSize: 14,
   },
+  // An eyebrow that has to make room for an InfoButton beside it.
+  optionalLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
   dateHintBad: { color: '#c5402f' },
   dateChips: { flexDirection: 'row', gap: 8 },
   dateChip: {

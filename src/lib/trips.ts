@@ -27,6 +27,23 @@ export function expensesForTrip(txns: Transaction[], tripId: string): Transactio
   return txns.filter((txn) => txn.tripId === tripId && txn.type === 'expense');
 }
 
+/**
+ * How many of `selectedIds` would be taken away from a trip they already belong to by attaching
+ * them to `destinationTripId`. This is the number the "move to this trip?" confirmation quotes.
+ *
+ * It deliberately reads the FULL transaction list rather than whatever subset a picker happens
+ * to be showing. A selection survives the search box being retyped, so counting only the visible
+ * candidates let a selected row hide itself and be moved with no confirmation at all.
+ */
+export function reassignedFromOtherTrips(
+  txns: Transaction[],
+  selectedIds: readonly string[],
+  destinationTripId: string
+): number {
+  const selected = new Set(selectedIds);
+  return txns.filter((txn) => selected.has(txn.id) && !!txn.tripId && txn.tripId !== destinationTripId).length;
+}
+
 /** The portion of an Activity multi-selection that the trip action can operate on. */
 export function expenseIdsFromSelection(txns: Transaction[], selected: ReadonlySet<string>): string[] {
   return txns.filter((txn) => selected.has(txn.id) && txn.type === 'expense').map((txn) => txn.id);

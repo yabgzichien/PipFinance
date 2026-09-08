@@ -14,7 +14,7 @@ export type IconName =
   | 'trash' | 'sliders' | 'gear' | 'alert' | 'pencil' | 'gift' | 'return' | 'percent'
   | 'home' | 'scale' | 'signal' | 'book' | 'shield' | 'store' | 'download' | 'file' | 'table'
   | 'copy' | 'upload' | 'code' | 'pin' | 'chart' | 'filter' | 'share' | 'folder'
-  | 'burger' | 'food' | 'phone' | 'cash' | 'banknote' | 'swap';
+  | 'burger' | 'food' | 'phone' | 'cash' | 'banknote' | 'swap' | 'calendar';
 
 type RenderFn = (stroke: string, sw: number) => React.ReactNode;
 
@@ -398,6 +398,14 @@ const ICONS: Record<IconName, RenderFn> = {
     <G fill="none" stroke={s} strokeWidth={w}>
       <Path d="M4 8h14.5M15 4.5L18.5 8 15 11.5" />
       <Path d="M20 16H5.5M9 12.5L5.5 16 9 19.5" />
+    </G>
+  ),
+  calendar: (s, w) => (
+    <G fill="none" stroke={s} strokeWidth={w}>
+      <Rect x={3} y={5} width={18} height={16} rx={2.5} />
+      <Line x1={3} y1={10} x2={21} y2={10} />
+      <Line x1={8} y1={3} x2={8} y2={7} />
+      <Line x1={16} y1={3} x2={16} y2={7} />
     </G>
   ),
 };

@@ -3,13 +3,14 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { Icon } from '../components/Icon';
+import { OverflowMenu } from '../components/OverflowMenu';
 import { Pip } from '../components/Pip';
 import { TxnRow } from './AllTransactionsScreen';
-import { Amount, Body, Card, Caption, CatBadge, Eyebrow, IconButton, Label, PrimaryButton, Title, TopBar } from '../components/ui';
+import { Amount, Body, Card, Caption, CatBadge, Eyebrow, Label, PrimaryButton, Title, TopBar } from '../components/ui';
 import { fmtMoney } from '../lib/format';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
-import { computeTripTotals, expensesForTrip } from '../lib/trips';
+import { computeTripTotals, expensesForTrip, reassignedFromOtherTrips } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -99,10 +100,9 @@ function AddExistingExpensesModal({
     // Some of what's selected already belongs to another trip — moving it is a legitimate,
     // explicit edit (spec §6.3), but it has to actually be explicit: say what's about to happen,
     // by name, before it happens. Nothing is blocked, this only asks for a beat of confirmation.
-    const reassignCount = [...selected].filter((id) => {
-      const tx = candidates.find((c) => c.id === id);
-      return !!tx?.tripId;
-    }).length;
+    // Counted against every transaction, not the search-filtered candidates: a selected row the
+    // user has since typed out of view is still going to move.
+    const reassignCount = reassignedFromOtherTrips(transactions, [...selected], tripId);
     if (reassignCount === 0) {
       void applySelection();
       return;
@@ -233,11 +233,16 @@ export function TripDetailScreen({
 
   const trip = trips.find((tr) => tr.id === tripId);
 
+  /** Set by tapping a category in the breakdown: the list below narrows to that category. */
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+
   const tripTxns = useMemo(() => expensesForTrip(transactions, tripId), [transactions, tripId]);
   const totals = useMemo(() => computeTripTotals(transactions, tripId, dc.convertTxn), [transactions, tripId, dc]);
   const sortedTxns = useMemo(
-    () => [...tripTxns].sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt)),
-    [tripTxns]
+    () => [...tripTxns]
+      .filter((txn) => !categoryFilter || (txn.categoryId ?? 'other') === categoryFilter)
+      .sort((a, b) => (b.date ?? b.createdAt).localeCompare(a.date ?? a.createdAt)),
+    [tripTxns, categoryFilter]
   );
 
   const owedByTxn = useMemo(() => {
@@ -299,11 +304,25 @@ export function TripDetailScreen({
         <TopBar
           title={trip.name}
           onBack={onBack}
+          // Rename, archive and delete are all occasional. Behind one trigger they stop competing
+          // with the two things this screen is for: what the trip cost, and adding to it.
           right={
-            <View style={styles.headerActions}>
-              <IconButton name="pencil" onPress={openRename} size={16} accessibilityLabel={isZh ? '重命名行程' : 'Rename trip'} />
-              <IconButton name="trash" onPress={confirmDelete} size={16} accessibilityLabel={t('deleteTripTitle')} />
-            </View>
+            <OverflowMenu
+              title={trip.name}
+              accessibilityLabel={`${isZh ? '更多操作' : 'More actions'}: ${trip.name}`}
+              size={17}
+              actions={[
+                { label: isZh ? '重命名行程' : 'Rename trip', icon: 'pencil', onPress: openRename },
+                {
+                  label: trip.archived ? t('unarchiveTrip') : t('archiveTrip'),
+                  icon: 'folder',
+                  onPress: () => { void setTripArchived(trip.id, !trip.archived); },
+                },
+                // Stated, not asked: `deleteTripTitle` is the confirmation's question and reads
+                // wrong as a menu item the user has not chosen yet.
+                { label: isZh ? '移除行程' : 'Remove trip', icon: 'trash', destructive: true, onPress: confirmDelete },
+              ]}
+            />
           }
         />
       </View>
@@ -336,17 +355,8 @@ export function TripDetailScreen({
           <Amount value={totals.recordedExpenses} currency={dc.code} size={32} weight={700} />
           <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
             {t('tripCountExpenses', { n: totals.txnCount })}
+            {trip.archived ? ` · ${t('archivedTrips')}` : ''}
           </Caption>
-
-          <Pressable
-            onPress={() => setTripArchived(trip.id, !trip.archived)}
-            style={[styles.archiveBtn, { borderColor: colorTheme.line }]}
-            accessibilityRole="button"
-          >
-            <Label weight={700} color={colorTheme.ink}>
-              {trip.archived ? t('unarchiveTrip') : t('archiveTrip')}
-            </Label>
-          </Pressable>
         </Card>
 
         <View style={styles.actionsRow}>
@@ -377,15 +387,32 @@ export function TripDetailScreen({
               {totals.byCategory.map((b, i) => {
                 const cat = catById[b.categoryId] ?? fallback;
                 const pct = totals.recordedExpenses > 0 ? Math.round((b.amount / totals.recordedExpenses) * 100) : 0;
+                const on = categoryFilter === b.categoryId;
                 return (
-                  <View key={b.categoryId} style={[styles.breakdownRow, i > 0 && styles.divider, i > 0 && { borderTopColor: colorTheme.line2 }]}>
+                  // A share of the total is a question ("what was the RM480 of food?"), so the
+                  // row answers it: tapping narrows the list below to that category, tapping
+                  // again clears it.
+                  <Pressable
+                    key={b.categoryId}
+                    onPress={() => setCategoryFilter(on ? null : b.categoryId)}
+                    style={({ pressed }) => [
+                      styles.breakdownRow,
+                      i > 0 && styles.divider,
+                      i > 0 && { borderTopColor: colorTheme.line2 },
+                      (pressed || on) && { backgroundColor: on ? theme.accentTint : colorTheme.surface2 },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                    accessibilityLabel={`${tCat(cat)} ${pct}%`}
+                  >
                     <CatBadge category={cat} size={36} />
                     <Text style={[styles.breakdownLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Amount value={b.amount} currency={dc.code} size={14} weight={700} />
                       <Caption color={colorTheme.ink2}>{pct}%</Caption>
                     </View>
-                  </View>
+                    <Icon name={on ? 'x' : 'chevronRight'} size={15} color={on ? theme.accent : colorTheme.ink3} />
+                  </Pressable>
                 );
               })}
             </Card>
@@ -393,7 +420,9 @@ export function TripDetailScreen({
         )}
 
         <Eyebrow style={{ marginTop: spacing.base, marginBottom: spacing.sm }}>
-          {isZh ? '交易明细' : 'Transactions'}
+          {categoryFilter
+            ? `${isZh ? '交易明细' : 'Transactions'} · ${tCat(catById[categoryFilter] ?? fallback)}`
+            : (isZh ? '交易明细' : 'Transactions')}
         </Eyebrow>
         {sortedTxns.length === 0 ? (
           <Card style={styles.emptyCard}>
@@ -435,14 +464,12 @@ export function TripDetailScreen({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 
   renameCard: { padding: spacing.base, marginBottom: spacing.md },
   renameActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.base, marginTop: spacing.sm },
   renameActionBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
 
   hero: { padding: spacing.base, marginBottom: spacing.md, alignItems: 'flex-start' },
-  archiveBtn: { marginTop: spacing.md, minHeight: 44, paddingHorizontal: spacing.md, borderRadius: radius.sm, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 
   actionsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, minHeight: 48, borderRadius: radius.sm },

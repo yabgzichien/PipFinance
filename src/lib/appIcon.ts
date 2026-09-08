@@ -8,6 +8,42 @@ interface AppIconNativeModule {
 
 const { AppIconModule } = NativeModules as { AppIconModule?: AppIconNativeModule };
 
+const ANDROID_ICON_DEBOUNCE_MS = 200;
+let androidIconTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingAndroidPreset = DEFAULT_ACCENT_PRESET_ID;
+let pendingAndroidResolvers: Array<(result: boolean) => void> = [];
+let androidIconUpdateChain: Promise<boolean> = Promise.resolve(true);
+
+/** PackageManager alias changes are expensive and some launchers become unstable when several
+ * swaps overlap. Keep the color preview immediate, but collapse a burst of icon requests to the
+ * final preset and serialize it behind any update already in progress. */
+function enqueueAndroidIconUpdate(presetId: string): Promise<boolean> {
+  pendingAndroidPreset = presetId;
+  if (androidIconTimer) clearTimeout(androidIconTimer);
+
+  const result = new Promise<boolean>((resolve) => {
+    pendingAndroidResolvers.push(resolve);
+  });
+
+  androidIconTimer = setTimeout(() => {
+    androidIconTimer = null;
+    const presetToApply = pendingAndroidPreset;
+    const resolvers = pendingAndroidResolvers;
+    pendingAndroidResolvers = [];
+
+    androidIconUpdateChain = androidIconUpdateChain.then(async () => {
+      try {
+        return await AppIconModule!.setAppIcon(presetToApply);
+      } catch {
+        return false;
+      }
+    });
+    void androidIconUpdateChain.then((ok) => resolvers.forEach((resolve) => resolve(ok)));
+  }, ANDROID_ICON_DEBOUNCE_MS);
+
+  return result;
+}
+
 /**
  * Updates the app icon dynamically according to the user's selected accent preset.
  * - On Android: switches the active launcher activity-alias using AppIconModule.
@@ -17,11 +53,7 @@ export async function setDynamicAppIcon(presetId: string): Promise<boolean> {
   const safePreset = ACCENT_PRESETS.some((p) => p.id === presetId) ? presetId : DEFAULT_ACCENT_PRESET_ID;
 
   if (Platform.OS === 'android' && AppIconModule?.setAppIcon) {
-    try {
-      return await AppIconModule.setAppIcon(safePreset);
-    } catch {
-      return false;
-    }
+    return enqueueAndroidIconUpdate(safePreset);
   }
 
   if (Platform.OS === 'web' && typeof document !== 'undefined') {

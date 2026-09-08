@@ -51,8 +51,12 @@ export async function shareSplitMessage(
     const available = await Sharing.isAvailableAsync().catch(() => false);
     if (available) {
       const copied = await copy(message);
+      const isPng = receiptUri.toLowerCase().endsWith('.png');
       try {
-        await Sharing.shareAsync(receiptUri, { mimeType: 'image/jpeg', UTI: 'public.jpeg' });
+        await Sharing.shareAsync(receiptUri, {
+          mimeType: isPng ? 'image/png' : 'image/jpeg',
+          UTI: isPng ? 'public.png' : 'public.jpeg',
+        });
         return copied ? 'shared-with-clipboard' : 'shared';
       } catch {
         return copied ? 'copied' : 'failed';

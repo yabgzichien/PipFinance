@@ -7,6 +7,7 @@ import { useLanguage } from '../i18n';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useGlossary } from '../state/glossary';
+import { useModalHandoff } from '../lib/modalHandoff';
 import { radius, uiFont } from '../theme';
 import { AddAccountModal } from './AddAccountModal';
 import { Icon, type IconName } from './Icon';
@@ -51,6 +52,9 @@ export function AccountLinkField({
 }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  // "Create new account" swaps this dropdown for the new-account sheet; on iOS the second modal
+  // has to wait for the first to finish dismissing or it is never presented at all.
+  const { request: requestCreateSheet, onDismiss: onDropdownDismissed } = useModalHandoff();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
@@ -115,7 +119,7 @@ export function AccountLinkField({
         </>
       )}
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="fade" onDismiss={onDropdownDismissed} onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={styles.menuWrap} pointerEvents="box-none">
           <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
@@ -136,7 +140,7 @@ export function AccountLinkField({
             <Pressable
               onPress={() => {
                 setOpen(false);
-                setCreating(true);
+                requestCreateSheet(() => setCreating(true));
               }}
               style={styles.option}
             >

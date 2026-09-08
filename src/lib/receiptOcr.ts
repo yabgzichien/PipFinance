@@ -11,6 +11,8 @@
 // build to get the OCR path (it still works via the vision fallback either way).
 import { Platform } from 'react-native';
 
+import { reportError } from './diagnostics';
+
 export type OcrOutcome =
   | { status: 'ok'; text: string }
   /** The native module isn't registered on this build (Expo Go, web), or the read failed. */
@@ -83,7 +85,11 @@ export async function recognizeReceiptText(uri: string): Promise<OcrOutcome> {
     // Chinese-script recognizer also reads Latin digits/punctuation fine, matching the mixed
     // EN/ZH receipts the pipeline was benchmarked against.
     result = await mod.default.recognize(uri, mod.TextRecognitionScript.CHINESE);
-  } catch {
+  } catch (err) {
+    // Distinct from the import failing above: the module loaded, so the recognizer throwing is a
+    // real fault rather than the expected Expo Go / web path. Reported without its message —
+    // ML Kit puts the image URI in there.
+    reportError(err, 'receipt-ocr');
     return { status: 'unavailable' };
   }
 

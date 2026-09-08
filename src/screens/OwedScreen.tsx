@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { SendMessageSheet, type SendMessageOption } from '../components/SendMessageSheet';
@@ -8,10 +9,14 @@ import { Amount, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, To
 import { shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
 import { currencyPrefix, fmtMoney } from '../lib/format';
+import { tap } from '../lib/haptics';
 import { RECEIVABLE_CLS } from '../lib/networth';
-import { confirmAction } from '../lib/platformAlert';
+import { confirmAction, notify } from '../lib/platformAlert';
 import { AGING_DAYS, groupOpenSharesByPerson, type OpenShare, type PersonDebt } from '../lib/split';
-import { buildBillReminder, buildOwedReminder, type OwedReminderInput } from '../lib/splitMessage';
+import { generateDeterministicReceipt, generateReceiptCanvasHtml, formatWorkingsCalculation } from '../lib/receiptGenerator';
+import { base64ToUint8Array, saveReceiptPng } from '../lib/receiptImage';
+import { shareSplitMessage } from '../lib/shareText';
+import { buildBillReminder, buildOwedReminder, type OwedBill, type OwedReminderInput } from '../lib/splitMessage';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
@@ -43,7 +48,7 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, isZh, tCat } = useLanguage();
-  const { openShares, allOwedShares, accounts, catById, settleShare, unsettleShare, writeOffShare, duitNowQrUri } = useAppData();
+  const { openShares, allOwedShares, accounts, catById, settleShare, unsettleShare, writeOffShare } = useAppData();
   const dc = useDisplayCurrency();
   const today = useMemo(() => todayISO(), []);
 
@@ -53,6 +58,10 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
   const [reminding, setReminding] = useState<PersonDebt | null>(null);
   const [settling, setSettling] = useState<OpenShare | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<string | null>(null);
+  const [sendingShareId, setSendingShareId] = useState<string | null>(null);
+  const [directCanvasHtml, setDirectCanvasHtml] = useState<string | null>(null);
+  const directSendResolvers = useRef<Record<string, (uri?: string) => void>>({});
+  const directGeneratedUris = useRef<Record<string, string>>({});
 
   const displayShares = allOwedShares ?? openShares;
 
@@ -143,16 +152,65 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
       personName: reminding.name,
       currency: dc.code,
       total: dc.convert(reminding.total),
-      bills: openSharesForPerson.map((share) => ({
-        shareId: share.shareId,
-        merchant: billLabel(share, share.categoryId ? tCat(catById[share.categoryId]) : undefined, isZh),
-        billDate: share.billDate,
-        outstanding: dc.convert(share.outstanding),
-        paid: share.paid,
-      })),
+      bills: openSharesForPerson.map((share) => {
+        const catLabel = share.categoryId ? tCat(catById[share.categoryId]) : undefined;
+        const merchant = billLabel(share, catLabel, isZh);
+        const outstandingAmt = dc.convert(share.outstanding);
+        const grossAmt = share.gross ? dc.convert(share.gross) : undefined;
+        const owedAmt = share.owed ? dc.convert(share.owed) : undefined;
+        const paidAmt = share.paid ? dc.convert(share.paid) : 0;
+        const calc = grossAmt && grossAmt > outstandingAmt
+          ? formatWorkingsCalculation({
+              gross: grossAmt,
+              owed: owedAmt ?? outstandingAmt,
+              outstanding: outstandingAmt,
+              paid: paidAmt,
+              currency: dc.code,
+              splitMethod: share.splitMethod,
+              participantCount: share.participantCount,
+              isZh,
+            })
+          : undefined;
+
+        return {
+          shareId: share.shareId,
+          merchant,
+          billDate: share.billDate,
+          outstanding: outstandingAmt,
+          paid: paidAmt,
+          remark: share.remark,
+          categoryId: share.categoryId,
+          gross: grossAmt,
+          owed: owedAmt,
+          splitMethod: share.splitMethod,
+          participantCount: share.participantCount,
+          workingsCalculation: calc,
+        };
+      }),
       isZh,
-      hasDuitNowQr: Boolean(duitNowQrUri),
     };
+
+    const individualReceipts = input.bills.map((b) => {
+      const catLabel = b.categoryId ? tCat(catById[b.categoryId]) : undefined;
+      return generateDeterministicReceipt({
+        merchant: b.merchant,
+        total: b.outstanding,
+        currency: input.currency,
+        personName: input.personName,
+        billDate: b.billDate,
+        seedId: b.shareId,
+        remark: b.remark,
+        categoryId: b.categoryId,
+        categoryName: catLabel,
+        gross: b.gross,
+        owed: b.owed,
+        paid: b.paid,
+        splitMethod: b.splitMethod,
+        participantCount: b.participantCount,
+        workingsCalculation: b.workingsCalculation,
+        isZh,
+      });
+    });
 
     return [
       {
@@ -162,28 +220,151 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
           ? `${input.bills.length} 笔账单 · ${fmtMoney(input.total, input.currency)}`
           : `${input.bills.length} ${input.bills.length === 1 ? 'bill' : 'bills'} · ${fmtMoney(input.total, input.currency)}`,
         icon: 'gift',
-        build: (opts?: { hasDuitNowQr?: boolean }) =>
-          buildOwedReminder({
-            ...input,
-            hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
-          }),
+        build: () => buildOwedReminder(input),
+        receiptData: individualReceipts,
       },
       ...openSharesForPerson.map((share, i): SendMessageOption => ({
         key: share.shareId,
         label: input.bills[i].merchant,
         sub: `${shortDate(share.billDate)}${share.billDate ? ' · ' : ''}${fmtMoney(input.bills[i].outstanding, input.currency)}`,
-        build: (opts?: { hasDuitNowQr?: boolean }) =>
-          buildBillReminder(
-            {
-              ...input,
-              hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
-            },
-            share.shareId
-          ),
+        build: () => buildBillReminder(input, share.shareId),
         receiptUri: share.receiptUri,
+        receiptData: individualReceipts[i],
       })),
     ];
-  }, [reminding, dc, catById, tCat, isZh, t, duitNowQrUri]);
+  }, [reminding, dc, catById, tCat, isZh, t]);
+
+  const onDirectWebViewMessage = (event: WebViewMessageEvent) => {
+    try {
+      const { key, dataUrl } = JSON.parse(event.nativeEvent.data);
+      if (!key || !dataUrl) return;
+      const bytes = base64ToUint8Array(dataUrl);
+      const fileUri = saveReceiptPng(bytes, key);
+      if (fileUri) {
+        directGeneratedUris.current[key] = fileUri;
+        if (directSendResolvers.current[key]) {
+          directSendResolvers.current[key](fileUri);
+          delete directSendResolvers.current[key];
+        }
+      }
+    } catch {}
+  };
+
+  const handleDirectSendBill = async (person: PersonDebt, share: OpenShare) => {
+    if (share.status === 'settled' || sendingShareId) return;
+
+    tap();
+    setSendingShareId(share.shareId);
+
+    try {
+      const catLabel = share.categoryId ? tCat(catById[share.categoryId]) : undefined;
+      const merchant = billLabel(share, catLabel, isZh);
+      const curr = dc.code;
+      const outstandingAmt = dc.convert(share.outstanding);
+      const grossAmt = share.gross ? dc.convert(share.gross) : undefined;
+      const owedAmt = share.owed ? dc.convert(share.owed) : undefined;
+      const paidAmt = share.paid ? dc.convert(share.paid) : 0;
+
+      const calc = grossAmt && grossAmt > outstandingAmt
+        ? formatWorkingsCalculation({
+            gross: grossAmt,
+            owed: owedAmt ?? outstandingAmt,
+            outstanding: outstandingAmt,
+            paid: paidAmt,
+            currency: curr,
+            splitMethod: share.splitMethod,
+            participantCount: share.participantCount,
+            isZh,
+          })
+        : undefined;
+
+      const receipt = generateDeterministicReceipt({
+        merchant,
+        total: outstandingAmt,
+        currency: curr,
+        personName: person.name,
+        billDate: share.billDate,
+        seedId: share.shareId,
+        remark: share.remark,
+        categoryId: share.categoryId,
+        categoryName: catLabel,
+        gross: grossAmt,
+        owed: owedAmt,
+        paid: paidAmt,
+        splitMethod: share.splitMethod,
+        participantCount: share.participantCount,
+        workingsCalculation: calc,
+        isZh,
+      });
+
+      const billObj: OwedBill = {
+        shareId: share.shareId,
+        merchant,
+        billDate: share.billDate,
+        outstanding: outstandingAmt,
+        paid: paidAmt,
+        remark: share.remark,
+        categoryId: share.categoryId,
+        gross: grossAmt,
+        owed: owedAmt,
+        splitMethod: share.splitMethod,
+        participantCount: share.participantCount,
+        workingsCalculation: calc,
+      };
+
+      const input: OwedReminderInput = {
+        personName: person.name,
+        currency: curr,
+        total: outstandingAmt,
+        bills: [billObj],
+        isZh,
+      };
+
+      const message = buildBillReminder(input, share.shareId) ?? '';
+
+      let imageUri: string | undefined = directGeneratedUris.current[share.shareId];
+
+      if (!imageUri) {
+        // Generate Split Receipt Image HTML
+        const html = generateReceiptCanvasHtml({
+          key: share.shareId,
+          receipts: [receipt],
+          currency: curr,
+          personName: person.name,
+          total: outstandingAmt,
+          isZh,
+        });
+
+        setDirectCanvasHtml(html);
+
+        imageUri = await new Promise<string | undefined>((resolve) => {
+          directSendResolvers.current[share.shareId] = resolve;
+          setTimeout(() => resolve(undefined), 1800);
+        });
+      }
+
+      const effectiveImageUri = imageUri || share.receiptUri || undefined;
+      const outcome = await shareSplitMessage(message, effectiveImageUri);
+
+      if (outcome === 'shared-with-clipboard') {
+        notify(
+          t('splitShareCopiedTitle'),
+          isZh
+            ? '分摊小票已分享！留言文字已复制到剪贴板，可粘贴到附言。'
+            : 'Split receipt shared! Message copied to clipboard to paste as caption.'
+        );
+      } else if (outcome === 'copied') {
+        notify(t('splitShareCopiedTitle'), t('splitShareCopiedBody'));
+      } else if (outcome === 'failed') {
+        notify(t('splitShareFailedTitle'), t('splitShareFailedBody'));
+      }
+    } catch {
+      notify(t('splitShareFailedTitle'), t('splitShareFailedBody'));
+    } finally {
+      setSendingShareId(null);
+      setDirectCanvasHtml(null);
+    }
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -358,7 +539,13 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                                 <Image source={{ uri: share.receiptUri }} style={[styles.receiptThumb, { borderColor: colorTheme.line2 }]} />
                               </Pressable>
                             )}
-                            <View style={{ flex: 1, minWidth: 0 }}>
+                            <Pressable
+                              onPress={() => !isSettled && handleDirectSendBill(p, share)}
+                              disabled={isSettled || sendingShareId === share.shareId}
+                              style={styles.shareBodyPressable}
+                              accessibilityRole="button"
+                              accessibilityLabel={isZh ? `发送 ${primaryName} 催款小票` : `Send split receipt for ${primaryName}`}
+                            >
                               <Text
                                 style={[
                                   styles.shareMerchant,
@@ -397,7 +584,24 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
                                 {isPartial ? ` · ${isZh ? '已付' : 'paid'} ${fmtMoney(share.paid!, curr)}` : ''}
                                 {hasGross && !isPartial && !isSettled ? ` · ${isZh ? '账单' : 'bill'} ${fmtMoney(share.gross!, curr)}` : ''}
                               </Text>
-                            </View>
+                            </Pressable>
+
+                            {!isSettled && (
+                              <Pressable
+                                onPress={() => handleDirectSendBill(p, share)}
+                                hitSlop={8}
+                                disabled={sendingShareId === share.shareId}
+                                accessibilityRole="button"
+                                accessibilityLabel={isZh ? '直接发送小票' : 'Send split receipt'}
+                                style={styles.directSendBtn}
+                              >
+                                {sendingShareId === share.shareId ? (
+                                  <ActivityIndicator size="small" color={theme.accent} />
+                                ) : (
+                                  <Icon name="share" size={15} color={theme.accent} />
+                                )}
+                              </Pressable>
+                            )}
 
                             {/* Checkbox: taps toggle settle/unsettle */}
                             <Pressable
@@ -458,7 +662,6 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
         title={t('owedRemindTitle')}
         subtitle={t('owedRemindSub')}
         options={reminderOptions}
-        duitNowQrUri={duitNowQrUri}
         onClose={() => setReminding(null)}
       />
 
@@ -482,6 +685,17 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {directCanvasHtml && (
+        <View style={styles.hiddenWebView}>
+          <WebView
+            originWhitelist={['*']}
+            source={{ html: directCanvasHtml }}
+            onMessage={onDirectWebViewMessage}
+            javaScriptEnabled
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -750,4 +964,22 @@ const styles = StyleSheet.create({
   },
   acctText: { fontFamily: uiFont(600), fontSize: 13, maxWidth: 160 },
   acctNote: { fontFamily: uiFont(500), fontSize: 11.5, lineHeight: 16, marginTop: 10 },
+  hiddenWebView: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0,
+    pointerEvents: 'none',
+  },
+  shareBodyPressable: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  directSendBtn: {
+    padding: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

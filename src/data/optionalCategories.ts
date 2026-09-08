@@ -102,13 +102,28 @@ export function optionalById(id: string): OptionalCategory | undefined {
 }
 
 /**
+ * The catalogue entries offered for one entry kind. Every shipped suggestion is an expense
+ * today, so this answers empty for income — which is the signal a picker needs to send the user
+ * straight to the custom form rather than offering Petrol as a source of income.
+ */
+export function optionalCategoriesForKind(kind: TxnType): OptionalCategory[] {
+  return OPTIONAL_CATEGORIES.filter((c) => c.kind === kind);
+}
+
+/**
  * Catalogue search across shipped names and local wording, in catalogue order.
  * A blank query returns everything, which is what the sheet shows on open.
+ * `kind` narrows to the entry kind being added; omitting it searches the whole catalogue.
  */
-export function searchOptionalCategories(query: string, lang: 'en' | 'zh'): OptionalCategory[] {
+export function searchOptionalCategories(
+  query: string,
+  lang: 'en' | 'zh',
+  kind?: TxnType
+): OptionalCategory[] {
+  const pool = kind ? optionalCategoriesForKind(kind) : OPTIONAL_CATEGORIES;
   const q = query.trim().toLowerCase();
-  if (!q) return [...OPTIONAL_CATEGORIES];
-  return OPTIONAL_CATEGORIES.filter((c) => {
+  if (!q) return [...pool];
+  return pool.filter((c) => {
     if (c.label.toLowerCase().includes(q)) return true;
     // Both alias lists are searched regardless of interface language: a user typing pinyin-free
     // English into a Chinese interface (or a brand like "SmartTag") should still find the row.

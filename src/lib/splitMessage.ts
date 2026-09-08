@@ -51,8 +51,6 @@ export interface SplitMessageInput {
   selfPortions?: number;
   workings: SplitWorkings | null;
   isZh: boolean;
-  /** Whether the payer has configured a personal DuitNow QR code. */
-  hasDuitNowQr?: boolean;
 }
 
 
@@ -193,25 +191,6 @@ function personLine(share: SplitMessageShare, currency: string, isZh: boolean): 
   return `${share.name}: ${amount}${portions}`;
 }
 
-function paymentBlock(hasDuitNowQr: boolean | undefined, isZh: boolean): string | null {
-  if (!hasDuitNowQr) return null;
-  return isZh
-    ? '使用 DuitNow 付款：\n请扫描附带的 DuitNow 二维码付款'
-    : 'Pay me via DuitNow:\nScan the attached DuitNow QR code to pay';
-}
-
-function splitSignOff(isZh: boolean): string {
-  return isZh
-    ? '由 Pip 分摊（零广告，100% 本地隐私）：\nhttps://pipfinance.app'
-    : 'Split with Pip (Zero ads, 100% private):\nhttps://pipfinance.app';
-}
-
-function reminderSignOff(isZh: boolean): string {
-  return isZh
-    ? '由 Pip 发送（零广告，100% 本地隐私）：\nhttps://pipfinance.app'
-    : 'Sent from Pip (Zero ads, 100% private):\nhttps://pipfinance.app';
-}
-
 /**
  * The message for the group chat: the bill, how it was cut, and what each person owes.
  *
@@ -219,7 +198,7 @@ function reminderSignOff(isZh: boolean): string {
  * reaches it, because the payer is pasting it somewhere they do not control.
  */
 export function buildGroupMessage(input: SplitMessageInput): string {
-  const { currency, gross, hasDuitNowQr, isZh, merchant, ownShare, shares } = input;
+  const { currency, gross, isZh, merchant, ownShare, shares } = input;
   const blocks: string[] = [];
 
   blocks.push(
@@ -237,11 +216,6 @@ export function buildGroupMessage(input: SplitMessageInput): string {
   }
   blocks.push(people.join('\n'));
 
-  const payment = paymentBlock(hasDuitNowQr, isZh);
-  if (payment) blocks.push(payment);
-
-  blocks.push(splitSignOff(isZh));
-
   return blocks.join('\n\n');
 }
 
@@ -255,7 +229,7 @@ export function buildPersonMessage(input: SplitMessageInput, personId: string): 
   const share = input.shares.find((s) => s.personId === personId);
   if (!share) return null;
 
-  const { currency, gross, hasDuitNowQr, isZh, merchant, workings } = input;
+  const { currency, gross, isZh, merchant, workings } = input;
   const blocks: string[] = [];
 
   blocks.push(isZh ? `${share.name} 您好` : `Hi ${share.name}`);
@@ -274,6 +248,9 @@ export function buildPersonMessage(input: SplitMessageInput, personId: string): 
     if (workings.taxPct > 0 || workings.tax > 0) {
       parts.push(`${isZh ? '销售税' : 'SST'} ${workings.taxPct}%`);
     }
+    if (workings.discount && workings.discount > 0) {
+      parts.push(isZh ? '折扣' : 'discount');
+    }
     if (parts.length > 0) {
       blocks.push(
         isZh
@@ -286,11 +263,6 @@ export function buildPersonMessage(input: SplitMessageInput, personId: string): 
       isZh ? `您占 ${share.portions} 份。` : `You took ${share.portions} portions.`
     );
   }
-
-  const payment = paymentBlock(hasDuitNowQr, isZh);
-  if (payment) blocks.push(payment);
-
-  blocks.push(splitSignOff(isZh));
 
   return blocks.join('\n\n');
 }
@@ -307,6 +279,13 @@ export interface OwedBill {
   outstanding: number;
   /** Anything already repaid against this bill, so a part-paid row can say so. */
   paid?: number;
+  remark?: string | null;
+  categoryId?: string | null;
+  gross?: number;
+  owed?: number;
+  splitMethod?: string;
+  participantCount?: number;
+  workingsCalculation?: string;
 }
 
 export interface OwedReminderInput {
@@ -317,8 +296,6 @@ export interface OwedReminderInput {
   total: number;
   bills: OwedBill[];
   isZh: boolean;
-  /** Whether the payee has configured a personal DuitNow QR code. */
-  hasDuitNowQr?: boolean;
 }
 
 /** "Food, 3 Sep: RM 10.00", with the date dropped when the bill never carried one. */
@@ -326,24 +303,22 @@ function billLine(bill: OwedBill, currency: string, isZh: boolean): string {
   const when = shortDate(bill.billDate);
   const head = when ? `${bill.merchant}, ${when}` : bill.merchant;
   const partPaid = bill.paid && bill.paid > 0 ? (isZh ? '（已部分支付）' : ' (part-paid)') : '';
-  return `${head}: ${fmtMoney(bill.outstanding, currency)}${partPaid}`;
+  const calc = bill.workingsCalculation ? ` (${bill.workingsCalculation})` : '';
+  return `${head}: ${fmtMoney(bill.outstanding, currency)}${partPaid}${calc}`;
 }
 
 /**
  * A reminder covering everything one person still owes.
- *
- * Amounts arrive already converted by the caller (the Owed screen runs them through the
- * display-currency hook before rendering), so the figures here are the same figures the user
- * is looking at when they tap send. Converting again in here would be the one way to make the
- * message disagree with the screen that produced it.
- *
- * Only ever mentions the person being chased. Nobody else's name or debt goes into a message
- * addressed to someone who has no business seeing it.
+ * The detailed itemized breakdown is provided in the accompanying Pip Receipt Image.
  */
 export function buildOwedReminder(input: OwedReminderInput): string {
-  const { bills, currency, hasDuitNowQr, isZh, personName, total } = input;
-  const blocks: string[] = [];
+  const { bills, currency, isZh, personName, total } = input;
 
+  if (bills.length === 1) {
+    return buildBillReminder(input, bills[0].shareId) ?? '';
+  }
+
+  const blocks: string[] = [];
   blocks.push(isZh ? `${personName} 您好` : `Hi ${personName}`);
 
   const n = bills.length;
@@ -355,27 +330,21 @@ export function buildOwedReminder(input: OwedReminderInput): string {
 
   blocks.push(bills.map((b) => billLine(b, currency, isZh)).join('\n'));
 
-  const payment = paymentBlock(hasDuitNowQr, isZh);
-  if (payment) blocks.push(payment);
-
-  blocks.push(reminderSignOff(isZh));
-
   return blocks.join('\n\n');
 }
 
 /**
- * A reminder for a single bill, for chasing one debt without dragging the others in.
- *
- * Returns null when the id is not one of this person's bills, so a caller cannot send a
- * reminder with a blank amount in it.
+ * A reminder for a single bill.
+ * The detailed itemized breakdown is provided in the accompanying Pip Receipt Image.
  */
 export function buildBillReminder(input: OwedReminderInput, shareId: string): string | null {
   const bill = input.bills.find((b) => b.shareId === shareId);
   if (!bill) return null;
 
-  const { currency, hasDuitNowQr, isZh, personName } = input;
+  const { currency, isZh, personName } = input;
   const when = shortDate(bill.billDate);
   const partPaid = bill.paid && bill.paid > 0;
+  const calc = bill.workingsCalculation ? ` (${bill.workingsCalculation})` : '';
 
   const blocks: string[] = [];
   blocks.push(isZh ? `${personName} 您好` : `Hi ${personName}`);
@@ -388,13 +357,9 @@ export function buildBillReminder(input: OwedReminderInput, shareId: string): st
       ? `${bill.merchant} on ${when}.`
       : `${bill.merchant}.`;
   const amount = isZh
-    ? `您尚欠 ${fmtMoney(bill.outstanding, currency)}${partPaid ? '（已部分支付）' : ''}。`
-    : `You still owe ${fmtMoney(bill.outstanding, currency)}${partPaid ? ', after what you have already paid' : ''}.`;
+    ? `您尚欠 ${fmtMoney(bill.outstanding, currency)}${partPaid ? '（已部分支付）' : ''}${calc}。`
+    : `You still owe ${fmtMoney(bill.outstanding, currency)}${partPaid ? ', after what you have already paid' : ''}${calc}.`;
   blocks.push(`${where}\n${amount}`);
 
-  const payment = paymentBlock(hasDuitNowQr, isZh);
-  if (payment) blocks.push(payment);
-
-  blocks.push(reminderSignOff(isZh));
   return blocks.join('\n\n');
 }

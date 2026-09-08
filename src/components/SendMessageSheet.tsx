@@ -1,20 +1,29 @@
 // src/components/SendMessageSheet.tsx
 // Bottom sheet for picking who a money message goes to, shared by the Saved screen ("Send the
 // split", straight after a bill is divided) and the Owed screen ("Send a reminder", when
-// chasing it later). Styled in Pip's design language with Pip mascot, DuitNow QR attachment,
-// and viral distribution referral link.
-import React, { useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+// chasing it later). Styled in Pip's design language with Pip mascot and viral distribution
+// referral link.
+import React, { useMemo, useRef, useState } from 'react';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { Icon, type IconName } from './Icon';
 import { Pip } from './Pip';
 import { Caption, Label, Title } from './ui';
 import { tap } from '../lib/haptics';
 import { notify } from '../lib/platformAlert';
 import { shareSplitMessage } from '../lib/shareText';
+import {
+  generateReceiptCanvasHtml,
+  type GeneratedReceipt,
+  type ReceiptCanvasInput,
+} from '../lib/receiptGenerator';
+import {
+  base64ToUint8Array,
+  saveReceiptPng,
+} from '../lib/receiptImage';
 import { useThemeColors } from '../state/colorScheme';
 import { useAccent } from '../state/accent';
-import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { radius, spacing, uiFont } from '../theme';
 
@@ -25,9 +34,11 @@ export interface SendMessageOption {
   icon?: IconName;
   /** Built lazily so a message is only composed for the row actually tapped. Null means the
    *  row has nothing to send, and tapping it does nothing rather than sending a blank. */
-  build: (opts?: { hasDuitNowQr?: boolean }) => string | null;
+  build: () => string | null;
   /** A receipt photo to send alongside, when this particular row has one. */
   receiptUri?: string | null;
+  /** Deterministic receipt data to render as a Pip receipt image. */
+  receiptData?: GeneratedReceipt | GeneratedReceipt[];
 }
 
 export function SendMessageSheet({
@@ -36,40 +47,97 @@ export function SendMessageSheet({
   subtitle,
   options,
   onClose,
-  duitNowQrUri: propDuitNowQrUri,
 }: {
   visible: boolean;
   title: string;
   subtitle: string;
   options: SendMessageOption[];
   onClose: () => void;
-  duitNowQrUri?: string | null;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { duitNowQrUri: storeDuitNowQrUri } = useAppData();
-  const effectiveQrUri = propDuitNowQrUri ?? storeDuitNowQrUri;
   const { t, isZh } = useLanguage();
   const [busy, setBusy] = useState(false);
-  const [attachDuitNow, setAttachDuitNow] = useState(true);
+  const [generatedUris, setGeneratedUris] = useState<Record<string, string>>({});
+  const resolversRef = useRef<Record<string, (uri?: string) => void>>({});
+
+  // Construct batch HTML for rendering Pip receipt images in WebView
+  const canvasHtml = useMemo(() => {
+    if (!visible) return null;
+    const inputs: ReceiptCanvasInput[] = [];
+
+    for (const opt of options) {
+      if (!opt.receiptData) continue;
+      const receipts = Array.isArray(opt.receiptData) ? opt.receiptData : [opt.receiptData];
+      if (receipts.length === 0) continue;
+
+      const currency = receipts[0].currency;
+      const personName = receipts[0].personName;
+      const total = receipts.reduce((sum, r) => sum + r.total, 0);
+
+      inputs.push({
+        key: opt.key,
+        receipts,
+        currency,
+        personName,
+        total,
+        isZh,
+      });
+    }
+
+    if (inputs.length === 0) return null;
+    return generateReceiptCanvasHtml(inputs);
+  }, [visible, options, isZh]);
+
+  const onWebViewMessage = (event: WebViewMessageEvent) => {
+    try {
+      const { key, dataUrl } = JSON.parse(event.nativeEvent.data);
+      if (!key || !dataUrl) return;
+      const bytes = base64ToUint8Array(dataUrl);
+      const fileUri = saveReceiptPng(bytes, key);
+      if (fileUri) {
+        setGeneratedUris((prev) => ({ ...prev, [key]: fileUri }));
+        if (resolversRef.current[key]) {
+          resolversRef.current[key](fileUri);
+          delete resolversRef.current[key];
+        }
+      }
+    } catch {
+      // Best-effort image capture
+    }
+  };
 
   if (!visible || options.length === 0) return <Modal visible={false} transparent />;
 
   const send = async (option: SendMessageOption) => {
-    const shouldAttachQr = attachDuitNow && Boolean(effectiveQrUri);
-    const message = option.build({ hasDuitNowQr: shouldAttachQr });
+    const message = option.build();
     if (!message || busy) return;
     setBusy(true);
     tap();
-    const imageUri = shouldAttachQr ? effectiveQrUri : option.receiptUri;
+
+    let imageUri = generatedUris[option.key] || option.receiptUri;
+
+    // If receipt image is being prepared in WebView, wait briefly for it
+    if (!imageUri && option.receiptData) {
+      imageUri = await new Promise<string | undefined>((resolve) => {
+        resolversRef.current[option.key] = resolve;
+        setTimeout(() => resolve(undefined), 1200);
+      });
+    }
+
     const outcome = await shareSplitMessage(message, imageUri);
     setBusy(false);
     // Only the clipboard paths need explaining. A plain share speaks for itself, and telling
     // someone "shared!" after they have just watched the share sheet open is noise.
     if (outcome === 'shared-with-clipboard') {
-      if (imageUri === effectiveQrUri) {
-        notify(t('splitShareCopiedTitle'), t('splitSharePasteHintQr'));
+      if (imageUri && imageUri === generatedUris[option.key]) {
+        notify(
+          t('splitShareCopiedTitle'),
+          isZh
+            ? '小票图片已分享！留言文字已复制到剪贴板，可粘贴到附言。'
+            : 'Receipt image shared! Message copied to clipboard to paste as caption.'
+        );
       } else {
         notify(t('splitShareCopiedTitle'), t('splitSharePasteHint'));
       }
@@ -101,7 +169,7 @@ export function SendMessageSheet({
           </Pressable>
         </View>
 
-        {/* Pip Brand & DuitNow QR Banner Card */}
+        {/* Pip Brand Banner Card */}
         <View
           style={[
             styles.previewCard,
@@ -118,45 +186,38 @@ export function SendMessageSheet({
                 {isZh ? 'Pip 极速分摊' : 'Pip Split'}
               </Label>
             </View>
+          </View>
 
-            {effectiveQrUri ? (
-              <Pressable
-                onPress={() => {
-                  tap();
-                  setAttachDuitNow((prev) => !prev);
-                }}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: attachDuitNow }}
-                style={({ pressed }) => [
-                  styles.qrTogglePill,
-                  {
-                    backgroundColor: attachDuitNow ? theme.accent : colorTheme.surface,
-                    borderColor: attachDuitNow ? theme.accent : colorTheme.line2,
-                    opacity: pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Image source={{ uri: effectiveQrUri }} style={styles.qrTinyThumb} />
-                <Caption
-                  weight={700}
-                  color={attachDuitNow ? '#fff' : colorTheme.ink}
-                >
-                  {attachDuitNow ? t('duitNowQrAttached') : t('duitNowAttachQrToggle')}
-                </Caption>
-                <Icon
-                  name={attachDuitNow ? 'check' : 'plus'}
-                  size={12}
-                  color={attachDuitNow ? '#fff' : colorTheme.ink2}
-                  stroke={2.4}
-                />
-              </Pressable>
-            ) : (
-              <Caption color={colorTheme.ink2} style={styles.noQrHint} numberOfLines={1}>
-                {t('duitNowTipNoQr')}
-              </Caption>
-            )}
+          <View style={[styles.receiptNotice, { borderTopColor: theme.accentSoft }]}>
+            <Caption color={theme.onTint} weight={700} numberOfLines={2}>
+              {isZh
+                ? '🧾 自动生成确定性消费小票图片，按分类与金额清晰对账。'
+                : '🧾 Auto-generates Pip receipt image with category & amount breakdown.'}
+            </Caption>
           </View>
         </View>
+
+        {/* Offscreen WebView for headless Canvas receipt image generation on native */}
+        {Platform.OS !== 'web' && canvasHtml ? (
+          <View
+            style={{
+              position: 'absolute',
+              top: -200,
+              left: -200,
+              width: 1,
+              height: 1,
+              opacity: 0.01,
+            }}
+            pointerEvents="none"
+          >
+            <WebView
+              originWhitelist={['*']}
+              source={{ html: canvasHtml }}
+              onMessage={onWebViewMessage}
+              javaScriptEnabled
+            />
+          </View>
+        ) : null}
 
         {/* Recipients List */}
         <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 320 }}>
@@ -193,7 +254,7 @@ export function SendMessageSheet({
         </ScrollView>
 
         <Caption color={colorTheme.ink3} style={{ marginTop: spacing.md, textAlign: 'center' }}>
-          {isZh ? '仅包含所选的账单内容 · 零广告，100% 本地隐私' : 'Only what you picked · Zero ads, 100% private'}
+          {isZh ? '仅包含所选的账单内容' : 'Only what you picked'}
         </Caption>
       </View>
     </Modal>
@@ -232,25 +293,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
   },
-  qrTogglePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingLeft: spacing.xs,
-    paddingRight: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  qrTinyThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
-    backgroundColor: '#fff',
-  },
-  noQrHint: {
-    flex: 1,
-    textAlign: 'right',
+  receiptNotice: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
   },
   list: { borderRadius: radius.md, borderWidth: 1, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingVertical: spacing.md },

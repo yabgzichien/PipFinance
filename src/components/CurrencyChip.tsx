@@ -3,38 +3,74 @@
 // trigger+modal picker pattern and CurrencySettingsScreen's entryChip pill tokens (radius 999,
 // borderWidth 1)  this codebase's established convention for currency-selection UI.
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
+import { activateCurrency } from '../db/currencyRepo';
+import { SUPPORTED_CURRENCIES } from '../lib/currencies';
+import { notify } from '../lib/platformAlert';
 import { radius, uiFont } from '../theme';
 import { Icon } from './Icon';
 
 /**
- * Renders `null` when only one currency is active, so callers can drop this in unconditionally
- * next to an amount field without their own `isMultiCurrency` guard. Opens a picker limited to
- * `active` — never the full supported-currency list, matching the entry-currency picker on the
- * Currency settings screen.
+ * Always tappable, even with a single active currency  that's the entry point into "Add
+ * currency" below, so a first foreign transaction never requires a detour to Settings first.
+ * The picker's main list is limited to `active`, matching the entry-currency picker on the
+ * Currency settings screen; "Add currency" steps into the full supported-currency list and
+ * activates whatever gets picked there (same activation path as Settings, including its
+ * offline failure).
  */
 export function CurrencyChip({
   value,
   active,
   onChange,
+  onActivated,
 }: {
   value: string;
   active: string[];
   onChange: (code: string) => void;
+  /** Fires after a new currency is successfully activated, so the caller can refresh its own
+   * active-currency/rate state without this component needing to know how that's stored. */
+  onActivated?: (code: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
 
-  if (active.length <= 1) return null;
+  const close = () => {
+    setOpen(false);
+    setAdding(false);
+    setPendingCode(null);
+  };
 
   const choose = (code: string) => {
-    setOpen(false);
+    close();
     if (code !== value) onChange(code);
+  };
+
+  const addable = SUPPORTED_CURRENCIES.filter((c) => !active.includes(c.code));
+
+  const activate = async (code: string) => {
+    if (pendingCode) return;
+    setPendingCode(code);
+    try {
+      const ok = await activateCurrency(code);
+      if (!ok) {
+        notify(
+          isZh ? `无法获取 ${code} 汇率` : `Couldn't fetch the ${code} rate.`,
+          isZh ? '请检查网络连接后重试。' : "Try again when you're online."
+        );
+        return;
+      }
+      onActivated?.(code);
+      choose(code);
+    } finally {
+      setPendingCode(null);
+    }
   };
 
   return (
@@ -49,29 +85,64 @@ export function CurrencyChip({
         <Icon name="chevronDown" size={15} color={colorTheme.ink3} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        <Pressable style={styles.backdrop} onPress={close} />
         <View style={styles.menuWrap} pointerEvents="box-none">
           <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
-            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>{isZh ? '选择货币' : 'Currency'}</Text>
+            <View style={styles.menuHeader}>
+              {adding && (
+                <Pressable onPress={() => setAdding(false)} hitSlop={8} style={styles.backBtn}>
+                  <Icon name="chevronLeft" size={16} color={colorTheme.ink2} stroke={2.2} />
+                </Pressable>
+              )}
+              <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>
+                {adding ? (isZh ? '添加货币' : 'Add currency') : isZh ? '选择货币' : 'Currency'}
+              </Text>
+            </View>
             <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
-              {active.map((code) => {
-                const selected = code === value;
-                return (
-                  <Pressable
-                    key={code}
-                    onPress={() => choose(code)}
-                    style={[styles.option, selected && { backgroundColor: theme.accentTint }]}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected }}
-                  >
-                    <Text style={[styles.optionText, { color: colorTheme.ink }, selected && { color: theme.onTint }]}>
-                      {code}
-                    </Text>
-                    {selected && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
-                  </Pressable>
-                );
-              })}
+              {adding
+                ? addable.map((c) => {
+                    const busy = pendingCode === c.code;
+                    return (
+                      <Pressable
+                        key={c.code}
+                        onPress={() => activate(c.code)}
+                        disabled={!!pendingCode}
+                        style={styles.option}
+                        accessibilityRole="button"
+                      >
+                        <Text style={[styles.optionText, { color: colorTheme.ink }]}>
+                          {c.code} <Text style={{ color: colorTheme.ink2, fontFamily: uiFont(500) }}>{c.label}</Text>
+                        </Text>
+                        {busy && <ActivityIndicator color={theme.accent} size="small" />}
+                      </Pressable>
+                    );
+                  })
+                : active.map((code) => {
+                    const selected = code === value;
+                    return (
+                      <Pressable
+                        key={code}
+                        onPress={() => choose(code)}
+                        style={[styles.option, selected && { backgroundColor: theme.accentTint }]}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                      >
+                        <Text style={[styles.optionText, { color: colorTheme.ink }, selected && { color: theme.onTint }]}>
+                          {code}
+                        </Text>
+                        {selected && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
+                      </Pressable>
+                    );
+                  })}
+              {!adding && addable.length > 0 && (
+                <Pressable onPress={() => setAdding(true)} style={[styles.option, styles.addOption]}>
+                  <Icon name="plus" size={15} color={theme.accent} stroke={2.4} />
+                  <Text style={[styles.optionText, { color: theme.accent }]}>
+                    {isZh ? '添加货币' : 'Add currency'}
+                  </Text>
+                </Pressable>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -99,7 +170,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     maxHeight: '70%',
   },
-  menuTitle: { fontFamily: uiFont(700), fontSize: 13, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
+  menuHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6, gap: 8 },
+  backBtn: { marginLeft: -4 },
+  menuTitle: { fontFamily: uiFont(700), fontSize: 13 },
   menuScroll: { flexGrow: 0 },
   option: {
     flexDirection: 'row',
@@ -110,4 +183,5 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   optionText: { fontFamily: uiFont(600), fontSize: 15 },
+  addOption: { justifyContent: 'flex-start' },
 });

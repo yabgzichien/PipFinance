@@ -27,11 +27,11 @@ export type SettingItemKey =
   | 'data_tax'
   | 'data_categories'
   | 'data_currencies'
-  | 'data_duitnow'
   | 'data_import'
   | 'data_export'
   | 'data_backup'
   | 'data_tutorial'
+  | 'data_diagnostics'
   | 'danger_reset_all'
   | 'danger_reset_setup';
 
@@ -498,38 +498,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     ],
   },
   {
-    key: 'data_duitnow',
-    section: 'data',
-    sectionTitleEn: 'Data',
-    sectionTitleZh: '数据与管理',
-    titleEn: 'DuitNow QR Code',
-    titleZh: 'DuitNow 收款码',
-    keywords: [
-      'duitnow',
-      'duit now',
-      'qr',
-      'qr code',
-      'payment',
-      'split',
-      'pay',
-      'scan',
-      'receive',
-      'transfer',
-      'maybank',
-      'cimb',
-      'tng',
-      'touch n go',
-      'ewallet',
-      'bank',
-      '收款码',
-      '二维码',
-      '分账',
-      '收款',
-      '转账',
-      '支付',
-    ],
-  },
-  {
     key: 'data_import',
     section: 'data',
     sectionTitleEn: 'Data',
@@ -608,6 +576,29 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       '云备份',
       '同步',
       '谷歌云端硬盘',
+    ],
+  },
+  {
+    key: 'data_diagnostics',
+    section: 'data',
+    sectionTitleEn: 'Data',
+    sectionTitleZh: '数据与管理',
+    titleEn: 'Crash Diagnostics',
+    titleZh: '崩溃诊断',
+    keywords: [
+      'crash',
+      'diagnostics',
+      'error reporting',
+      'bug report',
+      'telemetry',
+      'analytics',
+      'privacy',
+      'sentry',
+      '崩溃',
+      '诊断',
+      '错误报告',
+      '隐私',
+      '遥测',
     ],
   },
   {

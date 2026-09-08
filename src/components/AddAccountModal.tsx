@@ -6,7 +6,7 @@ import { CalcBadge } from './CalcBadge';
 import { CurrencyChip } from './CurrencyChip';
 import { getActiveCurrencies, getEntryCurrency } from '../db/currencyRepo';
 import { todayISO } from '../lib/duplicates';
-import { BASE_CURRENCY, isMultiCurrency } from '../lib/currency';
+import { BASE_CURRENCY } from '../lib/currency';
 import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix } from '../lib/format';
 import { cleanCalcInput, evaluateExpression } from '../lib/calc';
@@ -46,12 +46,16 @@ function fmtQty(n: number): string {
 export function AddAccountModal({
   visible,
   preset,
+  initialKind = 'asset',
   onClose,
   onCreated,
 }: {
   visible: boolean;
   /** Pre-fills a specific ticker, e.g. "add another lot" on an existing holding. */
   preset?: TickerResult | null;
+  /** Which tab the sheet opens on. A caller that only wants one side — "add the loan this
+   *  expense pays down" — shouldn't make the user re-answer a question its context settles. */
+  initialKind?: AccountKind;
   onClose: () => void;
   onCreated?: (accountId: string) => void;
 }) {
@@ -85,8 +89,8 @@ export function AddAccountModal({
 
   const reset = () => {
     setName('');
-    setKind('asset');
-    setCls('cash');
+    setKind(initialKind);
+    setCls(initialKind === 'liability' ? 'mortgage' : 'cash');
     setHoldingMode(false);
     setCoin(null);
     setQtyText('');
@@ -490,7 +494,12 @@ export function AddAccountModal({
                   <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
                 </View>
                 <View style={[styles.amountRow, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                  {isMultiCurrency(activeCurrencies) ? <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} /> : <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>}
+                  <CurrencyChip
+                    value={currency}
+                    active={activeCurrencies}
+                    onChange={setCurrency}
+                    onActivated={() => getActiveCurrencies().then(setActiveCurrencies)}
+                  />
                   <Animated.View style={{ flex: 1, minWidth: 0, opacity: mergeOpacity, transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }] }}>
                     <TextInput
                       value={valueText}

@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon';
 import { PieChart } from '../components/PieChart';
 import { Amount, Card, CatBadge, Eyebrow, TopBar, ValueToggle, type ValueMode } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
+import { resolveCategoryPresentation } from '../lib/categoryPresentation';
 import { currentMonthKey, txnMonthKey } from '../lib/budget';
 import { monthName } from '../lib/dates';
 import { fmtMoney } from '../lib/format';
@@ -47,7 +48,12 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
       .sort((a, b) => b.amt - a.amt);
   }, [monthTxns, kind, dc]);
 
-  const pieData = breakdown.map((b) => ({ value: b.amt, color: catColorsForHue((catById[b.catId] ?? fallback).hue, scheme === 'dark').solid }));
+  // Same resolution the badges beside each slice use, so a recoloured category is recoloured in
+  // the chart too rather than only in its row.
+  const pieData = breakdown.map((b) => ({
+    value: b.amt,
+    color: catColorsForHue(resolveCategoryPresentation(catById[b.catId] ?? fallback).hue, scheme === 'dark').solid,
+  }));
 
   // You versus your own last month (docs/ui-engagement-plan.md Step 5, §2.6). Expense-only,
   // matching spentByCategory; only shown once real history exists on both sides.

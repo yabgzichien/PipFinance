@@ -445,6 +445,85 @@ export function computeItemized(
   };
 }
 
+/** One line as it appears on a single person's portion of a shared bill. */
+export interface ItemizedPersonItem {
+  lineId: string;
+  label: string;
+  /** This person's portion of the line, not the printed line total. */
+  amount: number;
+  /** How many people shared the line. 1 means it was theirs alone. */
+  sharedBy: number;
+}
+
+/** What one person ordered, and what rode on top of it. */
+export interface ItemizedPersonBreakdown {
+  personId: string;
+  items: ItemizedPersonItem[];
+  itemsSubtotal: number;
+  /** Service charge, tax and any bank reconciliation apportioned to this person. */
+  surcharge: number;
+  /** Always equal to what `computeItemized` gives this person. */
+  total: number;
+}
+
+/**
+ * The same division `computeItemized` performs, kept itemised instead of collapsed to a
+ * total — what a group split receipt needs in order to print each person's own order.
+ *
+ * `computeItemized` stays the authority on the amounts: every `total` here is read straight
+ * off it and the surcharge is derived as the remainder, so the two can never disagree about
+ * what somebody owes no matter how the apportionment changes.
+ */
+export function explodeItemized(
+  lines: ReceiptLine[],
+  surcharges: Surcharges,
+  charged: number,
+  participants: string[]
+): ItemizedPersonBreakdown[] {
+  const people = participants.length > 0 ? participants : [SELF];
+  const authoritative = computeItemized(lines, surcharges, charged, participants);
+
+  const totalFor = new Map<string, number>([[SELF, authoritative.ownShare]]);
+  for (const s of authoritative.shares) totalFor.set(s.personId, s.owed);
+
+  return people.map((id) => {
+    const items: ItemizedPersonItem[] = [];
+    let subtotalCents = 0;
+
+    for (const line of lines) {
+      const lineCents = Math.max(0, toCents(line.amount));
+      if (lineCents <= 0) continue;
+
+      // A line nobody claimed belongs to everybody, matching computeItemized.
+      const eaters = line.assignedTo.filter((p) => people.includes(p));
+      const sharers = eaters.length === 0 ? people : eaters;
+      if (!sharers.includes(id)) continue;
+
+      const each = apportionCents(
+        sharers.map(() => 1),
+        lineCents
+      );
+      const mine = each[sharers.indexOf(id)];
+      subtotalCents += mine;
+      items.push({
+        lineId: line.id,
+        label: line.label,
+        amount: fromCents(mine),
+        sharedBy: sharers.length,
+      });
+    }
+
+    const total = totalFor.get(id) ?? 0;
+    return {
+      personId: id,
+      items,
+      itemsSubtotal: fromCents(subtotalCents),
+      surcharge: fromCents(toCents(total) - subtotalCents),
+      total,
+    };
+  });
+}
+
 /* --- Settlement matching ------------------------------------------------- */
 
 /** An unsettled share, flattened with the context needed to recognise its repayment. */
@@ -472,6 +551,10 @@ export interface OpenShare {
   status?: ShareStatus;
   /** Local file URI of the parent transaction's saved receipt photo, if any. */
   receiptUri?: string | null;
+  /** The method used to divide the bill ('equal' | 'shares' | 'exact' | 'itemized'). */
+  splitMethod?: SplitMethod;
+  /** Total number of people sharing this bill (including payer if they took a share). */
+  participantCount?: number;
 }
 
 /** An extracted inbound row that might be someone paying you back. */

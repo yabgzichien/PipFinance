@@ -676,7 +676,15 @@ export function AdvancedImportScreen({
           keyboardShouldPersistTaps="handled"
         >
         {/* ── Pip intro / done message ── */}
-        <PipSays expr={phase === 'done' ? 'happy' : 'idle'}>
+        {/* Pip works the file in goggles with a flask in each hand, and drops back to a plain grin
+            once it has landed — the lab pose says "still running it", which stops being true at
+            'done'. The size bump is the pose's own: its glassware fills the margins the plain coin
+            leaves empty, so at PipSays' default the coin itself would come out smaller. */}
+        <PipSays
+          expr={phase === 'done' ? 'happy' : 'idle'}
+          scientist={phase !== 'done'}
+          size={phase === 'done' ? 60 : 78}
+        >
           <BubbleText>
             {phase === 'done' ? (
               <>

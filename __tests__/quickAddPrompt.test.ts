@@ -42,7 +42,7 @@ describe('parseQuickAddReply', () => {
       categories, active, today
     );
     expect(out).toEqual([
-      { label: 'lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
+      { label: 'lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food', categorySource: 'guess' },
     ]);
   });
 

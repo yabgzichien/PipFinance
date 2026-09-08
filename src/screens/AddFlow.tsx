@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { PipWearsHat } from '../components/Pip';
+import { ScanProgressBar } from '../components/ScanProgressBar';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
 import { getActiveCurrencies } from '../db/currencyRepo';
@@ -9,6 +10,7 @@ import { listFxRates } from '../db/fxRepo';
 import { currentMonthKey } from '../lib/budget';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { resolveSuggestion, shouldPreserveMerchantMemory } from '../lib/categorySuggestion';
+import { guessCategoryByKeyword } from '../lib/categoryKeywords';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
@@ -17,6 +19,7 @@ import { type ScannedReceipt } from '../lib/parseReceipt';
 import { resolveQuickAdd } from '../lib/quickAdd';
 import type { QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
+import { getScanProgress } from '../lib/scanningNarration';
 import { autoFillStats, type AutoFillStats } from '../lib/recommend';
 import { merchantKey } from '../lib/normalize';
 import { workingsFromReceipt } from '../lib/splitMessage';
@@ -116,6 +119,10 @@ function AddFlowPhases({
   const [cached, setCached] = useState<ExtractedTxn[] | undefined>(undefined);
   const [linkId, setLinkId] = useState<string | null>(null);
   const [receiptResult, setReceiptResult] = useState<ReceiptSplitResult | null>(null);
+  // Auto-categorization for the scanned receipt's merchant, resolved once the read completes.
+  // Mirrors onExtracted's memory -> keyword -> LLM layering so a receipt gets the same treatment
+  // as a screenshot instead of always landing on 'split' with no category picked.
+  const [receiptSuggestion, setReceiptSuggestion] = useState<CategorySuggestion | null>(null);
 
   /** The itemized receipt's surcharge breakdown, kept alive for the Saved screen's share
    *  message. The `splits` table has nowhere to store it, so this is the only window in which
@@ -146,6 +153,9 @@ function AddFlowPhases({
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState<string | null>(null);
   const [quickPrefill, setQuickPrefill] = useState<QuickDraft | null>(null);
+  // Live seconds counter behind the 'quickparse' progress bar, same clock ExtractScreen uses
+  // for its scanning progress — quick add has no real percentage to report either.
+  const [quickElapsedSecs, setQuickElapsedSecs] = useState(0);
   // A quick-add batch was typed, not read off a screenshot, so it must not be saved as
   // 'extracted' — that would mislabel typed rows in the data-confidence weighting.
   const [batchSource, setBatchSource] = useState<TxnSource>('extracted');
@@ -153,6 +163,13 @@ function AddFlowPhases({
   useEffect(() => {
     getLLM().then((llm) => setHasKey(llm.can('extract')));
   }, []);
+
+  useEffect(() => {
+    if (phase !== 'quickparse') return;
+    setQuickElapsedSecs(0);
+    const id = setInterval(() => setQuickElapsedSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   // Named so hardware/gesture back can call the exact same transition as each phase's own back
   // button below — the two must never disagree about where back goes.
@@ -162,7 +179,19 @@ function AddFlowPhases({
   const backToKind = () => setPhase(image ? 'kind' : 'attach');
   const backFromManualOrSplit = () => {
     setQuickPrefill(null);
-    setPhase(phase === 'split' && receiptResult ? 'receipt' : 'attach');
+    if (phase === 'split' && receiptResult) {
+      setPhase('receipt');
+      return;
+    }
+    // Opened straight into manual entry — a trip's "Add expense", or an income/expense shortcut.
+    // The attach hub was never on screen, so revealing it on back invents a step the user never
+    // took and strands them one screen further from where they started. Closing the flow returns
+    // them to exactly that place instead (see `addOrigin` in App.tsx).
+    if (initialPhase === 'manual') {
+      onClose();
+      return;
+    }
+    setPhase('attach');
   };
   const backFromCategorize = () => {
     // A quick-add batch was typed, not scanned, so there is no image and no ExtractScreen to
@@ -207,6 +236,7 @@ function AddFlowPhases({
     setExtractElapsedMs(null);
     setAutoFill(null);
     setReceiptResult(null);
+    setReceiptSuggestion(null);
     setCachedReceipt(null);
     setBatchSource('extracted');
     setPhase('kind');
@@ -262,7 +292,7 @@ function AddFlowPhases({
         fxRate: null,
       }))
     );
-    setSuggestions(drafts.map((d) => (d.categoryId ? { categoryId: d.categoryId, source: 'guess' } : null)));
+    setSuggestions(drafts.map((d) => (d.categoryId ? { categoryId: d.categoryId, source: d.categorySource ?? 'guess' } : null)));
     setLearnedThisScan(drafts.map(() => null));
     setLinkId(null);
     setBatchSource('manual');
@@ -317,6 +347,36 @@ function AddFlowPhases({
       setSuggestions(learned);
     }
     setPhase('categorize');
+  };
+
+  // Mirrors onExtracted's layering for a single scanned receipt: memory match first, then a
+  // local keyword guess, then an LLM guess if the app has a key for it. Best-effort throughout —
+  // any miss just leaves the category blank for the user to pick, same as today.
+  const categorizeReceipt = async (merchant: string | null, amount: number) => {
+    setReceiptSuggestion(null);
+    if (!merchant) return;
+    const key = merchantKey(merchant);
+    const keywordGuess = guessCategoryByKeyword(merchant, 'expense', entryCategories);
+    const local = resolveSuggestion(key, memory, entryCategories, keywordGuess);
+    if (local) {
+      setReceiptSuggestion(local);
+      return;
+    }
+    const llm = await getLLM();
+    if (!llm.can('guessCategories')) return;
+    try {
+      const guessed = await withTimeout(
+        llm.guessCategories({
+          items: [{ index: 0, merchant, amount, method: null, kind: 'expense' }],
+          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+        }),
+        GUESS_TIMEOUT_MS
+      );
+      const remote = resolveSuggestion(key, {}, entryCategories, guessed[0] ?? null);
+      if (remote) setReceiptSuggestion(remote);
+    } catch {
+      // Enhancement-only: leave the category blank on any failure.
+    }
   };
 
   const onCategorized = async (
@@ -412,7 +472,12 @@ function AddFlowPhases({
     }
   };
 
-  const onManualComplete = async (item: ExtractedTxn, categoryId: string, split: SplitDraft | null) => {
+  const onManualComplete = async (
+    item: ExtractedTxn,
+    categoryId: string,
+    split: SplitDraft | null,
+    tripId: string | null
+  ) => {
     setQuickPrefill(null);
     const { created, newLearned: learned } = await commitCategorized(
       [item],
@@ -422,8 +487,10 @@ function AddFlowPhases({
       [receiptResult?.photoUri ?? null]
     );
     await applyReliefDetection(created, cachedReceipt);
-    if (initialTripId && created.length > 0) {
-      await setTransactionsTrip(created.map((c) => c.id), initialTripId);
+    // The trip the entry screen ends up holding, not the one this flow was opened with: it is
+    // seeded from `initialTripId` and the user may have changed or cleared it in More details.
+    if (tripId && created.length > 0) {
+      await setTransactionsTrip(created.map((c) => c.id), tripId);
     }
     setResult(created);
     setNewLearned(learned);
@@ -476,6 +543,11 @@ function AddFlowPhases({
         <PipSays expr="think">
           <BubbleText>{t('quickAddThinking')}</BubbleText>
         </PipSays>
+        <ScanProgressBar
+          progress={getScanProgress(quickElapsedSecs)}
+          label={t('quickAddProgress')}
+          style={{ marginTop: 16 }}
+        />
       </View>
     );
   }
@@ -489,11 +561,13 @@ function AddFlowPhases({
         onBack={backToKind}
         onManualInstead={() => {
           setReceiptResult(null);
+          setReceiptSuggestion(null);
           setPhase('split');
         }}
         onDone={(r) => {
           setReceiptResult(r);
           setPhase('split');
+          void categorizeReceipt(r.merchant, r.charged);
         }}
       />
     );
@@ -524,8 +598,10 @@ function AddFlowPhases({
         initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : quickPrefill?.currency ?? null}
         initialType={quickPrefill?.type ?? initialType ?? null}
         initialDate={quickPrefill?.date ?? null}
-        initialCategoryId={quickPrefill?.categoryId ?? null}
+        initialCategoryId={phase === 'split' ? receiptSuggestion?.categoryId ?? null : quickPrefill?.categoryId ?? null}
+        initialCategorySource={phase === 'split' ? receiptSuggestion?.source ?? null : quickPrefill?.categorySource ?? null}
         initialSplit={phase === 'split' ? receiptResult?.draft ?? null : null}
+        initialTripId={initialTripId}
         isTutorial={tutorialMode === 'manual'}
         activeTourAnchor={activeTourAnchor}
         onAmountValidChange={onAmountValidChange}

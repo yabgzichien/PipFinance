@@ -3,7 +3,7 @@ jest.mock('expo-audio', () => ({
   setAudioModeAsync: jest.fn(),
 }));
 
-import { partitionCategories, recurringCategoryHideActions } from '../src/screens/CategoriesScreen';
+import { deletionImpact, partitionCategories, recurringCategoryHideActions } from '../src/screens/CategoriesScreen';
 import type { Category } from '../src/lib/types';
 
 const category = (id: string, isHidden: boolean): Category => ({
@@ -42,5 +42,28 @@ describe('recurringCategoryHideActions', () => {
 
     actions.onConfirm();
     expect(hide).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('deletionImpact', () => {
+  // Drives whether deletion asks the user where its history should go. Getting this to zero
+  // wrongly would bring back the silent reassignment it exists to prevent.
+  const txns = [{ categoryId: 'petrol' }, { categoryId: 'petrol' }, { categoryId: 'food' }, { categoryId: null }];
+  const bills = [
+    { categoryId: 'petrol', archived: false },
+    { categoryId: 'petrol', archived: true },
+    { categoryId: 'food', archived: false },
+  ];
+
+  it('counts the transactions and the live bills that would be re-filed', () => {
+    expect(deletionImpact(txns, bills, 'petrol')).toBe(3);
+  });
+
+  it('ignores archived bills, which will never write another transaction', () => {
+    expect(deletionImpact([], bills, 'petrol')).toBe(1);
+  });
+
+  it('is zero for a category nothing points at', () => {
+    expect(deletionImpact(txns, bills, 'never-used')).toBe(0);
   });
 });

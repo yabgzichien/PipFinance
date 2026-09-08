@@ -14,8 +14,17 @@ describe('backTargetFor', () => {
   });
 
   it('sends every flat screen back to home', () => {
-    const flat: Screen[] = ['add', 'settings', 'transactions', 'budget', 'categoryDetail', 'recap', 'networth', 'breakdown'];
+    const flat: Screen[] = ['settings', 'transactions', 'budget', 'categoryDetail', 'recap', 'networth', 'breakdown'];
     for (const screen of flat) expect(backTargetFor(screen, origins)).toBe('home');
+  });
+
+  // Entry opened from a trip has to come back to that trip: landing on Home after logging one
+  // trip expense loses the place the user was working in, and the next expense costs three taps.
+  it('returns add to wherever it was opened from, defaulting to home', () => {
+    expect(backTargetFor('add', origins)).toBe('home');
+    expect(backTargetFor('add', { ...origins, addOrigin: 'home' })).toBe('home');
+    expect(backTargetFor('add', { ...origins, addOrigin: 'tripDetail' })).toBe('tripDetail');
+    expect(backTargetFor('add', { ...origins, addOrigin: 'calendar' })).toBe('calendar');
   });
 
   it('returns advancedImport to settings', () => {

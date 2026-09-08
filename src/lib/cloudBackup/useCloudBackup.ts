@@ -8,6 +8,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { getMeta, setMeta } from '../../db/metaRepo';
 import {
   GOOGLE_DRIVE_CLIENT_ID,
+  GOOGLE_DRIVE_REDIRECT_URI,
   GOOGLE_DRIVE_SCOPES,
   isGoogleDriveConfigured,
   refreshAccessToken,
@@ -67,7 +68,12 @@ export function useCloudBackup(): CloudBackupState {
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const redirectUri = useMemo(() => AuthSession.makeRedirectUri({ scheme: 'pip' }), []);
+  // `native` wins over `scheme` in a built app, which is what we want: Google requires the
+  // package-name scheme here, not the app's `pip://` one. See GOOGLE_DRIVE_REDIRECT_URI.
+  const redirectUri = useMemo(
+    () => AuthSession.makeRedirectUri({ scheme: 'pip', native: GOOGLE_DRIVE_REDIRECT_URI }),
+    []
+  );
 
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {

@@ -6,12 +6,21 @@
 //
 // SETUP REQUIRED (one-time, external to this repo): create an OAuth client ID in Google Cloud
 // Console (APIs & Services > Credentials > Create Credentials > OAuth client ID > Android),
-// using this app's package name `com.yabg.pipexpensestracker` and your release/debug signing
-// SHA-1 fingerprint(s). Put the resulting client id in `.env.local` as
+// using this app's package name `com.yabg.pip` and your release/debug signing
+// SHA-1 fingerprint(s). On that client's page, open Advanced Settings and turn on "Enable Custom
+// URI scheme" — Google blocks custom-scheme redirects for Android clients by default, and this
+// flow needs one. Then put the resulting client id in `.env.local` as
 // EXPO_PUBLIC_GOOGLE_DRIVE_CLIENT_ID. Cloud backup stays disabled (and says so in Settings)
 // until this is set.
 export const GOOGLE_DRIVE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_DRIVE_CLIENT_ID ?? '';
 export const isGoogleDriveConfigured = GOOGLE_DRIVE_CLIENT_ID.length > 0;
+
+/** Redirect Google sends the authorization code back to. Android OAuth clients only accept a
+ *  custom scheme equal to the app's package name — the app's own `pip://` scheme is rejected
+ *  with redirect_uri_mismatch — so this must match the Play Store package, which is the
+ *  `applicationId` in android/app/build.gradle, mirrored by `expo.android.package` (app.json).
+ *  The matching entry in `expo.scheme` is what registers the intent filter that routes it back. */
+export const GOOGLE_DRIVE_REDIRECT_URI = 'com.yabg.pip:/oauth2redirect';
 
 /** Narrow, hidden-folder-only scope — no access to the user's visible Drive files. */
 export const GOOGLE_DRIVE_SCOPES = [

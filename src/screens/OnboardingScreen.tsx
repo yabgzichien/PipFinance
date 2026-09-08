@@ -1,10 +1,9 @@
 // src/screens/OnboardingScreen.tsx
 // The app's front door setup wizard:
 // 1. Pip intro: "Know your money."
-// 2. Old money manager import ask:
-//    - If user imports via Advanced Import: branches directly to Notifications -> Widget.
-//    - If user has nothing to import: branches to Budget -> Recurring payment -> Notifications -> Widget.
-// Every step after the intro can be skipped individually.
+// 2. Old money manager import ask.
+// 3. Appearance -> Demo -> Notifications -> Widget, for both import outcomes.
+// Users can return to any earlier setup step with the wizard back control.
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,21 +11,26 @@ import { FadeIn } from '../components/Motion';
 import { ProgressTrack, TopBar } from '../components/ui';
 import * as haptics from '../lib/haptics';
 import {
+  getPreviousDemoBeat,
   getPreviousWizardStep,
   getWizardNavInfo,
+  type DemoBeat,
   type WizardStep,
 } from '../lib/onboardingNav';
+import { DEMO_RECEIPT_LINES } from '../data/demoReceipt';
+import type { ReceiptLine } from '../lib/split';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useBackHandler, useExitConfirm } from '../state/useBackHandler';
 import { useLanguage } from '../i18n';
 import { spacing } from '../theme';
+import { DEMO_STEP_ENABLED } from '../config/onboardingFlags';
 import { AdvancedImportScreen } from './AdvancedImportScreen';
-import { BudgetStep } from './onboarding/BudgetStep';
+import { AppearanceStep } from './onboarding/AppearanceStep';
+import { DemoStep } from './onboarding/DemoStep';
 import { ImportStep } from './onboarding/ImportStep';
 import { NotificationsStep } from './onboarding/NotificationsStep';
 import { PipIntroStep } from './onboarding/PipIntroStep';
-import { RecurringPaymentStep } from './onboarding/RecurringPaymentStep';
 import { WidgetStep } from './onboarding/WidgetStep';
 
 export function OnboardingScreen() {
@@ -41,6 +45,10 @@ export function OnboardingScreen() {
   // settles down from above, so the direction of travel is legible without a slide transition.
   const [back, setBack] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  // The demo's own state lives here, not inside the step. The wizard's back button walks the
+  // demo's beats before leaving it, and returning from Notifications preserves the split.
+  const [demoBeat, setDemoBeat] = useState<DemoBeat>('offer');
+  const [demoLines, setDemoLines] = useState<ReceiptLine[]>(DEMO_RECEIPT_LINES);
 
   const finish = () => {
     if (finishing) return;
@@ -54,8 +62,25 @@ export function OnboardingScreen() {
     setStep(nextStep);
   };
 
+  /** Both import outcomes flow through appearance before the optional demo. */
+  const afterImport = (): WizardStep => 'appearance';
+
+  const afterAppearance = (): WizardStep => (DEMO_STEP_ENABLED ? 'demo' : 'notifications');
+
   const goBack = () => {
-    const prev = getPreviousWizardStep(step, hasImported);
+    // Inside the demo, back rewinds a beat at a time and only leaves the step once there is
+    // nothing left to rewind.
+    if (step === 'demo') {
+      const prevBeat = getPreviousDemoBeat(demoBeat);
+      if (prevBeat) {
+        haptics.tap();
+        setBack(true);
+        setDemoBeat(prevBeat);
+        return;
+      }
+    }
+
+    const prev = getPreviousWizardStep(step, hasImported, DEMO_STEP_ENABLED);
     if (!prev) return;
     haptics.tap();
     setBack(true);
@@ -74,20 +99,20 @@ export function OnboardingScreen() {
     return confirmExit();
   });
 
-  const navInfo = getWizardNavInfo(step, hasImported);
+  const navInfo = getWizardNavInfo(step, hasImported, DEMO_STEP_ENABLED);
 
   const getLocalizedWizardTitle = (title: string) => {
     switch (title) {
       case 'Import data':
         return t('wizardImportTitle');
-      case 'Budget':
-        return t('wizardBudgetTitle');
-      case 'Recurring payment':
-        return t('wizardRecurringTitle');
+      case 'Appearance':
+        return t('wizardAppearanceTitle');
       case 'Notifications':
         return t('wizardNotificationsTitle');
       case 'Widget':
         return t('wizardWidgetTitle');
+      case 'Demo':
+        return t('wizardDemoTitle');
       default:
         return title;
     }
@@ -116,9 +141,9 @@ export function OnboardingScreen() {
               onStartImport={() => advance('advanced_import')}
               onSkip={() => {
                 setHasImported(false);
-                advance('budget');
+                advance(afterImport());
               }}
-              onContinue={() => advance('notifications')}
+              onContinue={() => advance(afterImport())}
             />
           )}
           {step === 'advanced_import' && (
@@ -126,19 +151,18 @@ export function OnboardingScreen() {
               onClose={goBack}
               onSuccess={() => {
                 setHasImported(true);
-                advance('notifications');
+                advance(afterImport());
               }}
               isWizard
             />
           )}
-          {step === 'budget' && (
-            <BudgetStep
-              onNext={() => advance('recurring')}
-              onSkip={() => advance('recurring')}
-            />
-          )}
-          {step === 'recurring' && (
-            <RecurringPaymentStep
+          {step === 'appearance' && <AppearanceStep onNext={() => advance(afterAppearance())} />}
+          {step === 'demo' && (
+            <DemoStep
+              beat={demoBeat}
+              onBeat={setDemoBeat}
+              lines={demoLines}
+              onLines={setDemoLines}
               onNext={() => advance('notifications')}
               onSkip={() => advance('notifications')}
             />

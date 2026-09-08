@@ -6,7 +6,7 @@ jest.mock('../src/db/db', () => {
 });
 
 import { adjustHoldingCost, adjustHoldingQuantity } from '../src/db/accountsRepo';
-import { deleteCategory } from '../src/db/categoriesRepo';
+import { deleteCategory, InvalidReplacementCategoryError } from '../src/db/categoriesRepo';
 import { listOccurrencesByTxnIds } from '../src/db/commitmentsRepo';
 import { recordPayment, revertPayment } from '../src/db/splitRepo';
 
@@ -109,6 +109,43 @@ describe('deleteCategory', () => {
     expect(sql).toContain('DELETE FROM merchant_memory WHERE category_id = ?');
     expect(sql).toContain('DELETE FROM budget_allocation WHERE category_id = ?');
     expect(sql).toContain('DELETE FROM categories WHERE id = ?');
+  });
+
+  // Deleting used to silently pick the destination itself, which quietly rewrote a user's
+  // historical category breakdown. The caller can now name where the transactions land.
+  describe('with a chosen replacement', () => {
+    const chosen = {
+      first: {
+        'SELECT kind FROM categories WHERE id = ?': { kind: 'expense' },
+        'SELECT kind, is_default': { kind: 'expense', is_default: 0 },
+        'SELECT id FROM categories': { id: 'other' },
+      },
+    };
+
+    it('moves transactions and bills to the category the caller named, not the automatic fallback', async () => {
+      const db = install(fakeDb(chosen));
+      await deleteCategory('broadband', 'travelling');
+      const txns = db.statements.find((s) => s.sql.includes('UPDATE transactions'));
+      const commitments = db.statements.find((s) => s.sql.includes('UPDATE commitments'));
+      expect(txns?.args).toEqual(['travelling', 'broadband']);
+      expect(commitments?.args).toEqual(['travelling', 'broadband']);
+    });
+
+    it('refuses a replacement of a different kind', async () => {
+      install(fakeDb({ first: { ...chosen.first, 'SELECT kind FROM categories WHERE id = ?': { kind: 'income' } } }));
+      await expect(deleteCategory('broadband', 'salary')).rejects.toBeInstanceOf(InvalidReplacementCategoryError);
+    });
+
+    it('refuses a replacement that no longer exists', async () => {
+      install(fakeDb({ first: { 'SELECT kind, is_default': { kind: 'expense', is_default: 0 } } }));
+      await expect(deleteCategory('broadband', 'deleted-already')).rejects.toBeInstanceOf(InvalidReplacementCategoryError);
+    });
+
+    it('refuses to move a category into itself', async () => {
+      const db = install(fakeDb(chosen));
+      await expect(deleteCategory('broadband', 'broadband')).rejects.toBeInstanceOf(InvalidReplacementCategoryError);
+      expect(db.sql().some((s) => s.includes('DELETE FROM categories'))).toBe(false);
+    });
   });
 });
 

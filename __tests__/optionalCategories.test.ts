@@ -8,6 +8,7 @@ import {
   OPTIONAL_CATEGORIES,
   OPTIONAL_GROUPS,
   optionalByTemplateKey,
+  optionalCategoriesForKind,
   searchOptionalCategories,
 } from '../src/data/optionalCategories';
 import { STARTER_TEMPLATE_KEYS, HISTORICAL_DEFAULT_LABELS } from '../src/data/categoryTemplates';
@@ -60,6 +61,25 @@ describe('search', () => {
 
   it('an empty query returns the whole catalogue in catalogue order', () => {
     expect(searchOptionalCategories('  ', 'en')).toHaveLength(6);
+  });
+
+  // Adding an income category used to offer Petrol and Groceries, because search ignored the
+  // kind the user was actually adding.
+  it('offers nothing for a kind the catalogue has no suggestions for', () => {
+    expect(searchOptionalCategories('', 'en', 'income')).toEqual([]);
+    expect(searchOptionalCategories('fuel', 'en', 'income')).toEqual([]);
+  });
+
+  it('still offers expense suggestions when the kind is expense', () => {
+    expect(searchOptionalCategories('', 'en', 'expense')).toHaveLength(6);
+    expect(searchOptionalCategories('fuel', 'en', 'expense').map((c) => c.id)).toEqual(['opt-petrol']);
+  });
+});
+
+describe('optionalCategoriesForKind', () => {
+  it('reports what a kind can be offered, so the sheet can skip an empty Suggested tab', () => {
+    expect(optionalCategoriesForKind('expense')).toHaveLength(6);
+    expect(optionalCategoriesForKind('income')).toEqual([]);
   });
 });
 

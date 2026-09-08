@@ -2,7 +2,7 @@
 // The totals contract is the whole of Trips that can be wrong quietly. Every case here is one
 // the spec names explicitly, and each has a way of producing a plausible-looking number that is
 // not the number the user means.
-import { computeTripTotals, expenseIdsFromSelection, expensesForTrip, inheritedTripId } from '../src/lib/trips';
+import { computeTripTotals, expenseIdsFromSelection, expensesForTrip, inheritedTripId, reassignedFromOtherTrips } from '../src/lib/trips';
 import type { Transaction } from '../src/lib/types';
 
 // Stand-in for useDisplayCurrency().convertTxn: MYR passes through, SGD is 3.5.
@@ -126,5 +126,33 @@ describe('inheritedTripId', () => {
 
   it('falls back to no trip when there is no origin transaction at all (e.g. a deleted bill)', () => {
     expect(inheritedTripId(undefined)).toBeNull();
+  });
+});
+
+describe('reassignedFromOtherTrips', () => {
+  // The confirmation before moving someone else's trip expense used to be computed from the
+  // picker's *filtered* candidate list. Selecting a row and then typing a search that hid it
+  // left the selection intact but made the count zero, so the move happened silently.
+  const all = [
+    txn({ id: 'a', tripId: null }),
+    txn({ id: 'b', tripId: 'trip-jp' }),
+    txn({ id: 'c', tripId: 'trip-kr' }),
+    txn({ id: 'd', tripId: 'trip-sg' }),
+  ];
+
+  it('counts selected rows that currently belong to a different trip', () => {
+    expect(reassignedFromOtherTrips(all, ['a', 'b', 'c'], 'trip-sg')).toBe(2);
+  });
+
+  it('counts a selection the caller can no longer see', () => {
+    expect(reassignedFromOtherTrips(all, ['b'], 'trip-sg')).toBe(1);
+  });
+
+  it('ignores rows with no trip and rows already in the destination', () => {
+    expect(reassignedFromOtherTrips(all, ['a', 'd'], 'trip-sg')).toBe(0);
+  });
+
+  it('ignores an id that no longer matches any transaction', () => {
+    expect(reassignedFromOtherTrips(all, ['gone'], 'trip-sg')).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 {
   "name": "pip-expenses-tracker",
-  "version": "1.0.8",
+  "version": "1.0.10",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -29,6 +29,7 @@
     "@expo-google-fonts/hanken-grotesk": "^0.4.3",
     "@expo-google-fonts/space-grotesk": "^0.4.1",
     "@react-native-ml-kit/text-recognition": "^2.0.0",
+    "@sentry/react-native": "~7.2.0",
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.0",
     "expo-asset": "~12.0.13",

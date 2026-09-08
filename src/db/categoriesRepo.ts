@@ -1,3 +1,5 @@
+import { Platform } from 'react-native';
+import type * as SQLite from 'expo-sqlite';
 import { getDb } from './db';
 import { optionalByTemplateKey, type OptionalCategory } from '../data/optionalCategories';
 import type { Category } from '../lib/types';
@@ -163,6 +165,30 @@ export async function setCategoryHidden(id: string, hidden: boolean): Promise<vo
   throw new LastVisibleCategoryError(row.kind === 'income' ? 'income' : 'expense');
 }
 
+/** The subset of a database (or an exclusive transaction's own connection) activation needs. */
+type ActivationTx = Pick<SQLite.SQLiteDatabase, 'getFirstAsync' | 'runAsync'>;
+
+/**
+ * Run activation's statements inside one all-or-nothing transaction.
+ *
+ * `withExclusiveTransactionAsync` is the stronger tool — its private connection means no other
+ * async write can interleave — but expo-sqlite throws outright for it on web, where there is no
+ * second connection to hand out. Web therefore falls back to `withTransactionAsync`: still a
+ * single BEGIN/COMMIT, so a failed batch still leaves no half-added categories behind, which is
+ * the property activation actually depends on. The weaker interleaving guarantee costs nothing
+ * there: a browser tab runs one wasm database with no concurrent writer to interleave with.
+ */
+async function withActivationTransaction(
+  db: SQLite.SQLiteDatabase,
+  body: (tx: ActivationTx) => Promise<void>
+): Promise<void> {
+  if (Platform.OS === 'web') {
+    await db.withTransactionAsync(() => body(db));
+    return;
+  }
+  await db.withExclusiveTransactionAsync((tx) => body(tx));
+}
+
 /**
  * Turn on one or more catalogue suggestions atomically. Template keys, rather than labels,
  * preserve idempotence for repeats and distinguish catalogue categories from user-made matches.
@@ -175,9 +201,9 @@ export async function activateSuggestedCategories(templateKeys: string[]): Promi
   if (wanted.length === 0) return [];
 
   const ids: string[] = [];
-  await db.withExclusiveTransactionAsync(async (tx) => {
-    // `withExclusiveTransactionAsync` provides its own connection. Every statement, including
-    // id collision probing, must stay on it or Expo can interleave an outer-connection query.
+  await withActivationTransaction(db, async (tx) => {
+    // On native, the transaction provides its own connection. Every statement, including id
+    // collision probing, must stay on it or Expo can interleave an outer-connection query.
     const uniqueTransactionId = async (base: string): Promise<string> => {
       let id = base;
       let n = 2;
@@ -251,19 +277,64 @@ export class NoFallbackCategoryError extends Error {
 }
 
 /**
+ * Thrown when the replacement category a caller named cannot receive the deleted category's
+ * transactions — it is gone, it is the category being deleted, or it is the other kind.
+ */
+export class InvalidReplacementCategoryError extends Error {
+  constructor() {
+    super('The chosen replacement category cannot receive these transactions');
+  }
+}
+
+/**
+ * Where a deleted category's transactions land.
+ *
+ * A named `replacementId` is the user's own answer and is used as given, once checked: it must
+ * still exist, must not be the row being deleted, and must be the same kind — moving expenses
+ * into an income category would corrupt every total that reads them.
+ *
+ * Omitting it keeps the historical automatic choice, which is right only where no user is there
+ * to ask (onboarding tears down a category it just created, and nothing has been filed under it).
+ */
+async function resolveDeletionDestination(
+  db: SQLite.SQLiteDatabase,
+  id: string,
+  kindColumn: string,
+  replacementId?: string
+): Promise<string> {
+  const kind = kindColumn === 'income' ? 'income' : 'expense';
+  if (replacementId !== undefined) {
+    if (replacementId === id) throw new InvalidReplacementCategoryError();
+    const replacement = await db.getFirstAsync<{ kind: string }>(
+      'SELECT kind FROM categories WHERE id = ?',
+      replacementId
+    );
+    if (!replacement || replacement.kind !== kindColumn) throw new InvalidReplacementCategoryError();
+    return replacementId;
+  }
+  const fallback = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM categories WHERE kind = ? AND id != ? ORDER BY is_default DESC, sort ASC LIMIT 1',
+    kindColumn,
+    id
+  );
+  if (!fallback) throw new NoFallbackCategoryError(kind);
+  return fallback.id;
+}
+
+/**
  * Delete any category, including the generic "Other Expenses"/"Other Income"
  * ones  nothing is permanently locked. Any transactions or learned mappings
- * pointing at it are reassigned to another category of the same kind (any
- * remaining one, preferring another default) so nothing dangles. If it's the
- * last category of its kind, deletion is refused via NoFallbackCategoryError
- * since there'd be no valid reassignment target.
+ * pointing at it are reassigned to `replacementId` — the category the user chose to receive
+ * them — or, when the caller names none, to any remaining category of the same kind (preferring
+ * another default). If it's the last category of its kind, deletion is refused via
+ * NoFallbackCategoryError since there'd be no valid reassignment target.
  *
  * A deleted default is also tombstoned in `deleted_default_categories`, so the
  * startup reseed (`seedCategories` in db.ts) knows not to bring it back  without
  * this, deleting a default category would only last until the app is next closed
  * and reopened. Custom categories need no such tombstone: they are never seeded.
  */
-export async function deleteCategory(id: string): Promise<void> {
+export async function deleteCategory(id: string, replacementId?: string): Promise<void> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ kind: string; is_default: number }>(
     'SELECT kind, is_default FROM categories WHERE id = ?',
@@ -271,21 +342,14 @@ export async function deleteCategory(id: string): Promise<void> {
   );
   if (!row) return;
   const kind = row.kind === 'income' ? 'income' : 'expense';
-  const fallback = await db.getFirstAsync<{ id: string }>(
-    'SELECT id FROM categories WHERE kind = ? AND id != ? ORDER BY is_default DESC, sort ASC LIMIT 1',
-    row.kind,
-    id
-  );
-  if (!fallback) {
-    throw new NoFallbackCategoryError(kind);
-  }
+  const destination = await resolveDeletionDestination(db, id, row.kind, replacementId);
   await db.withTransactionAsync(async () => {
-    await db.runAsync('UPDATE transactions SET category_id = ? WHERE category_id = ?', fallback.id, id);
+    await db.runAsync('UPDATE transactions SET category_id = ? WHERE category_id = ?', destination, id);
     // Recurring bills carry a category too, and they outlive the transactions they created.
     // Left pointing at the deleted id, the next tick would write a transaction categorised
     // as something that no longer exists — invisible to every category breakdown and to
     // every budget envelope, month after month.
-    await db.runAsync('UPDATE commitments SET category_id = ? WHERE category_id = ?', fallback.id, id);
+    await db.runAsync('UPDATE commitments SET category_id = ? WHERE category_id = ?', destination, id);
     await db.runAsync('DELETE FROM merchant_memory WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM budget_allocation WHERE category_id = ?', id);
     await db.runAsync('DELETE FROM categories WHERE id = ?', id);

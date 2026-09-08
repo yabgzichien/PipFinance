@@ -42,6 +42,7 @@ export function AmountSheet({
   activeCurrencies,
   decimals,
   onChangeCurrency,
+  onCurrencyActivated,
   onApply,
   onClose,
 }: {
@@ -52,6 +53,9 @@ export function AmountSheet({
   activeCurrencies: string[];
   decimals: number;
   onChangeCurrency: (code: string) => void;
+  /** Fires after CurrencyChip activates a currency that wasn't already active, so the parent
+   * can refresh its own active-currency/rate state. */
+  onCurrencyActivated?: (code: string) => void;
   /** The expression as typed — the parent evaluates it, exactly as it did for the old input. */
   onApply: (text: string) => void;
   onClose: () => void;
@@ -93,11 +97,12 @@ export function AmountSheet({
           <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
 
           <View style={[styles.display, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            {activeCurrencies.length > 1 ? (
-              <CurrencyChip value={currency} active={activeCurrencies} onChange={onChangeCurrency} />
-            ) : (
-              <Text style={[styles.prefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
-            )}
+            <CurrencyChip
+              value={currency}
+              active={activeCurrencies}
+              onChange={onChangeCurrency}
+              onActivated={onCurrencyActivated}
+            />
             {/* A real TextInput, with the OS keyboard suppressed on native. That keeps hardware
                 typing working on web (and for anyone on a tablet keyboard) without forking this
                 component per platform, while the pad below stays the only input on a phone. */}
@@ -180,7 +185,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingHorizontal: 14,
   },
-  prefix: { fontFamily: numFont(600), fontSize: 18 },
   input: { flex: 1, minWidth: 0, fontFamily: numFont(700), fontSize: 30, paddingVertical: 12, textAlign: 'right' },
   preview: { fontFamily: numFont(600), fontSize: 14, textAlign: 'right', marginTop: 6, marginBottom: 10, minHeight: 18 },
   pad: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4, marginBottom: 14 },

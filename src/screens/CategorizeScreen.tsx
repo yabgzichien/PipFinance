@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AddCategoryModal } from '../components/AddCategoryModal';
+import { AddCategorySheet } from '../components/AddCategorySheet';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { SplitSheet } from '../components/SplitSheet';
@@ -507,12 +507,18 @@ export function CategorizeScreen({
       )}
       </KeyboardAvoidingView>
 
-      <AddCategoryModal
+      {/* Same catalogue as Settings and manual entry — one way to add a category, wherever the
+          user happens to be when they discover they need one. */}
+      <AddCategorySheet
         visible={adding}
         kind={isIncome ? 'income' : 'expense'}
         onClose={() => setAdding(false)}
         onCreated={(id) => {
           setCat(id);
+          setAdding(false);
+        }}
+        onActivated={(ids) => {
+          if (ids.length > 0) setCat(ids[0]);
           setAdding(false);
         }}
       />

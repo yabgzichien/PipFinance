@@ -35,6 +35,9 @@ export type ScreenOrigins = {
   exportOrigin: Screen;
   commitmentsOrigin?: Screen;
   currencyOrigin?: Screen;
+  /** Where the add flow was opened from. Home for the bottom-nav plus, but a trip's own
+   *  "Add expense" has to come back to that trip rather than dumping the user on Home. */
+  addOrigin?: Screen;
 };
 
 /** Where `screen`'s back action goes. `null` means `screen` is a root destination — Home,
@@ -63,6 +66,7 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
     case 'calendar':
       return origins.calendarOrigin;
     case 'add':
+      return origins.addOrigin ?? 'home';
     case 'settings':
     case 'transactions':
     case 'budget':

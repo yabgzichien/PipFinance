@@ -3,6 +3,7 @@
 // short — one LLM call, whose answer memory still overrides. Lives in lib/ rather than in the
 // screen so the whole tree is unit-testable with a fake provider and no React.
 
+import { guessCategoryByKeyword } from './categoryKeywords';
 import { parseQuickText, type QuickDraft, type QuickParseResult } from './quickParse';
 import { suggestForMerchant } from './recommend';
 import type { Category, MemoryMap } from './types';
@@ -43,16 +44,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Fill each draft's category from learned memory, where memory has a hit whose kind matches.
- * A draft that already carries a category keeps it unless memory disagrees — memory wins,
- * mirroring AddFlow.onExtracted, where source 'learned' beats source 'guess'.
+ * Fill each draft's category from learned memory, where memory has a hit whose kind matches,
+ * falling back to a fixed keyword guess (lib/categoryKeywords.ts) when memory has nothing —
+ * e.g. "lunch" -> Food on a fresh install with no history and no LLM. A draft that already
+ * carries a category keeps it unless memory disagrees — memory wins, mirroring
+ * AddFlow.onExtracted, where source 'learned' beats source 'guess'.
  */
 function applyMemory(drafts: QuickDraft[], memory: MemoryMap, categories: Category[]): QuickDraft[] {
   return drafts.map((d) => {
     const id = d.label ? suggestForMerchant(memory, d.label) : null;
     const cat = id ? categories.find((c) => c.id === id) : undefined;
-    if (cat && cat.kind === d.type) return { ...d, categoryId: cat.id };
-    return d;
+    if (cat && cat.kind === d.type) return { ...d, categoryId: cat.id, categorySource: 'learned' };
+    if (d.categoryId) return d;
+    const guessed = d.label ? guessCategoryByKeyword(d.label, d.type, categories) : null;
+    return guessed ? { ...d, categoryId: guessed, categorySource: 'guess' } : d;
   });
 }
 

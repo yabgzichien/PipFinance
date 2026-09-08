@@ -57,27 +57,23 @@ describe('buildGroupMessage', () => {
     expect(msg).not.toContain('Me (paid)');
   });
 
-  it('signs off with Pip and the viral referral link so friends discover the app', () => {
+  it('omits promotional sign-off and referral link', () => {
     const msg = buildGroupMessage(input());
-    expect(msg).toContain('Split with Pip (Zero ads, 100% private):');
-    expect(msg).toContain('https://pipfinance.app');
+    expect(msg).not.toContain('Split with Pip');
+    expect(msg).not.toContain('https://pipfinance.app');
   });
 
-  it('includes DuitNow payment instructions when hasDuitNowQr is true', () => {
-    const withQr = buildGroupMessage(input({ hasDuitNowQr: true }));
-    expect(withQr).toContain('Pay me via DuitNow:');
-    expect(withQr).toContain('Scan the attached DuitNow QR code to pay');
-
-    const withoutQr = buildGroupMessage(input({ hasDuitNowQr: false }));
-    expect(withoutQr).not.toContain('Pay me via DuitNow');
+  it('does not include DuitNow text in the message', () => {
+    const msg = buildGroupMessage(input());
+    expect(msg).not.toContain('Pay me via DuitNow');
+    expect(msg).not.toContain('Scan the attached DuitNow QR code to pay');
   });
 
-  it('translates DuitNow payment instructions and referral link in Chinese', () => {
-    const msg = buildGroupMessage(input({ hasDuitNowQr: true, isZh: true }));
-    expect(msg).toContain('使用 DuitNow 付款：');
-    expect(msg).toContain('请扫描附带的 DuitNow 二维码付款');
-    expect(msg).toContain('由 Pip 分摊（零广告，100% 本地隐私）：');
-    expect(msg).toContain('https://pipfinance.app');
+  it('translates referral link in Chinese and omits DuitNow text and promo link', () => {
+    const msg = buildGroupMessage(input({ isZh: true }));
+    expect(msg).not.toContain('使用 DuitNow 付款');
+    expect(msg).not.toContain('由 Pip 分摊');
+    expect(msg).not.toContain('https://pipfinance.app');
   });
 
   describe('the workings line', () => {
@@ -329,77 +325,62 @@ function owed(over: Partial<OwedReminderInput> = {}): OwedReminderInput {
 }
 
 describe('buildOwedReminder', () => {
-  it('greets the person who owes the money', () => {
-    expect(buildOwedReminder(owed())).toContain('fyy');
+  it('names the person who owes the money', () => {
+    expect(buildOwedReminder(owed())).toContain('Hi fyy');
   });
 
   it('states how many bills are open and what they come to', () => {
     const msg = buildOwedReminder(owed());
-    expect(msg).toContain('3 open bills');
-    expect(msg).toContain('RM 37.29');
+    expect(msg).toContain('You have 3 open bills with me, RM 37.29 in total.');
   });
 
-  it('says "bill" rather than "bills" for a single outstanding bill', () => {
+  it('formats as a single reminder when there is only 1 open bill', () => {
     const msg = buildOwedReminder(
       owed({ total: 17.29, bills: [owed().bills[0]] })
     );
-    expect(msg).toContain('1 open bill');
-    expect(msg).not.toContain('open bills');
+    expect(msg).toContain('THE ML KITCHEN (SEPANG) SDN BHD on 2 Sep.');
+    expect(msg).toContain('You still owe RM 17.29.');
   });
 
   it('lists every bill with its date and what is still outstanding', () => {
     const msg = buildOwedReminder(owed());
     expect(msg).toContain('THE ML KITCHEN (SEPANG) SDN BHD, 2 Sep: RM 17.29');
-    expect(msg.match(/Food, 3 Sep: RM 10\.00/g)).toHaveLength(2);
-  });
-
-  it('quotes bill amounts that sum to the total shown on screen', () => {
-    const msg = buildOwedReminder(owed());
-    const listed = amountsIn(msg).filter((n) => n !== 37.29);
-    expect(listed.reduce((s, n) => s + n, 0)).toBeCloseTo(37.29, 2);
-  });
-
-  it('asks only for what is left on a part-paid bill, and says it is part-paid', () => {
-    const msg = buildOwedReminder(
-      owed({
-        total: 10,
-        bills: [{ shareId: '1', merchant: 'Food', billDate: '2026-09-03', outstanding: 10, paid: 10 }],
-      })
-    );
-    expect(msg).toContain('RM 10.00');
-    expect(msg).toContain('part-paid');
-    expect(msg).not.toContain('RM 20.00');
+    expect(msg).toContain('Food, 3 Sep: RM 10.00');
   });
 
   it('leaves out the date for a bill that never had one', () => {
     const msg = buildOwedReminder(
       owed({ total: 10, bills: [{ shareId: '1', merchant: 'Food', billDate: null, outstanding: 10 }] })
     );
-    expect(msg).toContain('Food: RM 10.00');
-    expect(msg).not.toContain(', :');
+    expect(msg).toContain('Food.');
+    expect(msg).not.toContain('undefined');
   });
 
   it('names nobody except the person being chased', () => {
     expect(buildOwedReminder(owed())).not.toContain('Ali');
   });
 
-  it('signs off as Pip', () => {
-    expect(buildOwedReminder(owed())).toContain('Pip');
+  it('omits promotional sign-off and referral link', () => {
+    const msg = buildOwedReminder(owed());
+    expect(msg).not.toContain('Sent from Pip');
+    expect(msg).not.toContain('https://pipfinance.app');
   });
 
-  it('writes the reminder in Chinese when the app is in Chinese', () => {
+  it('writes the statement in Chinese when the app is in Chinese', () => {
     const msg = buildOwedReminder(owed({ isZh: true }));
-    expect(msg).toContain('fyy');
-    expect(msg).toContain('尚未结清');
+    expect(msg).toContain('fyy 您好');
+    expect(msg).toContain('您有 3 笔账单尚未结清，合计 RM 37.29。');
+    expect(msg).not.toContain('由 Pip 发送');
+    expect(msg).not.toContain('https://pipfinance.app');
   });
 });
 
 describe('buildBillReminder', () => {
   it('names the bill, its date, and what is still owed', () => {
-    const msg = buildBillReminder(owed(), '1');
-    expect(msg).toContain('THE ML KITCHEN (SEPANG) SDN BHD');
-    expect(msg).toContain('2 Sep');
-    expect(msg).toContain('RM 17.29');
+    const msg = buildBillReminder(owed(), '1')!;
+    expect(msg).toContain('Hi fyy');
+    expect(msg).toContain('THE ML KITCHEN (SEPANG) SDN BHD on 2 Sep.');
+    expect(msg).toContain('You still owe RM 17.29.');
   });
 
   it('does not mention the person\'s other bills', () => {
@@ -413,6 +394,52 @@ describe('buildBillReminder', () => {
   });
 
   it('writes the reminder in Chinese when the app is in Chinese', () => {
-    expect(buildBillReminder(owed({ isZh: true }), '1')).toContain('尚欠');
+    const msg = buildBillReminder(owed({ isZh: true }), '1')!;
+    expect(msg).toContain('fyy 您好');
+    expect(msg).toContain('THE ML KITCHEN (SEPANG) SDN BHD（2 Sep）。');
+    expect(msg).toContain('您尚欠 RM 17.29。');
+    expect(msg).not.toContain('由 Pip 发送');
+  });
+
+  it('includes workings calculation when available on the bill', () => {
+    const inputWithWorkings = owed({
+      bills: [
+        {
+          shareId: '1',
+          merchant: 'Food',
+          billDate: '2026-09-07',
+          outstanding: 15,
+          gross: 30,
+          owed: 15,
+          workingsCalculation: 'Bill RM 30.00 ÷ 2 = RM 15.00',
+        },
+      ],
+    });
+    const msg = buildBillReminder(inputWithWorkings, '1')!;
+    expect(msg).toContain('You still owe RM 15.00 (Bill RM 30.00 ÷ 2 = RM 15.00).');
+  });
+
+  it('includes workings calculation in full statement list', () => {
+    const inputWithWorkings = owed({
+      bills: [
+        {
+          shareId: '1',
+          merchant: 'Food',
+          billDate: '2026-09-07',
+          outstanding: 15,
+          gross: 30,
+          owed: 15,
+          workingsCalculation: 'Bill RM 30.00 ÷ 2 = RM 15.00',
+        },
+        {
+          shareId: '2',
+          merchant: 'Drinks',
+          billDate: '2026-09-07',
+          outstanding: 5,
+        },
+      ],
+    });
+    const msg = buildOwedReminder(inputWithWorkings);
+    expect(msg).toContain('Food, 7 Sep: RM 15.00 (Bill RM 30.00 ÷ 2 = RM 15.00)');
   });
 });

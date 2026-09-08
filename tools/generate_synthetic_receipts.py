@@ -577,6 +577,90 @@ def get_childcare_receipt() -> str:
 </svg>
 """
 
+def get_sebelas_dinner_receipt() -> str:
+    """The onboarding demo's shared meal.
+
+    Unlike every other receipt in this file, this one is shown to every new install rather
+    than used as an internal tax fixture, so the merchant is invented rather than a real
+    brand. The figures must stay in lockstep with src/data/demoReceipt.ts, which derives the
+    same total through computeBillTotal: 68.90 subtotal, 10% service, 6% SST, 80.34 paid.
+    """
+    return """<svg width="600" height="850" viewBox="0 0 600 850" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="600" height="850" fill="#FAF9F5"/>
+  <rect x="25" y="25" width="550" height="800" rx="8" fill="#FFFFFF" stroke="#E4E0D6" stroke-width="2"/>
+
+  <style>
+    .mono { font-family: 'Courier New', Courier, monospace; }
+    .sans { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+    .bold { font-weight: bold; }
+  </style>
+
+  <text x="300" y="82" text-anchor="middle" class="sans bold" font-size="26" fill="#1A6B4F">RESTORAN SEBELAS</text>
+  <text x="300" y="108" text-anchor="middle" class="mono" font-size="13" fill="#555555">No. 11, Jalan Damai Perdana 2/3</text>
+  <text x="300" y="127" text-anchor="middle" class="mono" font-size="13" fill="#555555">56000 Cheras, Kuala Lumpur</text>
+  <text x="300" y="146" text-anchor="middle" class="mono" font-size="13" fill="#555555">SST Reg No: W10-1808-32004411</text>
+  <text x="300" y="165" text-anchor="middle" class="mono" font-size="13" fill="#555555">TEL: 03-9101 1188</text>
+
+  <line x1="50" y1="188" x2="550" y2="188" stroke="#333333" stroke-width="1.5" stroke-dasharray="5 3"/>
+
+  <text x="50" y="216" class="mono" font-size="13" fill="#333333">DATE: 05/09/2026 20:41</text>
+  <text x="350" y="216" class="mono" font-size="13" fill="#333333">BILL: SB-004182</text>
+  <text x="50" y="240" class="mono" font-size="13" fill="#333333">TABLE: 07</text>
+  <text x="350" y="240" class="mono" font-size="13" fill="#333333">PAX: 3</text>
+
+  <line x1="50" y1="262" x2="550" y2="262" stroke="#333333" stroke-width="1.5"/>
+
+  <text x="50" y="288" class="mono bold" font-size="14" fill="#111111">ITEM</text>
+  <text x="385" y="288" class="mono bold" font-size="14" fill="#111111">QTY</text>
+  <text x="478" y="288" class="mono bold" font-size="14" fill="#111111">RM</text>
+
+  <line x1="50" y1="303" x2="550" y2="303" stroke="#CCCCCC" stroke-width="1"/>
+
+  <text x="50" y="338" class="mono" font-size="14" fill="#222222">Nasi Goreng Kampung</text>
+  <text x="395" y="338" class="mono" font-size="14" fill="#222222">1</text>
+  <text x="478" y="338" class="mono" font-size="14" fill="#222222">14.90</text>
+
+  <text x="50" y="371" class="mono" font-size="14" fill="#222222">Ayam Masak Merah</text>
+  <text x="395" y="371" class="mono" font-size="14" fill="#222222">1</text>
+  <text x="478" y="371" class="mono" font-size="14" fill="#222222">18.50</text>
+
+  <text x="50" y="404" class="mono" font-size="14" fill="#222222">Sotong Goreng Tepung</text>
+  <text x="395" y="404" class="mono" font-size="14" fill="#222222">1</text>
+  <text x="478" y="404" class="mono" font-size="14" fill="#222222">22.00</text>
+
+  <text x="50" y="437" class="mono" font-size="14" fill="#222222">Teh Tarik</text>
+  <text x="395" y="437" class="mono" font-size="14" fill="#222222">3</text>
+  <text x="478" y="437" class="mono" font-size="14" fill="#222222">9.00</text>
+
+  <text x="50" y="470" class="mono" font-size="14" fill="#222222">Air Sirap Limau</text>
+  <text x="395" y="470" class="mono" font-size="14" fill="#222222">1</text>
+  <text x="478" y="470" class="mono" font-size="14" fill="#222222">4.50</text>
+
+  <line x1="50" y1="500" x2="550" y2="500" stroke="#333333" stroke-width="1"/>
+
+  <text x="300" y="532" class="mono bold" font-size="15" fill="#333333">SUBTOTAL:</text>
+  <text x="478" y="532" class="mono bold" font-size="15" fill="#333333">68.90</text>
+
+  <text x="300" y="560" class="mono" font-size="14" fill="#555555">Service Charge 10%:</text>
+  <text x="484" y="560" class="mono" font-size="14" fill="#555555">6.89</text>
+
+  <text x="300" y="588" class="mono" font-size="14" fill="#555555">SST 6%:</text>
+  <text x="484" y="588" class="mono" font-size="14" fill="#555555">4.55</text>
+
+  <line x1="280" y1="608" x2="550" y2="608" stroke="#111111" stroke-width="2"/>
+
+  <text x="300" y="644" class="mono bold" font-size="20" fill="#111111">TOTAL:</text>
+  <text x="440" y="644" class="mono bold" font-size="22" fill="#1A6B4F">RM 80.34</text>
+
+  <line x1="280" y1="664" x2="550" y2="664" stroke="#111111" stroke-width="2"/>
+
+  <text x="50" y="700" class="mono" font-size="13" fill="#555555">PAID: DuitNow QR &#183; Auth 774120</text>
+
+  <text x="300" y="775" text-anchor="middle" class="mono" font-size="12" fill="#888888">TERIMA KASIH &#183; THANK YOU</text>
+  <text x="300" y="796" text-anchor="middle" class="mono" font-size="11" fill="#AAAAAA">SILA DATANG LAGI</text>
+</svg>
+"""
+
 def main():
     print("Generating 9 realistic synthetic Malaysian receipts in assets/demo/receipts/...")
     render_receipt("popular_bookstore_receipt", get_popular_receipt())
@@ -588,6 +672,7 @@ def main():
     render_receipt("sspn_deposit_statement", get_sspn_statement())
     render_receipt("prudential_insurance_statement", get_prudential_statement())
     render_receipt("little_caliphs_childcare_receipt", get_childcare_receipt())
+    render_receipt("sebelas_dinner_receipt", get_sebelas_dinner_receipt())
     print("All synthetic receipts successfully generated.")
 
 if __name__ == "__main__":

@@ -29,8 +29,8 @@ const byId = new Map(ALL_SEED_CATEGORIES.map((c) => [c.id, c]));
 const asCategories: Category[] = ALL_SEED_CATEGORIES.map((c) => ({ ...c, isDefault: true }));
 
 describe('default category set', () => {
-  it('has 8 expense + 3 income categories with unique ids and no blank fields', () => {
-    expect(EXPENSE_CATEGORIES).toHaveLength(8);
+  it('has 13 expense + 3 income categories with unique ids and no blank fields', () => {
+    expect(EXPENSE_CATEGORIES).toHaveLength(13);
     expect(INCOME_CATEGORIES).toHaveLength(3);
     expect(new Set(ALL_SEED_CATEGORIES.map((c) => c.id)).size).toBe(ALL_SEED_CATEGORIES.length);
     for (const c of ALL_SEED_CATEGORIES) {
@@ -131,5 +131,19 @@ describe('Transport relabel', () => {
 
   it('keeps the retired transport id pointed at travelling', () => {
     expect(CATEGORY_ID_REMAP['transport']).toBe('travelling');
+  });
+});
+
+describe('Telco and WiFi relabel', () => {
+  it('changes the wording without creating a new id', () => {
+    expect(byId.get('phone-bill')?.label).toBe('Telco and WiFi');
+  });
+});
+
+describe('2026-09-07 new defaults', () => {
+  it('adds Subscriptions, Family, Health & Medical, Education and Utilities as live expense ids', () => {
+    for (const id of ['subscriptions', 'family', 'medical', 'learning', 'utilities']) {
+      expect(byId.get(id)?.kind).toBe('expense');
+    }
   });
 });

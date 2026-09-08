@@ -2,23 +2,23 @@
   "expo": {
     "name": "Pip",
     "slug": "pip-expenses-tracker",
-    "version": "1.0.8",
+    "version": "1.0.10",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "pip",
+    "scheme": ["pip", "com.yabg.pip"],
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "versionCode": 9,
+      "versionCode": 11,
       "adaptiveIcon": {
         "backgroundColor": "#1f8a5b",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [],
-      "package": "com.yabg.pipexpensestracker"
+      "package": "com.yabg.pip"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -81,7 +81,14 @@
           "microphonePermission": false
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "@sentry/react-native",
+        {
+          "organization": "pipsavings",
+          "project": "react-native"
+        }
+      ]
     ]
   }
 }

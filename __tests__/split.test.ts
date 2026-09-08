@@ -6,6 +6,7 @@ import {
   computeItemized,
   computeSplit,
   DEFAULT_SURCHARGES,
+  explodeItemized,
   groupOpenSharesByPerson,
   oldestOverdueDays,
   openReceivableTotal,
@@ -165,6 +166,57 @@ describe('validateSplit', () => {
       { personId: 'fyy', owed: 20 },
       { personId: 'nugget', owed: 33 },
     ]);
+  });
+});
+
+// The group split receipt needs to print what each person actually ordered, not just what they
+// owe. `explodeItemized` exposes that breakdown; these tests exist to keep it in lockstep with
+// `computeItemized`, which stays the authority on the amounts.
+describe('explodeItemized', () => {
+  const line = (id: string, amount: number, assignedTo: string[]): ReceiptLine => ({
+    id,
+    label: id,
+    amount,
+    assignedTo,
+  });
+  const TABLE = ['ali', SELF];
+
+  it("lists only the person's own items and agrees with computeItemized", () => {
+    const lines = [line('steak', 30, ['ali']), line('teh', 10, [SELF])];
+    const authoritative = computeItemized(lines, DEFAULT_SURCHARGES, 46.64, TABLE);
+    const broken = explodeItemized(lines, DEFAULT_SURCHARGES, 46.64, TABLE);
+
+    const ali = broken.find((p) => p.personId === 'ali')!;
+    expect(ali.items.map((i) => i.label)).toEqual(['steak']);
+    expect(ali.total).toBe(authoritative.shares[0].owed);
+
+    const self = broken.find((p) => p.personId === SELF)!;
+    expect(self.items.map((i) => i.label)).toEqual(['teh']);
+    expect(self.total).toBe(authoritative.ownShare);
+  });
+
+  it('divides a shared line and records how many shared it', () => {
+    const lines = [line('platter', 30, ['ali', SELF])];
+    const broken = explodeItemized(lines, DEFAULT_SURCHARGES, 34.98, TABLE);
+    const ali = broken.find((p) => p.personId === 'ali')!;
+    expect(ali.items[0].sharedBy).toBe(2);
+    expect(ali.items[0].amount).toBe(15);
+  });
+
+  it('separates each person’s items from the surcharge riding on them', () => {
+    const lines = [line('steak', 30, ['ali']), line('teh', 10, [SELF])];
+    const ali = explodeItemized(lines, DEFAULT_SURCHARGES, 46.64, TABLE).find(
+      (p) => p.personId === 'ali'
+    )!;
+    expect(ali.itemsSubtotal).toBe(30);
+    expect(ali.itemsSubtotal + ali.surcharge).toBeCloseTo(ali.total, 2);
+  });
+
+  it('hands every cent of the charge out across the table', () => {
+    const lines = [line('steak', 30, ['ali']), line('teh', 10, [SELF])];
+    const broken = explodeItemized(lines, DEFAULT_SURCHARGES, 46.64, TABLE);
+    const summed = broken.reduce((s, p) => s + toCents(p.total), 0);
+    expect(summed).toBe(toCents(46.64));
   });
 });
 

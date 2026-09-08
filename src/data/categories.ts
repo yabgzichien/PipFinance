@@ -15,7 +15,7 @@ const SEED_DEFAULTS = {
 /**
  * Default EXPENSE categories.
  *
- * 8 plain-language buckets, so a first-time user in the setup wizard picks
+ * 13 plain-language buckets, so a first-time user in the setup wizard picks
  * from a short list instead of a bookkeeping taxonomy. This intentionally
  * drops COICOP division alignment: nothing in the app compares these buckets
  * against an external taxonomy any more.
@@ -28,7 +28,12 @@ export const EXPENSE_CATEGORIES: SeedCategory[] = [
   { id: 'travelling', label: 'Transport', icon: 'car', hue: 248, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'insurance', label: 'Insurance', icon: 'shield', hue: 286, kind: 'expense', ...SEED_DEFAULTS },
   { id: 'rental', label: 'Rental', icon: 'home', hue: 200, kind: 'expense', ...SEED_DEFAULTS },
-  { id: 'phone-bill', label: 'Phone Bill', icon: 'phone', hue: 355, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'phone-bill', label: 'Telco and WiFi', icon: 'phone', hue: 355, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'subscriptions', label: 'Subscriptions', icon: 'calendar', hue: 265, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'family', label: 'Family', icon: 'heart', hue: 18, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'medical', label: 'Health & Medical', icon: 'plus', hue: 8, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'learning', label: 'Education', icon: 'book', hue: 95, kind: 'expense', ...SEED_DEFAULTS },
+  { id: 'utilities', label: 'Utilities', icon: 'gear', hue: 235, kind: 'expense', ...SEED_DEFAULTS },
 ];
 
 /**

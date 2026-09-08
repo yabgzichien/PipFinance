@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { strToU8, zipSync } from 'fflate';
+import { reportError } from './diagnostics';
 import { toDisplay } from './fx';
 import { currencyPrefix } from './format';
 import { formatCurrencyBreakdown } from './format';
@@ -2377,6 +2378,7 @@ export async function shareExportFile(
     return true;
   } catch (err) {
     console.warn('Error sharing export file:', err);
+    reportError(err, 'financial-export');
     return false;
   }
 }
@@ -2438,6 +2440,9 @@ export async function saveOrDownloadExport(
       };
     }
   } catch (err: any) {
+    // The user asked for a file and did not get one. The message stays local for the UI to show;
+    // only the tag and frames are transmitted.
+    reportError(err, 'financial-export');
     return {
       success: false,
       error: err?.message || 'Failed to save export file',

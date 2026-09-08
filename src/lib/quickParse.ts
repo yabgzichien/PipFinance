@@ -5,7 +5,7 @@
 // (learned memory first, model second).
 
 import { BASE_CURRENCY } from './currencies';
-import type { TxnType } from './types';
+import type { CategorySuggestion, TxnType } from './types';
 
 export interface QuickDraft {
   label: string;
@@ -17,6 +17,9 @@ export interface QuickDraft {
   currency: string | null;
   /** Always null out of this parser. */
   categoryId: string | null;
+  /** Always null out of this parser; set by resolveQuickAdd once a category is resolved, so the
+   *  UI can show the same "auto categorised" indicator quick-add gets on its batch path. */
+  categorySource: CategorySuggestion['source'] | null;
 }
 
 export interface QuickParseResult {
@@ -173,7 +176,7 @@ function parseSegment(segment: string, opts: QuickParseOptions): SegmentParse {
     .trim();
 
   return {
-    draft: { label, amount, type, date, currency, categoryId: null },
+    draft: { label, amount, type, date, currency, categoryId: null, categorySource: null },
     confident: numbers.length === 1 && label.length > 0,
   };
 }

@@ -14,7 +14,7 @@ import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
-import { expenseIdsFromSelection } from '../lib/trips';
+import { expenseIdsFromSelection, reassignedFromOtherTrips } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
 import type { AccentTheme } from '../state/accent';
 import { useAccent } from '../state/accent';
@@ -163,7 +163,7 @@ export function AllTransactionsScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, categories, catById, removeMany, setTransactionsTrip, splits, shares, openShares } = useAppData();
+  const { transactions, categories, catById, removeMany, setTransactionsTrip, splits, shares, openShares, trips } = useAppData();
 
   // `search` is what the box shows and must update on the keystroke; `query` is what the
   // ledger is filtered against and lags it by a beat. Filtering thousands of rows on every
@@ -312,9 +312,25 @@ export function AllTransactionsScreen({
   const attachSelectedToTrip = async (tripId: string | null) => {
     const ids = selectedExpenseIds;
     if (ids.length === 0) return;
-    await setTransactionsTrip(ids, tripId);
-    setTripPickerOpen(false);
-    cancelSelect();
+    const apply = async () => {
+      await setTransactionsTrip(ids, tripId);
+      setTripPickerOpen(false);
+      cancelSelect();
+    };
+    // Same rule as the trip screen's own picker: taking rows out of a trip they already belong
+    // to is allowed, but never silent. Clearing the trip (null) takes nothing from anyone else.
+    const tripName = tripId ? trips.find((trip) => trip.id === tripId)?.name ?? '' : '';
+    const reassignCount = tripId ? reassignedFromOtherTrips(transactions, ids, tripId) : 0;
+    if (reassignCount === 0) {
+      await apply();
+      return;
+    }
+    confirmAction(
+      t('moveToTripConfirmTitle', { trip: tripName }),
+      t('moveToTripConfirmBody', { n: reassignCount, trip: tripName }),
+      t('moveToTripConfirmAction'),
+      apply
+    );
   };
   // Stable across renders so `TxnRow`'s memo actually holds while the user types or scrolls.
   const onRowPress = useCallback(

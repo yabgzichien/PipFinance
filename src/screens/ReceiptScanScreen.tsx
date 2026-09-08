@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddPersonModal } from '../components/AddPersonModal';
+import { CurrencyChip } from '../components/CurrencyChip';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { ReceiptItemModal } from '../components/ReceiptItemModal';
@@ -164,6 +165,13 @@ export function ReceiptScanScreen({
   useEffect(() => {
     getActiveCurrencies().then(setActiveCurrencies);
   }, []);
+
+  // Re-reads active currencies after CurrencyChip activates a new one, so its own list (and the
+  // "Detected X receipt" nudge below, which only shows for a currency that isn't active yet)
+  // both reflect the addition immediately.
+  const refreshActiveCurrencies = async () => {
+    setActiveCurrencies(await getActiveCurrencies());
+  };
 
   // The payer is always at the table, and always last, so every rounding residue lands on them.
   const participants = useMemo(() => [...picked, SELF], [picked]);
@@ -625,9 +633,16 @@ export function ReceiptScanScreen({
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text style={[styles.itemLabel, { color: colorTheme.ink }]}>
-                {isZh ? `检测到 ${receipt.currency} 小票` : `Detected ${receipt.currency} receipt`}
-              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.itemLabel, { color: colorTheme.ink }]}>{isZh ? '检测到' : 'Detected'}</Text>
+                <CurrencyChip
+                  value={receipt.currency}
+                  active={activeCurrencies}
+                  onChange={(code) => setReceipt((r) => (r ? { ...r, currency: code } : r))}
+                  onActivated={refreshActiveCurrencies}
+                />
+                <Text style={[styles.itemLabel, { color: colorTheme.ink }]}>{isZh ? '小票' : 'receipt'}</Text>
+              </View>
               <Text style={[styles.meta, { color: colorTheme.ink2, marginTop: 2 }]}>
                 {isZh ? `启用 ${receipt.currency} 以换算并记录此小票。` : `Add ${receipt.currency} to convert and track this receipt.`}
               </Text>
@@ -642,8 +657,7 @@ export function ReceiptScanScreen({
                     notify(isZh ? `无法获取 ${receipt.currency} 汇率。` : `Couldn't fetch the ${receipt.currency} rate.`, isZh ? '请在联网后重试。' : "Try again when you're online.");
                     return;
                   }
-                  const nextActive = await getActiveCurrencies();
-                  setActiveCurrencies(nextActive);
+                  await refreshActiveCurrencies();
                 } finally {
                   setActivatingCode(null);
                 }
@@ -814,9 +828,12 @@ export function ReceiptScanScreen({
         {/* Always shown: the total is the whole point of the scan, split or not. */}
         <Text style={[styles.label, { marginTop: 22, color: colorTheme.ink2 }]}>{isZh ? '实付总额' : 'Total'}</Text>
         <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-          <Text style={[styles.rm, { color: colorTheme.ink2 }]}>
-            {currencyPrefix(receipt?.currency ?? BASE_CURRENCY)}
-          </Text>
+          <CurrencyChip
+            value={receipt?.currency ?? BASE_CURRENCY}
+            active={activeCurrencies}
+            onChange={(code) => setReceipt((r) => (r ? { ...r, currency: code } : r))}
+            onActivated={refreshActiveCurrencies}
+          />
           <TextInput
             value={chargedText}
             onChangeText={setChargedText}

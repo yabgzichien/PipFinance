@@ -36,8 +36,28 @@ export const DEFAULT_CATEGORY_TRANSLATIONS: Record<string, Record<SupportedLangu
     zh: '房租居住',
   },
   'phone-bill': {
-    en: 'Phone Bill',
+    en: 'Telco and WiFi',
     zh: '通讯话费',
+  },
+  subscriptions: {
+    en: 'Subscriptions',
+    zh: '订阅服务',
+  },
+  family: {
+    en: 'Family',
+    zh: '家庭支出',
+  },
+  medical: {
+    en: 'Health & Medical',
+    zh: '医疗健康',
+  },
+  learning: {
+    en: 'Education',
+    zh: '教育支出',
+  },
+  utilities: {
+    en: 'Utilities',
+    zh: '水电杂费',
   },
 
   // Income

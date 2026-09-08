@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Image, Pressable, StyleSheet, Text, View, type LayoutChangeEvent, type ViewStyle } from 'react-native';
 import { catColorsForHue } from '../lib/catColors';
+import { resolveCategoryPresentation } from '../lib/categoryPresentation';
 import { decimalsFor } from '../lib/currencies';
 import { currencyPrefix, fmtDecimals } from '../lib/format';
 import type { Category, CategorySuggestion } from '../lib/types';
@@ -133,13 +134,19 @@ export function CatBadge({
   const scheme = useResolvedScheme();
   const isDark = scheme === 'dark';
   const colorTheme = useThemeColors();
-  const col = catColorsForHue(category.hue, isDark);
-  const isCustomImage = category.icon && (
-    category.icon.startsWith('data:') ||
-    category.icon.startsWith('file:') ||
-    category.icon.startsWith('content:') ||
-    category.icon.startsWith('http') ||
-    category.icon.startsWith('/')
+  // The badge resolves appearance itself rather than trusting the stored row. Settings resolves
+  // overrides before it renders; every other caller passes the row straight from the store, and
+  // reading `category.icon`/`category.hue` here meant an edited category looked correct in
+  // Settings while entry chips and lists kept showing the pre-edit icon and colour.
+  // Language is irrelevant: only the label varies by language, and the badge has none.
+  const { icon, hue } = resolveCategoryPresentation(category);
+  const col = catColorsForHue(hue, isDark);
+  const isCustomImage = icon && (
+    icon.startsWith('data:') ||
+    icon.startsWith('file:') ||
+    icon.startsWith('content:') ||
+    icon.startsWith('http') ||
+    icon.startsWith('/')
   );
   return (
     <View
@@ -156,9 +163,9 @@ export function CatBadge({
       }}
     >
       {isCustomImage ? (
-        <Image source={{ uri: category.icon }} style={{ width: size, height: size }} resizeMode="cover" />
+        <Image source={{ uri: icon }} style={{ width: size, height: size }} resizeMode="cover" />
       ) : (
-        <Icon name={category.icon as IconName} size={size * 0.52} color={col.fg} stroke={1.9} />
+        <Icon name={icon as IconName} size={size * 0.52} color={col.fg} stroke={1.9} />
       )}
     </View>
   );
@@ -195,7 +202,7 @@ export function CategoryChip({
       <Text style={[styles.chipLabel, { color: colorTheme.ink }]} numberOfLines={1}>
         {label}
       </Text>
-      {suggested && !selected && (
+      {suggested && (
         <View style={[styles.learnedTag, { backgroundColor: theme.accentSoft }]}>
           <Icon name="sparkles" size={11} color={theme.accentInk} />
           <Text style={[styles.learnedTagText, { color: theme.onTint }]}>{suggested === 'guess' ? t('aiGuess') : t('learned')}</Text>
@@ -242,6 +249,7 @@ export function PipSays({
   idea,
   glasses,
   nerdy,
+  scientist,
   celebrate,
   hat,
   propellerHat,
@@ -253,6 +261,9 @@ export function PipSays({
   idea?: boolean;
   glasses?: boolean;
   nerdy?: boolean;
+  /** Owns the face and the head slot — see `Pip`. Callers that turn it on should also bump `size`,
+   *  since the pose spends its side margins on glassware and the coin itself ends up smaller. */
+  scientist?: boolean;
   celebrate?: boolean;
   hat?: boolean;
   propellerHat?: boolean;
@@ -268,6 +279,7 @@ export function PipSays({
           idea={idea}
           glasses={glasses}
           nerdy={nerdy}
+          scientist={scientist}
           celebrate={celebrate}
           hat={hat}
           propellerHat={propellerHat}

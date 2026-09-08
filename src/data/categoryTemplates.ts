@@ -18,6 +18,11 @@ export const STARTER_TEMPLATE_KEYS: Record<string, string> = {
   insurance: 'starter.insurance.v1',
   rental: 'starter.rental.v1',
   'phone-bill': 'starter.phone-bill.v1',
+  subscriptions: 'starter.subscriptions.v1',
+  family: 'starter.family.v1',
+  medical: 'starter.medical.v1',
+  learning: 'starter.learning.v1',
+  utilities: 'starter.utilities.v1',
   salary: 'starter.salary.v1',
   allowance: 'starter.allowance.v1',
   'other-income': 'starter.other-income.v1',
@@ -33,7 +38,8 @@ export const STARTER_TEMPLATE_KEYS: Record<string, string> = {
  *
  * `travelling` carries both 'Travelling' and 'Transport' because the 2026-09-06 relabel changes
  * the supplied wording — without the old entry, every upgraded install would read its untouched
- * 'Travelling' row as a user rename and pin it there forever.
+ * 'Travelling' row as a user rename and pin it there forever. `phone-bill` carries both 'Phone
+ * Bill' and 'Telco and WiFi' for the same reason, from the 2026-09-07 relabel.
  */
 export const HISTORICAL_DEFAULT_LABELS: Record<string, string[]> = {
   food: ['Food', 'Dining', 'Food & Groceries', '餐饮美食', '餐饮'],
@@ -43,7 +49,12 @@ export const HISTORICAL_DEFAULT_LABELS: Record<string, string[]> = {
   travelling: ['Travelling', 'Transport', 'Transportation', '交通出行', '交通'],
   insurance: ['Insurance', 'Insurance & Fees', '保险保障', '保险'],
   rental: ['Rental', 'Housing', 'Bills', '房租居住', '房租'],
-  'phone-bill': ['Phone Bill', 'Communications', '通讯话费', '通讯'],
+  'phone-bill': ['Phone Bill', 'Communications', 'Telco and WiFi', '通讯话费', '通讯'],
+  subscriptions: ['Subscriptions', '订阅服务'],
+  family: ['Family', '家庭支出'],
+  medical: ['Health & Medical', '医疗健康'],
+  learning: ['Education', '教育支出'],
+  utilities: ['Utilities', '水电杂费'],
   salary: ['Salary', 'Employment Income', '工资薪金', '工资'],
   allowance: ['Allowance', 'Transfers Received', '津贴补贴', '津贴'],
   'other-income': ['Other Income', 'Business Revenue', '其他收入'],
@@ -66,6 +77,11 @@ export const HISTORICAL_DEFAULT_ICONS: Record<string, string[]> = {
   insurance: ['shield'],
   rental: ['home'],
   'phone-bill': ['phone', 'signal'],
+  subscriptions: ['calendar'],
+  family: ['heart'],
+  medical: ['plus'],
+  learning: ['book'],
+  utilities: ['gear'],
   salary: ['wallet'],
   allowance: ['gift'],
   'other-income': ['dots'],
@@ -81,6 +97,11 @@ export const HISTORICAL_DEFAULT_HUES: Record<string, number[]> = {
   insurance: [286],
   rental: [200],
   'phone-bill': [355],
+  subscriptions: [265],
+  family: [18],
+  medical: [8],
+  learning: [95],
+  utilities: [235],
   salary: [152],
   allowance: [120],
   'other-income': [200],

@@ -1,9 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
 import { Amount, Body, Card, Caption, Eyebrow, Label, PrimaryButton, Title, TopBar } from '../components/ui';
+import { DateRangeSheet } from '../components/DateRangeSheet';
+import { formatRangeLabel } from '../lib/dateRange';
+import type { DateRange } from '../lib/dateRange';
 import { computeTripTotals } from '../lib/trips';
 import type { Trip } from '../lib/trips';
 import { useAccent } from '../state/accent';
@@ -81,8 +84,8 @@ export function TripsScreen({
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [dates, setDates] = useState<DateRange>({ start: null, end: null });
+  const [pickingDates, setPickingDates] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -95,10 +98,11 @@ export function TripsScreen({
     [trips]
   );
 
+  const dateLabel = formatRangeLabel(dates, isZh);
+
   const openCreate = () => {
     setName('');
-    setStartDate('');
-    setEndDate('');
+    setDates({ start: null, end: null });
     setCreating(true);
   };
 
@@ -107,7 +111,9 @@ export function TripsScreen({
     if (!trimmed || saving) return;
     setSaving(true);
     try {
-      const created = await addTrip(trimmed, startDate.trim() || null, endDate.trim() || null);
+      // No trimming or format check: the calendar is the only producer of these, so they are
+      // either a valid 'YYYY-MM-DD' or null by construction.
+      const created = await addTrip(trimmed, dates.start, dates.end);
       setCreating(false);
       onOpenTrip(created.id);
     } finally {
@@ -121,7 +127,16 @@ export function TripsScreen({
         <TopBar title={t('tripsTitle')} onBack={onBack} />
       </View>
 
-      <View style={{ flex: 1, paddingHorizontal: spacing.base, paddingTop: spacing.sm }}>
+      {/* A trip list grows without bound, and the create form pushes it further down with the
+          keyboard open, so this has to scroll — a plain View simply clipped everything past the
+          fold with no way to reach it. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: spacing.base, paddingTop: spacing.sm, paddingBottom: insets.bottom + spacing.xl }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {creating && (
           <Card style={styles.createCard}>
             <Label weight={700} style={{ marginBottom: spacing.sm }}>{t('newTrip')}</Label>
@@ -137,26 +152,23 @@ export function TripsScreen({
             <Caption color={colorTheme.ink2} style={{ marginTop: spacing.md, marginBottom: spacing.xs }}>
               {t('tripDatesOptional')}
             </Caption>
-            <View style={styles.dateRow}>
-              <TextInput
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder={isZh ? '开始 · YYYY-MM-DD' : 'Start · YYYY-MM-DD'}
-                placeholderTextColor={colorTheme.ink3}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, styles.dateInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
-              />
-              <TextInput
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder={isZh ? '结束 · YYYY-MM-DD' : 'End · YYYY-MM-DD'}
-                placeholderTextColor={colorTheme.ink3}
-                autoCapitalize="none"
-                autoCorrect={false}
-                style={[styles.input, styles.dateInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
-              />
-            </View>
+            {/* One tappable row, not two text fields: the calendar is the only way to set these
+                now, so there is no format to get wrong and no keyboard to dismiss. */}
+            <Pressable
+              onPress={() => setPickingDates(true)}
+              style={({ pressed }) => [
+                styles.input,
+                styles.dateRow,
+                { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, opacity: pressed ? 0.6 : 1 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={dateLabel ?? t('addDates')}
+            >
+              <Icon name="calendar" size={16} color={colorTheme.ink2} />
+              <Text style={[styles.dateText, { color: dateLabel ? colorTheme.ink : colorTheme.ink3 }]} numberOfLines={1}>
+                {dateLabel ?? t('addDates')}
+              </Text>
+            </Pressable>
             <View style={styles.createActions}>
               <Pressable onPress={() => setCreating(false)} style={styles.createActionBtn} disabled={saving}>
                 <Label weight={700} color={colorTheme.ink2}>{t('cancel')}</Label>
@@ -180,7 +192,7 @@ export function TripsScreen({
             <Pip size={64} expr="curious" float />
             <Title style={{ marginTop: spacing.md }}>{isZh ? '暂无行程' : 'No trips yet'}</Title>
             <Body color={colorTheme.ink2} style={{ textAlign: 'center', marginTop: spacing.sm, lineHeight: 20 }}>
-              {isZh ? '创建一个行程，把已有支出归到一起。' : 'Create a trip to group spending that already lives in your ledger.'}
+              {isZh ? '创建一个行程，把这趟的支出归到一起。' : "Create a trip to keep its expenses together."}
             </Body>
           </Card>
         ) : (
@@ -229,7 +241,15 @@ export function TripsScreen({
             )}
           </>
         )}
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
+
+      <DateRangeSheet
+        visible={pickingDates}
+        value={dates}
+        onApply={setDates}
+        onClose={() => setPickingDates(false)}
+      />
     </View>
   );
 }
@@ -239,8 +259,8 @@ const styles = StyleSheet.create({
   newTripLabel: { fontFamily: uiFont(700), fontSize: 15, color: '#fff', marginLeft: 8 },
   createCard: { padding: spacing.base, marginBottom: spacing.md },
   input: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.md, fontFamily: uiFont(600), fontSize: 15 },
-  dateRow: { flexDirection: 'row', gap: spacing.sm },
-  dateInput: { flex: 1, fontSize: 13 },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44 },
+  dateText: { flex: 1, minWidth: 0, fontFamily: uiFont(600), fontSize: 14 },
   createActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.base, marginTop: spacing.md },
   createActionBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
   listCard: { overflow: 'hidden' },

@@ -7,7 +7,19 @@ jest.mock('../src/db/db', () => {
   return { ...actual, getDb: () => Promise.resolve((global as any).__fakeDb), genId: () => 'genid1' };
 });
 
+import { Platform } from 'react-native';
 import { activateSuggestedCategories } from '../src/db/categoriesRepo';
+
+/** Runs `body` as if the app were the web build. */
+async function onWeb(body: () => Promise<void>): Promise<void> {
+  const native = Platform.OS;
+  Object.defineProperty(Platform, 'OS', { value: 'web', configurable: true, writable: true });
+  try {
+    await body();
+  } finally {
+    Object.defineProperty(Platform, 'OS', { value: native, configurable: true, writable: true });
+  }
+}
 
 function fakeDb(
   existingByKey: Record<string, { id: string; is_hidden: number }> = {},
@@ -61,6 +73,9 @@ function fakeDb(
       await fn();
     },
     withExclusiveTransactionAsync: async (fn: (tx: { runAsync: typeof run; getFirstAsync: typeof first }) => Promise<void>) => {
+      // Mirrors expo-sqlite: the web build has no second connection to hand out, so this
+      // method is not merely slower there, it throws outright.
+      if (Platform.OS === 'web') throw new Error('withExclusiveTransactionAsync is not supported on web');
       exclusiveTransactions += 1;
       await fn({ runAsync: run, getFirstAsync: first });
     },
@@ -118,6 +133,27 @@ it('runs all activation queries through one exclusive transaction connection', a
   await expect(activateSuggestedCategories(['optional.car.petrol.v1'])).resolves.toEqual(['opt-petrol']);
   expect(db.exclusiveTransactions).toBe(1);
   expect(db.transactions).toBe(0);
+});
+
+it('activates on web, where the exclusive transaction is unavailable', async () => {
+  await onWeb(async () => {
+    const db = install(fakeDb());
+    await expect(activateSuggestedCategories(['optional.car.petrol.v1'])).resolves.toEqual(['opt-petrol']);
+    // Still one transaction, still all-or-nothing — just the plain BEGIN/COMMIT kind.
+    expect(db.transactions).toBe(1);
+    expect(db.exclusiveTransactions).toBe(0);
+    expect(db.statements.filter((s) => s.sql.includes('INSERT OR IGNORE INTO categories'))).toHaveLength(1);
+  });
+});
+
+it('keeps a whole web batch in one transaction', async () => {
+  await onWeb(async () => {
+    const db = install(fakeDb());
+    await expect(
+      activateSuggestedCategories(['optional.car.petrol.v1', 'optional.car.maintenance.v1'])
+    ).resolves.toEqual(['opt-petrol', 'opt-car-maintenance']);
+    expect(db.transactions).toBe(1);
+  });
 });
 
 it('ignores a template key that is not in the catalogue', async () => {

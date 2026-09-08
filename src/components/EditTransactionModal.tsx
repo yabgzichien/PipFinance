@@ -19,7 +19,7 @@ import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
 import { AccountLinkField } from './AccountLinkField';
-import { AddCategoryModal } from './AddCategoryModal';
+import { AddCategorySheet } from './AddCategorySheet';
 import { CalcBadge } from './CalcBadge';
 import { InfoButton } from './InfoButton';
 import { SplitSheet } from './SplitSheet';
@@ -500,12 +500,16 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
         </View>
       </KeyboardAvoidingView>
 
-      <AddCategoryModal
+      <AddCategorySheet
         visible={adding}
         kind={type}
         onClose={() => setAdding(false)}
         onCreated={(id) => {
           setCat(id);
+          setAdding(false);
+        }}
+        onActivated={(ids) => {
+          if (ids.length > 0) setCat(ids[0]);
           setAdding(false);
         }}
       />

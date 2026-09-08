@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addCategory as dbAddCategory,
@@ -76,6 +77,7 @@ import { refreshPrices as fetchPrices } from '../prices';
 import { budgetHash, currentMonthKey, monthKey, positiveAllocations } from '../lib/budget';
 import { computeCoverage, type Coverage } from '../lib/coverage';
 import { getMeta, setMeta } from '../db/metaRepo';
+import { nextInstallId, resolveConsent } from '../lib/diagnostics';
 import { isReminderCadence, type ReminderCadence } from '../lib/reminders';
 import { setHapticsEnabled } from '../lib/haptics';
 import { setSoundEnabled as applySoundEnabled } from '../lib/sound';
@@ -153,6 +155,13 @@ const MOTION_SETTING_KEY = 'motion_setting';
 // muting it is a separate decision from turning motion down. Defaults to on, so an absent
 // row reads as on and only an explicit 'false' mutes.
 const SOUND_ENABLED_KEY = 'sound_enabled';
+// Crash diagnostics (src/lib/diagnostics.ts). Defaults to on, so an absent row reads as on and
+// only an explicit 'false' opts out — same convention as SOUND_ENABLED_KEY above. The install id
+// is a random UUID with no link to anything on the device; it exists so a crash loop on one phone
+// reads as one affected user rather than a hundred. Turning reporting off deletes it, so opting
+// back in mints a fresh one and the two runs can't be joined.
+const DIAGNOSTICS_ENABLED_KEY = 'diagnostics_enabled';
+const DIAGNOSTICS_INSTALL_ID_KEY = 'diagnostics_install_id';
 // docs/ui-engagement-plan.md Step 4: the streak's earned-not-purchased freeze and the
 // user-controlled pause. Both survive resetAllData/resetToOnboarding the same way the reminder
 // preferences do (see the comment above REMINDER_CADENCE_KEY) — they're how this phone's owner
@@ -165,7 +174,6 @@ const TUTORIAL_SCAN_DONE_KEY = 'tutorial_scan_done';
 const TUTORIAL_MANUAL_DONE_KEY = 'tutorial_manual_done';
 const TUTORIAL_DISMISSED_KEY = 'tutorial_dismissed';
 const EXPLORE_TASKS_DONE_KEY = 'explore_tasks_done';
-const DUITNOW_QR_KEY = 'duitnow_qr_uri';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
@@ -313,7 +321,10 @@ export interface AppData {
   clearTaskCelebrations: () => void;
   refreshAll: () => Promise<void>;
   addCategory: (label: string, icon: string, hue: number, kind: Category['kind']) => Promise<string>;
-  deleteCategory: (id: string) => Promise<void>;
+  /** Remove a category, moving its transactions, bills and budget to `replacementId`. Omitting
+   *  the replacement falls back to any remaining category of the same kind — only appropriate
+   *  where there is nothing filed under it and no user to ask. */
+  deleteCategory: (id: string, replacementId?: string) => Promise<void>;
   /** Change a category's icon/picture  a named icon or a custom photo URI. Allowed on every
    *  category, including the protected generics. */
   updateCategoryIcon: (id: string, icon: string) => Promise<void>;
@@ -417,6 +428,12 @@ export interface AppData {
    *  comment above SOUND_ENABLED_KEY. */
   soundEnabled: boolean;
   setSoundEnabled: (on: boolean) => Promise<void>;
+  /** Whether anonymous crash diagnostics may leave the device. On by default and disclosed in
+   *  the privacy policy; turning it off also deletes the install id (see
+   *  DIAGNOSTICS_ENABLED_KEY). Nothing but crash reports is ever sent — there is no behavioural
+   *  analytics in this app. */
+  diagnosticsEnabled: boolean;
+  setDiagnosticsEnabled: (on: boolean) => Promise<void>;
 
   // --- Streak (docs/ui-engagement-plan.md Step 4) ---------------------------------------
   /** The displayed streak: pause-frozen when paused, freeze-bridged otherwise. What every
@@ -511,10 +528,6 @@ export interface AppData {
   unpayCommitment: (occurrenceId: string) => Promise<void>;
   /** Mark a scheduled occurrence as not applicable this month. No ledger effect. */
   skipCommitment: (occurrenceId: string) => Promise<void>;
-
-  // --- DuitNow QR for viral bill splitting ---
-  duitNowQrUri: string | null;
-  setDuitNowQrUri: (uri: string | null) => Promise<void>;
 }
 
 const Ctx = createContext<AppData | null>(null);
@@ -544,17 +557,17 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [commitmentReminderEnabled, setCommitmentReminderEnabledState] = useState(false);
   const [motionSetting, setMotionSettingState] = useState<MotionSetting>('full');
   const [soundEnabled, setSoundEnabledState] = useState(true);
+  const [diagnosticsEnabled, setDiagnosticsEnabledState] = useState(true);
   const [streakFreeze, setStreakFreezeState] = useState<StreakFreezeState>(NO_STREAK_FREEZE);
   const [streakPausedSinceDay, setStreakPausedSinceDayState] = useState<number | null>(null);
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
   const [tasksDone, setTasksDoneState] = useState<ExploreTaskId[]>([]);
-  const [duitNowQrUri, setDuitNowQrUriState] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, duitNowQrRaw, tripRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -576,6 +589,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         getMeta(COMMITMENT_REMINDER_KEY),
         getMeta(MOTION_SETTING_KEY),
         getMeta(SOUND_ENABLED_KEY),
+        getMeta(DIAGNOSTICS_ENABLED_KEY),
+        getMeta(DIAGNOSTICS_INSTALL_ID_KEY),
         getMeta(STREAK_FREEZE_MONTH_KEY),
         getMeta(STREAK_FREEZE_AVAILABLE_KEY),
         getMeta(STREAK_FREEZE_SPENT_FOR_KEY),
@@ -584,11 +599,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         dbListSplits(),
         dbListShares(),
         dbListPayments(),
-        getMeta(DUITNOW_QR_KEY),
         listTrips(),
       ]);
     setTrips(tripRows);
-    setDuitNowQrUriState(duitNowQrRaw || null);
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
     setReminderCadenceState(isReminderCadence(reminderCadenceRaw) ? reminderCadenceRaw : 'off');
@@ -607,6 +620,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const resolvedSoundEnabled = soundEnabledRaw !== 'false';
     setSoundEnabledState(resolvedSoundEnabled);
     applySoundEnabled(resolvedSoundEnabled);
+
+    // Same absent-means-on convention. This is the point the crash reporter has been waiting for
+    // since index.ts armed it: until resolveConsent runs, anything it caught during startup is
+    // held in memory and nothing has left the device.
+    const resolvedDiagnosticsEnabled = diagnosticsEnabledRaw !== 'false';
+    setDiagnosticsEnabledState(resolvedDiagnosticsEnabled);
+    // '' rather than null once the row exists (opted out at some point), and an empty id is not a
+    // usable one — normalise before nextInstallId's ?? sees it.
+    const storedInstallId = diagnosticsInstallIdRaw || null;
+    const installId = nextInstallId(storedInstallId, resolvedDiagnosticsEnabled, () => Crypto.randomUUID());
+    if (installId !== storedInstallId) await setMeta(DIAGNOSTICS_INSTALL_ID_KEY, installId ?? '');
+    resolveConsent(resolvedDiagnosticsEnabled, installId);
 
     // Streak freeze: grant a fresh one if this calendar month hasn't seen one yet. Persist the
     // grant immediately so it isn't re-decided (and re-written) on every refresh within the
@@ -843,12 +868,18 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     for (const s of splits) splitById[s.id] = s;
     const personById: Record<string, Person> = {};
     for (const p of people) personById[p.id] = p;
+    const sharesBySplitId: Record<string, number> = {};
+    for (const s of shares) {
+      sharesBySplitId[s.splitId] = (sharesBySplitId[s.splitId] ?? 0) + 1;
+    }
 
     return shares
       .filter((s) => s.status === 'open' || s.status === 'settled')
       .map((s) => {
         const split = splitById[s.splitId];
         const txn = txnById[split?.txnId ?? ''];
+        const shareCount = sharesBySplitId[s.splitId] ?? 1;
+        const participantCount = shareCount + (split && split.ownShare > 0 ? 1 : 0);
         return {
           shareId: s.id,
           personId: s.personId,
@@ -865,6 +896,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           paid: s.paid,
           status: s.status,
           receiptUri: txn?.receiptUri ?? null,
+          splitMethod: split?.method,
+          participantCount,
         };
       });
   }, [shares, splits, transactions, people]);
@@ -894,8 +927,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const deleteCategory = useCallback(async (id: string) => {
-    await dbDeleteCategory(id);
+  const deleteCategory = useCallback(async (id: string, replacementId?: string) => {
+    await dbDeleteCategory(id, replacementId);
     const [cats, txns, mem, alloc] = await Promise.all([
       listCategories(),
       listTransactions(),
@@ -1239,6 +1272,16 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     applySoundEnabled(on);
   }, []);
 
+  const setDiagnosticsEnabled = useCallback(async (on: boolean) => {
+    await setMeta(DIAGNOSTICS_ENABLED_KEY, on ? 'true' : 'false');
+    // Turning off deletes the install id outright; turning back on mints a fresh one, so the two
+    // stretches of reporting can't be joined up on the server.
+    const installId = on ? Crypto.randomUUID() : null;
+    await setMeta(DIAGNOSTICS_INSTALL_ID_KEY, installId ?? '');
+    setDiagnosticsEnabledState(on);
+    resolveConsent(on, installId);
+  }, []);
+
   const pauseStreak = useCallback(async () => {
     // Local, matching every other day number the streak reasons in (see `localDayNumber`):
     // a UTC one would freeze the streak on yesterday for anyone pausing in the small hours.
@@ -1250,11 +1293,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const resumeStreak = useCallback(async () => {
     await setMeta(STREAK_PAUSED_SINCE_KEY, '');
     setStreakPausedSinceDayState(null);
-  }, []);
-
-  const setDuitNowQrUri = useCallback(async (uri: string | null) => {
-    await setMeta(DUITNOW_QR_KEY, uri ?? '');
-    setDuitNowQrUriState(uri);
   }, []);
 
   const resetBudget = useCallback(async () => {
@@ -2222,6 +2260,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setMotionSetting,
     soundEnabled,
     setSoundEnabled,
+    diagnosticsEnabled,
+    setDiagnosticsEnabled,
     streak: effectiveStreak,
     streakWeek,
     streakTodayIndex,
@@ -2255,8 +2295,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     payCommitment,
     unpayCommitment,
     skipCommitment,
-    duitNowQrUri,
-    setDuitNowQrUri,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

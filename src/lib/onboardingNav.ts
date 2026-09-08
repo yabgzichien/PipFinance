@@ -1,14 +1,48 @@
 // src/lib/onboardingNav.ts
 // Pure helper functions for setup wizard navigation, progress, and dynamic branching.
+//
+// The flow is expressed as an ordered list per branch rather than a switch per step, so step
+// numbers, totals and back-navigation all derive from one place. Adding or removing a step is
+// an edit to a single array — which is what makes the demo step (see
+// docs/superpowers/specs/2026-09-08-onboarding-demo-step-design.md) switchable without
+// four hand-maintained variants of the same arithmetic.
+//
+// `withDemo` is a parameter rather than a module-level constant read here: these functions stay
+// pure and both states stay testable. The app supplies it from `src/config/onboardingFlags.ts`.
 
 export type WizardStep =
   | 'intro'
   | 'import'
   | 'advanced_import'
-  | 'budget'
-  | 'recurring'
+  | 'appearance'
+  | 'demo'
   | 'notifications'
   | 'widget';
+
+/** The beats inside the demo step. Lives here rather than in the component because the wizard's
+ *  back button needs to know about them: back should walk the demo before leaving it. */
+export type DemoBeat = 'offer' | 'scanning' | 'reveal' | 'split' | 'share';
+
+/**
+ * Where back goes from inside the demo, or null when the demo has nothing left to go back to
+ * and the wizard should leave the step entirely.
+ *
+ * `scanning` is never a destination: it advances on a timer, so landing there would fling the
+ * user straight forward again. Going back from it returns to the offer.
+ */
+export function getPreviousDemoBeat(beat: DemoBeat): DemoBeat | null {
+  switch (beat) {
+    case 'offer':
+      return null;
+    case 'scanning':
+    case 'reveal':
+      return 'offer';
+    case 'split':
+      return 'reveal';
+    case 'share':
+      return 'split';
+  }
+}
 
 export interface WizardNavInfo {
   title: string;
@@ -17,57 +51,59 @@ export interface WizardNavInfo {
   progressPct: number;
 }
 
-export function getWizardNavInfo(step: WizardStep, hasImported: boolean): WizardNavInfo | null {
-  if (step === 'intro' || step === 'advanced_import') {
-    return null;
-  }
+/** English titles. `OnboardingScreen` maps these onto translation keys for display. */
+const STEP_TITLES: Partial<Record<WizardStep, string>> = {
+  import: 'Import data',
+  appearance: 'Appearance',
+  demo: 'Demo',
+  notifications: 'Notifications',
+  widget: 'Widget',
+};
 
-  if (hasImported) {
-    // Branch A: User imported from old money manager (3 setup steps: Import -> Notifications -> Widget)
-    switch (step) {
-      case 'import':
-        return { title: 'Import data', stepNumber: 1, totalSteps: 3, progressPct: (1 / 3) * 100 };
-      case 'notifications':
-        return { title: 'Notifications', stepNumber: 2, totalSteps: 3, progressPct: (2 / 3) * 100 };
-      case 'widget':
-        return { title: 'Widget', stepNumber: 3, totalSteps: 3, progressPct: (3 / 3) * 100 };
-      default:
-        return null;
-    }
-  } else {
-    // Branch B: Fresh setup (5 setup steps: Import -> Budget -> Recurring -> Notifications -> Widget)
-    switch (step) {
-      case 'import':
-        return { title: 'Import data', stepNumber: 1, totalSteps: 5, progressPct: (1 / 5) * 100 };
-      case 'budget':
-        return { title: 'Budget', stepNumber: 2, totalSteps: 5, progressPct: (2 / 5) * 100 };
-      case 'recurring':
-        return { title: 'Recurring payment', stepNumber: 3, totalSteps: 5, progressPct: (3 / 5) * 100 };
-      case 'notifications':
-        return { title: 'Notifications', stepNumber: 4, totalSteps: 5, progressPct: (4 / 5) * 100 };
-      case 'widget':
-        return { title: 'Widget', stepNumber: 5, totalSteps: 5, progressPct: (5 / 5) * 100 };
-      default:
-        return null;
-    }
-  }
+/**
+ * The steps that carry a progress bar, in order.
+ *
+ * `intro` and `advanced_import` are deliberately absent: the intro is the front door and
+ * advanced import is external chrome, and neither shows wizard progress.
+ *
+ * Both import outcomes feed the same setup sequence: make the app feel like the user's app,
+ * see the demo, then opt into notifications and widgets. Budgeting and recurring bills remain
+ * available in the product, but do not interrupt the first-run path.
+ */
+export function getWizardSteps(_hasImported: boolean, withDemo: boolean): WizardStep[] {
+  const demo: WizardStep[] = withDemo ? ['demo'] : [];
+  return ['import', 'appearance', ...demo, 'notifications', 'widget'];
 }
 
-export function getPreviousWizardStep(step: WizardStep, hasImported: boolean): WizardStep | null {
-  switch (step) {
-    case 'intro':
-      return null;
-    case 'import':
-      return 'intro';
-    case 'advanced_import':
-      return 'import';
-    case 'budget':
-      return 'import';
-    case 'recurring':
-      return 'budget';
-    case 'notifications':
-      return hasImported ? 'import' : 'recurring';
-    case 'widget':
-      return 'notifications';
-  }
+export function getWizardNavInfo(
+  step: WizardStep,
+  hasImported: boolean,
+  withDemo = false
+): WizardNavInfo | null {
+  const steps = getWizardSteps(hasImported, withDemo);
+  const idx = steps.indexOf(step);
+  if (idx < 0) return null;
+
+  const title = STEP_TITLES[step];
+  if (!title) return null;
+
+  const stepNumber = idx + 1;
+  const totalSteps = steps.length;
+  return { title, stepNumber, totalSteps, progressPct: (stepNumber / totalSteps) * 100 };
+}
+
+export function getPreviousWizardStep(
+  step: WizardStep,
+  hasImported: boolean,
+  withDemo = false
+): WizardStep | null {
+  if (step === 'intro') return null;
+  if (step === 'advanced_import') return 'import';
+
+  const steps = getWizardSteps(hasImported, withDemo);
+  const idx = steps.indexOf(step);
+  // A step outside the active wizard shape has no back destination.
+  if (idx < 0) return null;
+  // The first progress step falls back to the intro, the wizard's true root.
+  return idx === 0 ? 'intro' : steps[idx - 1];
 }

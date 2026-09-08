@@ -54,7 +54,7 @@ export function SavedScreen({
   const colorTheme = useThemeColors();
   const { t, tCat, isZh } = useLanguage();
   const pop = useRef(new Animated.Value(0)).current;
-  const { splits, shares, people, duitNowQrUri } = useAppData();
+  const { splits, shares, people } = useAppData();
   const [sendOpen, setSendOpen] = useState(false);
   const dc = useDisplayCurrency();
   const hasResults = result.length > 0;
@@ -125,13 +125,12 @@ export function SavedScreen({
           selfPortions: portions?.selfWeight,
           workings: splitWorkings,
           isZh,
-          hasDuitNowQr: Boolean(duitNowQrUri),
         },
         receiptUri: txn.receiptUri ?? null,
       };
     }
     return null;
-  }, [result, splits, shares, people, splitWorkings, isZh, duitNowQrUri]);
+  }, [result, splits, shares, people, splitWorkings, isZh]);
 
   /** Everyone at once, then each friend on their own. */
   const sendOptions = useMemo((): SendMessageOption[] => {
@@ -143,25 +142,14 @@ export function SavedScreen({
         label: t('splitShareEveryone'),
         sub: t('splitShareEveryoneSub'),
         icon: 'gift',
-        build: (opts?: { hasDuitNowQr?: boolean }) =>
-          buildGroupMessage({
-            ...input,
-            hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
-          }),
+        build: () => buildGroupMessage(input),
         receiptUri,
       },
       ...input.shares.map((s): SendMessageOption => ({
         key: s.personId,
         label: s.name,
         sub: fmtMoney(s.owed, input.currency),
-        build: (opts?: { hasDuitNowQr?: boolean }) =>
-          buildPersonMessage(
-            {
-              ...input,
-              hasDuitNowQr: opts?.hasDuitNowQr ?? input.hasDuitNowQr,
-            },
-            s.personId
-          ),
+        build: () => buildPersonMessage(input, s.personId),
         receiptUri,
       })),
     ];
@@ -309,7 +297,6 @@ export function SavedScreen({
         title={t('splitShareTitle')}
         subtitle={sendable?.receiptUri ? t('splitShareSubWithPhoto') : t('splitShareSub')}
         options={sendOptions}
-        duitNowQrUri={duitNowQrUri}
         onClose={() => setSendOpen(false)}
       />
     </View>

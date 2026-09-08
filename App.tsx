@@ -235,6 +235,10 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   // trip to whatever it saves and show it in the manual-entry title. Cleared on close alongside
   // the other one-shot add-flow prefills below.
   const [addTripId, setAddTripId] = useState<string | null>(null);
+  // Where closing the add flow returns to. Home for every ordinary way in; a trip's own
+  // "Add expense" points it back at that trip so logging one expense does not cost the user
+  // the screen they were working in.
+  const [addOrigin, setAddOrigin] = useState<Screen>('home');
   const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
   // Calendar is reachable from both Recap and the Home streak card, so back has to return
   // where it came from  same pattern as owedOrigin above.
@@ -528,6 +532,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     setAddTutorialMode(undefined);
     setAddInitialType(undefined);
     setAddTripId(null);
+    setAddOrigin('home');
     setScreen('add');
   };
 
@@ -538,6 +543,9 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     setAddTutorialMode(undefined);
     setAddInitialType(undefined);
     setAddTripId(tripId);
+    // Both halves of "come back here": which trip screen, and that it is a trip screen at all.
+    setTripDetailId(tripId);
+    setAddOrigin('tripDetail');
     setScreen('add');
   };
 
@@ -552,6 +560,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       exportOrigin,
       commitmentsOrigin,
       currencyOrigin,
+      addOrigin,
     });
     if (!target) return false;
     if (screen === 'transactions') setTxnFilter(null);
@@ -586,6 +595,8 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         } else {
           setAddInitialType(undefined);
         }
+        setAddTripId(null);
+        setAddOrigin('home');
         setScreen('add');
       } else if (url.startsWith('pip://dashboard') || url.endsWith('/home')) {
         setScreen('home');
@@ -798,7 +809,11 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         <CalendarScreen
           onBack={goBack}
           initialMonth={calendarMonth}
-          onAdd={() => setScreen('add')}
+          onAdd={() => {
+            setAddTripId(null);
+            setAddOrigin('home');
+            setScreen('add');
+          }}
         />
       )}
       {screen === 'networth' && <NetWorthScreen onBack={goBack} onOpenHistory={() => setScreen('netWorthHistory')} />}

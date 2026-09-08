@@ -267,6 +267,7 @@ export interface Translations {
   newTrip: string;
   tripNamePlaceholder: string;
   tripDatesOptional: string;
+  addDates: string;
   addExistingExpenses: string;
   addToTrip: string;
   noTrip: string;
@@ -377,10 +378,39 @@ export interface Translations {
   wizardDefaultCurrency: string;
   wizardCurrencySearchPlaceholder: string;
   wizardImportTitle: string;
+  wizardAppearanceTitle: string;
   wizardBudgetTitle: string;
   wizardRecurringTitle: string;
   wizardNotificationsTitle: string;
   wizardWidgetTitle: string;
+  wizardDemoTitle: string;
+  wizardAppearanceSubtitle: string;
+  wizardAppearanceContinue: string;
+  demoOfferTitle: string;
+  demoOfferBody: string;
+  demoTapToScan: string;
+  demoBadge: string;
+  demoNothingSaved: string;
+  demoReadTitle: string;
+  demoItemsLine: string;
+  demoServiceCharge: string;
+  demoCategorised: string;
+  demoSharedTag: string;
+  demoAssignHint: string;
+  demoShareAll: string;
+  demoClearAll: string;
+  demoWhoOrdered: string;
+  demoBillTotal: string;
+  demoSubtotal: string;
+  demoTotal: string;
+  demoSplitCta: string;
+  demoSplitTitle: string;
+  demoYou: string;
+  demoShareCta: string;
+  demoShareTitle: string;
+  demoShareNote: string;
+  demoDone: string;
+  demoSkip: string;
   importSwitchTracker: string;
   importSwitchSubtitle: string;
   importDoneTitle: string;
@@ -526,6 +556,7 @@ export interface Translations {
   quickAddLabel: string;
   quickAddPlaceholder: string;
   quickAddThinking: string;
+  quickAddProgress: string;
   quickAddNoAmount: string;
   quickAddForeignBatch: string;
   quickAddForeignBatchTitle: string;
@@ -548,20 +579,6 @@ export interface Translations {
   owedRemindTitle: string;
   owedRemindSub: string;
   owedRemindEverything: string;
-
-  // DuitNow QR & viral bill sharing
-  duitNowTitle: string;
-  duitNowDesc: string;
-  duitNowUploadBtn: string;
-  duitNowChangeBtn: string;
-  duitNowRemoveBtn: string;
-  duitNowActiveBadge: string;
-  duitNowRemoveTitle: string;
-  duitNowRemoveBody: string;
-  duitNowAttachQrToggle: string;
-  duitNowQrAttached: string;
-  duitNowTipNoQr: string;
-  splitSharePasteHintQr: string;
 
   // Owed screen search and settlement
   searchOwedPlaceholder: string;

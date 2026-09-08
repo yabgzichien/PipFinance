@@ -75,7 +75,8 @@ Android production builds are created using [Expo Application Services (EAS Buil
    ```bash
    eas login
    ```
-3. Ensure `app.json` has the correct bundle identifier (`com.yabg.pipexpensestracker`) and version numbers.
+3. Ensure `app.json` has the correct bundle identifier (`com.yabg.pip` — this must match the
+   `applicationId` in `android/app/build.gradle` and the package published on Play) and version numbers.
 
 ### Building APK (Testing / Direct Install)
 To build a preview APK that can be installed directly on an Android device:

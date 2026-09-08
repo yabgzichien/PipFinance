@@ -7,6 +7,7 @@
 import { File } from 'expo-file-system';
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib';
 import { strToU8, zipSync } from 'fflate';
+import { reportError } from './diagnostics';
 import { computeUsage } from './relief';
 import type { ReliefSchedule } from './reliefSchedule';
 import type { ReliefTag, Transaction } from './types';
@@ -24,7 +25,10 @@ export function readImageBytes(uri: string): Uint8Array | null {
     const file = new File(uri);
     if (!file.exists) return null;
     return file.bytesSync();
-  } catch {
+  } catch (err) {
+    // A receipt image that exists but won't read is a real fault — it silently drops evidence
+    // from a tax pack the user believes is complete.
+    reportError(err, 'tax-export');
     return null;
   }
 }

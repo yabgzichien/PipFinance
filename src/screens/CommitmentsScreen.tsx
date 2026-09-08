@@ -15,7 +15,7 @@ import { DEFAULT_EXPENSE_ID } from '../data/categories';
 import { currentMonthKey } from '../lib/budget';
 import { computeCommitmentRecord } from '../lib/commitmentRecord';
 import { occurrenceMyr, type Commitment, type CommitmentKind, type CommitmentOccurrence } from '../lib/commitments';
-import { BASE_CURRENCY, decimalsFor, isMultiCurrency } from '../lib/currency';
+import { BASE_CURRENCY, decimalsFor } from '../lib/currency';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { formatTimelineDateHeader, shortDate } from '../lib/dates';
 import { todayISO } from '../lib/duplicates';
@@ -83,13 +83,15 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>([BASE_CURRENCY]);
   const [rates, setRates] = useState<Record<string, number>>({});
 
-  React.useEffect(() => {
-    (async () => {
-      const [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
-      setActiveCurrencies(active);
-      setRates(ratesFromCache(fx));
-    })();
+  const reloadCurrencies = React.useCallback(async () => {
+    const [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
+    setActiveCurrencies(active);
+    setRates(ratesFromCache(fx));
   }, []);
+
+  React.useEffect(() => {
+    reloadCurrencies();
+  }, [reloadCurrencies]);
 
   const today = useMemo(() => todayISO(), []);
   const curMonth = useMemo(() => currentMonthKey(new Date()), []);
@@ -399,6 +401,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
         accounts={accounts}
         activeCurrencies={activeCurrencies}
         rates={rates}
+        onCurrencyActivated={reloadCurrencies}
         visible={editing !== null}
         onClose={() => setEditing(null)}
       />
@@ -708,6 +711,7 @@ function CommitmentEditorModal({
   accounts,
   activeCurrencies,
   rates,
+  onCurrencyActivated,
   visible,
   onClose,
 }: {
@@ -715,6 +719,7 @@ function CommitmentEditorModal({
   accounts: { id: string; name: string; kind: string; cls: string; archived: boolean; symbol?: string | null; ticker?: string | null; quantity?: number | null; cost?: number | null; sub?: string | null; icon?: string | null }[];
   activeCurrencies: string[];
   rates: Record<string, number>;
+  onCurrencyActivated: (code: string) => void;
   visible: boolean;
   onClose: () => void;
 }) {
@@ -887,8 +892,13 @@ function CommitmentEditorModal({
               <View style={{ flex: 1 }}>
                 <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{isZh ? '金额' : 'Amount'}</Text>
                 <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                  {isMultiCurrency(activeCurrencies) && !editingExisting ? (
-                    <CurrencyChip value={currency} active={activeCurrencies} onChange={setCurrency} />
+                  {!editingExisting ? (
+                    <CurrencyChip
+                      value={currency}
+                      active={activeCurrencies}
+                      onChange={setCurrency}
+                      onActivated={onCurrencyActivated}
+                    />
                   ) : (
                     <Text style={[styles.rmPrefix, { color: colorTheme.ink2 }]}>{currencyPrefix(currency)}</Text>
                   )}

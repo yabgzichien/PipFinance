@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { OPTIONAL_GROUPS, searchOptionalCategories, type OptionalCategory } from '../data/optionalCategories';
+import { OPTIONAL_GROUPS, optionalCategoriesForKind, searchOptionalCategories, type OptionalCategory } from '../data/optionalCategories';
 import { useLanguage } from '../i18n';
 import { OPTIONAL_CATEGORY_TRANSLATIONS, OPTIONAL_GROUP_TITLES } from '../i18n/categoryTranslations';
 import { notify } from '../lib/platformAlert';
@@ -58,13 +58,18 @@ export function AddCategorySheet({
   const [busy, setBusy] = useState(false);
   const openingGuard = useRef(createOpeningGuard());
 
+  // Whether Pip supplies anything for the kind being added. Income has no catalogue today, and
+  // an empty Suggested tab reads as a broken feature — so when there is nothing to suggest the
+  // sheet is simply the custom form.
+  const hasSuggestions = useMemo(() => optionalCategoriesForKind(kind).length > 0, [kind]);
+
   // Layout effects run after a committed visible change but before the frame is presented.
   // That gives a programmatic close/reopen the same stale-work protection as a user close,
   // without mutating refs during a render that React may later discard.
   useLayoutEffect(() => {
     if (visible) {
       openingGuard.current.open();
-      setTab('suggested');
+      setTab(hasSuggestions ? 'suggested' : 'create');
       setQuery('');
       setSelectedKeys([]);
       setBusy(false);
@@ -78,10 +83,10 @@ export function AddCategorySheet({
     return () => {
       openingGuard.current.close();
     };
-  }, [visible]);
+  }, [visible, hasSuggestions]);
 
   const language = isZh ? 'zh' : 'en';
-  const matches = useMemo(() => searchOptionalCategories(query, language), [language, query]);
+  const matches = useMemo(() => searchOptionalCategories(query, language, kind), [kind, language, query]);
   const matchesByGroup = useMemo(
     () => new Map(OPTIONAL_GROUPS.map((group) => [group, matches.filter((category) => category.group === group)])),
     [matches]
@@ -164,28 +169,30 @@ export function AddCategorySheet({
             </Pressable>
           </View>
 
-          <View style={[styles.tabs, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
-            {([
-              ['suggested', t('tabSuggested')],
-              ['create', t('tabCreateYourOwn')],
-            ] as const).map(([value, label]) => {
-              const active = tab === value;
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => setTab(value)}
-                  style={[styles.tab, active && { backgroundColor: colorTheme.surface }]}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={label}
-                >
-                  <Text style={[styles.tabText, { color: colorTheme.ink2 }, active && { color: colorTheme.ink }]}>{label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {hasSuggestions && (
+            <View style={[styles.tabs, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+              {([
+                ['suggested', t('tabSuggested')],
+                ['create', t('tabCreateYourOwn')],
+              ] as const).map(([value, label]) => {
+                const active = tab === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => setTab(value)}
+                    style={[styles.tab, active && { backgroundColor: colorTheme.surface }]}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={label}
+                  >
+                    <Text style={[styles.tabText, { color: colorTheme.ink2 }, active && { color: colorTheme.ink }]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
 
-          {tab === 'suggested' ? (
+          {hasSuggestions && tab === 'suggested' ? (
             <>
               <TextInput
                 value={query}

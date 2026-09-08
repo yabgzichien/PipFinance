@@ -22,20 +22,32 @@ function deps(over: Partial<QuickAddDeps> = {}): QuickAddDeps {
 const fakeLLM = (impl: QuickAddLLM['quickAdd']): QuickAddLLM => ({ can: () => true, quickAdd: impl });
 
 describe('resolveQuickAdd — local only', () => {
-  it('returns a local draft with no category when memory is empty and there is no LLM', async () => {
-    const out = await resolveQuickAdd('lunch 9.2', deps());
+  it('returns a local draft with no category when nothing — memory, keyword or LLM — has an answer', async () => {
+    const out = await resolveQuickAdd('mystery 9.2', deps());
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ label: 'lunch', amount: 9.2, categoryId: null });
+    expect(out[0]).toMatchObject({ label: 'mystery', amount: 9.2, categoryId: null });
+  });
+
+  it('falls back to a keyword guess when memory is empty and there is no LLM', async () => {
+    const out = await resolveQuickAdd('lunch 9.2', deps());
+    expect(out[0]).toMatchObject({ label: 'lunch', amount: 9.2, categoryId: 'food' });
   });
 
   it('fills the category from learned memory without any LLM', async () => {
-    const out = await resolveQuickAdd('lunch 9.2', deps({ memory: { lunch: 'food' } as MemoryMap }));
+    const out = await resolveQuickAdd('mystery 9.2', deps({ memory: { mystery: 'food' } as MemoryMap }));
     expect(out[0].categoryId).toBe('food');
   });
 
-  it('ignores a memory hit whose category kind contradicts the draft type', async () => {
+  it('prefers learned memory over a keyword guess when both would apply', async () => {
+    const out = await resolveQuickAdd('lunch 9.2', deps({ memory: { lunch: 'transport' } as MemoryMap }));
+    expect(out[0].categoryId).toBe('transport');
+  });
+
+  it('falls back to the keyword guess when a memory hit contradicts the draft type', async () => {
+    // 'salary' is income, so the (kind-mismatched) memory hit is ignored — but "lunch" still
+    // resolves offline via the keyword list, same as if memory had nothing at all.
     const out = await resolveQuickAdd('lunch 9.2', deps({ memory: { lunch: 'salary' } as MemoryMap }));
-    expect(out[0].categoryId).toBeNull();
+    expect(out[0].categoryId).toBe('food');
   });
 
   it('returns nothing for text with no amount', async () => {
@@ -52,9 +64,9 @@ describe('resolveQuickAdd — when the LLM is consulted', () => {
 
   it('IS called when a draft has no category', async () => {
     const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
+      { label: 'mystery', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
     ]);
-    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(quickAdd) }));
+    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(quickAdd) }));
     expect(quickAdd).toHaveBeenCalled();
     expect(out[0].categoryId).toBe('food');
   });
@@ -124,7 +136,8 @@ describe('resolveQuickAdd — the label the user typed is the label that gets le
       { label: 'Lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
       { label: 'Tip', amount: 1, type: 'expense', date: null, currency: null, categoryId: 'food' },
     ]);
-    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(quickAdd) }));
+    // "mystery" has no keyword hit and no memory, so this still needs the LLM.
+    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(quickAdd) }));
     expect(out.map((d) => d.label)).toEqual(['Lunch', 'Tip']);
   });
 
@@ -157,19 +170,19 @@ describe('resolveQuickAdd — the label the user typed is the label that gets le
 
 describe('resolveQuickAdd — failure is always soft', () => {
   it('falls back to the local result when the LLM rejects', async () => {
-    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(() => Promise.reject(new Error('offline'))) }));
+    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(() => Promise.reject(new Error('offline'))) }));
     expect(out).toHaveLength(1);
     expect(out[0].amount).toBe(9.2);
     expect(out[0].categoryId).toBeNull();
   });
 
   it('falls back to the local result when the LLM hangs past the timeout', async () => {
-    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(() => new Promise(() => {})) }), 10);
+    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(() => new Promise(() => {})) }), 10);
     expect(out[0].amount).toBe(9.2);
   });
 
   it('falls back to the local result when the LLM returns nothing usable', async () => {
-    const out = await resolveQuickAdd('lunch 9.2', deps({ llm: fakeLLM(async () => []) }));
+    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(async () => []) }));
     expect(out[0].amount).toBe(9.2);
   });
 });

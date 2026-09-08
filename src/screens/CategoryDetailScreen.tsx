@@ -10,6 +10,7 @@ import { Amount, Body, Card, Caption, CatBadge, IconButton, Label, Title, TopBar
 import * as haptics from '../lib/haptics';
 import { txnMonthKey } from '../lib/budget';
 import { catColorsForHue } from '../lib/catColors';
+import { resolveCategoryPresentation } from '../lib/categoryPresentation';
 import { monthLabel, shortDate } from '../lib/dates';
 import { fmtMoney } from '../lib/format';
 import type { Category, Transaction } from '../lib/types';
@@ -151,7 +152,9 @@ export function CategoryDetailScreen({
 
   const openEditMeta = () => {
     setDraftName(tCat(cat));
-    setDraftIcon(cat.icon);
+    // The icon the user can currently see, not the stored column behind it — otherwise the
+    // editor opens on a stale icon and saving writes that stale icon back as an override.
+    setDraftIcon(resolveCategoryPresentation(cat, isZh ? 'zh' : 'en').icon);
     setEditingMeta(true);
   };
 
@@ -168,10 +171,11 @@ export function CategoryDetailScreen({
   const saveMeta = async () => {
     if (savingMeta) return;
     const trimmed = draftName.trim();
+    const shown = resolveCategoryPresentation(cat, isZh ? 'zh' : 'en');
     setSavingMeta(true);
     try {
-      if (trimmed && trimmed !== cat.label) await updateCategoryLabel(activeId, trimmed);
-      if (draftIcon && draftIcon !== cat.icon) await updateCategoryIcon(activeId, draftIcon);
+      if (trimmed && trimmed !== shown.label) await updateCategoryLabel(activeId, trimmed);
+      if (draftIcon && draftIcon !== shown.icon) await updateCategoryIcon(activeId, draftIcon);
       setEditingMeta(false);
     } finally {
       setSavingMeta(false);
@@ -199,7 +203,7 @@ export function CategoryDetailScreen({
       >
         {siblings.map((c) => {
           const on = c.id === activeId;
-          const col = catColorsForHue(c.hue, isDark);
+          const col = catColorsForHue(resolveCategoryPresentation(c).hue, isDark);
           return (
             <Pressable
               key={c.id}

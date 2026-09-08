@@ -114,7 +114,7 @@ describe('seedCategories', () => {
     const db = fakeDb({ all: { deleted_default_categories: [] } });
     await __seedCategoriesForTest(db as any);
     const inserts = db.statements.filter((s) => s.sql.includes('INSERT INTO categories'));
-    expect(inserts).toHaveLength(11);
+    expect(inserts).toHaveLength(16);
     for (const s of inserts) {
       expect(s.args.some((a) => typeof a === 'string' && a.startsWith('starter.'))).toBe(true);
     }
@@ -152,7 +152,7 @@ describe('seedCategories', () => {
     });
     await __seedCategoriesForTest(db as any);
     const afterFirstSeed = db.persistedCategories();
-    expect(afterFirstSeed).toHaveLength(11);
+    expect(afterFirstSeed).toHaveLength(16);
     await __seedCategoriesForTest(db as any);
     expect(db.persistedCategories()).toEqual(afterFirstSeed);
     expect(db.persistedCategories()).toContainEqual(expect.objectContaining({

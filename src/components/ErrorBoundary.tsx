@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Pip } from './Pip';
 import { PrimaryButton, BtnLabel } from './ui';
+import { reportFatal } from '../lib/diagnostics';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
 import { uiFont } from '../theme';
@@ -31,11 +32,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return { hasError: true };
   }
 
-  componentDidCatch(error: unknown) {
+  componentDidCatch(error: unknown, info: React.ErrorInfo) {
     if (__DEV__) {
       // eslint-disable-next-line no-console
       console.error('ErrorBoundary caught:', error);
     }
+    reportFatal(error, info?.componentStack ?? undefined);
   }
 
   reset = () => this.setState({ hasError: false });
