@@ -12,7 +12,9 @@ export async function syncQuickRecordWidget(txns?: Transaction[]): Promise<void>
     const data = await getStreakWidgetData(txns);
     await requestWidgetUpdate({
       widgetName: 'QuickRecordWidget',
-      renderWidget: () => <QuickRecordWidget streak={data.streak} />,
+      renderWidget: () => (
+        <QuickRecordWidget streak={data.streak} dots={data.dots} config={data.config} />
+      ),
     });
   } catch {
     // Graceful fallback if widget is not placed, running in Expo Go, or native module is not ready

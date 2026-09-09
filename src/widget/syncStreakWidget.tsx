@@ -4,7 +4,13 @@ import { requestWidgetUpdate } from 'react-native-android-widget';
 import { computeStreak, compute7DayDots, type StreakInput } from '../lib/streak';
 import type { Transaction } from '../lib/types';
 import { listTransactions } from '../db/txnRepo';
+import { getMeta } from '../db/metaRepo';
 import { StreakWidget } from './StreakWidget';
+import {
+  DEFAULT_WIDGET_MASCOT_CONFIG,
+  parseWidgetMascotConfig,
+  WIDGET_MASCOT_CONFIG_KEY,
+} from './mascot/config';
 
 export { compute7DayDots };
 
@@ -20,11 +26,17 @@ export async function getStreakWidgetData(providedTxns?: Transaction[]) {
     }
   }
 
-  const now = new Date();
-  const streak = computeStreak(txns, now);
-  const dots = compute7DayDots(txns, now);
+  // A failed read must not break the render: this runs headless from widgetTask.tsx, where a
+  // throw fails a home-screen widget with no UI to report it.
+  let config = DEFAULT_WIDGET_MASCOT_CONFIG;
+  try {
+    config = parseWidgetMascotConfig(await getMeta(WIDGET_MASCOT_CONFIG_KEY));
+  } catch {
+    // Keep defaults.
+  }
 
-  return { streak, dots };
+  const now = new Date();
+  return { streak: computeStreak(txns, now), dots: compute7DayDots(txns, now), config };
 }
 
 export async function syncStreakWidget(txns?: Transaction[]): Promise<void> {
@@ -38,6 +50,7 @@ export async function syncStreakWidget(txns?: Transaction[]): Promise<void> {
         <StreakWidget
           streak={data.streak}
           dots={data.dots}
+          config={data.config}
         />
       ),
     });

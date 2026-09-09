@@ -17,6 +17,7 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
           <StreakWidget
             streak={data.streak}
             dots={data.dots}
+            config={data.config}
           />
         );
         break;
@@ -29,6 +30,7 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
             <StreakWidget
               streak={data.streak}
               dots={data.dots}
+              config={data.config}
             />
           );
         }
@@ -48,7 +50,9 @@ export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<
       case 'WIDGET_UPDATE':
       case 'WIDGET_RESIZED': {
         const data = await getStreakWidgetData();
-        renderWidget(<QuickRecordWidget streak={data.streak} />);
+        renderWidget(
+          <QuickRecordWidget streak={data.streak} dots={data.dots} config={data.config} />
+        );
         break;
       }
 
