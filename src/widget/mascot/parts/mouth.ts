@@ -5,6 +5,7 @@ import { Z } from './types';
 
 const INK = '#7A4800';
 const TEETH = '#FFFDF5';
+const TONGUE = '#E85D83';
 const GUARD_GOLD = '#C8A02E';
 const GUARD_GOLD_DARK = '#7C5F12';
 const HILT_WRAP = '#232A31';
@@ -61,16 +62,21 @@ export const MOUTH_PARTS: Record<string, MascotPart> = {
     ],
   },
 
-  /** Transcribed from Pip.tsx:798-824 (`ScientistFace`), mouth only (Pip.tsx:819-821) — the brows
-   *  and eyes there belong to other slots. Despite the id, the source shape is a closed,
-   *  off-centre concentration line, not a visible tongue; see task report for this discrepancy. */
+  /** Re-sourced per coordinator ruling: transcribed from Pip.tsx:983-1009 (`EatingFace`), mouth
+   *  group only (`pip-eating-mouth`, Pip.tsx:990-995) — the eyes there (Pip.tsx:986-989) are the
+   *  `blissful` id's source instead. The original brief cited `ScientistFace`'s mouth for this id,
+   *  but that shape is a closed asymmetric line with no tongue in it; `EatingFace`'s filled open
+   *  mouth plus its `TONGUE`-coloured ellipse is the actual tongue-bearing shape in `Pip.tsx`. */
   tongue: {
     id: 'tongue',
     slot: 'mouth',
     layers: [
       {
         z: Z.FACE,
-        svg: `<g data-part="tongue"><path d="M41.6 67.6 Q49.5 72.4 57.4 66.6" fill="none" stroke="${INK}" stroke-width="3" stroke-linecap="round" /></g>`,
+        svg: `<g data-part="tongue">
+    <path d="M39.5 64.5 Q50 61.5 60.5 64.5 Q59.5 79.5 50 79.5 Q40.5 79.5 39.5 64.5 Z" fill="${INK}" />
+    <ellipse cx="50" cy="75.4" rx="5.6" ry="3.4" fill="${TONGUE}" />
+  </g>`,
       },
     ],
   },

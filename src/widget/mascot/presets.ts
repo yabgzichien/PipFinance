@@ -9,8 +9,8 @@ export const PRESETS: Record<PresetId, PresetSlots> = {
   nerdy: { head: 'none', eyes: 'big', mouth: 'smile', holding: 'lollipop' },
   cool: { head: 'none', eyes: 'shades', mouth: 'grin', holding: 'thumbsUp' },
   swordsman: { head: 'bandana', eyes: 'scarred', mouth: 'katanaBite', holding: 'crossedKatana' },
-  scientist: { head: 'goggles', eyes: 'default', mouth: 'tongue', holding: 'flask' },
-  chef: { head: 'strawHat', eyes: 'blissful', mouth: 'open', holding: 'noodleBowl' },
+  scientist: { head: 'goggles', eyes: 'default', mouth: 'smile', holding: 'flask' },
+  chef: { head: 'strawHat', eyes: 'blissful', mouth: 'tongue', holding: 'noodleBowl' },
 };
 
 export function applyPreset(config: WidgetMascotConfig, id: PresetId): WidgetMascotConfig {

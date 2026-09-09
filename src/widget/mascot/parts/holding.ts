@@ -31,13 +31,11 @@ const SCALLION = '#4FAF6D';
 export const HOLDING_PARTS: Record<string, MascotPart> = {
   none: { id: 'none', slot: 'holding', layers: [] },
 
-  /** Transcribed from Pip.tsx:352-365 (`Lollipop`) followed by Pip.tsx:376-393 (`Hand`), per the
-   *  brief's source citation. `Hand` takes `cx`/`cy`/`flip` and is never actually called for the
-   *  `nerdy` pose in `Pip.tsx` — that pose calls only `<Lollipop />`, which already draws its own
-   *  small fist inline (the closing `Rect` below). Since `Hand` requires parameters not stated in
-   *  the brief, this instantiates it with the one concrete precedent the file offers for an
-   *  un-flipped right hand in this spot: `<Hand cx={84} cy={71} />`, the second call inside
-   *  `Hands` (Pip.tsx:469). Flagged in the task report as a judgment call. */
+  /** Transcribed from Pip.tsx:352-365 (`Lollipop`) only, per coordinator ruling: `Hand` (needing
+   *  `cx`/`cy`/`flip` never supplied by the brief) is never actually called for the `nerdy` pose in
+   *  `Pip.tsx` — that pose calls only `<Lollipop />` (Pip.tsx:1536), which already draws its own
+   *  small fist inline (the closing `Rect` below). The earlier synthesized `Hand` layer was dropped
+   *  rather than guessing parameters for a call the source never makes. */
   lollipop: {
     id: 'lollipop',
     slot: 'holding',
@@ -53,13 +51,6 @@ export const HOLDING_PARTS: Record<string, MascotPart> = {
     <circle cx="75" cy="27" r="2.6" fill="#4A90D9" />
     <ellipse cx="69.5" cy="21" rx="3.4" ry="2.1" fill="#fff" opacity="0.5" transform="rotate(-25 69.5 21)" />
     <rect x="77" y="67.5" width="12" height="11" rx="5.2" fill="${HAND_FILL}" stroke="${HAND_LINE}" stroke-width="2" />
-    <line x1="86.6" y1="68" x2="90.4" y2="58.4" stroke="${HAND_LINE}" stroke-width="8.8" stroke-linecap="round" />
-    <line x1="86.6" y1="68" x2="90.4" y2="58.4" stroke="${HAND_FILL}" stroke-width="6.2" stroke-linecap="round" />
-    <rect x="77" y="64.5" width="14" height="13.5" rx="5.8" fill="${HAND_FILL}" stroke="${HAND_LINE}" stroke-width="2.1" />
-    <g stroke="${HAND_LINE}" stroke-width="1.3" stroke-linecap="round" opacity="0.75">
-      <line x1="80.6" y1="69.6" x2="87.4" y2="69.6" />
-      <line x1="80.6" y1="73.6" x2="87.4" y2="73.6" />
-    </g>
   </g>`,
       },
     ],
