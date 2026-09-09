@@ -32,7 +32,7 @@ export function contentWidth(c: WidgetMascotConfig): number {
   const arrows = (c.showIncome ? 1 : 0) + (c.showExpense ? 1 : 0);
 
   if (arrows === 0) {
-    return STREAK_COLUMN;
+    return H_PADDING + mascot + COLUMN_GAP + STREAK_COLUMN;
   }
   return H_PADDING + mascot + arrows * (DIVIDER + button);
 }
