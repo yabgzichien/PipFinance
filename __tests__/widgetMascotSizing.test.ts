@@ -25,12 +25,21 @@ describe('sizing', () => {
     }
   });
 
-  it('drops the divider and button width when an arrow is hidden', () => {
+  it('drops one divider and one button width when a single arrow is hidden', () => {
     const both = { ...DEFAULT_WIDGET_MASCOT_CONFIG };
     const one = { ...both, showExpense: false };
+    expect(contentWidth(one)).toBe(contentWidth(both) - (1 + BUTTON_SIZES[both.buttonNotch]));
+  });
+
+  /** Arrows-off is NOT a narrower widget — it is a different layout. The freed space carries an
+   *  expanded streak column (count above a 7-day dot row) that is wider than the two arrows it
+   *  replaced: 16+58+8+68 = 150 against 16+58+2×(1+26) = 128 at the default notches. Asserting
+   *  monotonic shrinkage here would contradict the design; what matters is that it still fits. */
+  it('swaps in the wider streak column when both arrows are hidden', () => {
+    const both = { ...DEFAULT_WIDGET_MASCOT_CONFIG };
     const none = { ...both, showIncome: false, showExpense: false };
-    expect(contentWidth(one)).toBeLessThan(contentWidth(both));
-    expect(contentWidth(none)).toBeLessThan(contentWidth(one));
+    expect(contentWidth(none)).toBeGreaterThan(contentWidth(both));
+    expect(contentWidth(none)).toBeLessThanOrEqual(WIDTH_BUDGET_DP);
   });
 
   it('the expanded arrows-off layout also fits the budget', () => {
