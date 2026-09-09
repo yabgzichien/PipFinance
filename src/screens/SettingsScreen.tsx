@@ -27,7 +27,7 @@ import { motionSettingLabel, MOTION_SETTINGS } from '../theme/motion';
 
 type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
 
-export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onOpenBackup, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onOpenBackup?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
+export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onOpenBackup, onOpenWidgetCustomizer, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onOpenBackup?: () => void; onOpenWidgetCustomizer?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -97,6 +97,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     matchingKeys.has('language') ||
     matchingKeys.has('accent') ||
     matchingKeys.has('motion') ||
+    (Platform.OS === 'android' && Boolean(onOpenWidgetCustomizer) && matchingKeys.has('widgetMascot')) ||
     matchingKeys.has('sounds') ||
     matchingKeys.has('streak');
 
@@ -210,6 +211,31 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
                   <MotionSettingPicker />
                 </Card>
+              )}
+              {Platform.OS === 'android' && onOpenWidgetCustomizer && matchingKeys.has('widgetMascot') && (
+                <Pressable
+                  onPress={onOpenWidgetCustomizer}
+                  style={({ pressed }) => [
+                    styles.providerRow,
+                    styles.migrateRow,
+                    { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}
+                  accessibilityRole="button"
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}> 
+                    <Icon name="sparkles" size={18} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>
+                      {t('widgetCustomizer')}
+                    </Text>
+                    <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}> 
+                      {t('widgetCustomizerHint')}
+                    </Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
               )}
               {matchingKeys.has('sounds') && (
                 <Card style={{ padding: 16 }}>

@@ -43,6 +43,10 @@ describe('backTargetFor', () => {
     expect(backTargetFor('tax', origins)).toBe('settings');
   });
 
+  it('routes the widget customizer back to settings', () => {
+    expect(backTargetFor('widgetCustomizer', origins)).toBe('settings');
+  });
+
   it('returns commitments to settings or home based on origin', () => {
     expect(backTargetFor('commitments', { ...origins, commitmentsOrigin: 'settings' })).toBe('settings');
     expect(backTargetFor('commitments', { ...origins, commitmentsOrigin: 'home' })).toBe('home');

@@ -24,6 +24,7 @@ export type Screen =
   | 'tax'
   | 'currencySettings'
   | 'backup'
+  | 'widgetCustomizer'
   | 'trips'
   | 'tripDetail';
 
@@ -50,6 +51,7 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
     case 'tax':
     case 'categories':
     case 'backup':
+    case 'widgetCustomizer':
       return 'settings';
     case 'commitments':
       return origins.commitmentsOrigin ?? 'settings';

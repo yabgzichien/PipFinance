@@ -39,6 +39,7 @@ import { CommitmentsScreen } from './src/screens/CommitmentsScreen';
 import { TaxScreen } from './src/screens/TaxScreen';
 import { CurrencySettingsScreen } from './src/screens/CurrencySettingsScreen';
 import { BackupScreen } from './src/screens/BackupScreen';
+import { WidgetCustomizerScreen } from './src/screens/WidgetCustomizerScreen';
 import { TripsScreen } from './src/screens/TripsScreen';
 import { TripDetailScreen } from './src/screens/TripDetailScreen';
 import { GlossaryModal } from './src/components/InfoButton';
@@ -737,12 +738,14 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setScreen('currencySettings');
           }}
           onOpenBackup={() => setScreen('backup')}
+          onOpenWidgetCustomizer={() => setScreen('widgetCustomizer')}
           taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />
       )}
       {screen === 'advancedImport' && <AdvancedImportScreen onClose={goBack} />}
       {screen === 'backup' && <BackupScreen onBack={goBack} />}
+      {screen === 'widgetCustomizer' && <WidgetCustomizerScreen onBack={goBack} />}
       {screen === 'export' && (
         <ExportScreen
           initialMonth={exportMonth}

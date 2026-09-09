@@ -15,6 +15,7 @@ export type SettingItemKey =
   | 'accent'
   | 'motion'
   | 'sounds'
+  | 'widgetMascot'
   | 'streak'
   | 'reminder_spending'
   | 'reminder_owed'
@@ -157,6 +158,33 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       '减弱',
       '动效',
       '反馈',
+    ],
+  },
+  {
+    key: 'widgetMascot',
+    section: 'appearance',
+    sectionTitleEn: 'Appearance',
+    sectionTitleZh: '外观与偏好',
+    titleEn: 'Widget mascot',
+    titleZh: '小组件挂件',
+    keywords: [
+      'widget',
+      'mascot',
+      'pip',
+      'hat',
+      'eyes',
+      'mouth',
+      'streak badge',
+      'home screen',
+      'customize',
+      'customise',
+      '小组件',
+      '挂件',
+      '桌面',
+      '帽子',
+      '眼睛',
+      '嘴巴',
+      '自定义',
     ],
   },
   {
