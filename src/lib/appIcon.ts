@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { AppState, NativeModules, Platform, type NativeEventSubscription } from 'react-native';
 import { ACCENT_PRESETS, DEFAULT_ACCENT_PRESET_ID } from '../state/accentPresets';
 
 interface AppIconNativeModule {
@@ -8,52 +8,116 @@ interface AppIconNativeModule {
 
 const { AppIconModule } = NativeModules as { AppIconModule?: AppIconNativeModule };
 
-const ANDROID_ICON_DEBOUNCE_MS = 200;
-let androidIconTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingAndroidPreset = DEFAULT_ACCENT_PRESET_ID;
-let pendingAndroidResolvers: Array<(result: boolean) => void> = [];
-let androidIconUpdateChain: Promise<boolean> = Promise.resolve(true);
+/** How long the app must stay backgrounded before the alias swap is allowed to run. Long enough
+ *  that flicking to another app and straight back never triggers a write, short enough that it
+ *  still lands before the platform reclaims the process. */
+const ANDROID_ICON_SETTLE_MS = 2500;
 
-/** PackageManager alias changes are expensive and some launchers become unstable when several
- * swaps overlap. Keep the color preview immediate, but collapse a burst of icon requests to the
- * final preset and serialize it behind any update already in progress. */
-function enqueueAndroidIconUpdate(presetId: string): Promise<boolean> {
-  pendingAndroidPreset = presetId;
-  if (androidIconTimer) clearTimeout(androidIconTimer);
+/** The preset the user has chosen but that the launcher has not been told about yet. */
+let desiredAndroidPreset: string | null = null;
+/** The preset the launcher alias currently holds, once known. `null` means "not read yet". */
+let appliedAndroidPreset: string | null = null;
+let settleTimer: ReturnType<typeof setTimeout> | null = null;
+let appStateSub: NativeEventSubscription | null = null;
+let androidIconUpdateChain: Promise<void> = Promise.resolve();
 
-  const result = new Promise<boolean>((resolve) => {
-    pendingAndroidResolvers.push(resolve);
+/**
+ * Switching the launcher alias is a PackageManager write against the app's own components, and
+ * the alias it disables is the one the live task is running under — `dumpsys activity activities`
+ * reports the foreground record as `com.yabg.pip/.MainActivityRose`, with only `mActivityComponent`
+ * pointing at `.MainActivity`. Doing that from the foreground lets the platform tear the task
+ * down: the app drops to the home screen and nothing lands in dropbox, because nothing threw.
+ * Ordering the writes (see AppIconModule.kt) closed the "zero enabled LAUNCHER components" window
+ * but not this one, and debouncing never could — real taps are hundreds of milliseconds apart, so
+ * every tap still wrote.
+ *
+ * So the icon is deliberately allowed to lag the accent: the choice is held here and flushed only
+ * once the app has been in the background long enough that there is no foreground task left to
+ * lose. If the process dies before the flush, nothing is lost — the preset is already persisted in
+ * app_meta, so the next launch re-requests it and the next backgrounding applies it.
+ */
+function requestAndroidIconUpdate(presetId: string): Promise<boolean> {
+  desiredAndroidPreset = presetId;
+  subscribeToAppState();
+  return reconcileAndroidIconUpdate();
+}
+
+async function reconcileAndroidIconUpdate(): Promise<boolean> {
+  if (appliedAndroidPreset === null) {
+    try {
+      appliedAndroidPreset = await AppIconModule!.getAppIcon();
+    } catch {
+      // Leave it unknown and let the flush write unconditionally; the native module skips
+      // component writes that are already in the desired state, so a redundant call is cheap.
+    }
+  }
+
+  if (desiredAndroidPreset === appliedAndroidPreset) {
+    desiredAndroidPreset = null;
+    cancelSettle();
+    return true;
+  }
+
+  // A request that arrives while already backgrounded (a restored backup writing the preset
+  // straight to app_meta, say) still needs its own settle window.
+  if (AppState.currentState === 'background') scheduleSettle();
+  return true;
+}
+
+function subscribeToAppState() {
+  if (appStateSub) return;
+  appStateSub = AppState.addEventListener('change', (state) => {
+    if (state === 'background') scheduleSettle();
+    else cancelSettle();
   });
+}
 
-  androidIconTimer = setTimeout(() => {
-    androidIconTimer = null;
-    const presetToApply = pendingAndroidPreset;
-    const resolvers = pendingAndroidResolvers;
-    pendingAndroidResolvers = [];
+function scheduleSettle() {
+  if (!desiredAndroidPreset) return;
+  cancelSettle();
+  settleTimer = setTimeout(flushAndroidIconUpdate, ANDROID_ICON_SETTLE_MS);
+}
 
-    androidIconUpdateChain = androidIconUpdateChain.then(async () => {
-      try {
-        return await AppIconModule!.setAppIcon(presetToApply);
-      } catch {
-        return false;
-      }
-    });
-    void androidIconUpdateChain.then((ok) => resolvers.forEach((resolve) => resolve(ok)));
-  }, ANDROID_ICON_DEBOUNCE_MS);
+function cancelSettle() {
+  if (!settleTimer) return;
+  clearTimeout(settleTimer);
+  settleTimer = null;
+}
 
-  return result;
+function flushAndroidIconUpdate() {
+  settleTimer = null;
+  const presetToApply = desiredAndroidPreset;
+  if (!presetToApply) return;
+
+  // Serialized so a background/foreground/background bounce can never overlap two swaps.
+  androidIconUpdateChain = androidIconUpdateChain.then(async () => {
+    // Re-checked here, not just at schedule time: the timer fires while backgrounded but this
+    // callback runs at least a microtask later, and behind any swap already in flight. If the app
+    // came back in between, writing now would be the very foreground write this defers.
+    if (AppState.currentState !== 'background') return;
+    try {
+      await AppIconModule!.setAppIcon(presetToApply);
+      appliedAndroidPreset = presetToApply;
+      // Anything chosen after this flush started stays pending for the next backgrounding.
+      if (desiredAndroidPreset === presetToApply) desiredAndroidPreset = null;
+    } catch {
+      // Keep it pending and retry on the next backgrounding.
+    }
+  });
 }
 
 /**
  * Updates the app icon dynamically according to the user's selected accent preset.
- * - On Android: switches the active launcher activity-alias using AppIconModule.
+ * - On Android: records the choice and switches the launcher activity-alias once the app is
+ *   backgrounded (see `requestAndroidIconUpdate`). Resolving `true` means the request was
+ *   accepted, not that the launcher has already changed.
  * - On Web: dynamically renders a favicon with the chosen accent background.
  */
 export async function setDynamicAppIcon(presetId: string): Promise<boolean> {
   const safePreset = ACCENT_PRESETS.some((p) => p.id === presetId) ? presetId : DEFAULT_ACCENT_PRESET_ID;
 
   if (Platform.OS === 'android' && AppIconModule?.setAppIcon) {
-    return enqueueAndroidIconUpdate(safePreset);
+    return requestAndroidIconUpdate(safePreset);
   }
 
   if (Platform.OS === 'web' && typeof document !== 'undefined') {

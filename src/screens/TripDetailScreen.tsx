@@ -5,6 +5,8 @@ import { EditTransactionModal } from '../components/EditTransactionModal';
 import { Icon } from '../components/Icon';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { Pip } from '../components/Pip';
+import { TripBadge } from '../components/TripBadge';
+import { TripIconPickerSheet } from '../components/TripIconPickerSheet';
 import { TxnRow } from './AllTransactionsScreen';
 import { Amount, Body, Card, Caption, CatBadge, Eyebrow, Label, PrimaryButton, Title, TopBar } from '../components/ui';
 import { fmtMoney } from '../lib/format';
@@ -222,11 +224,12 @@ export function TripDetailScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, isZh, formatShortDate } = useLanguage();
-  const { trips, transactions, catById, splits, shares, renameTrip, setTripArchived, deleteTrip } = useAppData();
+  const { trips, transactions, catById, splits, shares, renameTrip, setTripArchived, setTripIcon, deleteTrip } = useAppData();
   const dc = useDisplayCurrency();
 
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -351,6 +354,16 @@ export function TripDetailScreen({
         )}
 
         <Card style={styles.hero}>
+          {/* The icon is its own edit affordance: it sits where the user is already looking and
+              costs no row of its own, so a wrong auto-guess is one tap from fixed. */}
+          <Pressable
+            onPress={() => setIconPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t('tripIconChange')}
+            style={({ pressed }) => [styles.heroIcon, pressed && { opacity: 0.7 }]}
+          >
+            <TripBadge trip={trip} size={44} rad={14} muted={trip.archived} />
+          </Pressable>
           <Eyebrow>{t('tripRecordedExpenses')}</Eyebrow>
           <Amount value={totals.recordedExpenses} currency={dc.code} size={32} weight={700} />
           <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
@@ -457,6 +470,15 @@ export function TripDetailScreen({
 
       <EditTransactionModal txn={editing} onClose={() => setEditing(null)} />
       <AddExistingExpensesModal visible={pickerOpen} onClose={() => setPickerOpen(false)} tripId={trip.id} tripName={trip.name} />
+      <TripIconPickerSheet
+        visible={iconPickerOpen}
+        trip={trip}
+        onClose={() => setIconPickerOpen(false)}
+        onPick={(icon) => {
+          setIconPickerOpen(false);
+          void setTripIcon(trip.id, icon);
+        }}
+      />
     </View>
   );
 }
@@ -469,6 +491,7 @@ const styles = StyleSheet.create({
   renameActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.base, marginTop: spacing.sm },
   renameActionBtn: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
 
+  heroIcon: { alignSelf: 'flex-start', marginBottom: spacing.sm },
   hero: { padding: spacing.base, marginBottom: spacing.md, alignItems: 'flex-start' },
 
   actionsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },

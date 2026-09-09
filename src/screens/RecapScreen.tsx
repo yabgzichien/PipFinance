@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
+import { TripMonthSection } from '../components/TripMonthSection';
 import { Card, CatBadge } from '../components/ui';
 import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
 import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
@@ -253,7 +254,7 @@ function InsightRow({ type, text, isLast }: { type: InsightType; text: string; i
   );
 }
 
-export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: () => void; onOpenCalendar?: (month: string) => void; onOpenExport?: (month: string) => void }) {
+export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip }: { onBack: () => void; onOpenCalendar?: (month: string) => void; onOpenExport?: (month: string) => void; onOpenTrip: (tripId: string) => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -421,6 +422,20 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport }: { onBack: 
           networth={networth}
           dc={dc}
           breakdown={formatCurrencyBreakdown(monthNativeTotals)}
+        />
+
+        {/* Above the budget block on purpose: that block collapses to "not available" for a month
+            with no budget, and a trip's spending is worth seeing in exactly those months too. */}
+        <TripMonthSection
+          monthKey={month}
+          monthExpenseTotal={dc.convert(statement.expenses)}
+          cardStyle={styles.listCard}
+          onOpenTrip={onOpenTrip}
+          heading={
+            <View style={styles.sectionHead}>
+              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{t('tripsThisMonth')}</Text>
+            </View>
+          }
         />
 
         {showComparisons && (

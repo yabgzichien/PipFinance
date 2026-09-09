@@ -99,21 +99,41 @@ describe('listTrips', () => {
         archived: false,
         startDate: '2026-09-10',
         endDate: '2026-09-15',
+        icon: null,
       },
     ]);
   });
 });
 
 describe('addTrip', () => {
-  it('inserts a new trip row with nullable dates', async () => {
+  it('inserts a new trip row with its required date range', async () => {
     const db = install(fakeDb());
-    const trip = await addTrip('Singapore');
+    const trip = await addTrip('Singapore', '2026-09-09', '2026-09-12');
     const insert = db.statements.find((s) => s.sql.includes('INSERT INTO trips'));
     expect(insert).toBeDefined();
     expect(trip.name).toBe('Singapore');
     expect(trip.archived).toBe(false);
-    expect(trip.startDate).toBeNull();
-    expect(trip.endDate).toBeNull();
+    expect(trip.startDate).toBe('2026-09-09');
+    expect(trip.endDate).toBe('2026-09-12');
+  });
+
+  it('refuses to create a trip without both dates', async () => {
+    install(fakeDb());
+
+    await expect((addTrip as any)('Singapore')).rejects.toThrow('Trip dates are required');
+    await expect((addTrip as any)('Singapore', '2026-09-09')).rejects.toThrow('Trip dates are required');
+  });
+
+  it('stores a landmark chosen while the trip is being created', async () => {
+    const db = install(fakeDb());
+
+    const trip = await addTrip('Tokyo in spring', '2026-03-20', '2026-03-25', 'jp');
+
+    const insert = db.statements.find((s) => s.sql.includes('INSERT INTO trips'));
+    expect(insert?.sql).toContain('icon');
+    expect(insert?.args[1]).toBe('Tokyo in spring');
+    expect(insert?.args.slice(-3)).toEqual(['jp', '2026-03-20', '2026-03-25']);
+    expect(trip.icon).toBe('jp');
   });
 });
 

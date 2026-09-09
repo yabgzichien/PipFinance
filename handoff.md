@@ -76,7 +76,42 @@ npm run audit:type
 
 ---
 
-## 5. Live Operations & On-Chain Activity
+## 5. Monetization & RevenueCat Shipaton 2026
 
-- **Live Trade Executed**: `0x22955CE01D82B786207a8934430D13a0921822a8`
+Pip is being entered into the [RevenueCat Shipaton 2026](https://revenuecat-shipaton-2026.devpost.com/) hackathon. This drives both the monetization design and the release timeline.
+
+### 5.1 Pricing (decided)
+
+| Plan | Price | Notes |
+|---|---|---|
+| Monthly | RM9.90 | Mid-price tier; `.90` ending matches local convention |
+| Annual | RM67.00 | 6.8x monthly, 44% saving, RM5.58/mo equivalent. Default-selected |
+| Lifetime | RM179 | Optional. Answers "why rent an app with no server?" |
+
+Benchmarked against Malaysian anchors (Spotify RM17.50, Netflix Mobile RM18.90, YouTube Premium RM20.90, Play Pass RM10.99/mo) and competitors (Wallet ~RM25/mo, Spendee ~RM20/mo, YNAB ~RM65/mo). Sits below the RevenueCat India/SEA regional median of $3.75/mo and $18.32/yr.
+
+### 5.2 Free vs Pro split (decided)
+
+- **Free forever**: manual entry, budgets, net worth, split bills + Owed, commitments, streaks, working widget (good default + a few themes + milestone unlocks), CSV/JSON export, capped monthly AI scans.
+- **Pro**: unlimited AI scans, tax relief tracking + audit pack, PDF/Excel reports, advanced import, multi-currency FX, full widget/mascot customizer.
+
+Gating principle: only charge for things with a genuine ongoing cost (AI vision calls) or ongoing labour (the LHDN relief schedule in `src/lib/reliefSchedule.ts` changes every budget year). Cosmetics are the one exception, since they need no such justification.
+
+AI cost reference: Gemini 3.1 Flash Lite runs roughly **RM0.007 per scan**, so scan caps are a fairness and abuse guard, not a margin guard.
+
+### 5.3 Shipaton constraints
+
+- **Eligibility**: only apps whose *first public store release* falls between 1 Aug and 30 Sep 2026 qualify. Updates to already-released apps are not eligible. Confirm Pip has never been on a public Play track before shipping.
+- **Deadline**: 30 Sep 2026, 11:45pm PDT. Store submission recommended by ~23 Sep so judges can download a published (not in-review) app.
+- **Judge access**: the app must offer a free trial, or ship a promo code that unlocks all premium features. A 14-day trial covers the 1-13 Oct judging window.
+- **Required**: purchases must be powered by the RevenueCat SDK.
+- Still-open Phase A blockers in `plan.md` that gate store submission: privacy policy, store screenshots.
+
+### 5.4 Implementation notes
+
+- `react-native-purchases` via its Expo config plugin. A dev build is already in use (`expo-dev-client`), so no workflow change.
+- Android first. iOS is a later config addition, not a rewrite.
+- Entitlement state must be readable offline. Persist the last known entitlement with a timestamp and honour it through a grace window (~7 days) when the network is unreachable, so a paying user offline is never locked out. A cold first launch with no cache resolves to free, which is safe because the free tier is fully functional.
+- Free tier allowance: **20 AI scans/month**. Trial is 14 days of full Pro.
+- Backup/restore interaction: a backup may carry a Pro-only mascot or widget config. On restore without entitlement, degrade silently to the free default. Never crash, and never render a locked-looking widget on the home screen.
 

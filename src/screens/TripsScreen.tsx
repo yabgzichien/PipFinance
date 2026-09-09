@@ -5,6 +5,8 @@ import { Icon } from '../components/Icon';
 import { Pip } from '../components/Pip';
 import { Amount, Body, Card, Caption, Eyebrow, Label, PrimaryButton, Title, TopBar } from '../components/ui';
 import { DateRangeSheet } from '../components/DateRangeSheet';
+import { TripBadge, TripGlyph } from '../components/TripBadge';
+import { TripIconPickerSheet } from '../components/TripIconPickerSheet';
 import { formatRangeLabel } from '../lib/dateRange';
 import type { DateRange } from '../lib/dateRange';
 import { computeTripTotals } from '../lib/trips';
@@ -45,6 +47,7 @@ function TripRow({
       accessibilityLabel={trip.name}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: colorTheme.surface2 }]}
     >
+      <TripBadge trip={trip} size={40} rad={13} muted={archived} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Body weight={700} numberOfLines={1} color={archived ? colorTheme.ink2 : colorTheme.ink}>
           {trip.name}
@@ -84,8 +87,10 @@ export function TripsScreen({
 
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const [icon, setIcon] = useState<string | null>(null);
   const [dates, setDates] = useState<DateRange>({ start: null, end: null });
   const [pickingDates, setPickingDates] = useState(false);
+  const [pickingIcon, setPickingIcon] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
@@ -102,18 +107,21 @@ export function TripsScreen({
 
   const openCreate = () => {
     setName('');
+    setIcon(null);
     setDates({ start: null, end: null });
     setCreating(true);
   };
 
   const submitCreate = async () => {
     const trimmed = name.trim();
-    if (!trimmed || saving) return;
+    const startDate = dates.start;
+    const endDate = dates.end;
+    if (!trimmed || !startDate || !endDate || saving) return;
     setSaving(true);
     try {
-      // No trimming or format check: the calendar is the only producer of these, so they are
-      // either a valid 'YYYY-MM-DD' or null by construction.
-      const created = await addTrip(trimmed, dates.start, dates.end);
+      // No format check: the calendar is the only producer, so both values are valid
+      // 'YYYY-MM-DD' strings by construction.
+      const created = await addTrip(trimmed, startDate, endDate, icon);
       setCreating(false);
       onOpenTrip(created.id);
     } finally {
@@ -140,17 +148,30 @@ export function TripsScreen({
         {creating && (
           <Card style={styles.createCard}>
             <Label weight={700} style={{ marginBottom: spacing.sm }}>{t('newTrip')}</Label>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder={t('tripNamePlaceholder')}
-              placeholderTextColor={colorTheme.ink3}
-              style={[styles.input, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
-              maxLength={60}
-              autoFocus
-            />
+            <View style={[styles.nameField, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+              <TextInput
+                value={name}
+                onChangeText={setName}
+                placeholder={t('tripNamePlaceholder')}
+                placeholderTextColor={colorTheme.ink3}
+                style={[styles.input, styles.nameInput, { color: colorTheme.ink }]}
+                maxLength={60}
+                autoFocus
+              />
+              <Pressable
+                onPress={() => setPickingIcon(true)}
+                accessibilityRole="button"
+                accessibilityLabel={t('tripIconChange')}
+                style={({ pressed }) => [
+                  styles.nameIconButton,
+                  { backgroundColor: 'transparent', opacity: pressed ? 0.55 : 1 },
+                ]}
+              >
+                <TripGlyph trip={{ name, icon }} size={22} color={theme.accent} />
+              </Pressable>
+            </View>
             <Caption color={colorTheme.ink2} style={{ marginTop: spacing.md, marginBottom: spacing.xs }}>
-              {t('tripDatesOptional')}
+              {t('tripDatesRequired')}
             </Caption>
             {/* One tappable row, not two text fields: the calendar is the only way to set these
                 now, so there is no format to get wrong and no keyboard to dismiss. */}
@@ -173,8 +194,8 @@ export function TripsScreen({
               <Pressable onPress={() => setCreating(false)} style={styles.createActionBtn} disabled={saving}>
                 <Label weight={700} color={colorTheme.ink2}>{t('cancel')}</Label>
               </Pressable>
-              <Pressable onPress={submitCreate} style={styles.createActionBtn} disabled={saving || !name.trim()}>
-                <Label weight={700} color={!name.trim() ? colorTheme.ink3 : theme.accent}>{t('save')}</Label>
+              <Pressable onPress={submitCreate} style={styles.createActionBtn} disabled={saving || !name.trim() || !dates.start || !dates.end}>
+                <Label weight={700} color={!name.trim() || !dates.start || !dates.end ? colorTheme.ink3 : theme.accent}>{t('save')}</Label>
               </Pressable>
             </View>
           </Card>
@@ -250,6 +271,23 @@ export function TripsScreen({
         onApply={setDates}
         onClose={() => setPickingDates(false)}
       />
+      <TripIconPickerSheet
+        visible={pickingIcon}
+        trip={{
+          id: 'new-trip',
+          name,
+          createdAt: '',
+          archived: false,
+          startDate: dates.start,
+          endDate: dates.end,
+          icon,
+        }}
+        onClose={() => setPickingIcon(false)}
+        onPick={(nextIcon) => {
+          setIcon(nextIcon);
+          setPickingIcon(false);
+        }}
+      />
     </View>
   );
 }
@@ -259,6 +297,9 @@ const styles = StyleSheet.create({
   newTripLabel: { fontFamily: uiFont(700), fontSize: 15, color: '#fff', marginLeft: 8 },
   createCard: { padding: spacing.base, marginBottom: spacing.md },
   input: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.md, fontFamily: uiFont(600), fontSize: 15 },
+  nameField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.sm, overflow: 'hidden' },
+  nameInput: { flex: 1, minWidth: 0, borderWidth: 0 },
+  nameIconButton: { width: 44, height: 44, marginRight: spacing.xs, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 44 },
   dateText: { flex: 1, minWidth: 0, fontFamily: uiFont(600), fontSize: 14 },
   createActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.base, marginTop: spacing.md },

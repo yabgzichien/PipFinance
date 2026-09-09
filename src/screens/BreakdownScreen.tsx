@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { PieChart } from '../components/PieChart';
+import { TripMonthSection } from '../components/TripMonthSection';
 import { Amount, Card, CatBadge, Eyebrow, TopBar, ValueToggle, type ValueMode } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
 import { resolveCategoryPresentation } from '../lib/categoryPresentation';
@@ -20,7 +21,15 @@ import { shadowToggle, uiFont } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
-export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void; onOpenCategory: (categoryId: string) => void }) {
+export function BreakdownScreen({
+  onBack,
+  onOpenCategory,
+  onOpenTrip,
+}: {
+  onBack: () => void;
+  onOpenCategory: (categoryId: string) => void;
+  onOpenTrip: (tripId: string) => void;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -116,6 +125,18 @@ export function BreakdownScreen({ onBack, onOpenCategory }: { onBack: () => void
                 <Amount value={total} currency={dc.code} size={22} weight={700} color={kind === 'income' ? theme.accent : colorTheme.ink} />
               </View>
             </View>
+
+            {/* Trips sit above the categories, not inside them: a trip is a second, orthogonal
+                grouping over the same rows, so a RM 30 Grab is still counted under Transport
+                below. Expense-only — a trip has no income side. */}
+            {kind === 'expense' && (
+              <TripMonthSection
+                monthKey={cur}
+                monthExpenseTotal={total}
+                onOpenTrip={onOpenTrip}
+                heading={<Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>{t('tripsThisMonth')}</Eyebrow>}
+              />
+            )}
 
             <Eyebrow style={{ marginTop: 18, marginBottom: 10 }}>
               {isZh ? '所有分类 · 点击查看' : 'All categories · tap to view'}

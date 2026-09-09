@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { AddCategorySheet } from '../components/AddCategorySheet';
 import { TripPickerModal } from '../components/TripPickerModal';
+import { TripGlyph } from '../components/TripBadge';
 import { AmountSheet } from '../components/AmountSheet';
 import { BrandLogo, matchBrand } from '../components/BrandLogo';
 import { MoreDetails } from '../components/MoreDetails';
@@ -700,7 +701,7 @@ export function ManualEntryScreen({
                       setTripId(trip.id);
                     }}
                   >
-                    <Icon name="pin" size={15} color={tripId === trip.id ? theme.accent : colorTheme.ink2} />
+                    <TripGlyph trip={trip} size={16} color={tripId === trip.id ? theme.accent : colorTheme.ink2} />
                   </ChoiceChip>
                 ))}
                 {/* Always offered: the picker is also where a new trip gets created, and where

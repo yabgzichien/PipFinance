@@ -13,6 +13,7 @@ interface TripRow {
   archived: number;
   start_date: string | null;
   end_date: string | null;
+  icon: string | null;
 }
 
 function toTrip(r: TripRow): Trip {
@@ -23,6 +24,7 @@ function toTrip(r: TripRow): Trip {
     archived: !!r.archived,
     startDate: r.start_date ?? null,
     endDate: r.end_date ?? null,
+    icon: r.icon ?? null,
   };
 }
 
@@ -34,26 +36,39 @@ export async function listTrips(): Promise<Trip[]> {
 
 export async function addTrip(
   name: string,
-  startDate: string | null = null,
-  endDate: string | null = null
+  startDate: string,
+  endDate: string,
+  icon: string | null = null
 ): Promise<Trip> {
+  if (!startDate || !endDate) throw new Error('Trip dates are required');
+
   const db = await getDb();
   const id = genId();
   const createdAt = new Date().toISOString();
   await db.runAsync(
-    'INSERT INTO trips (id, name, created_at, archived, start_date, end_date) VALUES (?, ?, ?, 0, ?, ?)',
+    'INSERT INTO trips (id, name, created_at, archived, icon, start_date, end_date) VALUES (?, ?, ?, 0, ?, ?, ?)',
     id,
     name,
     createdAt,
+    icon,
     startDate,
     endDate
   );
-  return { id, name, createdAt, archived: false, startDate, endDate };
+  return { id, name, createdAt, archived: false, startDate, endDate, icon };
 }
 
 export async function renameTrip(id: string, name: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('UPDATE trips SET name = ? WHERE id = ?', name, id);
+}
+
+/**
+ * Set the trip's icon: a destination key, a custom image URI, or `null` to go back to deriving
+ * it from the name. Renaming deliberately does not touch this column — see `Trip.icon`.
+ */
+export async function setTripIcon(id: string, icon: string | null): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE trips SET icon = ? WHERE id = ?', icon, id);
 }
 
 /** Archiving hides a trip from active pickers while keeping its membership intact, so a late

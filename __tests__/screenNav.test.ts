@@ -58,6 +58,16 @@ describe('backTargetFor', () => {
     expect(backTargetFor('currencySettings', { ...origins, currencyOrigin: 'home' })).toBe('home');
   });
 
+  // A trip opened from the Breakdown or Recap "Trips this month" section must come back to the
+  // month the user was reading. Falling through to the Trips list would drop them into a screen
+  // they never visited and cost them the month they had selected.
+  it('returns tripDetail to wherever it was opened from, defaulting to the trips list', () => {
+    expect(backTargetFor('tripDetail', origins)).toBe('trips');
+    expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'trips' })).toBe('trips');
+    expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'breakdown' })).toBe('breakdown');
+    expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'recap' })).toBe('recap');
+  });
+
   it('returns owed, calendar and export to wherever they were opened from', () => {
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'home' })).toBe('home');
     expect(backTargetFor('owed', { ...origins, owedOrigin: 'transactions' })).toBe('transactions');

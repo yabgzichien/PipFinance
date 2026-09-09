@@ -224,6 +224,7 @@ describe('trips round-trip', () => {
     archived: false,
     startDate: null,
     endDate: null,
+    icon: null,
   };
 
   it('carries trips and transaction membership through a backup', () => {
@@ -244,6 +245,24 @@ describe('trips round-trip', () => {
 
   it('accepts an older backup with no trips key at all', () => {
     expect(validateBackupPayload({ categories: [], transactions: [] })).toBe(true);
+  });
+
+  // A gallery icon is stored inline as a base64 data URI (same convention as a custom category
+  // icon), so the ONLY thing carrying it off the device is this payload. If it were dropped here
+  // the loss would be silent: the restored trip would quietly fall back to a name-derived
+  // landmark and look plausible.
+  it('carries a chosen landmark and a custom gallery image through a backup', () => {
+    const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    const payload = buildBackupPayloadForTest(mockCategories, {
+      trips: [
+        { ...trip, id: 'trip-kr', name: 'Seoul', icon: 'kr' },
+        { ...trip, id: 'trip-pic', name: 'Roadtrip', icon: dataUri },
+        { ...trip, id: 'trip-auto', name: 'Osaka', icon: null },
+      ],
+      transactions: [],
+    });
+
+    expect(payload.trips?.map((t: Trip) => t.icon)).toEqual(['kr', dataUri, null]);
   });
 });
 

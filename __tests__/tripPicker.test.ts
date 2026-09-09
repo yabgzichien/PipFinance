@@ -9,6 +9,7 @@ const trip = (id: string, archived = false): Trip => ({
   createdAt: `2026-09-0${id.length}T00:00:00.000Z`,
   startDate: null,
   endDate: null,
+  icon: null,
 });
 
 describe('tripsForPicker', () => {

@@ -2,13 +2,17 @@ import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLanguage } from '../i18n';
+import { formatRangeLabel, type DateRange } from '../lib/dateRange';
 import { createOpeningGuard } from '../lib/openingGuard';
 import { createTripForOpening, tripsForPicker } from '../lib/tripPicker';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { radius, uiFont } from '../theme';
+import { radius, spacing, uiFont } from '../theme';
+import { DateRangeSheet } from './DateRangeSheet';
 import { Icon } from './Icon';
+import { TripGlyph } from './TripBadge';
+import { TripIconPickerSheet } from './TripIconPickerSheet';
 
 /**
  * A compact optional-trip selector for a transaction or a multi-select Activity action.
@@ -34,6 +38,10 @@ export function TripPickerModal({
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const [icon, setIcon] = useState<string | null>(null);
+  const [dates, setDates] = useState<DateRange>({ start: null, end: null });
+  const [pickingDates, setPickingDates] = useState(false);
+  const [pickingIcon, setPickingIcon] = useState(false);
   const [saving, setSaving] = useState(false);
   const openingGuard = useRef(createOpeningGuard());
 
@@ -56,6 +64,8 @@ export function TripPickerModal({
     openingGuard.current.close();
     setCreating(false);
     setName('');
+    setIcon(null);
+    setDates({ start: null, end: null });
     setShowArchived(false);
     onClose();
   };
@@ -67,11 +77,13 @@ export function TripPickerModal({
 
   const createAndChoose = async () => {
     const trimmed = name.trim();
-    if (!trimmed || saving) return;
+    const startDate = dates.start;
+    const endDate = dates.end;
+    if (!trimmed || !startDate || !endDate || saving) return;
     setSaving(true);
     await createTripForOpening(
       openingGuard.current,
-      () => addTrip(trimmed),
+      () => addTrip(trimmed, startDate, endDate, icon),
       choose,
       () => setSaving(false)
     );
@@ -79,7 +91,10 @@ export function TripPickerModal({
 
   if (!visible) return <Modal visible={false} transparent />;
 
+  const dateLabel = formatRangeLabel(dates, isZh);
+
   return (
+    <>
     <Modal visible transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.backdrop} onPress={close} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.avoider} pointerEvents="box-none">
@@ -116,7 +131,7 @@ export function TripPickerModal({
                   accessibilityState={{ selected }}
                   accessibilityLabel={trip.name}
                 >
-                  <Icon name="pin" size={18} color={selected ? theme.accent : colorTheme.ink2} />
+                  <TripGlyph trip={trip} size={20} color={selected ? theme.accent : colorTheme.ink2} />
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={[styles.rowLabel, { color: colorTheme.ink }]} numberOfLines={1}>{trip.name}</Text>
                     {trip.archived && <Text style={[styles.archived, { color: colorTheme.ink2 }]}>{t('archivedTrips')}</Text>}
@@ -133,22 +148,44 @@ export function TripPickerModal({
               </Pressable>
             ) : (
               <View style={[styles.createForm, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder={t('tripNamePlaceholder')}
-                  placeholderTextColor={colorTheme.ink3}
-                  style={[styles.input, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
-                  maxLength={60}
-                  autoFocus
-                  accessibilityLabel={t('newTrip')}
-                />
+                <View style={[styles.nameField, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                  <TextInput
+                    value={name}
+                    onChangeText={setName}
+                    placeholder={t('tripNamePlaceholder')}
+                    placeholderTextColor={colorTheme.ink3}
+                    style={[styles.input, styles.nameInput, { color: colorTheme.ink }]}
+                    maxLength={60}
+                    autoFocus
+                    accessibilityLabel={t('newTrip')}
+                  />
+                  <Pressable
+                    onPress={() => setPickingIcon(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('tripIconChange')}
+                    style={({ pressed }) => [styles.nameIconButton, { opacity: pressed ? 0.55 : 1 }]}
+                  >
+                    <TripGlyph trip={{ name, icon }} size={22} color={theme.accent} />
+                  </Pressable>
+                </View>
+                <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{t('tripDatesRequired')}</Text>
+                <Pressable
+                  onPress={() => setPickingDates(true)}
+                  style={[styles.dateRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={dateLabel ?? t('addDates')}
+                >
+                  <Icon name="calendar" size={16} color={colorTheme.ink2} />
+                  <Text style={[styles.dateText, { color: dateLabel ? colorTheme.ink : colorTheme.ink3 }]} numberOfLines={1}>
+                    {dateLabel ?? t('addDates')}
+                  </Text>
+                </Pressable>
                 <View style={styles.createActions}>
-                  <Pressable onPress={() => { setCreating(false); setName(''); }} style={styles.actionButton} disabled={saving} accessibilityRole="button" accessibilityLabel={t('cancel')}>
+                  <Pressable onPress={() => { setCreating(false); setName(''); setIcon(null); setDates({ start: null, end: null }); }} style={styles.actionButton} disabled={saving} accessibilityRole="button" accessibilityLabel={t('cancel')}>
                     <Text style={[styles.actionLabel, { color: colorTheme.ink2 }]}>{t('cancel')}</Text>
                   </Pressable>
-                  <Pressable onPress={() => { void createAndChoose(); }} style={styles.actionButton} disabled={saving || !name.trim()} accessibilityRole="button" accessibilityLabel={t('newTrip')}>
-                    <Text style={[styles.actionLabel, { color: !name.trim() ? colorTheme.ink3 : theme.accent }]}>{saving ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Text>
+                  <Pressable onPress={() => { void createAndChoose(); }} style={styles.actionButton} disabled={saving || !name.trim() || !dates.start || !dates.end} accessibilityRole="button" accessibilityLabel={t('newTrip')}>
+                    <Text style={[styles.actionLabel, { color: !name.trim() || !dates.start || !dates.end ? colorTheme.ink3 : theme.accent }]}>{saving ? (isZh ? '保存中…' : 'Saving…') : t('save')}</Text>
                   </Pressable>
                 </View>
               </View>
@@ -170,6 +207,26 @@ export function TripPickerModal({
         </View>
       </KeyboardAvoidingView>
     </Modal>
+    <DateRangeSheet
+      visible={pickingDates}
+      value={dates}
+      onApply={setDates}
+      onClose={() => setPickingDates(false)}
+    />
+    <TripIconPickerSheet
+      visible={pickingIcon}
+      trip={{
+        id: 'new-trip', name, icon,
+        createdAt: '', archived: false,
+        startDate: dates.start, endDate: dates.end,
+      }}
+      onClose={() => setPickingIcon(false)}
+      onPick={(nextIcon) => {
+        setIcon(nextIcon);
+        setPickingIcon(false);
+      }}
+    />
+    </>
   );
 }
 
@@ -188,6 +245,12 @@ const styles = StyleSheet.create({
   createLabel: { fontFamily: uiFont(700), fontSize: 14 },
   createForm: { borderWidth: 1, borderRadius: radius.sm, padding: 12, marginTop: 4, gap: 10 },
   input: { minHeight: 44, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 12, fontFamily: uiFont(600), fontSize: 14.5 },
+  nameField: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.sm, overflow: 'hidden' },
+  nameInput: { flex: 1, minWidth: 0, borderWidth: 0 },
+  nameIconButton: { width: 44, height: 44, marginRight: spacing.xs, alignItems: 'center', justifyContent: 'center' },
+  fieldLabel: { fontFamily: uiFont(700), fontSize: 12.5 },
+  dateRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: spacing.md },
+  dateText: { flex: 1, minWidth: 0, fontFamily: uiFont(600), fontSize: 14.5 },
   createActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
   actionButton: { minHeight: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
   actionLabel: { fontFamily: uiFont(700), fontSize: 13.5 },

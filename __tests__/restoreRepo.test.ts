@@ -114,7 +114,7 @@ describe('restoreFromBackupPayload', () => {
     const db = install(fakeDb());
     await restoreFromBackupPayload(
       {
-        trips: [{ id: 'trip-sg', name: 'Singapore', createdAt: '2026-09-01T00:00:00.000Z', archived: false, startDate: '2026-09-10', endDate: '2026-09-15' }],
+        trips: [{ id: 'trip-sg', name: 'Singapore', createdAt: '2026-09-01T00:00:00.000Z', archived: false, startDate: '2026-09-10', endDate: '2026-09-15', icon: 'sg' }],
         transactions: [{ id: 't-trip', description: 'Hotel', amount: -400, tripId: 'trip-sg' }],
       },
       new Map()
@@ -124,8 +124,20 @@ describe('restoreFromBackupPayload', () => {
     const txnInsertIndex = db.statements.findIndex((statement) => statement.sql.includes('INSERT INTO transactions'));
     expect(tripInsertIndex).toBeGreaterThan(-1);
     expect(tripInsertIndex).toBeLessThan(txnInsertIndex);
-    expect(db.statements[tripInsertIndex].args).toEqual(['trip-sg', 'Singapore', '2026-09-01T00:00:00.000Z', 0, '2026-09-10', '2026-09-15']);
+    // The trailing `icon` proves a chosen landmark survives restore; a backup taken before
+    // icons existed omits the key entirely and must land as null, covered below.
+    expect(db.statements[tripInsertIndex].args).toEqual(['trip-sg', 'Singapore', '2026-09-01T00:00:00.000Z', 0, '2026-09-10', '2026-09-15', 'sg']);
     expect(db.statements[txnInsertIndex].args[14]).toBe('trip-sg');
+  });
+
+  it('restores a pre-icons backup with a null icon, so the name-derived match takes over', async () => {
+    const db = install(fakeDb());
+    await restoreFromBackupPayload(
+      { trips: [{ id: 'trip-jp', name: 'Osaka', createdAt: '2026-08-01T00:00:00.000Z', archived: false }], transactions: [] },
+      new Map()
+    );
+    const tripInsert = db.statements.find((statement) => statement.sql.includes('INSERT INTO trips'));
+    expect(tripInsert!.args[6]).toBeNull();
   });
 
   it('inserts commitments with the original id and merchant_key derived from the label', async () => {

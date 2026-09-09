@@ -335,7 +335,7 @@ export const en: Translations = {
   tripRecordedExpenses: 'Recorded expenses',
   newTrip: 'New trip',
   tripNamePlaceholder: 'e.g. Singapore · September 2026',
-  tripDatesOptional: 'Dates (optional)',
+  tripDatesRequired: 'Dates (required)',
   addDates: 'Add dates',
   addExistingExpenses: 'Add existing expenses',
   addToTrip: 'Add to trip',
@@ -351,6 +351,14 @@ export const en: Translations = {
   inOtherTrip: 'In {name}',
   moveToTripConfirmTitle: 'Move expenses to {trip}?',
   moveToTripConfirmBody: '{n} of the expenses you selected already belong to another trip. Continuing moves them out of that trip and into {trip}.',
+  tripsThisMonth: 'Trips this month',
+  tripIconTitle: 'Trip icon',
+  tripIconAuto: 'Automatic',
+  tripIconAutoHint: 'Picked from the trip name',
+  tripIconGallery: 'Choose from gallery',
+  tripIconChange: 'Change trip icon',
+  tripTotalSubtext: '{amount} trip total',
+  tripsShareOfMonth: '{pct}% of this month',
   moveToTripConfirmAction: 'Move',
 
   // Commitments / Tax / Currencies / Export

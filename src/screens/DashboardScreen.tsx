@@ -8,11 +8,13 @@ import { Icon, type IconName } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { PieChart } from '../components/PieChart';
 import { Pip } from '../components/Pip';
+import { TripBadge } from '../components/TripBadge';
 import { TaskListSheet } from '../components/TaskListSheet';
 import { TourAnchor } from '../components/TourAnchor';
 import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
 import { catColorsForHue } from '../lib/catColors';
 import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
+import { formatRangeLabel } from '../lib/dateRange';
 import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
 import { currencyPrefix, fmt, fmtCompact, fmtMoney } from '../lib/format';
 import { netWorth, netWorthSeries } from '../lib/networth';
@@ -21,7 +23,9 @@ import { lastActiveDay, localDayNumber } from '../lib/streak';
 import { computeExploreTaskStatus, type ExploreTask } from '../lib/tasks';
 import { AGING_DAYS, daysBetween } from '../lib/split';
 import * as haptics from '../lib/haptics';
-import type { Category } from '../lib/types';
+import { computeTripTotals, featuredTripForDate } from '../lib/trips';
+import type { FeaturedTrip } from '../lib/trips';
+import type { Category, Transaction } from '../lib/types';
 import { useAppData, type HeroPanel } from '../state/store';
 import { useNow } from '../state/useNow';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -64,6 +68,7 @@ export function DashboardScreen({
   onOpenCategory = () => {},
   onOpenRecap = () => {},
   onOpenNetWorth = () => {},
+  onOpenTrip = () => {},
   onOpenOwed = () => {},
   onOpenCommitments = () => {},
   onOpenCalendar = () => {},
@@ -80,6 +85,7 @@ export function DashboardScreen({
   onOpenCategory?: (id: string) => void;
   onOpenRecap?: () => void;
   onOpenNetWorth?: () => void;
+  onOpenTrip?: (tripId: string) => void;
   onOpenOwed?: () => void;
   onOpenCommitments?: () => void;
   /** Opens the activity calendar (CalendarScreen), defaulted to the current month, so the
@@ -100,6 +106,7 @@ export function DashboardScreen({
   const now = useNow();
   const {
     transactions,
+    trips,
     catById,
     allocations,
     hasBudget,
@@ -185,6 +192,8 @@ export function DashboardScreen({
   const net = received - spent;
   const hasAnyIncome = useMemo(() => transactions.some((t) => t.type === 'income'), [transactions]);
   const budgetLeft = useMemo(() => allocatedTotal(allocations) - spent, [allocations, spent]);
+  const today = dayKey(now);
+  const featuredTrip = useMemo(() => featuredTripForDate(trips, today), [trips, today]);
 
   const spentByCat = useMemo(() => {
     const m: Record<string, number> = {};
@@ -288,7 +297,7 @@ export function DashboardScreen({
     return null;
   }, [commitmentsDue, owed, onOpenCommitments, onOpenOwed, dc.code, dc.rates, isZh]);
 
-  const empty = transactions.length === 0;
+  const empty = transactions.length === 0 && !featuredTrip;
 
   // A returning user who has gone quiet, not a first-run empty state  the header mascot goes
   // sleepy rather than judging the gap (docs/ui-engagement-plan.md §1: reward looking, never
@@ -339,11 +348,14 @@ export function DashboardScreen({
           </View>
           <View style={styles.headerActions}>
             <TourAnchor id="tour_recap_btn" activeId={activeTourAnchor}>
-              <HeaderIcon name="chart" onPress={onOpenRecap} />
+              <HeaderIcon name="chart" onPress={onOpenRecap} accessibilityLabel={t('monthlyRecap')} />
             </TourAnchor>
             <View ref={mascotRef} style={styles.mascotWrap}>
               <Pressable
-                onPress={() => setTasksSheetOpen(true)}
+                onPress={() => {
+                  haptics.tap();
+                  setTasksSheetOpen(true);
+                }}
                 style={({ pressed }) => [styles.pipBubble, { backgroundColor: theme.accentTint }, pressed && { transform: [{ scale: 0.94 }] }]}
                 accessibilityRole="button"
                 accessibilityLabel={
@@ -404,6 +416,9 @@ export function DashboardScreen({
                 liabilities={nw.liabilities}
                 netWorthTrend={netWorthTrend}
                 onOpenNetWorth={onOpenNetWorth}
+                featuredTrip={featuredTrip}
+                transactions={transactions}
+                onOpenTrip={onOpenTrip}
               />
             </TourAnchor>
 
@@ -505,12 +520,17 @@ export function DashboardScreen({
 }
 
 /* ── header utility icon ── */
-function HeaderIcon({ name, onPress }: { name: IconName; onPress: () => void }) {
+function HeaderIcon({ name, onPress, accessibilityLabel }: { name: IconName; onPress: () => void; accessibilityLabel: string }) {
   const colorTheme = useThemeColors();
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        haptics.tap();
+        onPress();
+      }}
       style={({ pressed }) => [styles.headerIcon, { backgroundColor: colorTheme.surface }, pressed && { transform: [{ scale: 0.92 }] }]}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
     >
       <Icon name={name} size={17} color={colorTheme.ink2} />
     </Pressable>
@@ -929,15 +949,18 @@ function pinWebScrollSnapStop(node: unknown) {
 
 /** Which panels the hero carousel offers. `left` (budget remaining) only appears once a
  *  budget exists — swiping to it before that would show a number with no meaning yet. */
-function heroPanels(hasBudget: boolean): HeroPanel[] {
-  return hasBudget ? ['cashflow', 'spent', 'left', 'networth'] : ['cashflow', 'spent', 'networth'];
+export function heroPanels(hasBudget: boolean, hasFeaturedTrip = false): HeroPanel[] {
+  const panels: HeroPanel[] = hasBudget ? ['cashflow', 'spent', 'left', 'networth'] : ['cashflow', 'spent', 'networth'];
+  if (hasFeaturedTrip) panels.push('trips');
+  return panels;
 }
 
 /** Adaptive default panel when the user hasn't pinned one. No income on record yet:
  *  spending is a fact, never a verdict, so lead with that. Income known but no budget:
  *  net cash flow. A budget exists: what's left, which is what a user with a plan actually
  *  wants to know first. */
-function adaptivePanel(hasAnyIncome: boolean, hasBudget: boolean): HeroPanel {
+export function adaptivePanel(hasAnyIncome: boolean, hasBudget: boolean, hasCurrentTrip = false): HeroPanel {
+  if (hasCurrentTrip) return 'trips';
   if (hasBudget) return 'left';
   if (hasAnyIncome) return 'cashflow';
   return 'spent';
@@ -960,6 +983,9 @@ function SummaryCard({
   liabilities,
   netWorthTrend,
   onOpenNetWorth,
+  featuredTrip,
+  transactions,
+  onOpenTrip,
 }: {
   net: number;
   received: number;
@@ -975,14 +1001,19 @@ function SummaryCard({
   liabilities: number;
   netWorthTrend: number[];
   onOpenNetWorth: () => void;
+  featuredTrip: FeaturedTrip | null;
+  transactions: Transaction[];
+  onOpenTrip: (tripId: string) => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
-  const panels = useMemo(() => heroPanels(hasBudget), [hasBudget]);
+  const hasFeaturedTrip = !!featuredTrip;
+  const hasCurrentTrip = featuredTrip?.timing === 'current';
+  const panels = useMemo(() => heroPanels(hasBudget, hasFeaturedTrip), [hasBudget, hasFeaturedTrip]);
   const defaultPanel = useMemo(
-    () => adaptivePanel(hasAnyIncome, hasBudget),
-    [hasAnyIncome, hasBudget]
+    () => adaptivePanel(hasAnyIncome, hasBudget, hasCurrentTrip),
+    [hasAnyIncome, hasBudget, hasCurrentTrip]
   );
 
   const [cardWidth, setCardWidth] = useState(0);
@@ -1029,6 +1060,10 @@ function SummaryCard({
             <View key={panel} ref={pinWebScrollSnapStop} style={{ width: cardWidth }}>
               {panel === 'networth' ? (
                 <NetWorthView net={netWorthValue} assets={assets} liabilities={liabilities} trend={netWorthTrend} onSeeAll={onOpenNetWorth} dc={dc} />
+              ) : panel === 'trips' ? (
+                featuredTrip
+                  ? <TripHeroView featured={featuredTrip} transactions={transactions} onOpen={onOpenTrip} dc={dc} />
+                  : null
               ) : (
                 <CashFlowView
                   panel={panel}
@@ -1073,7 +1108,7 @@ function CashFlowView({
   onSeeAll,
   dc,
 }: {
-  panel: Exclude<HeroPanel, 'networth'>;
+  panel: Exclude<HeroPanel, 'networth' | 'trips'>;
   net: number;
   received: number;
   spent: number;
@@ -1149,7 +1184,7 @@ function CashFlowView({
       {breakdown.length > 0 && topCat && (
         <>
           <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
-          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+          <Pressable onPress={() => { haptics.tap(); onSeeAll(); }} hitSlop={8} style={styles.breakdownRow}>
             <PieChart data={pieData} size={56} thickness={11} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Label weight={500} numberOfLines={1}>{`${tCat(topCat)} · ${topPct}%`}</Label>
@@ -1219,7 +1254,7 @@ function NetWorthView({
           <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
           {/* A sparkline in the same slot the other panels use for their pie chart, so all
               three panels read as one visual family: chart thumbnail + one-line takeaway. */}
-          <Pressable onPress={onSeeAll} hitSlop={8} style={styles.breakdownRow}>
+          <Pressable onPress={() => { haptics.tap(); onSeeAll(); }} hitSlop={8} style={styles.breakdownRow}>
             <NetWorthSparkline values={trend} color={trendColor} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <Label weight={500} numberOfLines={1}>
@@ -1231,6 +1266,77 @@ function NetWorthView({
           </Pressable>
         </>
       )}
+    </>
+  );
+}
+
+function TripHeroView({
+  featured,
+  transactions,
+  onOpen,
+  dc,
+}: {
+  featured: FeaturedTrip;
+  transactions: Transaction[];
+  onOpen: (tripId: string) => void;
+  dc: DisplayCurrency;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { t, isZh } = useLanguage();
+  const { trip, timing } = featured;
+  const totals = useMemo(
+    () => computeTripTotals(transactions, trip.id, dc.convertTxn),
+    [transactions, trip.id, dc]
+  );
+  const range = formatRangeLabel({ start: trip.startDate, end: trip.endDate }, isZh);
+  const status = timing === 'current'
+    ? (isZh ? '当前行程' : 'Current trip')
+    : timing === 'upcoming'
+      ? (isZh ? '即将出发' : 'Upcoming trip')
+      : (isZh ? '最近行程' : 'Recent trip');
+
+  return (
+    <>
+      <View style={styles.cashTop}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Eyebrow>{status}</Eyebrow>
+          <Display
+            color={colorTheme.ink}
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            minimumFontScale={0.55}
+            style={styles.tripHeroName}
+          >
+            {trip.name}
+          </Display>
+          {range && <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>{range}</Caption>}
+        </View>
+        <TripBadge trip={trip} size={56} rad={16} />
+      </View>
+
+      <View style={[styles.cashDivider, { backgroundColor: colorTheme.line }]} />
+      <Pressable
+        onPress={() => {
+          haptics.tap();
+          onOpen(trip.id);
+        }}
+        hitSlop={8}
+        style={({ pressed }) => [styles.breakdownRow, pressed && { opacity: 0.65 }]}
+        accessibilityRole="button"
+        accessibilityLabel={isZh ? `打开${trip.name}` : `Open ${trip.name}`}
+      >
+        <View style={[styles.tripSpendBadge, { backgroundColor: theme.accentTint }]}>
+          <Label numeric color={theme.onTint}>{fmtMoney(dc.convert(totals.recordedExpenses), dc.code)}</Label>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Label weight={500}>{t('tripRecordedExpenses')}</Label>
+          <Caption color={colorTheme.ink2} style={{ marginTop: spacing.xs }}>
+            {t('tripCountExpenses', { n: totals.txnCount })}
+          </Caption>
+        </View>
+        <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
+      </Pressable>
     </>
   );
 }
@@ -1377,6 +1483,8 @@ const styles = StyleSheet.create({
   cashDivider: { height: 1, marginVertical: spacing.md },
   breakdownRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   netWorthAmount: { textDecorationLine: 'underline' },
+  tripHeroName: { marginTop: spacing.xs },
+  tripSpendBadge: { minWidth: 88, minHeight: 44, borderRadius: 14, paddingHorizontal: spacing.sm, alignItems: 'center', justifyContent: 'center' },
 
   /* generic cta */
   budgetCta: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.base },

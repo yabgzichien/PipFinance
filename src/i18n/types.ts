@@ -335,7 +335,7 @@ export interface Translations {
   tripRecordedExpenses: string;
   newTrip: string;
   tripNamePlaceholder: string;
-  tripDatesOptional: string;
+  tripDatesRequired: string;
   addDates: string;
   addExistingExpenses: string;
   addToTrip: string;
@@ -352,6 +352,14 @@ export interface Translations {
   moveToTripConfirmTitle: string;
   moveToTripConfirmBody: string;
   moveToTripConfirmAction: string;
+  tripsThisMonth: string;
+  tripIconTitle: string;
+  tripIconAuto: string;
+  tripIconAutoHint: string;
+  tripIconGallery: string;
+  tripIconChange: string;
+  tripTotalSubtext: string;
+  tripsShareOfMonth: string;
 
   // Commitments / Tax / Currencies / Export
   commitmentsTitle: string;

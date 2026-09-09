@@ -246,6 +246,9 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [calendarOrigin, setCalendarOrigin] = useState<Screen>('recap');
   const [exportMonth, setExportMonth] = useState<string | undefined>(undefined);
   const [exportOrigin, setExportOrigin] = useState<Screen>('settings');
+  // A trip is reachable from the Trips list and from the "Trips this month" section on Breakdown
+  // and Recap, so back has to return where it came from  same pattern as calendarOrigin above.
+  const [tripDetailOrigin, setTripDetailOrigin] = useState<Screen>('trips');
   const [commitmentsOrigin, setCommitmentsOrigin] = useState<Screen>('settings');
   const [currencyOrigin, setCurrencyOrigin] = useState<Screen>('settings');
   const [addTutorialMode, setAddTutorialMode] = useState<'scan' | 'manual' | undefined>(undefined);
@@ -550,6 +553,14 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
     setScreen('add');
   };
 
+  // Opening a trip records where from, so back returns to the month the user was reading rather
+  // than the Trips list when they arrived via Breakdown or Recap.
+  const openTrip = (origin: Screen, tripId: string) => {
+    setTripDetailId(tripId);
+    setTripDetailOrigin(origin);
+    setScreen('tripDetail');
+  };
+
   // The single "go back" action for every screen — used by each screen's own back button below
   // and by the hardware/gesture back handler, so the two can never disagree about where back
   // goes. Returns whether it actually navigated (false only on Home, which has nowhere back to
@@ -562,6 +573,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       commitmentsOrigin,
       currencyOrigin,
       addOrigin,
+      tripDetailOrigin,
     });
     if (!target) return false;
     if (screen === 'transactions') setTxnFilter(null);
@@ -676,6 +688,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           }}
           onOpenRecap={() => setScreen('recap')}
           onOpenNetWorth={() => setScreen('networth')}
+          onOpenTrip={(id) => openTrip('home', id)}
           onOpenOwed={() => {
             setOwedOrigin('home');
             setScreen('owed');
@@ -774,13 +787,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         />
       )}
       {screen === 'trips' && (
-        <TripsScreen
-          onBack={goBack}
-          onOpenTrip={(id) => {
-            setTripDetailId(id);
-            setScreen('tripDetail');
-          }}
-        />
+        <TripsScreen onBack={goBack} onOpenTrip={(id) => openTrip('trips', id)} />
       )}
       {screen === 'tripDetail' && tripDetailId && (
         <TripDetailScreen
@@ -806,6 +813,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setScreen('calendar');
           }}
           onOpenExport={(month) => openExport('recap', month)}
+          onOpenTrip={(id) => openTrip('recap', id)}
         />
       )}
       {screen === 'calendar' && (
@@ -828,6 +836,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setTxnFilter(id);
             setScreen('transactions');
           }}
+          onOpenTrip={(id) => openTrip('breakdown', id)}
         />
       )}
       </View>

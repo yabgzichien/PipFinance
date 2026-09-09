@@ -188,30 +188,6 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
           <>
             <Eyebrow style={{ marginBottom: 10 }}>{t('appearance')}</Eyebrow>
             <View style={{ gap: 12 }}>
-              {matchingKeys.has('theme') && (
-                <Card style={{ padding: 16 }}>
-                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('theme')}</Text>
-                  <ThemeModePicker />
-                </Card>
-              )}
-              {matchingKeys.has('language') && (
-                <Card style={{ padding: 16 }}>
-                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('language')}</Text>
-                  <LanguagePicker />
-                </Card>
-              )}
-              {matchingKeys.has('accent') && (
-                <Card style={{ padding: 16 }}>
-                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('accentColor')}</Text>
-                  <AccentColorPicker />
-                </Card>
-              )}
-              {matchingKeys.has('motion') && (
-                <Card style={{ padding: 16 }}>
-                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
-                  <MotionSettingPicker />
-                </Card>
-              )}
               {Platform.OS === 'android' && onOpenWidgetCustomizer && matchingKeys.has('widgetMascot') && (
                 <Pressable
                   onPress={onOpenWidgetCustomizer}
@@ -236,6 +212,30 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   </View>
                   <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
                 </Pressable>
+              )}
+              {matchingKeys.has('theme') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('theme')}</Text>
+                  <ThemeModePicker />
+                </Card>
+              )}
+              {matchingKeys.has('language') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('language')}</Text>
+                  <LanguagePicker />
+                </Card>
+              )}
+              {matchingKeys.has('accent') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('accentColor')}</Text>
+                  <AccentColorPicker />
+                </Card>
+              )}
+              {matchingKeys.has('motion') && (
+                <Card style={{ padding: 16 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('motionAndHaptics')}</Text>
+                  <MotionSettingPicker />
+                </Card>
               )}
               {matchingKeys.has('sounds') && (
                 <Card style={{ padding: 16 }}>

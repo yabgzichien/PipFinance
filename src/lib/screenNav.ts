@@ -39,6 +39,10 @@ export type ScreenOrigins = {
   /** Where the add flow was opened from. Home for the bottom-nav plus, but a trip's own
    *  "Add expense" has to come back to that trip rather than dumping the user on Home. */
   addOrigin?: Screen;
+  /** Where a trip's detail screen was opened from. The Trips list for the ordinary path, but
+   *  the "Trips this month" section on Breakdown and Recap has to come back to the month the
+   *  user was reading rather than a list they never visited. */
+  tripDetailOrigin?: Screen;
 };
 
 /** Where `screen`'s back action goes. `null` means `screen` is a root destination — Home,
@@ -60,7 +64,7 @@ export function backTargetFor(screen: Screen, origins: ScreenOrigins): Screen | 
     case 'netWorthHistory':
       return 'networth';
     case 'tripDetail':
-      return 'trips';
+      return origins.tripDetailOrigin ?? 'trips';
     case 'export':
       return origins.exportOrigin;
     case 'owed':

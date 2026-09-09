@@ -68,6 +68,7 @@ import {
   addTrip as dbAddTrip,
   renameTrip as dbRenameTrip,
   setTripArchived as dbSetTripArchived,
+  setTripIcon as dbSetTripIcon,
   deleteTrip as dbDeleteTrip,
   setTransactionTrip as dbSetTransactionTrip,
   setTransactionsTrip as dbSetTransactionsTrip,
@@ -281,7 +282,7 @@ async function reconcileReceivable(
   return true;
 }
 
-export type HeroPanel = 'cashflow' | 'spent' | 'left' | 'networth';
+export type HeroPanel = 'cashflow' | 'spent' | 'left' | 'networth' | 'trips';
 
 export interface AppData {
   ready: boolean;
@@ -342,9 +343,11 @@ export interface AppData {
   activateSuggested: (templateKeys: string[]) => Promise<string[]>;
   /** Named groupings over existing transactions. See src/lib/trips.ts and src/db/tripsRepo.ts. */
   trips: Trip[];
-  addTrip: (name: string, startDate?: string | null, endDate?: string | null) => Promise<Trip>;
+  addTrip: (name: string, startDate: string, endDate: string, icon?: string | null) => Promise<Trip>;
   renameTrip: (id: string, name: string) => Promise<void>;
   setTripArchived: (id: string, archived: boolean) => Promise<void>;
+  /** A destination key, a custom image URI, or null to go back to deriving it from the name. */
+  setTripIcon: (id: string, icon: string | null) => Promise<void>;
   deleteTrip: (id: string) => Promise<void>;
   setTransactionTrip: (txnId: string, tripId: string | null) => Promise<void>;
   setTransactionsTrip: (txnIds: string[], tripId: string | null) => Promise<void>;
@@ -1003,8 +1006,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return ids;
   }, []);
 
-  const addTrip = useCallback(async (name: string, startDate?: string | null, endDate?: string | null) => {
-    const created = await dbAddTrip(name, startDate ?? null, endDate ?? null);
+  const addTrip = useCallback(async (name: string, startDate: string, endDate: string, icon?: string | null) => {
+    const created = await dbAddTrip(name, startDate, endDate, icon ?? null);
     setTrips(await listTrips());
     return created;
   }, []);
@@ -1016,6 +1019,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const setTripArchived = useCallback(async (id: string, archived: boolean) => {
     await dbSetTripArchived(id, archived);
+    setTrips(await listTrips());
+  }, []);
+
+  const setTripIcon = useCallback(async (id: string, icon: string | null) => {
+    await dbSetTripIcon(id, icon);
     setTrips(await listTrips());
   }, []);
 
@@ -2258,6 +2266,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     addTrip,
     renameTrip,
     setTripArchived,
+    setTripIcon,
     deleteTrip,
     setTransactionTrip,
     setTransactionsTrip,

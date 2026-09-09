@@ -7,6 +7,7 @@ import { colors, platformShadow, uiFont } from '../theme';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
 import { TourAnchor } from './TourAnchor';
+import * as haptics from '../lib/haptics';
 
 export type NavTab = 'home' | 'activity' | 'networth' | 'settings';
 
@@ -24,10 +25,14 @@ const ICONS: Record<NavTab, (stroke: string, fill: string) => React.ReactNode> =
     </G>
   ),
   settings: (stroke) => (
-    <>
-      <Circle cx={12} cy={12} r={3} fill="none" stroke={stroke} strokeWidth={1.8} />
-      <Path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.2 5.2l2.1 2.1M16.7 16.7l2.1 2.1M18.8 5.2l-2.1 2.1M7.3 16.7l-2.1 2.1" stroke={stroke} strokeWidth={1.8} strokeLinecap="round" />
-    </>
+    <G fill="none" stroke={stroke} strokeWidth={1.8} strokeLinecap="round">
+      <Line x1={3.5} y1={6} x2={20.5} y2={6} />
+      <Line x1={3.5} y1={12} x2={20.5} y2={12} />
+      <Line x1={3.5} y1={18} x2={20.5} y2={18} />
+      <Circle cx={8} cy={6} r={2.2} fill="none" />
+      <Circle cx={16} cy={12} r={2.2} fill="none" />
+      <Circle cx={10} cy={18} r={2.2} fill="none" />
+    </G>
   ),
 };
 
@@ -80,7 +85,10 @@ export function BottomNav({
     const tab = (
       <Pressable
         key={key}
-        onPress={() => onNavigate(key)}
+        onPress={() => {
+          if (key === 'settings') haptics.tap();
+          onNavigate(key);
+        }}
         style={styles.tab}
         hitSlop={6}
         accessibilityRole="tab"

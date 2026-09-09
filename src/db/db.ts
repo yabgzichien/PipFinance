@@ -211,7 +211,8 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
       created_at  TEXT NOT NULL,
       archived    INTEGER NOT NULL DEFAULT 0,
       start_date  TEXT,
-      end_date    TEXT
+      end_date    TEXT,
+      icon        TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_txn_created ON transactions (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_split_txn ON splits (txn_id);
@@ -360,6 +361,15 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     await db.execAsync('CREATE INDEX IF NOT EXISTS idx_txn_trip ON transactions (trip_id)');
   } catch {
     // index already present
+  }
+
+  // Migration (2026-09-09, trip icons): the trip's chosen landmark key or custom image URI.
+  // Nullable, and null is meaningful — it means "derive the icon from the name" rather than
+  // "no icon", so every existing trip picks up an auto-matched landmark with no backfill.
+  try {
+    await db.execAsync('ALTER TABLE trips ADD COLUMN icon TEXT');
+  } catch {
+    // column already present
   }
 
   // Data repair: a backup-restore bug once wrote signed amounts straight into `amount` for

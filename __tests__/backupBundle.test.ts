@@ -20,7 +20,7 @@ const mockGenerateFullBackupZip = jest.requireMock('../src/lib/financialExport')
 describe('buildBackupZip', () => {
   it('passes the AppData trip collection to the full-backup serializer', async () => {
     const trips: Trip[] = [{
-      id: 'trip-sg', name: 'Singapore', createdAt: '2026-09-01T00:00:00.000Z', archived: false, startDate: null, endDate: null,
+      id: 'trip-sg', name: 'Singapore', createdAt: '2026-09-01T00:00:00.000Z', archived: false, startDate: null, endDate: null, icon: null,
     }];
     const data = {
       transactions: [], categories: [], accounts: [], balanceEntries: [], trips,
