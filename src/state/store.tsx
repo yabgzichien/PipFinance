@@ -100,6 +100,13 @@ import { monthLabel } from '../lib/dates';
 import type { MerchantMemoryWritePolicy } from '../lib/categorySuggestion';
 import { syncAllWidgets } from '../widget/syncWidgets';
 import {
+  DEFAULT_WIDGET_MASCOT_CONFIG,
+  parseWidgetMascotConfig,
+  serializeWidgetMascotConfig,
+  WIDGET_MASCOT_CONFIG_KEY,
+  type WidgetMascotConfig,
+} from '../widget/mascot/config';
+import {
   addCommitment as dbAddCommitment,
   archiveCommitment as dbArchiveCommitment,
   deleteCommitment as dbDeleteCommitment,
@@ -423,6 +430,8 @@ export interface AppData {
    *  `src/lib/haptics.ts` so haptics respect it without every call site threading it through. */
   motionSetting: MotionSetting;
   setMotionSetting: (setting: MotionSetting) => Promise<void>;
+  widgetMascotConfig: WidgetMascotConfig;
+  setWidgetMascotConfig: (config: WidgetMascotConfig) => Promise<void>;
   /** Whether the save-confirmation chime plays. Mirrored into `src/lib/sound.ts` so call
    *  sites never thread it through. Independent of `motionSetting` on purpose — see the
    *  comment above SOUND_ENABLED_KEY. */
@@ -532,6 +541,13 @@ export interface AppData {
 
 const Ctx = createContext<AppData | null>(null);
 
+/** Persist first, then update any placed widgets. A widget sync failure is non-fatal because
+ *  the user may simply have no widget placed. */
+export async function persistWidgetMascotConfig(config: WidgetMascotConfig): Promise<void> {
+  await setMeta(WIDGET_MASCOT_CONFIG_KEY, serializeWidgetMascotConfig(config));
+  await syncAllWidgets().catch(() => {});
+}
+
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -556,6 +572,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [owedReminderEnabled, setOwedReminderEnabledState] = useState(false);
   const [commitmentReminderEnabled, setCommitmentReminderEnabledState] = useState(false);
   const [motionSetting, setMotionSettingState] = useState<MotionSetting>('full');
+  const [widgetMascotConfig, setWidgetMascotConfigState] = useState<WidgetMascotConfig>(
+    DEFAULT_WIDGET_MASCOT_CONFIG
+  );
   const [soundEnabled, setSoundEnabledState] = useState(true);
   const [diagnosticsEnabled, setDiagnosticsEnabledState] = useState(true);
   const [streakFreeze, setStreakFreezeState] = useState<StreakFreezeState>(NO_STREAK_FREEZE);
@@ -567,7 +586,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [trips, setTrips] = useState<Trip[]>([]);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -588,6 +607,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         getMeta(OWED_REMINDER_KEY),
         getMeta(COMMITMENT_REMINDER_KEY),
         getMeta(MOTION_SETTING_KEY),
+        getMeta(WIDGET_MASCOT_CONFIG_KEY),
         getMeta(SOUND_ENABLED_KEY),
         getMeta(DIAGNOSTICS_ENABLED_KEY),
         getMeta(DIAGNOSTICS_INSTALL_ID_KEY),
@@ -615,6 +635,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setCommitmentReminderEnabledState(commitmentReminderRaw === 'true');
     const resolvedMotionSetting = isMotionSetting(motionSettingRaw) ? motionSettingRaw : 'full';
     setMotionSettingState(resolvedMotionSetting);
+    setWidgetMascotConfigState(parseWidgetMascotConfig(widgetMascotRaw));
     setHapticsEnabled(resolvedMotionSetting !== 'off');
     // Anything but an explicit 'false' means on, so a fresh install (no row yet) hears it.
     const resolvedSoundEnabled = soundEnabledRaw !== 'false';
@@ -1264,6 +1285,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await setMeta(MOTION_SETTING_KEY, setting);
     setMotionSettingState(setting);
     setHapticsEnabled(setting !== 'off');
+  }, []);
+
+  const setWidgetMascotConfig = useCallback(async (config: WidgetMascotConfig) => {
+    await persistWidgetMascotConfig(config);
+    setWidgetMascotConfigState(config);
   }, []);
 
   const setSoundEnabled = useCallback(async (on: boolean) => {
@@ -2258,6 +2284,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setCommitmentReminderEnabled,
     motionSetting,
     setMotionSetting,
+    widgetMascotConfig,
+    setWidgetMascotConfig,
     soundEnabled,
     setSoundEnabled,
     diagnosticsEnabled,
