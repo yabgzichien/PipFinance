@@ -36,8 +36,8 @@ export const DEMO_CATEGORY_ID = 'food';
 
 /** The two friends at the table. The payer is the user and is never in this list. */
 export const DEMO_FRIENDS = [
-  { personId: 'demo-aisyah', name: 'Aisyah' },
-  { personId: 'demo-weijie', name: 'Wei Jie' },
+  { personId: 'demo-wenjie', name: 'Wen Jie' },
+  { personId: 'demo-zhichen', name: 'Zhi Chen' },
 ];
 
 /**
@@ -47,20 +47,20 @@ export const DEMO_FRIENDS = [
  */
 export const DEMO_RECEIPT_LINES: ReceiptLine[] = [
   { id: 'l1', label: 'Nasi Goreng Kampung', amount: 14.9, assignedTo: [SELF] },
-  { id: 'l2', label: 'Ayam Masak Merah', amount: 18.5, assignedTo: ['demo-aisyah'] },
+  { id: 'l2', label: 'Ayam Masak Merah', amount: 18.5, assignedTo: ['demo-wenjie'] },
   {
     id: 'l3',
     label: 'Sotong Goreng Tepung',
     amount: 22.0,
-    assignedTo: [SELF, 'demo-aisyah', 'demo-weijie'],
+    assignedTo: [SELF, 'demo-wenjie', 'demo-zhichen'],
   },
   {
     id: 'l4',
     label: 'Teh Tarik × 3',
     amount: 9.0,
-    assignedTo: [SELF, 'demo-aisyah', 'demo-weijie'],
+    assignedTo: [SELF, 'demo-wenjie', 'demo-zhichen'],
   },
-  { id: 'l5', label: 'Air Sirap Limau', amount: 4.5, assignedTo: ['demo-weijie'] },
+  { id: 'l5', label: 'Air Sirap Limau', amount: 4.5, assignedTo: ['demo-zhichen'] },
 ];
 
 /** The service-charge and SST breakdown a friend can check against the paper. */

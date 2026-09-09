@@ -408,6 +408,8 @@ export const en: Translations = {
   demoShareCta: 'See the receipt Pip makes',
   demoShareTitle: 'Share it with your friends',
   demoShareNote: 'Preview only. Nothing is sent.',
+  demoTapToView: 'Tap to view',
+  demoCloseReceipt: 'Close receipt',
   demoDone: 'Continue',
   demoSkip: 'Skip the demo',
   importSwitchTracker: 'Switching from another tracker?',

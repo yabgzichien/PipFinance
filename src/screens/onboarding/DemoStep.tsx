@@ -25,7 +25,17 @@
 // synthetic. Nothing claims a measured read time — `ExtractScreen` already ties its "Read in
 // Ns" line to a genuine measurement, and this step never shows one.
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import { Icon } from '../../components/Icon';
 import { FadeIn, useEased } from '../../components/Motion';
@@ -59,6 +69,7 @@ import * as haptics from '../../lib/haptics';
 import type { DemoBeat } from '../../lib/onboardingNav';
 import { generateReceiptCanvasHtml, groupReceiptCanvasInput } from '../../lib/receiptGenerator';
 import { getScanStage } from '../../lib/scanningNarration';
+import { payoff as playChime } from '../../lib/sound';
 import { SELF, type ReceiptLine } from '../../lib/split';
 import { useAccent } from '../../state/accent';
 import { useThemeColors } from '../../state/colorScheme';
@@ -121,6 +132,10 @@ export function DemoStep({
   const [elapsedMs, setElapsedMs] = useState(0);
   /** The PNG Pip actually generates, once the hidden canvas has painted it. */
   const [generatedUri, setGeneratedUri] = useState<string | null>(null);
+  /** Whether the generated receipt is open full-screen. The inline copy is sized to fit the
+   *  beat alongside Pip and the button, which leaves the small print unreadable; tapping it
+   *  opens the same PNG at full height so the itemisation can actually be checked. */
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const toggleAssign = (lineId: string, personId: string) => {
     haptics.tap();
@@ -187,7 +202,11 @@ export function DemoStep({
       setElapsedMs(next);
       if (next >= SCAN_MS) {
         clearInterval(id);
+        // The read landing is the demo's first payoff, so it gets the same buzz-and-chime pair
+        // a real save does (SavedScreen.tsx). Both respect their own Settings switch, so a user
+        // who has muted sounds still feels the haptic and vice versa.
         haptics.payoff();
+        playChime();
         onBeat('reveal');
       }
     }, SCAN_TICK_MS);
@@ -216,10 +235,18 @@ export function DemoStep({
   const receipt = buildDemoGroupReceipt(isZh, lines);
 
   // Reassigning a dish changes the receipt, so the painted PNG has to be thrown away and
-  // repainted rather than showing a stale split.
+  // repainted rather than showing a stale split. Any open viewer goes with it — it would
+  // otherwise be holding a receipt that no longer matches the split behind it.
   useEffect(() => {
     setGeneratedUri(null);
+    setViewerOpen(false);
   }, [lines]);
+
+  // The wizard's back button rewinds beats without unmounting this step, so a viewer left open
+  // would survive onto a beat that has no receipt to show.
+  useEffect(() => {
+    if (beat !== 'share') setViewerOpen(false);
+  }, [beat]);
 
   const onCanvasMessage = (event: WebViewMessageEvent) => {
     try {
@@ -487,13 +514,27 @@ export function DemoStep({
 
             {generatedUri ? (
               // The real artifact: the PNG the canvas renderer painted, the same one that would
-              // go to the group chat. Static — no share sheet, by design (see file header).
-              <Image
-                source={{ uri: generatedUri }}
-                style={styles.generatedReceipt}
-                resizeMode="contain"
-                accessibilityLabel={t('demoShareTitle')}
-              />
+              // go to the group chat. Tapping opens it full-screen — still static, still no
+              // share sheet, by design (see file header).
+              <Pressable
+                onPress={() => {
+                  haptics.tap();
+                  setViewerOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('demoShareTitle')} — ${t('demoTapToView')}`}
+                style={({ pressed }) => [styles.generatedWrap, pressed && styles.pressed]}
+              >
+                <Image
+                  source={{ uri: generatedUri }}
+                  style={styles.generatedReceipt}
+                  resizeMode="contain"
+                />
+                <View style={[styles.viewPill, { backgroundColor: theme.accent }]}>
+                  <Icon name="search" size={14} color="#fff" />
+                  <Caption color="#fff">{t('demoTapToView')}</Caption>
+                </View>
+              </Pressable>
             ) : (
               // Shown while the canvas paints, and permanently on web, where
               // react-native-webview has no implementation. Same numbers, drawn natively.
@@ -545,6 +586,43 @@ export function DemoStep({
           </View>
         )}
       </FadeIn>
+
+      {/* The generated receipt at full height, on a scrim so the paper reads as paper. Tapping
+          anywhere closes it — the same dismissal the rest of the app's sheets use — and there is
+          deliberately no share control here: the demo never puts a fabricated bill in front of a
+          real contact (see file header). */}
+      <Modal
+        visible={viewerOpen && !!generatedUri}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setViewerOpen(false)}
+      >
+        <Pressable
+          style={styles.viewerBackdrop}
+          onPress={() => setViewerOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel={t('demoCloseReceipt')}
+        >
+          {generatedUri && (
+            <Image
+              source={{ uri: generatedUri }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+              accessibilityLabel={t('demoShareTitle')}
+            />
+          )}
+        </Pressable>
+        <Pressable
+          onPress={() => setViewerOpen(false)}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={t('demoCloseReceipt')}
+          style={({ pressed }) => [styles.viewerClose, pressed && styles.pressed]}
+        >
+          <Icon name="x" size={22} color="#fff" />
+        </Pressable>
+      </Modal>
 
       {/* Off-screen canvas that paints the real receipt PNG. Native only: the web build has no
           WebView, and the native rendering above stands in for it there. */}
@@ -659,10 +737,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   receiptSection: { gap: spacing.xs, marginBottom: spacing.sm },
+  generatedWrap: { alignItems: 'center', marginBottom: spacing.sm },
   generatedReceipt: {
     width: '100%',
     height: 420,
-    marginBottom: spacing.sm,
+  },
+  // Overlaps the foot of the receipt rather than sitting below it: the share beat already has
+  // Pip, a title, the note and the Continue button to fit, and a stacked pill pushed the button
+  // off the fold.
+  viewPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.md,
+    marginTop: -spacing.md,
+  },
+  // Near-opaque rather than a light scrim: the receipt is white paper, and it only reads as an
+  // object lifted out of the page if there is nothing competing behind it.
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    padding: spacing.lg,
+    justifyContent: 'center',
+  },
+  // `contain` against the full backdrop, so a receipt of any height (the canvas sizes itself to
+  // the number of people) fills as much of the screen as its own aspect allows.
+  viewerImage: { flex: 1, width: '100%' },
+  viewerClose: {
+    position: 'absolute',
+    top: 52,
+    right: spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
   hiddenCanvas: { position: 'absolute', width: 1, height: 1, opacity: 0, left: -9999 },
   hint: { marginBottom: spacing.sm },

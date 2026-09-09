@@ -59,11 +59,20 @@ export function AccentProvider({ children }: { children: React.ReactNode }) {
   const setDarkSurfaces = useSetDarkSurfaces();
   const [alert, setAlert] = useState(false);
   const [presetId, setPresetIdState] = useState(DEFAULT_ACCENT_PRESET_ID);
+  /** False until the persisted preset has been read back. */
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    getMeta(ACCENT_PRESET_KEY).then((saved) => {
-      if (saved && ACCENT_PRESETS.some((p) => p.id === saved)) setPresetIdState(saved);
-    });
+    // `presetId` and `hydrated` are set from the same callback so they land in one render: two
+    // separate microtasks would render once with the default preset already marked hydrated,
+    // and the icon effect below would act on it.
+    getMeta(ACCENT_PRESET_KEY).then(
+      (saved) => {
+        if (saved && ACCENT_PRESETS.some((p) => p.id === saved)) setPresetIdState(saved);
+        setHydrated(true);
+      },
+      () => setHydrated(true)
+    );
   }, []);
 
   useEffect(() => {
@@ -75,9 +84,16 @@ export function AccentProvider({ children }: { children: React.ReactNode }) {
     setDarkSurfaces(preset.darkSurfaces);
   }, [resolvedScheme, presetId, setDarkSurfaces]);
 
+  // Held back until hydration: before it, `presetId` is still the default, and applying that
+  // would swap the launcher alias away from whatever the user actually chose and back again a
+  // tick later — two alias swaps on every cold start, for nothing. Once hydrated this does run
+  // on each launch, but the native module skips writes for components already in the desired
+  // state, so a launch whose icon already matches costs zero PackageManager writes and any
+  // drift (a restored backup writing the preset straight to app_meta) still self-heals.
   useEffect(() => {
+    if (!hydrated) return;
     void setDynamicAppIcon(presetId);
-  }, [presetId]);
+  }, [hydrated, presetId]);
 
   const setPresetId = (id: string) => {
     setPresetIdState(id);

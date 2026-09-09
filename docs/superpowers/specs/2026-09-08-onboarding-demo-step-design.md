@@ -104,7 +104,7 @@ defaults ever change, the fixture follows them instead of silently disagreeing
 with the rest of the app.
 
 Split: `method: 'equal'`, `includeSelf: true`, three participants — the user plus
-**Aisyah** and **Wei Jie**. `SplitResult` guarantees
+**Wen Jie** and **Zhi Chen**. `SplitResult` guarantees
 `ownShare + Σ owed === gross`.
 
 Itemised per-person assignment — the differentiator named in the business plan —

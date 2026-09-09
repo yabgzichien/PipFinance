@@ -409,6 +409,8 @@ export interface Translations {
   demoShareCta: string;
   demoShareTitle: string;
   demoShareNote: string;
+  demoTapToView: string;
+  demoCloseReceipt: string;
   demoDone: string;
   demoSkip: string;
   importSwitchTracker: string;

@@ -45,12 +45,12 @@ test('the itemized split reconciles exactly to the bill total', () => {
 test('each person pays for what they ordered, so no two shares match', () => {
   const split = buildDemoSplit();
   const owed = new Map(split.shares.map((s) => [s.personId, s.owed]));
-  // Aisyah's ayam masak merah is the priciest solo dish; Wei Jie only had the sirap. The
+  // Wen Jie's ayam masak merah is the priciest solo dish; Zhi Chen only had the sirap. The
   // odd cents come from `apportionCents` distributing the residue, not from rounding each
   // share independently — which is why these sum to the gross exactly, above.
-  expect(owed.get('demo-aisyah')).toBeCloseTo(33.63, 2);
+  expect(owed.get('demo-wenjie')).toBeCloseTo(33.63, 2);
   expect(split.ownShare).toBeCloseTo(29.42, 2);
-  expect(owed.get('demo-weijie')).toBeCloseTo(17.29, 2);
+  expect(owed.get('demo-zhichen')).toBeCloseTo(17.29, 2);
 });
 
 test('the payer is never listed as one of the friends who owe', () => {
@@ -66,8 +66,8 @@ test('the meal is categorised as Food', () => {
 test('the share message names the merchant and both friends', () => {
   const msg = buildDemoShareMessage(false);
   expect(msg).toContain(DEMO_RECEIPT_MERCHANT);
-  expect(msg).toContain('Aisyah');
-  expect(msg).toContain('Wei Jie');
+  expect(msg).toContain('Wen Jie');
+  expect(msg).toContain('Zhi Chen');
 });
 
 test("the generated receipt carries every line and the bill's real total", () => {

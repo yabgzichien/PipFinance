@@ -408,6 +408,8 @@ export const zh: Translations = {
   demoShareCta: '看看 Pip 生成的小票',
   demoShareTitle: '分享给你的朋友',
   demoShareNote: '仅供预览，不会发送。',
+  demoTapToView: '点击查看',
+  demoCloseReceipt: '关闭小票',
   demoDone: '继续',
   demoSkip: '跳过演示',
   importSwitchTracker: '从其他记账应用迁入？',
