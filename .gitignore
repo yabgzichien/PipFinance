@@ -81,3 +81,6 @@ local.properties
 tax-relief-evidence-*.zip
 *.zip
 
+
+# Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
+.superpowers/
