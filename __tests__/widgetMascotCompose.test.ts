@@ -42,4 +42,39 @@ describe('composeMascot', () => {
   it('omits the badge entirely when badgeIcon is none', () => {
     expect(composeMascot(cfg({ badgeIcon: 'none' }), 7)).not.toContain('data-part="badge"');
   });
+
+  it('emits the badge outside the scaled group, in outer 76x64 coordinates', () => {
+    const svg = composeMascot(cfg(), 7);
+    const openTag = '<g transform="translate(5, 5) scale(0.54)">';
+    const openIndex = svg.indexOf(openTag);
+    expect(openIndex).toBeGreaterThan(-1);
+
+    // Walk forward from the scaled group's opening tag, tracking <g>/</g> nesting depth, to find
+    // the index of THAT group's own closing tag. A naive `svg.indexOf('</g>')` would instead
+    // match one of the nested <g> elements inside individual parts (e.g. the eyes part and the
+    // crossedKatana holding part both nest <g> internally), giving a false pass even if the badge
+    // were wrongly moved inside the scaled group.
+    const tagPattern = /<\/g>|<g\b/g;
+    tagPattern.lastIndex = openIndex + openTag.length;
+    let depth = 1;
+    let closeIndex = -1;
+    let match: RegExpExecArray | null;
+    while ((match = tagPattern.exec(svg))) {
+      if (match[0] === '</g>') {
+        depth -= 1;
+        if (depth === 0) {
+          closeIndex = match.index;
+          break;
+        }
+      } else {
+        depth += 1;
+      }
+    }
+    expect(closeIndex).toBeGreaterThan(-1);
+
+    // A part drawn in mascot-space (the always-present coin body) must be inside the scaled
+    // group; the badge, drawn in outer 76x64 space, must appear only after it closes.
+    expect(svg.indexOf('data-part="body"')).toBeLessThan(closeIndex);
+    expect(svg.indexOf('data-part="badge"')).toBeGreaterThan(closeIndex);
+  });
 });
