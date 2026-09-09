@@ -226,9 +226,36 @@ gap for this reason.
 A full screen, not an inline picker — the other four Appearance entries are
 inline, this one is not.
 
-Top: a live preview rendering the **actual composed SVG string** through
-`SvgXml` from `react-native-svg` (15.12.1, already a dependency). Preview and
-widget consume one string from one function, so they cannot drift.
+Top: a live preview of **the whole widget** — shell, mascot, dividers, arrows
+and the expanded streak column — rendered through `SvgXml` from
+`react-native-svg` (15.12.1, already a dependency).
+
+**Amended 2026-09-09.** This section originally specified the preview as the
+mascot SVG alone, on the reasoning that preview and widget consuming one
+string from one function could not drift. Shipping it proved that wrong in
+the other direction: the arrow toggles, the dividers, the shell and the whole
+expanded layout are drawn by `QuickRecordWidget`, not by `composeMascot`, so
+half the screen's controls changed nothing visible. The preview was accurate
+about the mascot and silent about everything else.
+
+`FlexWidget`/`SvgWidget`/`TextWidget` are Android RemoteViews components with
+no React Native renderer, so the screen cannot mount the real widget. The
+preview is therefore a second renderer (`mascot/previewCompose.ts`) drawing
+the same widget with SVG primitives. Drift is contained rather than
+eliminated:
+
+- every colour, glyph, padding and typography value comes from a shared
+  `mascot/chrome.ts` that the real widget imports too — one definition, not a
+  copy
+- the mascot comes from `composeMascotBody`, the same function
+  `composeMascot` wraps for the widget
+- horizontal arithmetic uses the constants `contentWidth` uses, and a test
+  asserts the preview's width equals `contentWidth(config)` for all 25 notch
+  pairs across all four arrow states, so divergence fails CI
+
+The preview draws the minimum-width packing at a fixed 1.6× scale. Fixed
+rather than stretch-to-fit, so the two size sliders visibly change something;
+minimum-width because the launcher's real cell size is unknowable here.
 
 Below: preset row, four slot pickers, two notched sliders, two arrow toggles,
 badge icon and colour pickers. Saving writes the blob and calls

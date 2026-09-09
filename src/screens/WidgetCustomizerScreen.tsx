@@ -10,7 +10,7 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { BADGE_THEMES } from '../widget/mascot/badge';
-import { composeMascot } from '../widget/mascot/compose';
+import { composeWidgetPreview } from '../widget/mascot/previewCompose';
 import type {
   BadgeColor,
   BadgeIcon,
@@ -25,6 +25,17 @@ const SLOTS: SlotId[] = ['head', 'eyes', 'mouth', 'holding'];
 const BADGE_ICONS: BadgeIcon[] = ['flame', 'star', 'leaf', 'sprout', 'none'];
 const BADGE_COLORS: BadgeColor[] = ['amber', 'red', 'green', 'blue', 'violet'];
 
+/** A sample streak for the preview, with a matching week: a 7-day streak means all seven days
+ *  are active, so showing gaps here would preview a state that cannot exist. */
+const PREVIEW_STREAK = 7;
+const PREVIEW_DOTS = [true, true, true, true, true, true, true];
+
+/** Drawn larger than life so the widget is legible on a phone, but at a FIXED multiplier rather
+ *  than stretched to fill the card — otherwise every mascot and button size would render the
+ *  same width and the two size sliders would appear to do nothing. At the widest configuration
+ *  (150dp) this is 240pt, which fits the card on small screens. */
+const PREVIEW_SCALE = 1.6;
+
 export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -34,8 +45,11 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const [draft, setDraft] = useState(widgetMascotConfig);
   const [saving, setSaving] = useState(false);
 
-  // The preview uses the exact SVG string sent to Android widgets, preventing visual drift.
-  const previewSvg = composeMascot(draft, 7);
+  // The whole widget, not just the mascot — otherwise the arrow toggles, dividers and the
+  // expanded streak column change nothing on screen. Drawn from the same chrome constants and
+  // mascot body the real widget uses; see mascot/previewCompose.ts on why it is a second
+  // renderer and what keeps it honest.
+  const preview = composeWidgetPreview(draft, PREVIEW_STREAK, PREVIEW_DOTS);
 
   const save = async () => {
     setSaving(true);
@@ -64,7 +78,11 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
         showsVerticalScrollIndicator={false}
       >
         <Card style={[styles.preview, { backgroundColor: theme.accentTint }]}>
-          <SvgXml xml={previewSvg} width={152} height={128} />
+          <SvgXml
+            xml={preview.svg}
+            width={preview.width * PREVIEW_SCALE}
+            height={preview.height * PREVIEW_SCALE}
+          />
           <Caption color={colorTheme.ink2}>{t('widgetPreviewHint')}</Caption>
         </Card>
 

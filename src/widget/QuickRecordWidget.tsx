@@ -6,37 +6,28 @@ import { DEFAULT_WIDGET_MASCOT_CONFIG } from './mascot/config';
 import { composeMascot } from './mascot/compose';
 import { BADGE_THEMES, badgeIconSvg } from './mascot/badge';
 import { MASCOT_SIZES, BUTTON_SIZES } from './mascot/sizing';
+// Shared with the in-app preview (mascot/previewCompose.ts) so the two renderers cannot drift.
+import {
+  DIVIDER_COLOR,
+  DIVIDER_HEIGHT,
+  DOTS_ROW_HEIGHT,
+  DOTS_ROW_WIDTH,
+  DOWN_ARROW_SVG,
+  SHELL_BG,
+  SHELL_PADDING_H,
+  SHELL_PADDING_V,
+  SHELL_RADIUS,
+  STREAK_COUNT_FONT_SIZE,
+  STREAK_ICON_SIZE,
+  STREAK_STACK_GAP,
+  UP_ARROW_SVG,
+  dotsRowSvg,
+} from './mascot/chrome';
 
 export interface QuickRecordWidgetProps {
   streak?: number;
   dots?: boolean[];
   config?: WidgetMascotConfig;
-}
-
-const UP_ARROW_SVG = `
-<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M14 5L6 13M14 5L22 13M14 5V23" stroke="#1f8a5b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-</svg>`.trim();
-
-const DOWN_ARROW_SVG = `
-<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M14 23L6 15M14 23L22 15M14 23V5" stroke="#d6453f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-</svg>`.trim();
-
-/** The 7-day activity row, recovered from the StreakWidget that shipped at commit f1bcbbd and
- *  fed by compute7DayDots. Only rendered in the expanded layout, where hiding both arrows has
- *  freed the room for it. */
-function dotsRowSvg(dots: boolean[], color: string): string {
-  const safe = dots.length === 7 ? dots : Array.from({ length: 7 }, (_, i) => dots[i] ?? false);
-  const cells = safe
-    .map((on, i) => {
-      const cx = 4 + i * 10;
-      return on
-        ? `<circle cx="${cx}" cy="4" r="4" fill="${color}" />`
-        : `<circle cx="${cx}" cy="4" r="3.2" fill="none" stroke="#C9C2B4" stroke-width="1.4" />`;
-    })
-    .join('');
-  return `<svg data-streak-dots width="68" height="8" viewBox="0 0 68 8" fill="none" xmlns="http://www.w3.org/2000/svg">${cells}</svg>`;
 }
 
 function expandedBadgeIconSvg(icon: BadgeIcon, color: BadgeColor): string | null {
@@ -46,7 +37,7 @@ function expandedBadgeIconSvg(icon: BadgeIcon, color: BadgeColor): string | null
 }
 
 function Divider() {
-  return <FlexWidget style={{ width: 1, height: 32, backgroundColor: '#e6e0d2' }} />;
+  return <FlexWidget style={{ width: 1, height: DIVIDER_HEIGHT, backgroundColor: DIVIDER_COLOR }} />;
 }
 
 export function QuickRecordWidget({
@@ -84,10 +75,10 @@ export function QuickRecordWidget({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#faf8f2',
-    borderRadius: 20,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    backgroundColor: SHELL_BG,
+    borderRadius: SHELL_RADIUS,
+    paddingHorizontal: SHELL_PADDING_H,
+    paddingVertical: SHELL_PADDING_V,
   };
 
   if (expanded) {
@@ -100,15 +91,15 @@ export function QuickRecordWidget({
         accessibilityLabel="Add Transaction"
       >
         <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
-        <FlexWidget style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: 4 }}>
-          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 4 }}>
-            {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: 16, height: 16 }} />}
+        <FlexWidget style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
+          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
+            {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: STREAK_ICON_SIZE, height: STREAK_ICON_SIZE }} />}
             <TextWidget
               text={String(streak)}
-              style={{ fontSize: 18, fontWeight: '700', color: badge.text as HexColor }}
+              style={{ fontSize: STREAK_COUNT_FONT_SIZE, fontWeight: '700', color: badge.text as HexColor }}
             />
           </FlexWidget>
-          <SvgWidget svg={dotsRowSvg(dots, badge.icon)} style={{ width: 68, height: 8 }} />
+          <SvgWidget svg={dotsRowSvg(dots, badge.icon)} style={{ width: DOTS_ROW_WIDTH, height: DOTS_ROW_HEIGHT }} />
         </FlexWidget>
       </FlexWidget>
     );

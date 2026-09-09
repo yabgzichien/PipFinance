@@ -35,7 +35,20 @@ export function resolvePart(slot: SlotId, id: string): MascotPart | null {
   return forSlot[fallbackId] ?? null;
 }
 
-export function composeMascot(config: WidgetMascotConfig, streak: number): string {
+/** Outer coordinate box the mascot is authored in. The in-app preview needs these to scale the
+ *  body fragment into its own layout. */
+export const MASCOT_VIEW_W = 76;
+export const MASCOT_VIEW_H = 64;
+
+/**
+ * The mascot's contents in the 76x64 outer space, WITHOUT an enclosing `<svg>` element.
+ *
+ * `composeMascot` wraps this in a standalone document for the Android widget, which needs one
+ * complete SVG per `SvgWidget`. The in-app preview instead inlines it inside a `<g>` transform,
+ * because the preview is a single SVG document and nesting `<svg>` elements is not reliably
+ * supported by react-native-svg. Both callers therefore draw the same shapes from one source.
+ */
+export function composeMascotBody(config: WidgetMascotConfig, streak: number): string {
   const layers: PartLayer[] = [BODY_LAYER];
 
   for (const slot of ['head', 'eyes', 'mouth', 'holding'] as SlotId[]) {
@@ -56,11 +69,15 @@ export function composeMascot(config: WidgetMascotConfig, streak: number): strin
   const inner = ordered.filter(({ l }) => l.z < Z.BADGE).map(({ l }) => l.svg);
   const outer = ordered.filter(({ l }) => l.z >= Z.BADGE).map(({ l }) => l.svg);
 
-  return `<svg width="76" height="64" viewBox="0 0 76 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="32" cy="32" r="28" fill="#FFFFFF" stroke="#EAE5DA" stroke-width="1.2" />
+  return `  <circle cx="32" cy="32" r="28" fill="#FFFFFF" stroke="#EAE5DA" stroke-width="1.2" />
   <g transform="translate(5, 5) scale(0.54)">
 ${inner.join('\n')}
   </g>
-${outer.join('\n')}
+${outer.join('\n')}`;
+}
+
+export function composeMascot(config: WidgetMascotConfig, streak: number): string {
+  return `<svg width="${MASCOT_VIEW_W}" height="${MASCOT_VIEW_H}" viewBox="0 0 ${MASCOT_VIEW_W} ${MASCOT_VIEW_H}" fill="none" xmlns="http://www.w3.org/2000/svg">
+${composeMascotBody(config, streak)}
 </svg>`;
 }

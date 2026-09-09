@@ -19,12 +19,15 @@ export const BUTTON_SIZES: Record<Notch, number> = { 1: 18, 2: 22, 3: 26, 4: 30,
 export const WIDTH_BUDGET_DP = 150;
 export const HEIGHT_BUDGET_DP = 50;
 
-const H_PADDING = 16;
-const DIVIDER = 1;
+// Exported so the in-app preview (previewCompose.ts) does this same arithmetic rather than its
+// own. Keeping one set of constants is what lets the preview's width be asserted equal to
+// contentWidth, which is the guard against the two renderers drifting apart.
+export const H_PADDING = 16;
+export const DIVIDER = 1;
 /** Expanded streak column: a 7-dot row at 8dp with 2dp gaps, which also comfortably fits the
  *  count rendered above it. */
-const STREAK_COLUMN = 68;
-const COLUMN_GAP = 8;
+export const STREAK_COLUMN = 68;
+export const COLUMN_GAP = 8;
 
 export function contentWidth(c: WidgetMascotConfig): number {
   const mascot = MASCOT_SIZES[c.mascotNotch].w;
