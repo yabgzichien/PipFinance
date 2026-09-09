@@ -556,7 +556,7 @@ Every part is transcribed from `Pip.tsx` using the seven rules in Task 2 Step 6.
 | mouth | `smile` | `Mouth` 1125-1148, `idle` branch | `Z.FACE` |
 | mouth | `grin` | `Grin` 311-334 | `Z.FACE` |
 | mouth | `open` | `Mouth` 1125-1148, `happy` branch | `Z.FACE` |
-| mouth | `tongue` | `ScientistFace` 798-836, mouth only | `Z.FACE` |
+| mouth | `tongue` | `EatingFace` 983-1009, mouth only (incl. the `TONGUE` ellipse) | `Z.FACE` |
 | mouth | `katanaBite` | `MouthKatana` 704-756 | `Z.FRONT` |
 | holding | `none` | — | — |
 | holding | `lollipop` | `Lollipop` 352-375 + `Hand` 376-408 | `Z.FRONT` |
@@ -736,8 +736,11 @@ export const PRESETS: Record<PresetId, PresetSlots> = {
   nerdy: { head: 'none', eyes: 'big', mouth: 'smile', holding: 'lollipop' },
   cool: { head: 'none', eyes: 'shades', mouth: 'grin', holding: 'thumbsUp' },
   swordsman: { head: 'bandana', eyes: 'scarred', mouth: 'katanaBite', holding: 'crossedKatana' },
-  scientist: { head: 'goggles', eyes: 'default', mouth: 'tongue', holding: 'flask' },
-  chef: { head: 'strawHat', eyes: 'blissful', mouth: 'open', holding: 'noodleBowl' },
+  // ScientistFace's own mouth is a closed asymmetric line ~0.5px from `smile` at render scale,
+  // so scientist takes `smile` rather than the catalog carrying a near-duplicate part.
+  scientist: { head: 'goggles', eyes: 'default', mouth: 'smile', holding: 'flask' },
+  // `tongue` IS EatingFace's mouth, so chef is the authentic eating pose.
+  chef: { head: 'strawHat', eyes: 'blissful', mouth: 'tongue', holding: 'noodleBowl' },
 };
 
 export function applyPreset(config: WidgetMascotConfig, id: PresetId): WidgetMascotConfig {
