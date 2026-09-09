@@ -21,11 +21,25 @@ export const BADGE_THEMES: Record<BadgeColor, BadgeTheme> = {
 /** Icon glyphs, each drawn inside a 100x100 box and scaled to 0.16 by the caller — the same
  *  treatment the original flame got in QuickRecordWidget.tsx:54. */
 const ICONS: Record<Exclude<BadgeIcon, 'none'>, (fill: string) => string> = {
-  flame: (f) => `<path d="M49 12.5C53.5 22 57 32 58.6 39.6C61.1 33.2 65.4 28.9 70 26.8C73.2 33.8 79.6 47.2 80 64C80.4 82.2 62.9 99 41 99C19.1 99 1.6 82.2 2 64C2.2 56.2 4.1 51.4 7.6 46.8C9.1 39.9 17 26.7 25.2 20C26.7 27.2 30.7 36.2 36.6 42.6C40.1 46.2 43.1 42.2 44.6 35C45.7 29.6 47.2 20 49 12.5Z" fill="${f}" />`,
+  flame: (f) => {
+    // Preserve the original amber flame's layered shading exactly. Other themes use the
+    // selected colour throughout so the colour choice still owns the whole icon.
+    const middle = f === BADGE_THEMES.amber.icon ? '#F26A22' : f;
+    const core = f === BADGE_THEMES.amber.icon ? '#E2402A' : f;
+    return `<path d="M49 12.5C53.5 22 57 32 58.6 39.6C61.1 33.2 65.4 28.9 70 26.8C73.2 33.8 79.6 47.2 80 64C80.4 82.2 62.9 99 41 99C19.1 99 1.6 82.2 2 64C2.2 56.2 4.1 51.4 7.6 46.8C9.1 39.9 17 26.7 25.2 20C26.7 27.2 30.7 36.2 36.6 42.6C40.1 46.2 43.1 42.2 44.6 35C45.7 29.6 47.2 20 49 12.5Z" fill="${f}" />
+      <path d="M34.5 42C38 47.5 41.5 51.5 43.5 55.5C45.5 51.5 48 48 51 45.5C55.5 52 58.5 60 58.5 67.5C58.5 78.5 50.7 88.5 41 88.5C31.3 88.5 23.5 78.5 23.5 67.5C23.5 58.5 28.5 48.5 34.5 42Z" fill="${middle}" />
+      <path d="M38.6 1C41.7 6.2 43.2 11.2 42.2 15.2C41.1 19.7 36.6 21.1 33.6 17.7C31 14.7 31.6 8.4 38.6 1Z" fill="${middle}" />
+      <path d="M42.5 61C46 67 49 72.5 49 77.5C49 82.5 46 86 42.5 86C39 86 36 82.5 36 77.5C36 72.5 39 67 42.5 61Z" fill="${core}" />`;
+  },
   star: (f) => `<path d="M50 4L62 38H98L69 59L80 95L50 73L20 95L31 59L2 38H38Z" fill="${f}" />`,
   leaf: (f) => `<path d="M84 10C84 10 22 6 12 52C6 80 30 96 46 90C74 80 84 40 84 10Z" fill="${f}" />`,
   sprout: (f) => `<path d="M50 96V44" stroke="${f}" stroke-width="10" stroke-linecap="round" /><ellipse cx="26" cy="34" rx="24" ry="13" fill="${f}" transform="rotate(-32 26 34)" /><ellipse cx="74" cy="28" rx="26" ry="14" fill="${f}" transform="rotate(28 74 28)" />`,
 };
+
+export function badgeIconSvg(icon: BadgeIcon, color: BadgeColor): string | null {
+  if (icon === 'none') return null;
+  return ICONS[icon](BADGE_THEMES[color].icon);
+}
 
 /**
  * Geometry note carried over from QuickRecordWidget.tsx:17-23: the icon and number are centred
@@ -53,7 +67,7 @@ export function badgeLayer(icon: BadgeIcon, color: BadgeColor, streak: number): 
     z: Z.BADGE,
     svg: `<g data-part="badge">
       <rect x="${pillX}" y="40" width="${pillW}" height="18" rx="9" fill="#FFFFFF" stroke="${theme.border}" stroke-width="1.2" />
-      <g transform="translate(${contentX}, 41) scale(0.16)">${ICONS[icon](theme.icon)}</g>
+      <g transform="translate(${contentX}, 41) scale(0.16)">${badgeIconSvg(icon, color)}</g>
       <text x="${textX}" y="52.5" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="10.5" fill="${theme.text}">${s}</text>
     </g>`,
   };

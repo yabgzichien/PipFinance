@@ -47,6 +47,29 @@ describe('QuickRecordWidget layout', () => {
     expect(compact).not.toContain('data-streak-dots');
   });
 
+  it('honours the selected badge icon and colour in the expanded layout', () => {
+    const expanded = QuickRecordWidget({
+      streak: 9,
+      config: cfg({
+        showIncome: false,
+        showExpense: false,
+        badgeIcon: 'star',
+        badgeColor: 'blue',
+      }),
+    });
+    const json = JSON.stringify(expanded);
+    expect(json).toContain('data-streak-icon');
+    expect(json).toContain('#2563EB');
+
+    const withoutIcon = JSON.stringify(
+      QuickRecordWidget({
+        streak: 9,
+        config: cfg({ showIncome: false, showExpense: false, badgeIcon: 'none' }),
+      })
+    );
+    expect(withoutIcon).not.toContain('data-streak-icon');
+  });
+
   it('applies the mascot and button size notches', () => {
     const el = QuickRecordWidget({ streak: 1, config: cfg({ mascotNotch: 2, buttonNotch: 5 }) });
     const json = JSON.stringify(el);

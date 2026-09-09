@@ -80,13 +80,9 @@ describe('presets', () => {
  *  "every shape from the original hand-written SVG is still emitted" rather than byte equality,
  *  because composition legitimately adds data-part attributes and reorders by z.
  *
- *  Body, sprout and eye literals come from QuickRecordWidget.tsx:26-64 as it stood before this
- *  feature, and were verified to match Pip.tsx exactly. The MOUTH is the one shape where the two
- *  sources disagree: the old widget's hand-copy used `Q50 72` at stroke-width 3.4, while
- *  Pip.tsx:1136 draws `Q50 71` at 3.2. The catalog transcribes from Pip.tsx — it is the single
- *  art source this whole feature is built on — so the Pip.tsx value is the expected one. The
- *  divergence is one control-unit at scale(0.54), roughly half a pixel at render size, which does
- *  not breach the spec's "no visual change for users who never open the customizer". */
+ *  These literals come from QuickRecordWidget.tsx as it stood before this feature. The default
+ *  mouth intentionally preserves that widget's `Q50 72`/3.4 geometry even though Pip.tsx's
+ *  in-app idle mouth differs slightly, because users who never customize must see no change. */
 describe('default composition preserves the original artwork', () => {
   const ORIGINAL_SHAPES = [
     'M50 26 C50 18 50 14 50 12',                              // sprout stem
@@ -94,7 +90,7 @@ describe('default composition preserves the original artwork', () => {
     '<circle cx="50" cy="56" r="26.6" fill="#FAC438" />',     // coin face
     'cx="40" cy="55" r="4.2"',                                // left eye
     'cx="60" cy="55" r="4.2"',                                // right eye
-    'M43 64 Q50 71 57 64',                                    // smile (Pip.tsx:1136)
+    'M43 64 Q50 72 57 64',                                    // original widget smile
   ];
 
   it('emits every shape the pre-customization mascot drew', () => {

@@ -23,7 +23,7 @@ export const MOUTH_PARTS: Record<string, MascotPart> = {
     layers: [
       {
         z: Z.FACE,
-        svg: `<g data-part="smile"><path d="M43 64 Q50 71 57 64" fill="none" stroke="${INK}" stroke-width="3.2" stroke-linecap="round" /></g>`,
+        svg: `<g data-part="smile"><path d="M43 64 Q50 72 57 64" fill="none" stroke="${INK}" stroke-width="3.4" stroke-linecap="round" /></g>`,
       },
     ],
   },

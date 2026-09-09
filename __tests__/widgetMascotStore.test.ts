@@ -6,10 +6,12 @@ jest.mock('../src/widget/syncWidgets', () => ({
   syncAllWidgets: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../src/lib/sound', () => ({ setSoundEnabled: jest.fn() }));
+jest.mock('../src/lib/backupRestore', () => ({ restoreFromBackupZip: jest.fn() }));
 
 import { setMeta } from '../src/db/metaRepo';
 import { syncAllWidgets } from '../src/widget/syncWidgets';
-import { persistWidgetMascotConfig } from '../src/state/store';
+import { restoreFromBackupZip } from '../src/lib/backupRestore';
+import { persistWidgetMascotConfig, restoreBackupAndRefresh } from '../src/state/store';
 import {
   DEFAULT_WIDGET_MASCOT_CONFIG,
   WIDGET_MASCOT_CONFIG_KEY,
@@ -34,5 +36,20 @@ describe('persistWidgetMascotConfig', () => {
     await expect(
       persistWidgetMascotConfig(DEFAULT_WIDGET_MASCOT_CONFIG)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('restoreBackupAndRefresh', () => {
+  it('refreshes app state and then resyncs placed widgets after restore', async () => {
+    jest.clearAllMocks();
+    const refresh = jest.fn().mockResolvedValue(undefined);
+    await restoreBackupAndRefresh(new Uint8Array([1]), refresh);
+
+    expect(restoreFromBackupZip).toHaveBeenCalledWith(new Uint8Array([1]));
+    expect(refresh).toHaveBeenCalled();
+    expect(syncAllWidgets).toHaveBeenCalled();
+    expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(
+      (syncAllWidgets as jest.Mock).mock.invocationCallOrder[0]
+    );
   });
 });

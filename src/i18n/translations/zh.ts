@@ -109,6 +109,7 @@ export const zh: Translations = {
   widgetSize: '大小',
   widgetMascotSize: '挂件大小',
   widgetButtonSize: '按钮大小',
+  widgetDefaultNotch: '默认：{value}',
   widgetButtons: '快捷记账按钮',
   widgetShowIncome: '显示收入箭头',
   widgetShowExpense: '显示支出箭头',

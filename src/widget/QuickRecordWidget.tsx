@@ -1,10 +1,10 @@
 import React from 'react';
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 import type { FlexWidgetStyle, HexColor } from 'react-native-android-widget';
-import type { WidgetMascotConfig } from './mascot/config';
+import type { BadgeColor, BadgeIcon, WidgetMascotConfig } from './mascot/config';
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from './mascot/config';
 import { composeMascot } from './mascot/compose';
-import { BADGE_THEMES } from './mascot/badge';
+import { BADGE_THEMES, badgeIconSvg } from './mascot/badge';
 import { MASCOT_SIZES, BUTTON_SIZES } from './mascot/sizing';
 
 export interface QuickRecordWidgetProps {
@@ -39,6 +39,12 @@ function dotsRowSvg(dots: boolean[], color: string): string {
   return `<svg data-streak-dots width="68" height="8" viewBox="0 0 68 8" fill="none" xmlns="http://www.w3.org/2000/svg">${cells}</svg>`;
 }
 
+function expandedBadgeIconSvg(icon: BadgeIcon, color: BadgeColor): string | null {
+  const fragment = badgeIconSvg(icon, color);
+  if (!fragment) return null;
+  return `<svg data-streak-icon width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`;
+}
+
 function Divider() {
   return <FlexWidget style={{ width: 1, height: 32, backgroundColor: '#e6e0d2' }} />;
 }
@@ -52,6 +58,7 @@ export function QuickRecordWidget({
   const button = BUTTON_SIZES[config.buttonNotch];
   const expanded = !config.showIncome && !config.showExpense;
   const badge = BADGE_THEMES[config.badgeColor];
+  const expandedIcon = expandedBadgeIconSvg(config.badgeIcon, config.badgeColor);
 
   // The badge is drawn into the mascot svg only in the compact layouts. When expanded, the count
   // is a TextWidget beside the dots row, so the pill would duplicate it.
@@ -94,10 +101,13 @@ export function QuickRecordWidget({
       >
         <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
         <FlexWidget style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: 4 }}>
-          <TextWidget
-            text={String(streak)}
-            style={{ fontSize: 18, fontWeight: '700', color: badge.text as HexColor }}
-          />
+          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 4 }}>
+            {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: 16, height: 16 }} />}
+            <TextWidget
+              text={String(streak)}
+              style={{ fontSize: 18, fontWeight: '700', color: badge.text as HexColor }}
+            />
+          </FlexWidget>
           <SvgWidget svg={dotsRowSvg(dots, badge.icon)} style={{ width: 68, height: 8 }} />
         </FlexWidget>
       </FlexWidget>

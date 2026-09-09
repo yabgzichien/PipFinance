@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
-import { notchFromX } from '../lib/notchedSlider';
+import { notchAfterAccessibilityAction, notchFromX } from '../lib/notchedSlider';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { Caption } from './ui';
@@ -12,11 +12,15 @@ export function NotchedSlider({
   count,
   onChange,
   label,
+  defaultValue,
+  defaultLabel,
 }: {
   value: number;
   count: number;
   onChange: (n: number) => void;
   label?: string;
+  defaultValue?: number;
+  defaultLabel?: string;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -53,7 +57,21 @@ export function NotchedSlider({
   return (
     <View>
       {label ? <Caption>{label}</Caption> : null}
-      <View style={styles.row} onLayout={onLayout} {...pan.panHandlers}>
+      <View
+        style={styles.row}
+        onLayout={onLayout}
+        {...pan.panHandlers}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityValue={{ min: 1, max: count, now: value, text: `${value} of ${count}` }}
+        accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+        onAccessibilityAction={(event) => {
+          const action = event.nativeEvent.actionName;
+          if (action !== 'increment' && action !== 'decrement') return;
+          onChangeRef.current(notchAfterAccessibilityAction(value, count, action));
+        }}
+      >
         <View style={[styles.track, { backgroundColor: colorTheme.line }]} />
         <View
           style={[
@@ -71,6 +89,14 @@ export function NotchedSlider({
                 left: count > 1 ? `${(index / (count - 1)) * 100}%` : '0%',
                 backgroundColor: index + 1 <= value ? theme.accent : colorTheme.line,
               },
+              index + 1 === defaultValue && {
+                width: 9,
+                height: 9,
+                marginLeft: -4.5,
+                borderWidth: 2,
+                borderColor: theme.accent,
+                backgroundColor: colorTheme.surface,
+              },
             ]}
           />
         ))}
@@ -84,6 +110,11 @@ export function NotchedSlider({
           ]}
         />
       </View>
+      {defaultLabel ? (
+        <Caption color={colorTheme.ink2} style={styles.defaultLabel}>
+          {defaultLabel}
+        </Caption>
+      ) : null}
     </View>
   );
 }
@@ -107,4 +138,5 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#fff',
   },
+  defaultLabel: { marginTop: -4 },
 });

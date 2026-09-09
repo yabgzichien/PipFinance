@@ -54,7 +54,7 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   ];
 
   return (
-    <View style={[styles.root, { backgroundColor: colorTheme.bg }]}> 
+    <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={t('widgetCustomizer')} onBack={onBack} />
       </View>
@@ -63,7 +63,7 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Card style={[styles.preview, { backgroundColor: theme.accentTint }]}> 
+        <Card style={[styles.preview, { backgroundColor: theme.accentTint }]}>
           <SvgXml xml={previewSvg} width={152} height={128} />
           <Caption color={colorTheme.ink2}>{t('widgetPreviewHint')}</Caption>
         </Card>
@@ -108,6 +108,8 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
               label={t('widgetMascotSize')}
               value={draft.mascotNotch}
               count={5}
+              defaultValue={5}
+              defaultLabel={t('widgetDefaultNotch', { value: 5 })}
               onChange={(value) =>
                 setDraft((current) => ({ ...current, mascotNotch: value as Notch }))
               }
@@ -116,6 +118,8 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
               label={t('widgetButtonSize')}
               value={draft.buttonNotch}
               count={5}
+              defaultValue={3}
+              defaultLabel={t('widgetDefaultNotch', { value: 3 })}
               onChange={(value) =>
                 setDraft((current) => ({ ...current, buttonNotch: value as Notch }))
               }

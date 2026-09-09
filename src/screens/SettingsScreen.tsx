@@ -223,14 +223,14 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   ]}
                   accessibilityRole="button"
                 >
-                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}> 
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
                     <Icon name="sparkles" size={18} color={theme.accent} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.providerName, { color: colorTheme.ink }]}>
                       {t('widgetCustomizer')}
                     </Text>
-                    <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}> 
+                    <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>
                       {t('widgetCustomizerHint')}
                     </Text>
                   </View>

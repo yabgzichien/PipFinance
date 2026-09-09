@@ -43,6 +43,16 @@ describe('composeMascot', () => {
     expect(composeMascot(cfg({ badgeIcon: 'none' }), 7)).not.toContain('data-part="badge"');
   });
 
+  it('preserves the pre-customization default smile and four-layer flame artwork', () => {
+    const svg = composeMascot(cfg(), 7);
+    expect(svg).toContain(
+      'd="M43 64 Q50 72 57 64" fill="none" stroke="#7A4800" stroke-width="3.4"'
+    );
+    expect(svg).toContain('d="M34.5 42C38 47.5 41.5 51.5');
+    expect(svg).toContain('d="M38.6 1C41.7 6.2 43.2 11.2');
+    expect(svg).toContain('d="M42.5 61C46 67 49 72.5');
+  });
+
   it('emits the badge outside the scaled group, in outer 76x64 coordinates', () => {
     const svg = composeMascot(cfg(), 7);
     const openTag = '<g transform="translate(5, 5) scale(0.54)">';

@@ -109,6 +109,7 @@ export const en: Translations = {
   widgetSize: 'Size',
   widgetMascotSize: 'Mascot size',
   widgetButtonSize: 'Button size',
+  widgetDefaultNotch: 'Default: {value}',
   widgetButtons: 'Quick-record buttons',
   widgetShowIncome: 'Show income arrow',
   widgetShowExpense: 'Show expense arrow',

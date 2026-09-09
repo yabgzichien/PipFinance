@@ -548,6 +548,17 @@ export async function persistWidgetMascotConfig(config: WidgetMascotConfig): Pro
   await syncAllWidgets().catch(() => {});
 }
 
+/** Restore changes the persisted mascot independently of streak activity, so widgets must be
+ *  refreshed explicitly after React state has reloaded. */
+export async function restoreBackupAndRefresh(
+  zipBytes: Uint8Array,
+  refresh: () => Promise<void>
+): Promise<void> {
+  await restoreFromBackupZip(zipBytes);
+  await refresh();
+  await syncAllWidgets().catch(() => {});
+}
+
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -1339,8 +1350,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, [refreshAll]);
 
   const restoreFromBackup = useCallback(async (zipBytes: Uint8Array) => {
-    await restoreFromBackupZip(zipBytes);
-    await refreshAll();
+    await restoreBackupAndRefresh(zipBytes, refreshAll);
   }, [refreshAll]);
 
   // `refreshAll` matters as much here as in `resetAllData` above, and is easy to miss because

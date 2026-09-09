@@ -1,4 +1,4 @@
-import { notchFromX } from '../src/lib/notchedSlider';
+import { notchAfterAccessibilityAction, notchFromX } from '../src/lib/notchedSlider';
 
 describe('notchFromX', () => {
   const W = 200;
@@ -30,5 +30,14 @@ describe('notchFromX', () => {
 
   it('degrades safely on a zero-width track (pre-layout)', () => {
     expect(notchFromX(0, 0, 5)).toBe(1);
+  });
+});
+
+describe('notchAfterAccessibilityAction', () => {
+  it('increments and decrements without leaving the valid range', () => {
+    expect(notchAfterAccessibilityAction(3, 5, 'increment')).toBe(4);
+    expect(notchAfterAccessibilityAction(3, 5, 'decrement')).toBe(2);
+    expect(notchAfterAccessibilityAction(5, 5, 'increment')).toBe(5);
+    expect(notchAfterAccessibilityAction(1, 5, 'decrement')).toBe(1);
   });
 });

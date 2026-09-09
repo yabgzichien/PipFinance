@@ -5,3 +5,12 @@ export function notchFromX(x: number, trackWidth: number, count: number): number
   const ratio = Math.max(0, Math.min(1, x / trackWidth));
   return Math.round(ratio * (count - 1)) + 1;
 }
+
+export function notchAfterAccessibilityAction(
+  value: number,
+  count: number,
+  action: 'increment' | 'decrement'
+): number {
+  const delta = action === 'increment' ? 1 : -1;
+  return Math.max(1, Math.min(Math.max(1, count), value + delta));
+}

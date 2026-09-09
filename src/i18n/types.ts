@@ -109,6 +109,7 @@ export interface Translations {
   widgetSize: string;
   widgetMascotSize: string;
   widgetButtonSize: string;
+  widgetDefaultNotch: string;
   widgetButtons: string;
   widgetShowIncome: string;
   widgetShowExpense: string;
