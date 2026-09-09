@@ -326,6 +326,77 @@ All pure-function; no rendering harness needed.
 5. Defaults — a config parsed from an absent key renders a mascot SVG identical
    to today's output.
 
+## 10a. Amendments, 2026-09-09
+
+Three changes after the first version shipped and was used on a device.
+
+### Two positional slots replace the arrow booleans
+
+`showIncome`/`showExpense` become `slot1`/`slot2`, each holding `income`,
+`expense`, `streak` or `none`. The slots are positional — `slot1` is nearer
+the mascot — so an arrow beside a streak badge is a valid layout, as is a
+lone expense arrow.
+
+At most one slot may hold a streak badge; two counts side by side say nothing
+one does not. The rule is enforced in `parseWidgetMascotConfig` AND in
+`setSlotContent`, so the UI cannot build a state the parser would silently
+rewrite on next launch. Wherever a slot shows the streak, the mascot's own
+badge pill is suppressed — the same rule the expanded layout already used.
+
+Both slots empty still produces the expanded streak column with the seven-day
+dots. That behaviour is unchanged.
+
+**This is a stored-schema change, so the config carries `version: 2` and
+migrates.** Every v1 arrow combination maps explicitly: both true →
+`income`/`expense`; income only → `income`/`none`; expense only →
+`expense`/`none`; both false → `none`/`none`. A blob with no `version`
+predates versioning and is treated as v1. A config that fails to migrate
+silently resets a customized widget to stock, which is the only failure in
+this feature that destroys real user data, so the migration was written
+test-first and every combination is pinned.
+
+### The mascot ladder is rescaled around notch 3
+
+The original ladder ran 38–58dp with the default at 58 — the ceiling — which
+left the bottom three notches too small to be worth choosing. It now runs
+54–78dp with the default at notch 3 (66×55), so the default sits mid-ladder
+and every notch is a size someone might pick.
+
+**The width guard changes meaning as a result.** It previously asserted that
+all 25 notch pairs fit the declared minimum. That cannot hold once the mascot
+is bigger and a streak slot exists: the largest combination needs ~170×77dp,
+and declaring that would force every widget — including stock ones — to claim
+a much larger home-screen footprint. Instead:
+
+- the declared minimum (now 160×70dp) must fit the DEFAULT configuration, and
+  in fact fits every configuration up to the default mascot notch
+- larger choices are the user's to accommodate by resizing the widget, which
+  Android supports and `widgetTask.tsx` already handles
+- `fitsDeclaredMinimum` reports when a configuration exceeds it, and the
+  Layout tab says so rather than letting the widget clip silently
+
+160 rather than the previous 150 because the arrows-off expanded column at the
+default notch needs 158dp, and that is an ordinary choice rather than an
+extreme one.
+
+### The customizer is tabbed, and its options are pictures
+
+One scroll of eight sections showed every option at once and pushed the
+preview out of view exactly when someone was choosing. Seven tabs replace it —
+Preset · Hat · Eyes · Mouth · Holding · Layout · Badge — with the preview
+pinned above them and Save pinned below, since a tabbed screen has no
+end-of-scroll for a button to sit at.
+
+Option tiles carry **artwork only, no captions**. That is only legible because
+each tab crops its thumbnails to the feature being chosen (`THUMB_FRAMES`):
+two mouth shapes are nearly identical on a whole mascot at tile size and
+obvious when the tile is framed on the mouth. Every tile keeps an
+`accessibilityLabel`, so screen readers still announce "Straw hat" while
+sighted users compare hats by looking at hats.
+
+Tabs whose values differ from stock carry a dot in the strip. Hiding options
+behind tabs is only safe if people can still tell where they have been.
+
 ## 11. Out of scope
 
 - Any change to `src/components/Pip.tsx` or the in-app mascot

@@ -156,6 +156,21 @@ export interface Translations {
   widgetColor_green: string;
   widgetColor_blue: string;
   widgetColor_violet: string;
+  widgetTab_preset: string;
+  widgetTab_head: string;
+  widgetTab_eyes: string;
+  widgetTab_mouth: string;
+  widgetTab_holding: string;
+  widgetTab_layout: string;
+  widgetTab_badge: string;
+  widgetSlotPosition_slot1: string;
+  widgetSlotPosition_slot2: string;
+  widgetSlotContent_income: string;
+  widgetSlotContent_expense: string;
+  widgetSlotContent_streak: string;
+  widgetSlotContent_none: string;
+  widgetNeedsBigger: string;
+  widgetTabChanged: string;
 
   // Dashboard
   monthlySpend: string;

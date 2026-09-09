@@ -16,13 +16,13 @@ import type { WidgetMascotConfig } from './config';
 import { composeMascotBody, MASCOT_VIEW_W, MASCOT_VIEW_H } from './compose';
 import { BADGE_THEMES, badgeIconSvg } from './badge';
 import {
-  BUTTON_SIZES,
   COLUMN_GAP,
   DIVIDER,
-  HEIGHT_BUDGET_DP,
   MASCOT_SIZES,
   STREAK_COLUMN,
+  contentHeight,
   contentWidth,
+  slotWidth,
 } from './sizing';
 import {
   DIVIDER_COLOR,
@@ -38,6 +38,7 @@ import {
   STREAK_STACK_GAP,
   dotsRowFragment,
   downArrowFragment,
+  streakSlotMetrics,
   upArrowFragment,
 } from './chrome';
 
@@ -45,6 +46,25 @@ export interface WidgetPreview {
   svg: string;
   width: number;
   height: number;
+}
+
+/**
+ * One option tile's artwork: the mascot drawn through a framing viewBox, so a tab can crop to the
+ * feature being chosen.
+ *
+ * The customizer's tiles carry no text, so the picture has to carry the whole distinction — and
+ * on a whole mascot at tile size, two mouth shapes are nearly identical. Cropping to the mouth
+ * makes them obvious. The badge is always suppressed here: a streak pill on every tile would sit
+ * over the very features being compared.
+ */
+export function composeMascotThumbnail(
+  config: WidgetMascotConfig,
+  frame: { x: number; y: number; w: number; h: number }
+): string {
+  const body = composeMascotBody({ ...config, badgeIcon: 'none' }, 0);
+  return `<svg viewBox="${frame.x} ${frame.y} ${frame.w} ${frame.h}" fill="none" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+${body}
+</svg>`;
 }
 
 /** Approximate advance width of a digit at STREAK_COUNT_FONT_SIZE / weight 700. Only used to
@@ -110,6 +130,38 @@ function streakColumn(config: WidgetMascotConfig, streak: number, dots: boolean[
 }
 
 /**
+ * A streak badge occupying one of the two slots: icon and count on a row, centred in the slot.
+ *
+ * Read-only in the real widget — it carries no tap target there, so the mascot stays the only
+ * add action — but the preview only has to draw it.
+ */
+function streakSlot(
+  config: WidgetMascotConfig,
+  streak: number,
+  x: number,
+  height: number,
+  size: number
+): string {
+  const theme = BADGE_THEMES[config.badgeColor];
+  const icon = badgeIconSvg(config.badgeIcon, config.badgeColor);
+  const m = streakSlotMetrics(size);
+  const count = String(streak);
+
+  const textW = count.length * m.font * 0.58;
+  const clusterW = (icon ? m.icon + m.gap : 0) + textW;
+  const clusterX = x + (size - clusterW) / 2;
+  const centreY = height / 2;
+
+  const iconGroup = icon
+    ? `<g transform="translate(${round(clusterX)}, ${round(centreY - m.icon / 2)}) scale(${round(m.icon / 100)})">${icon}</g>`
+    : '';
+  const textX = clusterX + (icon ? m.icon + m.gap : 0) + textW / 2;
+
+  return `<g data-streak-slot>${iconGroup}
+<text x="${round(textX)}" y="${round(centreY + m.font * 0.36)}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="${m.font}" fill="${theme.text}">${count}</text></g>`;
+}
+
+/**
  * Compose the whole widget for preview.
  *
  * Laid out at exactly `contentWidth(config)` — the widget's tightest packing, and the width its
@@ -123,11 +175,11 @@ export function composeWidgetPreview(
   dots: boolean[]
 ): WidgetPreview {
   const mascot = MASCOT_SIZES[config.mascotNotch];
-  const button = BUTTON_SIZES[config.buttonNotch];
-  const expanded = !config.showIncome && !config.showExpense;
+  const expanded = config.slot1 === 'none' && config.slot2 === 'none';
+  const hasStreakSlot = config.slot1 === 'streak' || config.slot2 === 'streak';
 
   const width = contentWidth(config);
-  const height = Math.max(HEIGHT_BUDGET_DP, mascot.h + SHELL_PADDING_V * 2);
+  const height = contentHeight(config);
 
   const body: string[] = [
     `<rect data-preview-shell x="0" y="0" width="${width}" height="${height}" rx="${SHELL_RADIUS}" fill="${SHELL_BG}" />`,
@@ -136,11 +188,11 @@ export function composeWidgetPreview(
   let x = SHELL_PADDING_H;
   const mascotY = (height - mascot.h) / 2;
 
-  // The badge is drawn into the mascot only in the compact layouts. When expanded, the count is
-  // rendered beside the dots instead, so keeping the pill would show the streak twice.
+  // The mascot's own badge is suppressed wherever the streak is already shown elsewhere — in the
+  // expanded column or in a slot — so the count never appears twice.
   body.push(
     mascotGroup(
-      expanded ? { ...config, badgeIcon: 'none' } : config,
+      expanded || hasStreakSlot ? { ...config, badgeIcon: 'none' } : config,
       streak,
       x,
       mascotY,
@@ -154,17 +206,21 @@ export function composeWidgetPreview(
     x += COLUMN_GAP;
     body.push(streakColumn(config, streak, dots, x, height));
   } else {
-    if (config.showIncome) {
+    for (const which of ['slot1', 'slot2'] as const) {
+      const content = config[which];
+      if (content === 'none') continue;
+      const size = slotWidth(config, which);
+
       body.push(divider(x, height));
       x += DIVIDER;
-      body.push(arrowGroup(upArrowFragment(), x, height, button));
-      x += button;
-    }
-    if (config.showExpense) {
-      body.push(divider(x, height));
-      x += DIVIDER;
-      body.push(arrowGroup(downArrowFragment(), x, height, button));
-      x += button;
+
+      if (content === 'streak') {
+        body.push(streakSlot(config, streak, x, height, size));
+      } else {
+        const fragment = content === 'income' ? upArrowFragment() : downArrowFragment();
+        body.push(arrowGroup(fragment, x, height, size));
+      }
+      x += size;
     }
   }
 

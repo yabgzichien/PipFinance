@@ -79,3 +79,14 @@ export function dotsRowSvg(dots: boolean[], color: string): string {
 export const STREAK_COUNT_FONT_SIZE = 18;
 export const STREAK_ICON_SIZE = 16;
 export const STREAK_STACK_GAP = 4;
+
+/** Icon and text sizes for a streak badge occupying one of the two slots beside the mascot.
+ *  Derived from the slot's own width rather than tabled per notch, so the badge always fills its
+ *  slot proportionally however the ladder is later retuned. */
+export function streakSlotMetrics(slotWidth: number): { icon: number; font: number; gap: number } {
+  return {
+    icon: Math.round(slotWidth * 0.42),
+    font: Math.round(slotWidth * 0.38),
+    gap: 2,
+  };
+}

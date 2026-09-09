@@ -1,29 +1,42 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
+import { MascotOptionTile } from '../components/MascotOptionTile';
 import { NotchedSlider } from '../components/NotchedSlider';
+import { TabStrip } from '../components/TabStrip';
 import { Body, BtnLabel, Caption, Card, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
 import { useLanguage } from '../i18n';
-import { setSlot } from '../lib/widgetCustomizer';
+import { setSlot, setSlotContent } from '../lib/widgetCustomizer';
+import {
+  CUSTOMIZER_TABS,
+  THUMB_FRAMES,
+  isSlotTab,
+  tabIsModified,
+  type CustomizerTab,
+} from '../lib/widgetCustomizerTabs';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { BADGE_THEMES } from '../widget/mascot/badge';
-import { composeWidgetPreview } from '../widget/mascot/previewCompose';
+import { BADGE_THEMES, badgeIconSvg } from '../widget/mascot/badge';
+import { DOWN_ARROW_SVG, UP_ARROW_SVG } from '../widget/mascot/chrome';
+import { composeMascotThumbnail, composeWidgetPreview } from '../widget/mascot/previewCompose';
 import type {
   BadgeColor,
   BadgeIcon,
   Notch,
   PresetId,
-  SlotId,
+  SlotContent,
+  WidgetMascotConfig,
 } from '../widget/mascot/config';
 import { PART_CATALOG } from '../widget/mascot/parts';
+import { fitsDeclaredMinimum } from '../widget/mascot/sizing';
 import { applyPreset, PRESETS } from '../widget/mascot/presets';
 
-const SLOTS: SlotId[] = ['head', 'eyes', 'mouth', 'holding'];
 const BADGE_ICONS: BadgeIcon[] = ['flame', 'star', 'leaf', 'sprout', 'none'];
 const BADGE_COLORS: BadgeColor[] = ['amber', 'red', 'green', 'blue', 'violet'];
+const WIDGET_SLOTS: ('slot1' | 'slot2')[] = ['slot1', 'slot2'];
+const SLOT_CONTENTS: SlotContent[] = ['income', 'expense', 'streak', 'none'];
 
 /** A sample streak for the preview, with a matching week: a 7-day streak means all seven days
  *  are active, so showing gaps here would preview a state that cannot exist. */
@@ -32,9 +45,20 @@ const PREVIEW_DOTS = [true, true, true, true, true, true, true];
 
 /** Drawn larger than life so the widget is legible on a phone, but at a FIXED multiplier rather
  *  than stretched to fill the card — otherwise every mascot and button size would render the
- *  same width and the two size sliders would appear to do nothing. At the widest configuration
- *  (150dp) this is 240pt, which fits the card on small screens. */
-const PREVIEW_SCALE = 1.6;
+ *  same width and the two size sliders would appear to do nothing. */
+const PREVIEW_SCALE = 1.5;
+
+/** A slot choice's glyph, drawn at tile size. `none` gets an explicit empty marker rather than a
+ *  blank tile, so "no button here" reads as a deliberate choice and not a rendering failure. */
+function slotContentSvg(content: SlotContent, config: WidgetMascotConfig): string {
+  if (content === 'income') return UP_ARROW_SVG;
+  if (content === 'expense') return DOWN_ARROW_SVG;
+  if (content === 'streak') {
+    const icon = badgeIconSvg(config.badgeIcon === 'none' ? 'flame' : config.badgeIcon, config.badgeColor);
+    return `<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${icon ?? ''}</svg>`;
+  }
+  return `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="9" fill="none" stroke="#9E9686" stroke-width="2" stroke-dasharray="3 3" /></svg>`;
+}
 
 export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const insets = useSafeAreaInsets();
@@ -43,13 +67,47 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const { t } = useLanguage();
   const { widgetMascotConfig, setWidgetMascotConfig } = useAppData();
   const [draft, setDraft] = useState(widgetMascotConfig);
+  const [tab, setTab] = useState<CustomizerTab>('preset');
   const [saving, setSaving] = useState(false);
 
-  // The whole widget, not just the mascot — otherwise the arrow toggles, dividers and the
-  // expanded streak column change nothing on screen. Drawn from the same chrome constants and
-  // mascot body the real widget uses; see mascot/previewCompose.ts on why it is a second
-  // renderer and what keeps it honest.
+  // The whole widget, not just the mascot — otherwise the slot pickers and size sliders change
+  // nothing on screen. See mascot/previewCompose.ts on why it is a second renderer.
   const preview = composeWidgetPreview(draft, PREVIEW_STREAK, PREVIEW_DOTS);
+  const fits = fitsDeclaredMinimum(draft);
+
+  const tabItems = useMemo(
+    () =>
+      CUSTOMIZER_TABS.map((id) => ({
+        id,
+        label: t(`widgetTab_${id}`),
+        marked: tabIsModified(id, draft),
+      })),
+    [draft, t]
+  );
+
+  // Recomposed only when the tab or the underlying mascot changes, so dragging a size slider
+  // does not rebuild a grid of hat thumbnails on every frame.
+  const tiles = useMemo(() => {
+    if (tab === 'preset') {
+      return (Object.keys(PRESETS) as PresetId[]).map((id) => ({
+        id,
+        label: t(`widgetPreset_${id}`),
+        selected: draft.preset === id,
+        svg: composeMascotThumbnail(applyPreset(draft, id), THUMB_FRAMES.preset),
+        apply: () => setDraft((current) => applyPreset(current, id)),
+      }));
+    }
+    if (isSlotTab(tab)) {
+      return Object.keys(PART_CATALOG[tab]).map((id) => ({
+        id,
+        label: t(`widgetPart_${id}`),
+        selected: draft[tab] === id,
+        svg: composeMascotThumbnail(setSlot(draft, tab, id), THUMB_FRAMES[tab]),
+        apply: () => setDraft((current) => setSlot(current, tab, id)),
+      }));
+    }
+    return [];
+  }, [tab, draft, t]);
 
   const save = async () => {
     setSaving(true);
@@ -61,11 +119,8 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
     }
   };
 
-  const chipStyle = (selected: boolean) => [
-    styles.chip,
-    { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
-    selected && { backgroundColor: theme.accentTint, borderColor: theme.accent },
-  ];
+  const presetName =
+    draft.preset === 'custom' ? t('widgetPreviewHint') : t(`widgetPreset_${draft.preset}`);
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
@@ -73,207 +128,158 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
         <TopBar title={t('widgetCustomizer')} onBack={onBack} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 40 }]}
-        showsVerticalScrollIndicator={false}
-      >
+      {/* Pinned: the preview must stay visible while options change, which is the whole reason
+          this screen moved from one long scroll to tabs. */}
+      <View style={styles.previewWrap}>
         <Card style={[styles.preview, { backgroundColor: theme.accentTint }]}>
           <SvgXml
             xml={preview.svg}
             width={preview.width * PREVIEW_SCALE}
             height={preview.height * PREVIEW_SCALE}
           />
-          <Caption color={colorTheme.ink2}>{t('widgetPreviewHint')}</Caption>
         </Card>
+        <Caption color={colorTheme.ink2}>{presetName}</Caption>
+      </View>
 
-        <Section title={t('widgetPreset')}>
-          <View style={styles.chips}>
-            {(Object.keys(PRESETS) as PresetId[]).map((id) => (
-              <Pressable
-                key={id}
-                onPress={() => setDraft((current) => applyPreset(current, id))}
-                style={chipStyle(draft.preset === id)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: draft.preset === id }}
-              >
-                <Body>{t(`widgetPreset_${id}`)}</Body>
-              </Pressable>
+      <TabStrip items={tabItems} value={tab} onChange={setTab} />
+
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {tiles.length > 0 ? (
+          <View style={styles.tiles}>
+            {tiles.map((tile) => (
+              <MascotOptionTile
+                key={tile.id}
+                svg={tile.svg}
+                label={tile.label}
+                selected={tile.selected}
+                onPress={tile.apply}
+              />
             ))}
           </View>
-        </Section>
+        ) : null}
 
-        {SLOTS.map((slot) => (
-          <Section key={slot} title={t(`widgetSlot_${slot}`)}>
-            <View style={styles.chips}>
-              {Object.keys(PART_CATALOG[slot]).map((id) => (
-                <Pressable
-                  key={id}
-                  onPress={() => setDraft((current) => setSlot(current, slot, id))}
-                  style={chipStyle(draft[slot] === id)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: draft[slot] === id }}
-                >
-                  <Body>{t(`widgetPart_${id}`)}</Body>
-                </Pressable>
-              ))}
-            </View>
-          </Section>
-        ))}
+        {tab === 'layout' ? (
+          <View style={styles.section}>
+            <Card style={styles.controlCard}>
+              <NotchedSlider
+                label={t('widgetMascotSize')}
+                value={draft.mascotNotch}
+                count={5}
+                defaultValue={3}
+                defaultLabel={t('widgetDefaultNotch', { value: 3 })}
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, mascotNotch: value as Notch }))
+                }
+              />
+              <NotchedSlider
+                label={t('widgetButtonSize')}
+                value={draft.buttonNotch}
+                count={5}
+                defaultValue={3}
+                defaultLabel={t('widgetDefaultNotch', { value: 3 })}
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, buttonNotch: value as Notch }))
+                }
+              />
+            </Card>
 
-        <Section title={t('widgetSize')}>
-          <Card style={styles.controlCard}>
-            <NotchedSlider
-              label={t('widgetMascotSize')}
-              value={draft.mascotNotch}
-              count={5}
-              defaultValue={5}
-              defaultLabel={t('widgetDefaultNotch', { value: 5 })}
-              onChange={(value) =>
-                setDraft((current) => ({ ...current, mascotNotch: value as Notch }))
-              }
-            />
-            <NotchedSlider
-              label={t('widgetButtonSize')}
-              value={draft.buttonNotch}
-              count={5}
-              defaultValue={3}
-              defaultLabel={t('widgetDefaultNotch', { value: 3 })}
-              onChange={(value) =>
-                setDraft((current) => ({ ...current, buttonNotch: value as Notch }))
-              }
-            />
-          </Card>
-        </Section>
+            {WIDGET_SLOTS.map((which) => (
+              <View key={which} style={styles.section}>
+                <Eyebrow>{t(`widgetSlotPosition_${which}`)}</Eyebrow>
+                <View style={styles.tiles}>
+                  {SLOT_CONTENTS.map((content) => (
+                    <MascotOptionTile
+                      key={content}
+                      svg={slotContentSvg(content, draft)}
+                      label={t(`widgetSlotContent_${content}`)}
+                      selected={draft[which] === content}
+                      onPress={() => setDraft((current) => setSlotContent(current, which, content))}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
 
-        <Section title={t('widgetButtons')}>
-          <Card style={styles.controlCard}>
-            <ToggleRow
-              label={t('widgetShowIncome')}
-              enabled={draft.showIncome}
-              onPress={() =>
-                setDraft((current) => ({ ...current, showIncome: !current.showIncome }))
-              }
-            />
-            <View style={[styles.divider, { backgroundColor: colorTheme.line }]} />
-            <ToggleRow
-              label={t('widgetShowExpense')}
-              enabled={draft.showExpense}
-              onPress={() =>
-                setDraft((current) => ({ ...current, showExpense: !current.showExpense }))
-              }
-            />
-            {!draft.showIncome && !draft.showExpense ? (
+            {draft.slot1 === 'none' && draft.slot2 === 'none' ? (
               <Caption color={colorTheme.ink2}>{t('widgetArrowsOffHint')}</Caption>
             ) : null}
-          </Card>
-        </Section>
-
-        <Section title={t('widgetStreakBadge')}>
-          <View style={styles.chips}>
-            {BADGE_ICONS.map((icon) => (
-              <Pressable
-                key={icon}
-                onPress={() => setDraft((current) => ({ ...current, badgeIcon: icon }))}
-                style={chipStyle(draft.badgeIcon === icon)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: draft.badgeIcon === icon }}
-              >
-                <Body>{t(`widgetBadge_${icon}`)}</Body>
-              </Pressable>
-            ))}
+            {!fits ? <Caption color={colorTheme.ink2}>{t('widgetNeedsBigger')}</Caption> : null}
           </View>
-          <View style={styles.chips}>
-            {BADGE_COLORS.map((color) => (
-              <Pressable
-                key={color}
-                onPress={() => setDraft((current) => ({ ...current, badgeColor: color }))}
-                style={chipStyle(draft.badgeColor === color)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: draft.badgeColor === color }}
-              >
-                <View style={[styles.swatch, { backgroundColor: BADGE_THEMES[color].icon }]} />
-                <Body>{t(`widgetColor_${color}`)}</Body>
-              </Pressable>
-            ))}
-          </View>
-        </Section>
+        ) : null}
 
+        {tab === 'badge' ? (
+          <View style={styles.section}>
+            <View style={styles.tiles}>
+              {BADGE_ICONS.map((icon) => {
+                const fragment = badgeIconSvg(icon === 'none' ? 'flame' : icon, draft.badgeColor);
+                const svg =
+                  icon === 'none'
+                    ? slotContentSvg('none', draft)
+                    : `<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${fragment ?? ''}</svg>`;
+                return (
+                  <MascotOptionTile
+                    key={icon}
+                    svg={svg}
+                    label={t(`widgetBadge_${icon}`)}
+                    selected={draft.badgeIcon === icon}
+                    onPress={() => setDraft((current) => ({ ...current, badgeIcon: icon }))}
+                  />
+                );
+              })}
+            </View>
+            <View style={styles.swatches}>
+              {BADGE_COLORS.map((color) => {
+                const selected = draft.badgeColor === color;
+                return (
+                  <Pressable
+                    key={color}
+                    onPress={() => setDraft((current) => ({ ...current, badgeColor: color }))}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={t(`widgetColor_${color}`)}
+                    style={[
+                      styles.swatch,
+                      {
+                        backgroundColor: BADGE_THEMES[color].icon,
+                        borderColor: selected ? colorTheme.ink : 'transparent',
+                        borderWidth: selected ? 3 : 0,
+                      },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {/* Pinned: with tabs there is no longer an end-of-scroll for Save to sit at. */}
+      <View
+        style={[
+          styles.footer,
+          { paddingBottom: insets.bottom + 12, borderTopColor: colorTheme.line, backgroundColor: colorTheme.bg },
+        ]}
+      >
         <PrimaryButton onPress={save} disabled={saving}>
           <BtnLabel>{saving ? t('saving') : t('save')}</BtnLabel>
         </PrimaryButton>
-      </ScrollView>
-    </View>
-  );
-
-  function ToggleRow({
-    label,
-    enabled,
-    onPress,
-  }: {
-    label: string;
-    enabled: boolean;
-    onPress: () => void;
-  }) {
-    return (
-      <Pressable
-        onPress={onPress}
-        style={styles.toggleRow}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: enabled }}
-      >
-        <Body>{label}</Body>
-        <View
-          style={[
-            styles.switchTrack,
-            { backgroundColor: enabled ? theme.accent : colorTheme.line2 },
-          ]}
-        >
-          <View
-            style={[
-              styles.switchThumb,
-              { transform: [{ translateX: enabled ? 20 : 0 }] },
-            ]}
-          />
-        </View>
-      </Pressable>
-    );
-  }
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Eyebrow>{title}</Eyebrow>
-      {children}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: 18, paddingTop: 8, gap: 24 },
-  preview: { alignItems: 'center', justifyContent: 'center', padding: 20, gap: 4 },
+  previewWrap: { alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingBottom: 12 },
+  preview: { alignItems: 'center', justifyContent: 'center', padding: 16 },
+  content: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24, gap: 20 },
   section: { gap: 12 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    minHeight: 44,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   controlCard: { padding: 16, gap: 12 },
-  toggleRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  divider: { height: StyleSheet.hairlineWidth },
-  switchTrack: { width: 48, height: 28, borderRadius: 14, padding: 3 },
-  switchThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF' },
-  swatch: { width: 14, height: 14, borderRadius: 7 },
+  swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  swatch: { width: 40, height: 40, borderRadius: 999 },
+  footer: { paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
 });

@@ -12,7 +12,7 @@ describe('widget mascot config backup round-trip', () => {
       head: 'goggles',
       eyes: 'big',
       mascotNotch: 2 as const,
-      showExpense: false,
+      slot2: 'none' as const,
       badgeColor: 'violet' as const,
     };
     const payloadValue = serializeWidgetMascotConfig(original);

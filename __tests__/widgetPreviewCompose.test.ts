@@ -1,5 +1,10 @@
-import { DEFAULT_WIDGET_MASCOT_CONFIG, type Notch, type WidgetMascotConfig } from '../src/widget/mascot/config';
-import { contentWidth, MASCOT_SIZES } from '../src/widget/mascot/sizing';
+import {
+  DEFAULT_WIDGET_MASCOT_CONFIG,
+  type Notch,
+  type SlotContent,
+  type WidgetMascotConfig,
+} from '../src/widget/mascot/config';
+import { contentWidth, contentHeight, MASCOT_SIZES } from '../src/widget/mascot/sizing';
 import { UP_ARROW_PATH, DOWN_ARROW_PATH, SHELL_BG, DIVIDER_COLOR } from '../src/widget/mascot/chrome';
 import { composeWidgetPreview } from '../src/widget/mascot/previewCompose';
 
@@ -9,6 +14,7 @@ const cfg = (over: Partial<WidgetMascotConfig> = {}): WidgetMascotConfig => ({
 });
 
 const NOTCHES: Notch[] = [1, 2, 3, 4, 5];
+const CONTENTS: SlotContent[] = ['income', 'expense', 'streak', 'none'];
 const DOTS = [true, true, false, true, false, false, true];
 
 describe('composeWidgetPreview', () => {
@@ -19,20 +25,20 @@ describe('composeWidgetPreview', () => {
     expect(svg.match(/<svg/g)).toHaveLength(1);
   });
 
-  /** The anti-drift guard. `contentWidth` is the shared source of truth the real widget's budget
-   *  is checked against; if the preview ever lays out to a different width, the two renderers
+  /** The anti-drift guard. `contentWidth` is the shared source of truth the real widget's layout
+   *  is measured against; if the preview ever lays out to a different width, the two renderers
    *  have diverged and this fails. */
-  it('lays out to exactly contentWidth for every layout case and notch pair', () => {
+  it('lays out to exactly contentWidth and contentHeight for every configuration', () => {
     for (const m of NOTCHES) {
       for (const b of NOTCHES) {
-        for (const [showIncome, showExpense] of [
-          [true, true],
-          [true, false],
-          [false, true],
-          [false, false],
-        ] as const) {
-          const c = cfg({ mascotNotch: m, buttonNotch: b, showIncome, showExpense });
-          expect(composeWidgetPreview(c, 7, DOTS).width).toBe(contentWidth(c));
+        for (const slot1 of CONTENTS) {
+          for (const slot2 of CONTENTS) {
+            if (slot1 === 'streak' && slot2 === 'streak') continue; // unreachable via the parser
+            const c = cfg({ mascotNotch: m, buttonNotch: b, slot1, slot2 });
+            const p = composeWidgetPreview(c, 7, DOTS);
+            expect(p.width).toBe(contentWidth(c));
+            expect(p.height).toBe(contentHeight(c));
+          }
         }
       }
     }
@@ -45,69 +51,87 @@ describe('composeWidgetPreview', () => {
     expect(svg).toContain('data-part="body"');
   });
 
-  describe('arrow visibility', () => {
-    it('draws both arrows and two dividers by default', () => {
-      const { svg } = composeWidgetPreview(cfg(), 7, DOTS);
-      expect(svg).toContain(UP_ARROW_PATH);
-      expect(svg).toContain(DOWN_ARROW_PATH);
-      expect(svg.match(new RegExp(DIVIDER_COLOR, 'g'))).toHaveLength(2);
-    });
-
-    it('drops only the hidden arrow and its divider when one is off', () => {
-      const income = composeWidgetPreview(cfg({ showExpense: false }), 7, DOTS).svg;
-      expect(income).toContain(UP_ARROW_PATH);
-      expect(income).not.toContain(DOWN_ARROW_PATH);
-      expect(income.match(new RegExp(DIVIDER_COLOR, 'g'))).toHaveLength(1);
-
-      const expense = composeWidgetPreview(cfg({ showIncome: false }), 7, DOTS).svg;
-      expect(expense).toContain(DOWN_ARROW_PATH);
-      expect(expense).not.toContain(UP_ARROW_PATH);
-    });
-
-    it('drops both arrows and all dividers when both are off', () => {
-      const { svg } = composeWidgetPreview(cfg({ showIncome: false, showExpense: false }), 7, DOTS);
-      expect(svg).not.toContain(UP_ARROW_PATH);
-      expect(svg).not.toContain(DOWN_ARROW_PATH);
-      expect(svg).not.toContain(DIVIDER_COLOR);
-    });
-  });
-
-  describe('expanded streak column', () => {
-    it('appears only when both arrows are off', () => {
-      const expanded = composeWidgetPreview(cfg({ showIncome: false, showExpense: false }), 9, DOTS).svg;
-      expect(expanded).toContain('data-streak-dots');
-      expect(expanded).toContain('>9<');
-
-      const compact = composeWidgetPreview(cfg(), 9, DOTS).svg;
-      expect(compact).not.toContain('data-streak-dots');
-    });
-
-    it('suppresses the mascot badge so the streak is not drawn twice', () => {
-      const expanded = composeWidgetPreview(cfg({ showIncome: false, showExpense: false }), 9, DOTS).svg;
-      expect(expanded).not.toContain('data-part="badge"');
-    });
-
-    it('keeps the mascot badge in the compact layouts', () => {
-      expect(composeWidgetPreview(cfg(), 9, DOTS).svg).toContain('data-part="badge"');
-    });
-
-    it('renders seven dots regardless of the input array length', () => {
-      const { svg } = composeWidgetPreview(cfg({ showIncome: false, showExpense: false }), 3, []);
-      expect(svg.match(/data-dot=/g)).toHaveLength(7);
-    });
-  });
-
   it('scales the mascot with its notch', () => {
     for (const m of NOTCHES) {
       const { svg } = composeWidgetPreview(cfg({ mascotNotch: m }), 7, DOTS);
       expect(svg).toContain(`data-mascot="${MASCOT_SIZES[m].w}x${MASCOT_SIZES[m].h}"`);
     }
   });
+});
 
-  it('reserves height for the tallest mascot it draws', () => {
-    const small = composeWidgetPreview(cfg({ mascotNotch: 1 }), 7, DOTS).height;
-    const large = composeWidgetPreview(cfg({ mascotNotch: 5 }), 7, DOTS).height;
-    expect(large).toBeGreaterThanOrEqual(small);
-    expect(large).toBeGreaterThanOrEqual(MASCOT_SIZES[5].h);
+describe('slot contents', () => {
+  it('draws both arrows and two dividers by default', () => {
+    const { svg } = composeWidgetPreview(cfg(), 7, DOTS);
+    expect(svg).toContain(UP_ARROW_PATH);
+    expect(svg).toContain(DOWN_ARROW_PATH);
+    expect(svg.match(new RegExp(DIVIDER_COLOR, 'g'))).toHaveLength(2);
+  });
+
+  it('draws only the content each slot holds', () => {
+    const incomeOnly = composeWidgetPreview(cfg({ slot2: 'none' }), 7, DOTS).svg;
+    expect(incomeOnly).toContain(UP_ARROW_PATH);
+    expect(incomeOnly).not.toContain(DOWN_ARROW_PATH);
+    expect(incomeOnly.match(new RegExp(DIVIDER_COLOR, 'g'))).toHaveLength(1);
+
+    const expenseOnly = composeWidgetPreview(cfg({ slot1: 'expense', slot2: 'none' }), 7, DOTS).svg;
+    expect(expenseOnly).toContain(DOWN_ARROW_PATH);
+    expect(expenseOnly).not.toContain(UP_ARROW_PATH);
+  });
+
+  it('honours slot order, so the same pair can be drawn either way round', () => {
+    const a = composeWidgetPreview(cfg({ slot1: 'income', slot2: 'expense' }), 7, DOTS).svg;
+    const b = composeWidgetPreview(cfg({ slot1: 'expense', slot2: 'income' }), 7, DOTS).svg;
+    expect(a.indexOf(UP_ARROW_PATH)).toBeLessThan(a.indexOf(DOWN_ARROW_PATH));
+    expect(b.indexOf(DOWN_ARROW_PATH)).toBeLessThan(b.indexOf(UP_ARROW_PATH));
+  });
+
+  describe('streak badge in a slot', () => {
+    it('draws the count in the slot and drops the mascot pill', () => {
+      const { svg } = composeWidgetPreview(cfg({ slot2: 'streak' }), 9, DOTS);
+      expect(svg).toContain('data-streak-slot');
+      expect(svg).toContain('>9<');
+      // Suppressed so the streak is not shown twice.
+      expect(svg).not.toContain('data-part="badge"');
+    });
+
+    it('pairs with an arrow in the other slot', () => {
+      const { svg } = composeWidgetPreview(cfg({ slot1: 'income', slot2: 'streak' }), 4, DOTS);
+      expect(svg).toContain(UP_ARROW_PATH);
+      expect(svg).toContain('data-streak-slot');
+      expect(svg).not.toContain(DOWN_ARROW_PATH);
+    });
+
+    it('keeps the mascot pill when no slot shows the streak', () => {
+      expect(composeWidgetPreview(cfg(), 9, DOTS).svg).toContain('data-part="badge"');
+    });
+  });
+});
+
+describe('expanded layout (both slots empty)', () => {
+  const expanded = (streak = 9, dots = DOTS) =>
+    composeWidgetPreview(cfg({ slot1: 'none', slot2: 'none' }), streak, dots).svg;
+
+  it('shows the count and the seven-day dots', () => {
+    expect(expanded()).toContain('data-streak-dots');
+    expect(expanded()).toContain('>9<');
+  });
+
+  it('drops all arrows and dividers', () => {
+    expect(expanded()).not.toContain(UP_ARROW_PATH);
+    expect(expanded()).not.toContain(DOWN_ARROW_PATH);
+    expect(expanded()).not.toContain(DIVIDER_COLOR);
+  });
+
+  it('suppresses the mascot badge so the streak is not drawn twice', () => {
+    expect(expanded()).not.toContain('data-part="badge"');
+  });
+
+  it('renders seven dots regardless of the input array length', () => {
+    expect(expanded(3, []).match(/data-dot=/g)).toHaveLength(7);
+  });
+
+  it('does not appear in any compact layout', () => {
+    expect(composeWidgetPreview(cfg(), 9, DOTS).svg).not.toContain('data-streak-dots');
+    expect(composeWidgetPreview(cfg({ slot2: 'streak' }), 9, DOTS).svg).not.toContain('data-streak-dots');
   });
 });

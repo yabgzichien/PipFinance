@@ -1,11 +1,11 @@
 import React from 'react';
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 import type { FlexWidgetStyle, HexColor } from 'react-native-android-widget';
-import type { BadgeColor, BadgeIcon, WidgetMascotConfig } from './mascot/config';
+import type { BadgeColor, BadgeIcon, SlotContent, WidgetMascotConfig } from './mascot/config';
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from './mascot/config';
 import { composeMascot } from './mascot/compose';
 import { BADGE_THEMES, badgeIconSvg } from './mascot/badge';
-import { MASCOT_SIZES, BUTTON_SIZES } from './mascot/sizing';
+import { MASCOT_SIZES, slotWidth } from './mascot/sizing';
 // Shared with the in-app preview (mascot/previewCompose.ts) so the two renderers cannot drift.
 import {
   DIVIDER_COLOR,
@@ -22,6 +22,7 @@ import {
   STREAK_STACK_GAP,
   UP_ARROW_SVG,
   dotsRowSvg,
+  streakSlotMetrics,
 } from './mascot/chrome';
 
 export interface QuickRecordWidgetProps {
@@ -30,7 +31,7 @@ export interface QuickRecordWidgetProps {
   config?: WidgetMascotConfig;
 }
 
-function expandedBadgeIconSvg(icon: BadgeIcon, color: BadgeColor): string | null {
+function badgeIconDocument(icon: BadgeIcon, color: BadgeColor): string | null {
   const fragment = badgeIconSvg(icon, color);
   if (!fragment) return null;
   return `<svg data-streak-icon width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`;
@@ -46,27 +47,16 @@ export function QuickRecordWidget({
   config = DEFAULT_WIDGET_MASCOT_CONFIG,
 }: QuickRecordWidgetProps = {}) {
   const mascot = MASCOT_SIZES[config.mascotNotch];
-  const button = BUTTON_SIZES[config.buttonNotch];
-  const expanded = !config.showIncome && !config.showExpense;
   const badge = BADGE_THEMES[config.badgeColor];
-  const expandedIcon = expandedBadgeIconSvg(config.badgeIcon, config.badgeColor);
 
-  // The badge is drawn into the mascot svg only in the compact layouts. When expanded, the count
-  // is a TextWidget beside the dots row, so the pill would duplicate it.
+  const expanded = config.slot1 === 'none' && config.slot2 === 'none';
+  const hasStreakSlot = config.slot1 === 'streak' || config.slot2 === 'streak';
+
+  // The mascot's own badge pill is suppressed wherever the streak is already shown elsewhere —
+  // in the expanded column, or in a slot — so the count never appears twice.
   const mascotSvg = composeMascot(
-    expanded ? { ...config, badgeIcon: 'none' } : config,
+    expanded || hasStreakSlot ? { ...config, badgeIcon: 'none' } : config,
     streak
-  );
-
-  const mascotButton = (
-    <FlexWidget
-      style={{ flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
-      clickAction="OPEN_URI"
-      clickActionData={{ uri: 'pip://add' }}
-      accessibilityLabel="Add Transaction"
-    >
-      <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
-    </FlexWidget>
   );
 
   const shell: FlexWidgetStyle = {
@@ -82,7 +72,9 @@ export function QuickRecordWidget({
   };
 
   if (expanded) {
-    // Whole widget is one add target; the freed space carries the streak instead of arrows.
+    // Nothing beside the mascot, so the freed space carries the streak and the whole widget
+    // becomes one add target.
+    const expandedIcon = badgeIconDocument(config.badgeIcon, config.badgeColor);
     return (
       <FlexWidget
         style={{ ...shell, justifyContent: 'flex-start' }}
@@ -105,31 +97,66 @@ export function QuickRecordWidget({
     );
   }
 
+  /** One slot's contents. Arrows are tap targets; a streak badge is a read-only indicator, so it
+   *  carries no clickAction — the mascot remains the widget's add target. */
+  function slot(which: 'slot1' | 'slot2') {
+    const content: SlotContent = config[which];
+    if (content === 'none') return null;
+
+    const size = slotWidth(config, which);
+    const column: FlexWidgetStyle = {
+      flex: 1,
+      height: 'match_parent',
+      alignItems: 'center',
+      justifyContent: 'center',
+    };
+
+    if (content === 'streak') {
+      const m = streakSlotMetrics(size);
+      const icon = badgeIconDocument(config.badgeIcon, config.badgeColor);
+      return (
+        <FlexWidget
+          key={which}
+          style={{ ...column, flexDirection: 'row', flexGap: m.gap }}
+          accessibilityLabel={`Streak ${streak} days`}
+        >
+          {icon && <SvgWidget svg={icon} style={{ width: m.icon, height: m.icon }} />}
+          <TextWidget
+            text={String(streak)}
+            style={{ fontSize: m.font, fontWeight: '700', color: badge.text as HexColor }}
+          />
+        </FlexWidget>
+      );
+    }
+
+    const income = content === 'income';
+    return (
+      <FlexWidget
+        key={which}
+        style={column}
+        clickAction="OPEN_URI"
+        clickActionData={{ uri: income ? 'pip://add?type=income' : 'pip://add?type=expense' }}
+        accessibilityLabel={income ? 'Record Income' : 'Record Expense'}
+      >
+        <SvgWidget svg={income ? UP_ARROW_SVG : DOWN_ARROW_SVG} style={{ width: size, height: size }} />
+      </FlexWidget>
+    );
+  }
+
   return (
     <FlexWidget style={shell}>
-      {mascotButton}
-      {config.showIncome && <Divider />}
-      {config.showIncome && (
-        <FlexWidget
-          style={{ flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
-          clickAction="OPEN_URI"
-          clickActionData={{ uri: 'pip://add?type=income' }}
-          accessibilityLabel="Record Income"
-        >
-          <SvgWidget svg={UP_ARROW_SVG} style={{ width: button, height: button }} />
-        </FlexWidget>
-      )}
-      {config.showExpense && <Divider />}
-      {config.showExpense && (
-        <FlexWidget
-          style={{ flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
-          clickAction="OPEN_URI"
-          clickActionData={{ uri: 'pip://add?type=expense' }}
-          accessibilityLabel="Record Expense"
-        >
-          <SvgWidget svg={DOWN_ARROW_SVG} style={{ width: button, height: button }} />
-        </FlexWidget>
-      )}
+      <FlexWidget
+        style={{ flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
+        clickAction="OPEN_URI"
+        clickActionData={{ uri: 'pip://add' }}
+        accessibilityLabel="Add Transaction"
+      >
+        <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
+      </FlexWidget>
+      {config.slot1 !== 'none' && <Divider />}
+      {slot('slot1')}
+      {config.slot2 !== 'none' && <Divider />}
+      {slot('slot2')}
     </FlexWidget>
   );
 }

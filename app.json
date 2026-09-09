@@ -54,8 +54,8 @@
             {
               "name": "StreakWidget",
               "label": "Pip Streak",
-              "minWidth": "150dp",
-              "minHeight": "50dp",
+              "minWidth": "160dp",
+              "minHeight": "70dp",
               "targetCellWidth": 2,
               "targetCellHeight": 1,
               "description": "Track your daily transaction recording streak and 7-day activity.",
@@ -64,8 +64,8 @@
             {
               "name": "QuickRecordWidget",
               "label": "Pip Quick Record",
-              "minWidth": "150dp",
-              "minHeight": "50dp",
+              "minWidth": "160dp",
+              "minHeight": "70dp",
               "targetCellWidth": 2,
               "targetCellHeight": 1,
               "description": "Quickly record income or expense with Pip.",

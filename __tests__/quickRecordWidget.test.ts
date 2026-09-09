@@ -26,21 +26,21 @@ describe('QuickRecordWidget layout', () => {
     );
   });
 
-  it('drops only the hidden arrow when one is turned off', () => {
-    const found = byUri(QuickRecordWidget({ streak: 5, config: cfg({ showExpense: false }) }));
+  it('drops only the emptied slot', () => {
+    const found = byUri(QuickRecordWidget({ streak: 5, config: cfg({ slot2: 'none' }) }));
     expect(found['pip://add?type=income']).toBeDefined();
     expect(found['pip://add?type=expense']).toBeUndefined();
     expect(found['pip://add']).toBeDefined();
   });
 
-  it('collapses to a single add target when both arrows are off', () => {
-    const found = byUri(QuickRecordWidget({ streak: 5, config: cfg({ showIncome: false, showExpense: false }) }));
+  it('collapses to a single add target when both slots are empty', () => {
+    const found = byUri(QuickRecordWidget({ streak: 5, config: cfg({ slot1: 'none', slot2: 'none' }) }));
     expect(Object.keys(found)).toEqual(['pip://add']);
   });
 
-  it('shows the expanded streak count and 7 dots only when both arrows are off', () => {
+  it('shows the expanded streak count and 7 dots only when both slots are empty', () => {
     const dots = [true, true, false, true, false, false, true];
-    const expanded = QuickRecordWidget({ streak: 9, dots, config: cfg({ showIncome: false, showExpense: false }) });
+    const expanded = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'none', slot2: 'none' }) });
     const json = JSON.stringify(expanded);
     expect(json).toContain('data-streak-dots');
     const compact = JSON.stringify(QuickRecordWidget({ streak: 9, dots, config: cfg() }));
@@ -51,8 +51,8 @@ describe('QuickRecordWidget layout', () => {
     const expanded = QuickRecordWidget({
       streak: 9,
       config: cfg({
-        showIncome: false,
-        showExpense: false,
+        slot1: 'none',
+        slot2: 'none',
         badgeIcon: 'star',
         badgeColor: 'blue',
       }),
@@ -64,10 +64,29 @@ describe('QuickRecordWidget layout', () => {
     const withoutIcon = JSON.stringify(
       QuickRecordWidget({
         streak: 9,
-        config: cfg({ showIncome: false, showExpense: false, badgeIcon: 'none' }),
+        config: cfg({ slot1: 'none', slot2: 'none', badgeIcon: 'none' }),
       })
     );
     expect(withoutIcon).not.toContain('data-streak-icon');
+  });
+
+  it('renders a streak badge in a slot without giving it a tap target', () => {
+    // The badge is an indicator, not an action — the mascot stays the widget's only add target
+    // besides the arrows, so the streak slot carries no clickAction.
+    const found = byUri(QuickRecordWidget({ streak: 6, config: cfg({ slot2: 'streak' }) }));
+    expect(Object.keys(found).sort()).toEqual(['pip://add', 'pip://add?type=income'].sort());
+
+    const json = JSON.stringify(QuickRecordWidget({ streak: 6, config: cfg({ slot2: 'streak' }) }));
+    expect(json).toContain('data-streak-icon');
+    expect(json).toContain('"text":"6"');
+  });
+
+  it('suppresses the mascot pill when a slot shows the streak', () => {
+    const withSlot = JSON.stringify(QuickRecordWidget({ streak: 6, config: cfg({ slot2: 'streak' }) }));
+    expect(withSlot).not.toContain('data-part=\\"badge\\"');
+
+    const withoutSlot = JSON.stringify(QuickRecordWidget({ streak: 6, config: cfg() }));
+    expect(withoutSlot).toContain('data-part=\\"badge\\"');
   });
 
   it('applies the mascot and button size notches', () => {

@@ -13,8 +13,17 @@ export type BadgeIcon = 'flame' | 'star' | 'leaf' | 'sprout' | 'none';
 export type BadgeColor = 'amber' | 'red' | 'green' | 'blue' | 'violet';
 export type PresetId = 'classic' | 'nerdy' | 'cool' | 'swordsman' | 'scientist' | 'chef';
 
+/**
+ * What occupies one of the two slots to the right of the mascot.
+ *
+ * The slots are positional, not semantic: `slot1` is nearer the mascot and `slot2` sits outside
+ * it. Either can hold either arrow, a streak badge, or nothing — so an income arrow beside a
+ * streak badge is a valid layout, as is a lone expense arrow.
+ */
+export type SlotContent = 'income' | 'expense' | 'streak' | 'none';
+
 export interface WidgetMascotConfig {
-  version: 1;
+  version: 2;
   preset: PresetId | 'custom';
   head: string;
   eyes: string;
@@ -22,25 +31,24 @@ export interface WidgetMascotConfig {
   holding: string;
   mascotNotch: Notch;
   buttonNotch: Notch;
-  showIncome: boolean;
-  showExpense: boolean;
+  slot1: SlotContent;
+  slot2: SlotContent;
   badgeIcon: BadgeIcon;
   badgeColor: BadgeColor;
 }
 
-/** Reproduces the widget exactly as it shipped before customization existed, so a user who
- *  updates and never opens the customizer sees no change at all. */
+/** The stock widget: both arrows, a mid-ladder mascot, amber flame badge. */
 export const DEFAULT_WIDGET_MASCOT_CONFIG: WidgetMascotConfig = {
-  version: 1,
+  version: 2,
   preset: 'classic',
   head: 'none',
   eyes: 'default',
   mouth: 'smile',
   holding: 'none',
-  mascotNotch: 5,
+  mascotNotch: 3,
   buttonNotch: 3,
-  showIncome: true,
-  showExpense: true,
+  slot1: 'income',
+  slot2: 'expense',
   badgeIcon: 'flame',
   badgeColor: 'amber',
 };
@@ -48,6 +56,7 @@ export const DEFAULT_WIDGET_MASCOT_CONFIG: WidgetMascotConfig = {
 const PRESET_IDS: readonly string[] = ['classic', 'nerdy', 'cool', 'swordsman', 'scientist', 'chef', 'custom'];
 const BADGE_ICONS: readonly string[] = ['flame', 'star', 'leaf', 'sprout', 'none'];
 const BADGE_COLORS: readonly string[] = ['amber', 'red', 'green', 'blue', 'violet'];
+const SLOT_CONTENTS: readonly string[] = ['income', 'expense', 'streak', 'none'];
 
 /** Part-id validity is checked against the catalog at compose time, not here — config.ts stays
  *  free of catalog imports so it can be read without pulling the whole art registry in. The one
@@ -68,6 +77,32 @@ function notch(v: unknown, fallback: Notch): Notch {
   return v === 1 || v === 2 || v === 3 || v === 4 || v === 5 ? v : fallback;
 }
 
+/**
+ * v1 stored the arrows as two independent booleans. v2 stores two positional slots that can each
+ * hold either arrow, a streak badge, or nothing.
+ *
+ * A stored config that fails to migrate silently resets someone's customized widget to stock, so
+ * every v1 combination is mapped explicitly and pinned by test. A blob with no `version` predates
+ * versioning and is treated as v1; v1's own default was both arrows on, which is why absent
+ * booleans fall back to true rather than to v2's defaults.
+ */
+function migrateArrowsFromV1(o: Record<string, unknown>): Pick<WidgetMascotConfig, 'slot1' | 'slot2'> {
+  const income = bool(o.showIncome, true);
+  const expense = bool(o.showExpense, true);
+  if (income && expense) return { slot1: 'income', slot2: 'expense' };
+  if (income) return { slot1: 'income', slot2: 'none' };
+  if (expense) return { slot1: 'expense', slot2: 'none' };
+  return { slot1: 'none', slot2: 'none' };
+}
+
+/** Two streak counts side by side say nothing a single one does not. slot1 keeps it. */
+function enforceSingleStreak(slots: Pick<WidgetMascotConfig, 'slot1' | 'slot2'>) {
+  if (slots.slot1 === 'streak' && slots.slot2 === 'streak') {
+    return { slot1: slots.slot1, slot2: 'none' as const };
+  }
+  return slots;
+}
+
 export function parseWidgetMascotConfig(raw: string | null): WidgetMascotConfig {
   const d = DEFAULT_WIDGET_MASCOT_CONFIG;
   if (!raw) return d;
@@ -81,8 +116,16 @@ export function parseWidgetMascotConfig(raw: string | null): WidgetMascotConfig 
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return d;
   const o = obj as Record<string, unknown>;
 
+  const slots =
+    o.version === 2
+      ? {
+          slot1: oneOf(o.slot1, SLOT_CONTENTS, d.slot1) as SlotContent,
+          slot2: oneOf(o.slot2, SLOT_CONTENTS, d.slot2) as SlotContent,
+        }
+      : migrateArrowsFromV1(o);
+
   return {
-    version: 1,
+    version: 2,
     preset: oneOf(o.preset, PRESET_IDS, d.preset) as PresetId | 'custom',
     head: str(o.head, d.head),
     eyes: str(o.eyes, d.eyes),
@@ -90,8 +133,7 @@ export function parseWidgetMascotConfig(raw: string | null): WidgetMascotConfig 
     holding: str(o.holding, d.holding),
     mascotNotch: notch(o.mascotNotch, d.mascotNotch),
     buttonNotch: notch(o.buttonNotch, d.buttonNotch),
-    showIncome: bool(o.showIncome, d.showIncome),
-    showExpense: bool(o.showExpense, d.showExpense),
+    ...enforceSingleStreak(slots),
     badgeIcon: oneOf(o.badgeIcon, BADGE_ICONS, d.badgeIcon) as BadgeIcon,
     badgeColor: oneOf(o.badgeColor, BADGE_COLORS, d.badgeColor) as BadgeColor,
   };
