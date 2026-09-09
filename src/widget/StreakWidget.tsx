@@ -1,9 +1,11 @@
 import React from 'react';
-import { QuickRecordWidget, type QuickRecordWidgetProps } from './QuickRecordWidget';
+import { QuickRecordWidget } from './QuickRecordWidget';
+import type { WidgetMascotConfig } from './mascot/config';
 
 export interface StreakWidgetProps {
   streak?: number;
   dots?: boolean[];
+  config?: WidgetMascotConfig;
 }
 
 /**
@@ -12,6 +14,6 @@ export interface StreakWidgetProps {
  * seamlessly receive the new Quick Record layout (Pip mascot + streak flame badge +
  * Income ↑ / Expense ↓ buttons) without the widget disappearing or breaking on their home screen.
  */
-export function StreakWidget({ streak = 0 }: StreakWidgetProps | QuickRecordWidgetProps = {}) {
-  return <QuickRecordWidget streak={streak} />;
+export function StreakWidget({ streak = 0, dots = [], config }: StreakWidgetProps = {}) {
+  return <QuickRecordWidget streak={streak} dots={dots} config={config} />;
 }
