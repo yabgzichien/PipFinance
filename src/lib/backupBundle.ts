@@ -10,6 +10,7 @@ import { getReliefMemoryMap, listAllReliefTags } from '../db/reliefRepo';
 import { buildFinancialReportBundle, buildReportPeriod } from './bookkeeping';
 import { generateFullBackupZip, type CommitmentExportExtra } from './financialExport';
 import type { AppData } from '../state/store';
+import { serializeWidgetMascotConfig } from '../widget/mascot/config';
 
 /** The subset of useAppData()'s fields a full backup needs. */
 export type BackupSourceData = Pick<
@@ -39,6 +40,7 @@ export type BackupSourceData = Pick<
   | 'owedReminderEnabled'
   | 'commitmentReminderEnabled'
   | 'motionSetting'
+  | 'widgetMascotConfig'
   | 'soundEnabled'
 >;
 
@@ -92,6 +94,7 @@ export async function buildBackupZip(data: BackupSourceData): Promise<Uint8Array
         owedReminderEnabled: data.owedReminderEnabled,
         commitmentReminderEnabled: data.commitmentReminderEnabled,
         motionSetting: data.motionSetting,
+        widgetMascotConfig: serializeWidgetMascotConfig(data.widgetMascotConfig),
         soundEnabled: data.soundEnabled,
       },
       tasks: {

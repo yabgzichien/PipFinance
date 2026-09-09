@@ -58,6 +58,7 @@ export interface BackupPayload {
       owedReminderEnabled?: boolean;
       commitmentReminderEnabled?: boolean;
       motionSetting?: string;
+      widgetMascotConfig?: string;
       soundEnabled?: boolean;
     };
     tasks?: {
@@ -434,6 +435,9 @@ export async function restoreFromBackupPayload(
       if (s.owedReminderEnabled !== undefined) meta.owed_reminder_on = s.owedReminderEnabled ? 'true' : 'false';
       if (s.commitmentReminderEnabled !== undefined) meta.commitment_reminder_on = s.commitmentReminderEnabled ? 'true' : 'false';
       if (s.motionSetting !== undefined) meta.motion_setting = s.motionSetting;
+      if (typeof s.widgetMascotConfig === 'string') {
+        meta.widget_mascot_config = s.widgetMascotConfig;
+      }
       if (s.soundEnabled !== undefined) meta.sound_enabled = s.soundEnabled ? 'true' : 'false';
     }
     const tasks = payload.preferences?.tasks;

@@ -13,6 +13,7 @@ jest.mock('../src/db/reliefRepo', () => ({
 
 import { buildBackupZip, type BackupSourceData } from '../src/lib/backupBundle';
 import type { Trip } from '../src/lib/trips';
+import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
 
 const mockGenerateFullBackupZip = jest.requireMock('../src/lib/financialExport').generateFullBackupZip as jest.Mock;
 
@@ -28,10 +29,22 @@ describe('buildBackupZip', () => {
       onboardingComplete: false, tutorialScanDone: false, tutorialManualDone: false, tutorialDismissed: false,
       reminderCadence: 'off', reminderHourOverride: null, owedReminderEnabled: false,
       commitmentReminderEnabled: false, motionSetting: 'full', soundEnabled: false,
+      widgetMascotConfig: DEFAULT_WIDGET_MASCOT_CONFIG,
     } as BackupSourceData;
 
     await buildBackupZip(data);
 
-    expect(mockGenerateFullBackupZip).toHaveBeenCalledWith(expect.anything(), data.transactions, expect.objectContaining({ trips }));
+    expect(mockGenerateFullBackupZip).toHaveBeenCalledWith(
+      expect.anything(),
+      data.transactions,
+      expect.objectContaining({
+        trips,
+        preferences: expect.objectContaining({
+          settings: expect.objectContaining({
+            widgetMascotConfig: JSON.stringify(DEFAULT_WIDGET_MASCOT_CONFIG),
+          }),
+        }),
+      })
+    );
   });
 });
