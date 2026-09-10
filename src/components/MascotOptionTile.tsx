@@ -19,14 +19,18 @@ export function MascotOptionTile({
   selected,
   label,
   onPress,
+  size = TILE_SIZE,
 }: {
   svg: string;
   selected: boolean;
   label: string;
   onPress: () => void;
+  size?: number;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const radius = Math.round(size * (16 / 78));
+  const padding = Math.round(size * (6 / 78));
 
   return (
     <Pressable
@@ -37,13 +41,16 @@ export function MascotOptionTile({
       style={[
         styles.tile,
         {
+          width: size,
+          height: size,
+          borderRadius: radius,
           backgroundColor: selected ? theme.accentTint : colorTheme.surface,
           borderColor: selected ? theme.accent : colorTheme.line2,
           borderWidth: selected ? 2 : StyleSheet.hairlineWidth,
         },
       ]}
     >
-      <View style={styles.art} pointerEvents="none">
+      <View style={[styles.art, { padding }]} pointerEvents="none">
         <SvgXml xml={svg} width="100%" height="100%" />
       </View>
     </Pressable>

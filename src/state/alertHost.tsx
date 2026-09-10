@@ -17,8 +17,13 @@ export type AlertRequest =
       title: string;
       message: string;
       confirmLabel: string;
+      cancelLabel?: string;
       onConfirm: () => void | Promise<void>;
-      neutralAction?: { label: string; onPress: () => void | Promise<void> };
+      neutralAction?: {
+        label: string;
+        onPress: () => void | Promise<void>;
+        style?: 'primary' | 'neutral';
+      };
     };
 
 interface AlertHostCtx {

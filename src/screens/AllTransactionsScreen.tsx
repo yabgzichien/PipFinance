@@ -14,7 +14,7 @@ import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
-import { expenseIdsFromSelection, reassignedFromOtherTrips } from '../lib/trips';
+import { expenseIdsFromSelection, reassignedFromOtherTrips, type Trip } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
 import type { AccentTheme } from '../state/accent';
 import { useAccent } from '../state/accent';
@@ -23,6 +23,7 @@ import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCur
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
 import { radius, shadowCard, uiFont, type StructuralColors } from '../theme';
+import { TripGlyph } from '../components/TripBadge';
 
 /** The date used to sort/bucket a transaction: its own date, else when it was logged. */
 function txnDateOnly(t: Transaction): string {
@@ -64,6 +65,8 @@ export const TxnRow = React.memo(function TxnRow({
   txn,
   cat,
   owed,
+  trip,
+  onOpenTrip,
   first,
   last,
   selectMode,
@@ -76,6 +79,8 @@ export const TxnRow = React.memo(function TxnRow({
   txn: Transaction;
   cat: Category;
   owed: OwedInfo | undefined;
+  trip?: Trip | null;
+  onOpenTrip?: (tripId: string) => void;
   dc: DisplayCurrency;
   first: boolean;
   last: boolean;
@@ -86,7 +91,7 @@ export const TxnRow = React.memo(function TxnRow({
   onPress: (t: Transaction) => void;
   onLongPress: (id: string) => void;
 }) {
-  const { tCat, formatShortDate, isZh } = useLanguage();
+  const { t, tCat, formatShortDate, isZh } = useLanguage();
   const income = txn.type === 'income';
   const transfer = txn.type === 'transfer';
   const catLabel = tCat(cat);
@@ -125,16 +130,42 @@ export const TxnRow = React.memo(function TxnRow({
           {description ? `${description} · ` : ''}
           {formatShortDate(txn.date ?? txn.createdAt)}
         </Text>
-        {/* A split row shows only the payer's share, which reads as a suspiciously
-            cheap dinner without this. */}
-        {owed && (
-          <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
-            <Icon name="gift" size={10} color={theme.accentInk} />
-            <Text style={[styles.owedChipText, { color: theme.onTint }]}>
-              {isZh
-                ? `待收 ${fmtMoney(dc.convert(owed.owed), dc.code)} · 共 ${fmtMoney(dc.convert(owed.gross), dc.code)}`
-                : `${fmtMoney(dc.convert(owed.owed), dc.code)} owed · split of ${fmtMoney(dc.convert(owed.gross), dc.code)}`}
-            </Text>
+        {(trip || owed) && (
+          <View style={styles.chipRow}>
+            {trip && (
+              <Pressable
+                disabled={!onOpenTrip || selectMode}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onOpenTrip?.(trip.id);
+                }}
+                hitSlop={4}
+                style={({ pressed }) => [
+                  styles.tripChip,
+                  { backgroundColor: theme.accentTint },
+                  pressed && onOpenTrip && !selectMode && { opacity: 0.7 },
+                ]}
+                accessibilityRole={onOpenTrip && !selectMode ? 'button' : undefined}
+                accessibilityLabel={`${t('tripsTitle')}: ${trip.name}`}
+              >
+                <TripGlyph trip={trip} size={11} color={theme.accentInk} />
+                <Text style={[styles.tripChipText, { color: theme.onTint }]} numberOfLines={1}>
+                  {trip.name}
+                </Text>
+              </Pressable>
+            )}
+            {/* A split row shows only the payer's share, which reads as a suspiciously
+                cheap dinner without this. */}
+            {owed && (
+              <View style={[styles.owedChip, { backgroundColor: theme.accentTint }]}>
+                <Icon name="gift" size={10} color={theme.accentInk} />
+                <Text style={[styles.owedChipText, { color: theme.onTint }]}>
+                  {isZh
+                    ? `待收 ${fmtMoney(dc.convert(owed.owed), dc.code)} · 共 ${fmtMoney(dc.convert(owed.gross), dc.code)}`
+                    : `${fmtMoney(dc.convert(owed.owed), dc.code)} owed · split of ${fmtMoney(dc.convert(owed.gross), dc.code)}`}
+                </Text>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -150,6 +181,7 @@ export function AllTransactionsScreen({
   onClearFilter,
   onOpenOwed,
   onOpenTrips,
+  onOpenTrip,
 }: {
   onBack: () => void;
   filterCategoryId?: string | null;
@@ -158,12 +190,20 @@ export function AllTransactionsScreen({
   /** Opens the Trips list. Trips has no bottom-nav tab of its own — this compact header chip
    *  is its only entry point from Activity. */
   onOpenTrips: () => void;
+  /** Opens the detail view for a specific trip directly. */
+  onOpenTrip?: (tripId: string) => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
   const { transactions, categories, catById, removeMany, setTransactionsTrip, splits, shares, openShares, trips } = useAppData();
+
+  const tripById = useMemo(() => {
+    const map = new Map<string, Trip>();
+    for (const t of trips) map.set(t.id, t);
+    return map;
+  }, [trips]);
 
   // `search` is what the box shows and must update on the keystroke; `query` is what the
   // ledger is filtered against and lags it by a beat. Filtering thousands of rows on every
@@ -234,15 +274,17 @@ export function AllTransactionsScreen({
     if (q) {
       list = list.filter((t) => {
         const cat = catById[t.categoryId ?? 'other'] ?? fallback;
+        const trip = t.tripId ? tripById.get(t.tripId) : null;
         return (
           (t.merchantRaw ?? '').toLowerCase().includes(q) ||
           (t.remark ?? '').toLowerCase().includes(q) ||
-          cat.label.toLowerCase().includes(q)
+          cat.label.toLowerCase().includes(q) ||
+          (trip?.name ?? '').toLowerCase().includes(q)
         );
       });
     }
     return list;
-  }, [transactions, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, query, catById]);
+  }, [transactions, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, query, catById, tripById]);
 
   /** `shown`, sorted newest-first and bucketed into month sections for the sectioned list. */
   const sections = useMemo<Section[]>(() => {
@@ -352,6 +394,8 @@ export function AllTransactionsScreen({
         txn={item}
         cat={catById[item.categoryId ?? 'other'] ?? fallback}
         owed={owedByTxn[item.id]}
+        trip={item.tripId ? tripById.get(item.tripId) ?? null : null}
+        onOpenTrip={onOpenTrip}
         dc={dc}
         first={index === 0}
         last={index === section.data.length - 1}
@@ -363,7 +407,7 @@ export function AllTransactionsScreen({
         onLongPress={onRowLongPress}
       />
     ),
-    [catById, owedByTxn, dc.code, dc.rates, selectMode, selected, theme, colorTheme, onRowPress, onRowLongPress] // eslint-disable-line react-hooks/exhaustive-deps
+    [catById, owedByTxn, tripById, onOpenTrip, dc.code, dc.rates, selectMode, selected, theme, colorTheme, onRowPress, onRowLongPress] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const renderSectionHeader = useCallback(
     ({ section }: { section: Section }) => (
@@ -620,12 +664,28 @@ const styles = StyleSheet.create({
   },
   owedTitle: { fontFamily: uiFont(700), fontSize: 14 },
   owedSub: { fontFamily: uiFont(500), fontSize: 12, marginTop: 1 },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    flexWrap: 'wrap',
+  },
+  tripChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    maxWidth: 160,
+  },
+  tripChipText: { fontFamily: uiFont(600), fontSize: 10.5, flexShrink: 1 },
   owedChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    alignSelf: 'flex-start',
-    marginTop: 4,
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 999,

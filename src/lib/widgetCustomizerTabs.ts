@@ -11,17 +11,16 @@ import {
   type WidgetMascotConfig,
 } from '../widget/mascot/config';
 
-export type CustomizerTab = 'preset' | SlotId | 'layout' | 'badge';
+export type CustomizerTab = 'preset' | SlotId | 'badge';
 
-/** Display order, left to right. Mascot appearance first (the reason most people open this
- *  screen), then the widget's own shape, then the badge. */
+/** Display order, left to right. Mascot appearance first, then the badge. Layout controls are
+ *  now persistently available at the bottom of every tab selection rather than a separate tab. */
 export const CUSTOMIZER_TABS: CustomizerTab[] = [
   'preset',
   'head',
   'eyes',
   'mouth',
   'holding',
-  'layout',
   'badge',
 ];
 
@@ -59,7 +58,6 @@ export const THUMB_FRAMES: Record<CustomizerTab, ThumbFrame> = {
   eyes: { x: 18, y: 24, w: 28, h: 19 },
   // Lower face. Overlaps the eye band slightly so the crop still reads as a face.
   mouth: { x: 18, y: 31, w: 28, h: 19 },
-  layout: FULL,
   badge: FULL,
 };
 
@@ -74,7 +72,6 @@ const TAB_FIELDS: Record<CustomizerTab, (keyof WidgetMascotConfig)[]> = {
   eyes: ['eyes'],
   mouth: ['mouth'],
   holding: ['holding'],
-  layout: ['mascotNotch', 'buttonNotch', 'slot1', 'slot2'],
   badge: ['badgeIcon', 'badgeColor'],
 };
 

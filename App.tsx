@@ -231,6 +231,8 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
   const [txnFilter, setTxnFilter] = useState<string | null>(null);
   const [categoryDetailId, setCategoryDetailId] = useState<string | null>(null);
+  // Recap remounts after calendar/export/trip navigation; retain the month being reviewed.
+  const [recapMonth, setRecapMonth] = useState<string | undefined>(undefined);
   const [tripDetailId, setTripDetailId] = useState<string | null>(null);
   // Set only when Add was opened from a trip's "Add expense" action, so AddFlow can attach the
   // trip to whatever it saves and show it in the manual-entry title. Cleared on close alongside
@@ -686,7 +688,10 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setCategoryDetailId(id);
             setScreen('categoryDetail');
           }}
-          onOpenRecap={() => setScreen('recap')}
+          onOpenRecap={(month) => {
+            setRecapMonth(month);
+            setScreen('recap');
+          }}
           onOpenNetWorth={() => setScreen('networth')}
           onOpenTrip={(id) => openTrip('home', id)}
           onOpenOwed={() => {
@@ -783,6 +788,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
             setScreen('owed');
           }}
           onOpenTrips={() => setScreen('trips')}
+          onOpenTrip={(id) => openTrip('transactions', id)}
           onBack={goBack}
         />
       )}
@@ -800,13 +806,22 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       {screen === 'commitments' && <CommitmentsScreen onBack={goBack} />}
       {screen === 'tax' && <TaxScreen onBack={goBack} />}
       {screen === 'currencySettings' && <CurrencySettingsScreen onBack={goBack} />}
-      {screen === 'budget' && <BudgetScreen onBack={goBack} onOpenRecap={() => setScreen('recap')} />}
+      {screen === 'budget' && <BudgetScreen onBack={goBack} onOpenRecap={() => { setRecapMonth(undefined); setScreen('recap'); }} />}
       {screen === 'categoryDetail' && categoryDetailId && (
         <CategoryDetailScreen categoryId={categoryDetailId} onBack={goBack} />
       )}
       {screen === 'recap' && (
         <RecapScreen
           onBack={goBack}
+          initialMonth={recapMonth}
+          onMonthChange={setRecapMonth}
+          onAdd={() => {
+            setAddTutorialMode(undefined);
+            setAddInitialType(undefined);
+            setAddTripId(null);
+            setAddOrigin('recap');
+            setScreen('add');
+          }}
           onOpenCalendar={(month) => {
             setCalendarOrigin('recap');
             setCalendarMonth(month);

@@ -38,33 +38,45 @@ describe('QuickRecordWidget layout', () => {
     expect(Object.keys(found)).toEqual(['pip://add']);
   });
 
-  it('shows the expanded streak count and 7 dots only when both slots are empty', () => {
+  it('shows the expanded streak count and 7 dots when fire is selected', () => {
     const dots = [true, true, false, true, false, false, true];
-    const expanded = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'none', slot2: 'none' }) });
-    const json = JSON.stringify(expanded);
+    const withFire = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'streak', slot2: 'none' }) });
+    const json = JSON.stringify(withFire);
     expect(json).toContain('data-streak-dots');
-    const compact = JSON.stringify(QuickRecordWidget({ streak: 9, dots, config: cfg() }));
-    expect(compact).not.toContain('data-streak-dots');
+    const compact = QuickRecordWidget({ streak: 9, dots, config: cfg() });
+    expect(JSON.stringify(compact)).not.toContain('data-streak-dots');
+    const withNone = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'none', slot2: 'none' }) });
+    expect(JSON.stringify(withNone)).not.toContain('data-streak-dots');
   });
 
-  it('honours the selected badge icon and colour in the expanded layout', () => {
-    const expanded = QuickRecordWidget({
+  it('scales the fire icon and count with buttonNotch when fire is selected', () => {
+    const dots = [true, true, false, true, false, false, true];
+    const notch1 = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 1 }) });
+    const notch5 = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 5 }) });
+    expect(JSON.stringify(notch1)).toContain('"width":24,"height":24');
+    expect(JSON.stringify(notch5)).toContain('"width":44,"height":44');
+    expect(JSON.stringify(notch1)).toContain('"fontSize":15');
+    expect(JSON.stringify(notch5)).toContain('"fontSize":22');
+  });
+
+  it('honours the selected badge icon and colour when fire is selected', () => {
+    const withFire = QuickRecordWidget({
       streak: 9,
       config: cfg({
-        slot1: 'none',
+        slot1: 'streak',
         slot2: 'none',
         badgeIcon: 'star',
         badgeColor: 'blue',
       }),
     });
-    const json = JSON.stringify(expanded);
+    const json = JSON.stringify(withFire);
     expect(json).toContain('data-streak-icon');
     expect(json).toContain('#2563EB');
 
     const withoutIcon = JSON.stringify(
       QuickRecordWidget({
         streak: 9,
-        config: cfg({ slot1: 'none', slot2: 'none', badgeIcon: 'none' }),
+        config: cfg({ slot1: 'streak', slot2: 'none', badgeIcon: 'none' }),
       })
     );
     expect(withoutIcon).not.toContain('data-streak-icon');

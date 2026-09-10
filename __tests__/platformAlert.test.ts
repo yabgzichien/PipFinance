@@ -39,4 +39,36 @@ describe('confirmAction', () => {
     request.neutralAction.onPress();
     expect(onReview).toHaveBeenCalledTimes(1);
   });
+
+  it('dispatches custom cancel label and primary neutral action style', () => {
+    const onQuit = jest.fn();
+    const onSave = jest.fn();
+
+    confirmAction(
+      'Quit without saving?',
+      'You have unsaved changes.',
+      'Quit without saving',
+      onQuit,
+      {
+        label: 'Save & Exit',
+        onPress: onSave,
+        style: 'primary',
+      },
+      'Keep editing'
+    );
+
+    expect(mockDispatchAlert).toHaveBeenCalledWith({
+      kind: 'confirm',
+      title: 'Quit without saving?',
+      message: 'You have unsaved changes.',
+      confirmLabel: 'Quit without saving',
+      cancelLabel: 'Keep editing',
+      onConfirm: onQuit,
+      neutralAction: {
+        label: 'Save & Exit',
+        onPress: onSave,
+        style: 'primary',
+      },
+    });
+  });
 });

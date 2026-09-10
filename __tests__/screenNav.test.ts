@@ -66,6 +66,7 @@ describe('backTargetFor', () => {
     expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'trips' })).toBe('trips');
     expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'breakdown' })).toBe('breakdown');
     expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'recap' })).toBe('recap');
+    expect(backTargetFor('tripDetail', { ...origins, tripDetailOrigin: 'transactions' })).toBe('transactions');
   });
 
   it('returns owed, calendar and export to wherever they were opened from', () => {

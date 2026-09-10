@@ -1,739 +1,344 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
-import { Icon } from '../components/Icon';
+import { Icon, type IconName } from '../components/Icon';
 import { Pip } from '../components/Pip';
 import { TripMonthSection } from '../components/TripMonthSection';
-import { Card, CatBadge } from '../components/ui';
-import { categoryStatus, monthKey, txnMonthKey, type CategoryBudgetStatus } from '../lib/budget';
-import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
+import { RecapTransactionsSheet } from '../components/recap/RecapTransactionsSheet';
+import { Body, CatBadge, Display, Label, Title } from '../components/ui';
+import { currentMonthKey, txnMonthKey } from '../lib/budget';
+import { fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
-import {
-  autoCategorizedRate,
-  availableMonths,
-  categoryComparisons,
-  computeAdherence,
-  hasComparisonData,
-  monthlyIncomeStatement,
-  prevMonthKey,
-  spentByCategory,
-} from '../lib/recap';
+import { availableMonths, completedRecapComparisons, monthlyRecapSummary, prevMonthKey } from '../lib/recap';
 import { netWorthSeries } from '../lib/networth';
+import * as haptics from '../lib/haptics';
 import type { Category } from '../lib/types';
 import { useAccent } from '../state/accent';
-import type { AccentTheme } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
-import type { StructuralColors } from '../theme';
+import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
+import { useNow } from '../state/useNow';
+import { useReducedMotion } from '../state/useReducedMotion';
 import { useLanguage } from '../i18n';
-import { numFont, platformShadow, shadowCard, uiFont } from '../theme';
+import { radius, spacing } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
-// ── Design tints (from the approved mockup) ───────────────────────────────────
-// warn/caution are fixed hexes rather than colorTheme.amber: amber is a shared structural
-// token used for unrelated warnings elsewhere, and the caution (yellow) tier added alongside
-// it needs enough hue separation from it to read as a distinct step, not colorTheme.amber's
-// job to carry — see src/components/BudgetProgressList.tsx STATUS_COLOR, which this mirrors
-// so the two screens showing the same categoryStatus render it the same way.
-const CAUTION_COLOR = '#ca8a04';
-const WARN_COLOR = '#ea580c';
-const TINT = {
-  redSoft: '#fce8e6',
-  redTint: '#fff0ef',
-  amberSoft: '#fdf3dc',
-  amberTint: '#fffcf4',
-  yellowSoft: '#fbf0c7',
-  yellowTint: '#fffdf0',
-  ncfUp: '#42e893',
-  ncfDown: '#ff8a7a',
-} as const;
-
-function statusColor(st: CategoryBudgetStatus, theme: AccentTheme, colorTheme: StructuralColors): string {
-  if (st === 'ok') return theme.accent;
-  if (st === 'caution') return CAUTION_COLOR;
-  if (st === 'warn') return WARN_COLOR;
-  return colorTheme.red;
-}
-function statusBg(st: CategoryBudgetStatus, theme: AccentTheme): string {
-  if (st === 'ok') return theme.accentTint;
-  if (st === 'caution') return TINT.yellowTint;
-  if (st === 'warn') return TINT.amberTint;
-  return TINT.redTint;
-}
-function statusBorder(st: CategoryBudgetStatus, theme: AccentTheme): string {
-  if (st === 'ok') return theme.accentSoft;
-  if (st === 'caution') return TINT.yellowSoft;
-  if (st === 'warn') return TINT.amberSoft;
-  return TINT.redSoft;
-}
-
-// ── Hero gradient (radial sheen approximated by a diagonal linear ramp) ────────
-function HeroGradient({ positive }: { positive: boolean }) {
-  const stops = positive ? ['#25845e', '#1b6b48', '#0e3d27'] : ['#9b2335', '#7d1c2c', '#4a0e19'];
-  return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-      <Defs>
-        <LinearGradient id="recapHero" x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor={stops[0]} />
-          <Stop offset="0.52" stopColor={stops[1]} />
-          <Stop offset="1" stopColor={stops[2]} />
-        </LinearGradient>
-      </Defs>
-      <Rect x="0" y="0" width="100%" height="100%" fill="url(#recapHero)" />
-    </Svg>
-  );
-}
-
-// ── Income-statement hero ─────────────────────────────────────────────────────
-function IncomeHero({
-  month,
-  income,
-  expenses,
-  net,
-  networth,
-  dc,
-  breakdown,
-}: {
-  month: string;
-  income: number;
-  expenses: number;
-  net: number;
-  networth: { net: number; delta: number } | null;
-  dc: DisplayCurrency;
-  breakdown: string;
+export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, onAdd, initialMonth, onMonthChange }: {
+  onBack: () => void;
+  onOpenCalendar?: (month: string) => void;
+  onOpenExport?: (month: string) => void;
+  onOpenTrip: (tripId: string) => void;
+  onAdd?: () => void;
+  initialMonth?: string;
+  onMonthChange?: (month: string) => void;
 }) {
-  const { formatMonthLabel, isZh } = useLanguage();
-  const positive = net >= 0;
-  return (
-    <View
-      style={[
-        styles.heroShadowWrap,
-        positive ? styles.heroShadowPos : styles.heroShadowNeg,
-        { backgroundColor: positive ? '#0e3d27' : '#4a0e19' },
-      ]}
-    >
-      <View style={styles.hero}>
-      <HeroGradient positive={positive} />
-      <View style={styles.heroBlob} />
-      <View style={styles.heroPip}>
-        <Pip size={40} expr="proud" />
-      </View>
-
-      <Text style={styles.heroEyebrow}>
-        {isZh ? `收支总结 · ${formatMonthLabel(month, true)}` : `Income Statement · ${formatMonthLabel(month, true)}`}
-      </Text>
-
-      {/* Income */}
-      <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>{isZh ? '总收入' : 'Income'}</Text>
-        <Text style={styles.heroVal}>{fmtMoney(dc.convert(income), dc.code)}</Text>
-      </View>
-      {/* Expenses */}
-      <View style={[styles.heroLine, styles.heroLineBorder]}>
-        <Text style={styles.heroLineLabel}>{isZh ? '总支出' : 'Expenses'}</Text>
-        <Text style={[styles.heroVal, { color: 'rgba(255,255,255,0.72)' }]}>− {fmtMoney(dc.convert(expenses), dc.code)}</Text>
-      </View>
-      {/* Net cash flow */}
-      <View style={[styles.heroLine, { paddingTop: 12 }]}>
-        <Text style={[styles.heroLineLabel, { color: 'rgba(255,255,255,0.60)', fontFamily: uiFont(700) }]}>
-          {isZh ? '净现金流' : 'Net Cash Flow'}
-        </Text>
-        <Text style={[styles.heroNcf, { color: positive ? TINT.ncfUp : TINT.ncfDown }]}>
-          {positive ? '+' : '−'} {fmtMoney(dc.convert(Math.abs(net)), dc.code)}
-        </Text>
-      </View>
-
-      {breakdown.length > 0 && (
-        <Text style={styles.heroBreakdown}>{breakdown}</Text>
-      )}
-
-      {/* Net-worth impact strip */}
-      {networth && (
-        <View style={styles.nwStrip}>
-          <View>
-            <Text style={styles.nwLabel}>{isZh ? '月末净资产' : 'Month-End Net Worth'}</Text>
-            <Text style={styles.nwVal}>
-              {networth.net < 0 ? '− ' : ''}{fmtMoney(dc.convert(Math.abs(networth.net)), dc.code)}
-            </Text>
-          </View>
-          <View style={styles.nwDivider} />
-          <View>
-            <Text style={styles.nwLabel}>{isZh ? '比上月' : 'vs. last month'}</Text>
-            <View style={styles.nwDeltaRow}>
-              <Svg width={11} height={11} viewBox="0 0 12 12" fill="none">
-                <Path
-                  d={networth.delta >= 0 ? 'M6 10V2M6 2L3 5M6 2L9 5' : 'M6 2v8M6 10L3 7M6 10L9 7'}
-                  stroke={networth.delta >= 0 ? TINT.ncfUp : TINT.ncfDown}
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-              <Text style={[styles.nwDelta, { color: networth.delta >= 0 ? TINT.ncfUp : TINT.ncfDown }]}>
-                {networth.delta >= 0 ? '+' : '−'}{fmtMoney(dc.convert(Math.abs(networth.delta)), dc.code)}
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-      </View>
-    </View>
-  );
-}
-
-// ── Category row (target vs actual) ───────────────────────────────────────────
-function CategoryRow({ cat, spent, alloc, isLast, dc }: { cat: Category; spent: number; alloc: number; isLast: boolean; dc: DisplayCurrency }) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const { tCat, isZh } = useLanguage();
-  const st = categoryStatus(spent, alloc);
-  const color = statusColor(st, theme, colorTheme);
-  const ratio = alloc > 0 ? spent / alloc : spent > 0 ? 1.45 : 0;
-  const pct = Math.round(ratio * 100);
-  const over = spent > alloc;
-  const diff = Math.abs(spent - alloc);
-  const mainPct = Math.min(ratio, 1) * 100;
-
-  return (
-    <View style={[styles.catRow, !isLast && [styles.divider, { borderTopColor: colorTheme.line }]]}>
-      <View style={styles.catTop}>
-        <View style={styles.catIconLabel}>
-          <CatBadge category={cat} size={30} rad={9} />
-          <Text style={[styles.catLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
-        </View>
-        <View style={styles.catNums}>
-          <Text style={[styles.catActual, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(spent), dc.code)}</Text>
-          <Text style={[styles.catTarget, { color: colorTheme.ink2 }]}> / {fmt(dc.convert(alloc))}</Text>
-        </View>
-        <View style={[styles.badge, { backgroundColor: statusBg(st, theme), borderColor: statusBorder(st, theme) }]}>
-          <Text style={[styles.badgeText, { color }]}>
-            {diff === 0 ? (isZh ? '达标' : 'On target') : over ? `+${fmt(dc.convert(diff))}` : `−${fmt(dc.convert(diff))}`}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.barTrack}>
-        {over && <View style={[styles.barFill, { width: '100%', backgroundColor: color, opacity: 0.3 }]} />}
-        <View style={[styles.barFill, { width: `${mainPct}%`, backgroundColor: color }]} />
-      </View>
-
-      <View style={styles.catFoot}>
-        <Text style={[styles.catPct, { color }]}>{isZh ? `占预算 ${pct}%` : `${pct}% of budget`}</Text>
-        <Text style={[styles.catBudget, { color: colorTheme.ink2 }]}>{isZh ? `预算 ${fmtMoney(dc.convert(alloc), dc.code)}` : `budget ${fmtMoney(dc.convert(alloc), dc.code)}`}</Text>
-      </View>
-    </View>
-  );
-}
-
-type InsightType = 'good' | 'warn' | 'caution';
-
-// ── Insight row ───────────────────────────────────────────────────────────────
-function InsightRow({ type, text, isLast }: { type: InsightType; text: string; isLast: boolean }) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const color = type === 'good' ? theme.accent : type === 'warn' ? colorTheme.red : colorTheme.amber;
-  const bg = type === 'good' ? theme.accentTint : type === 'warn' ? TINT.redTint : TINT.amberTint;
-  const path =
-    type === 'good'
-      ? 'M3 7l3 3 6-6'
-      : type === 'warn'
-      ? 'M7 3.5v4M7 9.5h.01'
-      : 'M7 4v3.5M7 9h.01';
-  return (
-    <View style={[styles.insightRow, !isLast && [styles.divider, { borderTopColor: colorTheme.line }]]}>
-      <View style={[styles.insightIcon, { backgroundColor: bg }]}>
-        <Svg width={14} height={14} viewBox="0 0 14 14" fill="none">
-          <Path d={path} stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
-        </Svg>
-      </View>
-      <Text style={[styles.insightText, { color: colorTheme.ink }]}>{text}</Text>
-    </View>
-  );
-}
-
-export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip }: { onBack: () => void; onOpenCalendar?: (month: string) => void; onOpenExport?: (month: string) => void; onOpenTrip: (tripId: string) => void }) {
   const insets = useSafeAreaInsets();
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
+  const accent = useAccent();
+  const colors = useThemeColors();
+  const { width, fontScale } = useWindowDimensions();
+  const compact = width < 360 || fontScale > 1.25;
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, catById, snapshots, accounts, balanceEntries, memory, coverage, markTaskDone } = useAppData();
-
-  useEffect(() => {
-    void markTaskDone('recap');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const snapshotMonths = useMemo(() => Object.keys(snapshots), [snapshots]);
-  const months = useMemo(
-    () => availableMonths(transactions, snapshotMonths),
-    [transactions, snapshotMonths]
-  );
-  // Oldest → newest for the picker, so the most-recent month sits on the right.
-  const displayMonths = useMemo(() => [...months].reverse(), [months]);
-  const [selected, setSelected] = useState<string>(() => monthKey(new Date().toISOString())!);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const month = months.includes(selected) ? selected : months[0];
-
-  const statement = useMemo(() => monthlyIncomeStatement(transactions, month), [transactions, month]);
+  const { transactions, catById, snapshots, accounts, balanceEntries, memory, markTaskDone } = useAppData();
+  const now = useNow();
+  const todayMonth = currentMonthKey(now);
+  const reduced = useReducedMotion();
   const dc = useDisplayCurrency();
-  const monthNativeTotals = useMemo(
-    () => nativeTransactionTotalsByCurrency(transactions.filter((t) => txnMonthKey(t) === month)),
-    [transactions, month]
-  );
-  const spentByCat = useMemo(() => spentByCategory(transactions, month), [transactions, month]);
-  const snapshot = snapshots[month];
-  const allocations = snapshot?.allocations ?? {};
-  const adherence = useMemo(() => computeAdherence(allocations, spentByCat), [allocations, spentByCat]);
+  const scroll = useRef<ScrollView>(null);
+  const [selected, setSelected] = useState(initialMonth ?? todayMonth);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [allCategories, setAllCategories] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // undefined = closed; null = all expenses; string = one spending category.
+  const [transactionCategory, setTransactionCategory] = useState<string | null | undefined>(undefined);
+  const months = useMemo(() => availableMonths(transactions, Object.keys(snapshots), now), [transactions, snapshots, todayMonth]); // eslint-disable-line react-hooks/exhaustive-deps
+  const month = months.includes(selected) ? selected : todayMonth;
+  const current = month === todayMonth;
+  const future = month > todayMonth;
+  const summary = useMemo(() => monthlyRecapSummary(transactions, month, dc.convertTxn), [transactions, month, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
+  const comparisons = useMemo(() => completedRecapComparisons(transactions, month, now, dc.convertTxn).slice(0, 2), [transactions, month, todayMonth, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
+  const recordCount = summary.incomeCount + summary.expenseCount;
+  const empty = recordCount === 0;
+  const allocations = snapshots[month]?.allocations ?? {};
+  const budgetIds = Object.keys(allocations);
   const merchantsKnown = Object.keys(memory).length;
-  const autoRate = useMemo(() => autoCategorizedRate(transactions, month), [transactions, month]);
-  const comparisons = useMemo(() => categoryComparisons(transactions, month), [transactions, month]);
-  const showComparisons = useMemo(() => hasComparisonData(transactions, month), [transactions, month]);
-
-  const hasBudget = Object.keys(allocations).length > 0;
-  const budgetedIds = useMemo(() => Object.keys(allocations), [allocations]);
-  const unbudgetedSpent = useMemo(
-    () => Object.entries(spentByCat).filter(([id]) => !budgetedIds.includes(id)).reduce((s, [, v]) => s + v, 0),
-    [spentByCat, budgetedIds]
-  );
-
-  // Month-end net worth for the selected month and the one before it.
+  const categoryFor = (id: string): Category => catById[id] ?? { ...fallback, id, label: isZh ? '未分类' : 'Uncategorized' };
+  const categoryLabel = (id: string) => catById[id] ? tCat(catById[id]) : (isZh ? '未分类' : 'Uncategorized');
+  const money = (amount: number) => fmtMoney(amount, dc.code);
+  const signed = (amount: number) => `${amount < 0 ? '− ' : amount > 0 ? '+ ' : ''}${money(Math.abs(amount))}`;
+  const incomeOnly = summary.expenseCount === 0 && summary.incomeCount > 0;
+  const heroAmount = money(incomeOnly ? summary.income : summary.expenses);
+  const nativeExpenses = useMemo(() => nativeTransactionTotalsByCurrency(transactions.filter((txn) => txnMonthKey(txn) === month && txn.type === 'expense')), [transactions, month]);
+  const today = `${todayMonth}-${String(now.getDate()).padStart(2, '0')}`;
   const networth = useMemo(() => {
-    if (accounts.length === 0) return null;
-    const [prev, curr] = netWorthSeries(accounts, balanceEntries, [prevMonthKey(month), month]);
-    return { net: curr.net, delta: curr.net - prev.net };
-  }, [accounts, balanceEntries, month]);
+    const eligibleAccounts = accounts.filter((account) => !account.archived);
+    const entries = balanceEntries.filter((entry) => entry.asOf <= (current ? today : `${month}-31`));
+    if (future || !entries.some((entry) => eligibleAccounts.some((account) => account.id === entry.accountId))) return null;
+    const [previous, selectedPoint] = netWorthSeries(eligibleAccounts, entries, [prevMonthKey(month), month], dc.rates);
+    const hasPrevious = entries.some((entry) => entry.asOf < `${month}-01` && eligibleAccounts.some((account) => account.id === entry.accountId));
+    return { net: dc.convert(selectedPoint.net), delta: hasPrevious ? dc.convert(selectedPoint.net - previous.net) : null };
+  }, [accounts, balanceEntries, month, today, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Insights, mapped from the deterministic adherence result.
-  const insights = useMemo<{ type: InsightType; text: string }[]>(() => {
-    const out: { type: InsightType; text: string }[] = [];
-    out.push({
-      type: adherence.overspends.length === 0 ? 'good' : 'caution',
-      text: isZh
-        ? `在 ${adherence.totalBudgeted} 个分类中，有 ${adherence.withinCount} 个控制在预算内。`
-        : `Stayed within budget in ${adherence.withinCount} of ${adherence.totalBudgeted} categories.`,
-    });
-    if (adherence.overspends.length === 0) {
-      out.push({
-        type: 'good',
-        text: isZh ? '本月所有分类均未超出预算！🎉' : 'Nothing went over target this month. 🎉',
-      });
-    } else {
-      for (const o of adherence.overspends.slice(0, 3)) {
-        const cat = catById[o.catId] ?? fallback;
-        out.push({
-          type: 'warn',
-          text: isZh
-            ? `${tCat(cat)} 超出 ${fmtMoney(dc.convert(o.over), dc.code)}：支出 ${fmtMoney(dc.convert(o.spent), dc.code)} / 预算 ${fmtMoney(dc.convert(o.allocated), dc.code)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}。`
-            : `${cat.label} over by ${fmtMoney(dc.convert(o.over), dc.code)}: ${fmtMoney(dc.convert(o.spent), dc.code)} of ${fmtMoney(dc.convert(o.allocated), dc.code)}${o.allocated > 0 ? ` (${o.pct}%)` : ''}.`,
-        });
-      }
-    }
-    return out;
-  }, [adherence, catById, isZh, tCat, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void markTaskDone('recap'); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onMonthChange?.(month); }, [month, onMonthChange]);
 
-  const stripRef = useRef<ScrollView>(null);
+  const chooseMonth = (next: string) => {
+    haptics.tap();
+    setSelected(next);
+    setPickerOpen(false);
+    setAllCategories(false);
+    setDetailsOpen(false);
+    setTransactionCategory(undefined);
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  };
+  const openTransactions = (catId: string | null) => { haptics.tap(); setTransactionCategory(catId); };
 
   return (
-    <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
-      {/* Nav bar */}
-      <View style={[styles.nav, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={onBack} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]}>
-          <Svg width={10} height={17} viewBox="0 0 10 17" fill="none">
-            <Path d="M8.5 1.5L1.5 8.5l7 7" stroke={colorTheme.ink2} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-          </Svg>
+    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <View style={[styles.nav, { paddingTop: insets.top + spacing.sm }]}>
+        <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={isZh ? '返回' : 'Back'} style={({ pressed }) => [styles.iconButton, pressed && { backgroundColor: colors.surface }]}>
+          <Icon name="chevronLeft" size={24} color={colors.ink} />
         </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('monthlyRecap')}</Text>
-        <Pressable onPress={() => setPickerOpen(true)} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} accessibilityRole="button" accessibilityLabel="Select month">
-          <Svg width={17} height={17} viewBox="0 0 18 18" fill="none" stroke={colorTheme.ink2} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-            <Rect x={3} y={4} width={12} height={11} rx={2} />
-            <Path d="M3 7.5h12M6.5 2.5v3M11.5 2.5v3M6.5 11l1.6 1.6L11.5 9" />
-          </Svg>
-        </Pressable>
-        {onOpenCalendar && (
-          <Pressable
-            onPress={() => onOpenCalendar(month)}
-            style={[styles.navBtn, { backgroundColor: colorTheme.surface, marginLeft: 6 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Open calendar view"
-          >
-            <Svg width={17} height={17} viewBox="0 0 18 18" fill="none" stroke={theme.accent} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
-              <Rect x={3} y={3} width={12} height={12} rx={2} />
-              <Path d="M3 7h12M6.5 1.5v3M11.5 1.5v3" />
-              <Path d="M6 10.5h2M10 10.5h2M6 13h2M10 13h2" />
-            </Svg>
-          </Pressable>
-        )}
-        {onOpenExport && (
-          <Pressable
-            onPress={() => onOpenExport(month)}
-            style={[styles.navBtn, { backgroundColor: colorTheme.surface, marginLeft: 6 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Export financial report"
-          >
-            <Svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke={theme.accent} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-            </Svg>
-          </Pressable>
-        )}
+        <Body weight={700} style={styles.navTitle}>{t('monthlyRecap')}</Body>
+        <View style={styles.iconButton} />
       </View>
+      <ScrollView ref={scroll} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.xl }]} showsVerticalScrollIndicator={false}>
+        <View style={styles.monthRow}>
+          <Pressable onPress={() => { haptics.tap(); setPickerOpen(true); }} accessibilityRole="button" accessibilityLabel={isZh ? '选择月份' : 'Select month'} style={({ pressed }) => [styles.monthPicker, { opacity: pressed ? 0.7 : 1 }]}>
+            <Body weight={700}>{formatMonthLabel(month, true)}</Body>
+            <Icon name="chevronDown" size={14} color={colors.ink2} />
+          </Pressable>
+          {current && <Label weight={500} color={colors.ink2}>{isZh ? '截至目前' : 'So far'}</Label>}
 
-      {/* Month picker  most-recent on the right */}
-      <ScrollView
-        ref={stripRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        onContentSizeChange={() => stripRef.current?.scrollToEnd({ animated: false })}
-        style={styles.monthScroll}
-        contentContainerStyle={styles.monthStrip}
-      >
-        {displayMonths.map((mk) => {
-          const on = mk === month;
-          return (
-            <Pressable
-              key={mk}
-              onPress={() => setSelected(mk)}
-              style={[
-                styles.monthChip,
-                { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
-                on && {
-                  backgroundColor: theme.accentInk,
-                  borderColor: theme.accentInk,
-                  ...platformShadow(theme.accent, 0.28, 10, { width: 0, height: 3 }, 0),
-                },
-              ]}
-            >
-              <Text style={[styles.monthChipText, { color: colorTheme.ink2 }, on && styles.monthChipTextOn]}>
-                {formatMonthLabel(mk, false)}
-              </Text>
+        </View>
+
+        <View style={[styles.hero, { backgroundColor: accent.accentTint }]}>
+          <View style={styles.intro}>
+            <View style={styles.grow}>
+              {empty ? <Title color={accent.onTint}>{isZh ? '还没有记录' : 'No entries yet'}</Title> :
+                <Label weight={500} color={accent.onTint}>{incomeOnly ? (isZh ? '已记录收入' : 'Recorded income') : (isZh ? '已记录支出' : 'Recorded spending')}</Label>
+              }
+            </View>
+            <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Pip size={36} expr={empty ? 'curious' : 'happy'} />
+            </View>
+          </View>
+          {!empty && (heroAmount.length > (compact ? 11 : 16)
+            ? <Title numeric>{heroAmount}</Title>
+            : <Display numeric>{heroAmount}</Display>)}
+          {empty ? (
+            onAdd && <Pressable onPress={onAdd} accessibilityRole="button" accessibilityLabel={isZh ? '添加交易' : 'Add a transaction'} style={({ pressed }) => [styles.addButton, { backgroundColor: accent.accentInk, opacity: pressed ? 0.8 : 1 }]}>
+              <Icon name="plus" size={20} color="#fff" />
+              <Body weight={700} color="#fff">{isZh ? '添加交易' : 'Add a transaction'}</Body>
             </Pressable>
-          );
-        })}
-      </ScrollView>
-
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 30 }} showsVerticalScrollIndicator={false}>
-        <IncomeHero
-          month={month}
-          income={statement.income}
-          expenses={statement.expenses}
-          net={statement.net}
-          networth={networth}
-          dc={dc}
-          breakdown={formatCurrencyBreakdown(monthNativeTotals)}
-        />
-
-        {/* Above the budget block on purpose: that block collapses to "not available" for a month
-            with no budget, and a trip's spending is worth seeing in exactly those months too. */}
-        <TripMonthSection
-          monthKey={month}
-          monthExpenseTotal={dc.convert(statement.expenses)}
-          cardStyle={styles.listCard}
-          onOpenTrip={onOpenTrip}
-          heading={
-            <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{t('tripsThisMonth')}</Text>
-            </View>
-          }
-        />
-
-        {showComparisons && (
-          <>
-            <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '对比上月支出' : 'You vs. last month'}</Text>
-            </View>
-            <Card style={styles.listCard}>
-              {comparisons.slice(0, 5).map((c, i) => {
-                const cat = catById[c.catId] ?? fallback;
-                return (
-                  <View key={c.catId} style={[styles.compareRow, i > 0 && [styles.divider, { borderTopColor: colorTheme.line }]]}>
-                    <CatBadge category={cat} size={30} rad={9} />
-                    <Text style={[styles.compareLabel, { color: colorTheme.ink }]} numberOfLines={1}>{tCat(cat)}</Text>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[styles.compareNow, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(c.current), dc.code)}</Text>
-                      <Text style={[styles.comparePrev, { color: colorTheme.ink2 }]}>
-                        {isZh ? `上月 ${fmtMoney(dc.convert(c.previous), dc.code)}` : `Last month ${fmtMoney(dc.convert(c.previous), dc.code)}`}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </Card>
-          </>
-        )}
-
-        {hasBudget ? (
-          <>
-            {/* Spending breakdown */}
-            <View style={styles.sectionHead}>
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '支出明细' : 'Spending'}</Text>
-              <Text style={[styles.sectionSub, { color: colorTheme.ink2 }]}>{fmtMoney(dc.convert(statement.expenses), dc.code)}</Text>
-            </View>
-            <Card style={styles.listCard}>
-              {budgetedIds.map((id, i) => (
-                <CategoryRow
-                  key={id}
-                  cat={catById[id] ?? fallback}
-                  spent={spentByCat[id] ?? 0}
-                  alloc={allocations[id]}
-                  isLast={i === budgetedIds.length - 1 && unbudgetedSpent <= 0}
-                  dc={dc}
-                />
-              ))}
-              {unbudgetedSpent > 0 && (
-                <View style={[styles.catRow, styles.divider, { borderTopColor: colorTheme.line }]}>
-                  <View style={styles.catIconLabel}>
-                    <View style={[styles.unbudgetedIcon, { backgroundColor: colorTheme.surface2 }]}>
-                      <Icon name="dots" size={16} color={colorTheme.ink3} />
-                    </View>
-                    <Text style={[styles.catLabel, { color: colorTheme.ink }]}>{isZh ? '未列入预算' : 'Unbudgeted'}</Text>
-                  </View>
-                  <Text style={[styles.catActual, { color: colorTheme.ink }]}>{fmtMoney(dc.convert(unbudgetedSpent), dc.code)}</Text>
-                </View>
-              )}
-            </Card>
-
-            {/* Where to improve */}
-            <View style={styles.improveHead}>
-              <View style={[styles.improveTab, { backgroundColor: theme.accent }]} />
-              <Text style={[styles.sectionLabel, { color: colorTheme.ink2 }]}>{isZh ? '改善建议' : 'Where to improve'}</Text>
-              <View style={[styles.signalPill, { backgroundColor: theme.accentSoft }]}>
-                <Text style={[styles.signalText, { color: theme.onTint }]}>
-                  {isZh ? `${insights.length} 条提醒` : `${insights.length} signals`}
-                </Text>
+          ) : incomeOnly || summary.incomeCount === 0 ? (
+            <Label weight={500} color={colors.ink2} style={styles.recordNote}>{incomeOnly ? (isZh ? '尚未记录支出' : 'No expenses recorded') : (isZh ? '尚未记录收入' : 'No income recorded')}</Label>
+          ) : (
+            <View style={[styles.moneyRow, { borderTopColor: accent.accentSoft }, compact && styles.stack]}>
+              <View style={styles.grow}>
+                <Label weight={500} color={colors.ink2}>{isZh ? '收入' : 'Income'}</Label>
+                <Body numeric weight={700}>{money(summary.income)}</Body>
+              </View>
+              <View style={styles.grow}>
+                <Label weight={500} color={colors.ink2}>{isZh ? '净现金流' : 'Net cash flow'}</Label>
+                <Body numeric weight={700}>{signed(summary.net)}</Body>
               </View>
             </View>
-            <Card style={styles.listCard}>
-              {insights.map((it, i) => (
-                <InsightRow key={i} type={it.type} text={it.text} isLast={i === insights.length - 1} />
-              ))}
-            </Card>
-          </>
-        ) : (
-          <View style={styles.emptyPad}>
-            <Text style={[styles.emptyText, { color: colorTheme.ink2 }]}>
-              {isZh ? '该月份暂无分类预算数据。' : 'Category breakdown not available for this month.'}
-            </Text>
-          </View>
-        )}
+          )}
+        </View>
 
-        {merchantsKnown > 0 && (
-          <View style={[styles.competenceCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-            <View style={[styles.exportIconWrap, { backgroundColor: theme.accentTint }]}>
-              <Icon name="sparkles" size={18} color={theme.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>
-                {t('competenceMerchants', { count: merchantsKnown })}
-              </Text>
-              {autoRate !== null && (
-                <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
-                  {t('competenceAutoRate', { pct: autoRate })}
-                </Text>
-              )}
-              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
-                {t('competenceCoverage', { days: coverage.daysCovered, window: coverage.windowDays })}
-              </Text>
-            </View>
-          </View>
-        )}
+        {/* Trips this month (placed above Where it went) */}
+        <TripMonthSection monthKey={month} monthExpenseTotal={summary.expenses} onOpenTrip={onOpenTrip} cardStyle={styles.tripCard} heading={<View style={styles.tripHeading}><Title>{isZh ? '这个月的旅程' : 'Trips this month'}</Title></View>} />
 
-        {onOpenExport && (
-          <Pressable
-            onPress={() => onOpenExport(month)}
-            style={({ pressed }) => [
-              styles.exportCard,
-              { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
-              pressed && { opacity: 0.9 },
-            ]}
-          >
-            <View style={[styles.exportIconWrap, { backgroundColor: theme.accentTint }]}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={theme.accent} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-              </Svg>
+        {/* Where it went */}
+        {summary.expenseCount > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeading}>
+              <Title>{isZh ? '钱花在哪里' : 'Where it went'}</Title>
+              <Pressable onPress={() => openTransactions(null)} accessibilityRole="button" accessibilityLabel={isZh ? '查看全部支出' : 'View all expenses'} style={styles.inlineAction}>
+                <Label color={accent.onTint}>{isZh ? '查看全部' : 'View all'}</Label>
+                <Icon name="arrowRight" size={16} color={accent.onTint} />
+              </Pressable>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.exportCardTitle, { color: colorTheme.ink }]}>
-                {isZh ? `导出 ${formatMonthLabel(month, true)} 财务报表` : `Export ${formatMonthLabel(month, true)} Statement`}
-              </Text>
-              <Text style={[styles.exportCardSub, { color: colorTheme.ink2 }]}>
-                {isZh ? '生成 PDF、Excel (.xlsx)、CSV 或 HTML 格式对账单。' : 'Generate PDF, Excel (.xlsx), CSV, or HTML bookkeeping files.'}
-              </Text>
-            </View>
-            <Svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke={colorTheme.ink3} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <Path d="M6 3l5 5-5 5" />
-            </Svg>
-          </Pressable>
-        )}
-
-        <View style={{ height: 16 }} />
-      </ScrollView>
-
-      {/* Month dropdown  reliable selector on every platform (web mouse can't drag the strip) */}
-      <Modal visible={pickerOpen} transparent animationType="fade" onRequestClose={() => setPickerOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
-          <Pressable style={[styles.modalSheet, { backgroundColor: colorTheme.surface, paddingBottom: insets.bottom + 16 }]} onPress={() => {}}>
-            <View style={[styles.modalHandle, { backgroundColor: colorTheme.line }]} />
-            <Text style={[styles.modalTitle, { color: colorTheme.ink2 }]}>{isZh ? '选择月份' : 'Select month'}</Text>
-            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
-              {months.map((mk) => {
-                const on = mk === month;
+            <View style={[styles.surface, { backgroundColor: colors.surface }]}>
+              {(allCategories ? summary.categories : summary.categories.slice(0, 4)).map((row, i) => {
+                const pct = summary.expenses > 0 ? Math.round(row.amount / summary.expenses * 100) : 0;
                 return (
-                  <Pressable
-                    key={mk}
-                    onPress={() => {
-                      setSelected(mk);
-                      setPickerOpen(false);
-                    }}
-                    style={[styles.monthOption, on && { backgroundColor: theme.accentTint }]}
-                  >
-                    <Text style={[styles.monthOptionText, { color: colorTheme.ink }, on && { color: theme.onTint, fontFamily: uiFont(700) }]}>
-                      {formatMonthLabel(mk, true)}
-                    </Text>
-                    {on && (
-                      <Svg width={16} height={16} viewBox="0 0 16 16" fill="none">
-                        <Path d="M3 8.5l3.2 3.2L13 5" stroke={theme.accent} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-                      </Svg>
-                    )}
+                  <Pressable key={row.catId} onPress={() => openTransactions(row.catId)} accessibilityRole="button" accessibilityLabel={isZh ? `查看${categoryLabel(row.catId)}交易` : `View ${categoryLabel(row.catId)} transactions`} style={({ pressed }) => [styles.categoryRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line }, pressed && { backgroundColor: colors.surface2 }]}>
+                    <View style={styles.categoryTop}>
+                      <CatBadge category={categoryFor(row.catId)} size={36} rad={12} />
+                      <View style={styles.grow}>
+                        <Body weight={700}>{categoryLabel(row.catId)}</Body>
+                      </View>
+                      <Body numeric weight={700} style={styles.categoryAmount}>{money(row.amount)}</Body>
+                      <Icon name="chevronRight" size={16} color={colors.ink2} />
+                    </View>
+                    <View style={[styles.barTrack, { backgroundColor: colors.surface2 }]} accessible={false}>
+                      <View style={[styles.barFill, { backgroundColor: accent.accent, width: `${Math.max(0, Math.min(100, pct))}%` }]} />
+                    </View>
                   </Pressable>
                 );
               })}
+              {summary.categories.length > 4 && (
+                <Pressable onPress={() => setAllCategories(!allCategories)} accessibilityRole="button" accessibilityState={{ expanded: allCategories }} style={[styles.textButton, { borderTopWidth: 1, borderTopColor: colors.line }]}>
+                  <Label color={accent.onTint}>{allCategories ? (isZh ? '收起分类' : 'Show fewer categories') : (isZh ? `查看全部 ${summary.categories.length} 个分类` : `View all ${summary.categories.length} categories`)}</Label>
+                  <Icon name={allCategories ? 'chevronUp' : 'chevronDown'} size={16} color={accent.onTint} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* What changed */}
+        {comparisons.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeading}>
+              <Title>{isZh ? '这个月的变化' : 'What changed'}</Title>
+              <Label weight={500} color={colors.ink2}>{isZh ? `对比 ${formatMonthLabel(prevMonthKey(month), false)} 记录` : `vs. ${formatMonthLabel(prevMonthKey(month), false)} records`}</Label>
+            </View>
+            <View style={[styles.surface, { backgroundColor: colors.surface }]}>
+              {comparisons.map((comparison, i) => (
+                <View key={comparison.catId} style={[styles.changeRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line }]}>
+                  <CatBadge category={categoryFor(comparison.catId)} size={36} rad={12} />
+                  <View style={styles.grow}>
+                    <Body weight={700}>{categoryLabel(comparison.catId)}</Body>
+                  </View>
+                  <Body numeric weight={700} style={styles.categoryAmount}>
+                    {isZh ? `${comparison.deltaAbs > 0 ? '多' : '少'} ${money(Math.abs(comparison.deltaAbs))}` : `${money(Math.abs(comparison.deltaAbs))} ${comparison.deltaAbs > 0 ? 'more' : 'less'}`}
+                  </Body>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        <View style={styles.section}>
+          <View>
+            {(!empty || budgetIds.length > 0 || networth) && (
+              <>
+                <Pressable onPress={() => { haptics.tap(); setDetailsOpen(!detailsOpen); }} accessibilityRole="button" accessibilityLabel={isZh ? '财务详情' : 'Financial details'} accessibilityState={{ expanded: detailsOpen }} style={styles.detailsToggle}>
+                  <Body color={colors.ink2}>{isZh ? '详情' : 'Details'}</Body>
+                  <Icon name={detailsOpen ? 'chevronUp' : 'chevronDown'} size={18} color={colors.ink2} />
+                </Pressable>
+                {detailsOpen && (
+                  <View style={[styles.details, { borderTopColor: colors.line }]}>
+                    {!empty && <>
+                      <View style={styles.budgetRow}>
+                        <Body style={styles.grow}>{isZh ? '净现金流' : 'Net cash flow'}</Body>
+                        <Body numeric weight={700} style={styles.categoryAmount}>{signed(summary.net)}</Body>
+                      </View>
+                      <Label weight={500} color={colors.ink2}>{isZh ? `根据 ${recordCount} 笔交易计算。净现金流为收入减支出。` : `Based on ${recordCount} recorded transaction${recordCount === 1 ? '' : 's'}. Net cash flow is income minus expenses.`}</Label>
+                      {Object.keys(nativeExpenses).length > 1 && <Label weight={500} color={colors.ink2}>{isZh ? '原币支出：' : 'Original currencies: '}{formatCurrencyBreakdown(nativeExpenses)}</Label>}
+                      {merchantsKnown > 0 && <Label weight={500} color={colors.ink2}>{isZh ? `Pip 累计记住了 ${merchantsKnown} 家商家。` : `${merchantsKnown} merchants remembered across your records.`}</Label>}
+                    </>}
+                    {budgetIds.length > 0 && (
+                      <>
+                        <Body weight={700}>{isZh ? '预算详情' : 'Budget details'}</Body>
+                        {budgetIds.map((id) => {
+                          const spent = summary.categories.find((row) => row.catId === id)?.amount ?? 0;
+                          const target = dc.convert(allocations[id]);
+                          return (
+                            <View key={id} style={styles.budgetRow}>
+                              <View style={styles.grow}>
+                                <Body>{categoryLabel(id)}</Body>
+                                <Label weight={500} color={colors.ink2}>{isZh ? `目标 ${money(target)}` : `Target ${money(target)}`}</Label>
+                              </View>
+                              <View style={styles.budgetAmount}>
+                                <Body numeric weight={700}>{money(spent)}</Body>
+                                <Label weight={500} color={colors.ink2}>{isZh ? `${spent > target ? '高于' : '低于'}目标 ${money(Math.abs(spent - target))}` : `${money(Math.abs(spent - target))} ${spent > target ? 'over' : 'under'} target`}</Label>
+                              </View>
+                            </View>
+                          );
+                        })}
+                        <Label weight={500} color={colors.ink2}>{isZh ? '仅显示设置了预算的分类，全部支出见上方。' : 'Only categories with a budget are listed here. All spending is shown above.'}</Label>
+                      </>
+                    )}
+                    {networth && (
+                      <View style={styles.networth}>
+                        <Body weight={700}>{isZh ? (current ? '当前已记录净资产' : '月末已记录净资产') : (current ? 'Recorded net worth so far' : 'Recorded month-end net worth')}</Body>
+                        <Title numeric>{signed(networth.net)}</Title>
+                        {networth.delta !== null && <Label weight={500} color={colors.ink2}>{isZh ? `较上月末 ${signed(networth.delta)}` : `${signed(networth.delta)} since last month-end`}</Label>}
+                        <Label weight={500} color={colors.ink2}>{isZh ? '根据 Pip 中的账户余额记录计算。' : 'Based on account balances added to Pip.'}</Label>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </>
+            )}
+            {(onOpenCalendar || onOpenExport) && <View style={[styles.actions, { borderTopColor: colors.line }]}>
+              {onOpenCalendar && <ActionButton icon="calendar" label={isZh ? '日历' : 'Calendar'} accessibilityLabel={isZh ? '查看活动日历' : 'View activity calendar'} onPress={() => onOpenCalendar(month)} />}
+              {onOpenExport && <ActionButton icon="download" label={isZh ? '导出' : 'Export'} accessibilityLabel={isZh ? '导出报表' : 'Export statement'} onPress={() => onOpenExport(month)} />}
+            </View>}
+          </View>
+        </View>
+      </ScrollView>
+
+      <Modal visible={pickerOpen} transparent animationType={reduced ? 'none' : 'fade'} onRequestClose={() => setPickerOpen(false)}>
+        <View style={styles.backdrop}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPickerOpen(false)} accessibilityRole="button" accessibilityLabel={isZh ? '关闭月份选择' : 'Close month picker'} />
+          <View style={[styles.monthSheet, { backgroundColor: colors.surface, paddingBottom: insets.bottom + spacing.base }]} accessibilityViewIsModal>
+            <View style={styles.sectionHeading}>
+              <Title>{isZh ? '选择月份' : 'Choose a month'}</Title>
+              <Pressable onPress={() => setPickerOpen(false)} style={styles.iconButton} accessibilityRole="button" accessibilityLabel={isZh ? '关闭' : 'Close'}><Icon name="x" size={22} color={colors.ink} /></Pressable>
+            </View>
+            <ScrollView>
+              {months.map((mk) => <Pressable key={mk} onPress={() => chooseMonth(mk)} accessibilityRole="button" accessibilityLabel={formatMonthLabel(mk, true)} accessibilityState={{ selected: mk === month }} style={({ pressed }) => [styles.monthOption, { backgroundColor: mk === month ? accent.accentTint : pressed ? colors.surface2 : colors.surface }]}>
+                <Body weight={mk === month ? 700 : 500}>{formatMonthLabel(mk, true)}</Body>
+                {mk === month && <Icon name="check" size={20} color={accent.onTint} />}
+              </Pressable>)}
             </ScrollView>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
+      {transactionCategory !== undefined && <RecapTransactionsSheet month={month} categoryId={transactionCategory} transactions={transactions} categoryFor={categoryFor} onClose={() => setTransactionCategory(undefined)} />}
     </View>
   );
 }
 
-const HERO_NUM = numFont(700);
+function ActionButton({ icon, label, accessibilityLabel, onPress }: { icon: IconName; label: string; accessibilityLabel: string; onPress: () => void }) {
+  const colors = useThemeColors();
+  return <Pressable onPress={() => { haptics.tap(); onPress(); }} accessibilityRole="button" accessibilityLabel={accessibilityLabel} style={({ pressed }) => [styles.actionButton, pressed && { backgroundColor: colors.surface2 }]}>
+    <Icon name={icon} size={18} color={colors.ink2} />
+    <Label weight={500} color={colors.ink2}>{label}</Label>
+  </Pressable>;
+}
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-
-  // nav
-  nav: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingBottom: 12 },
-  navBtn: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
-  navTitle: { flex: 1, textAlign: 'center', fontFamily: uiFont(700), fontSize: 16 },
-
-  // month picker  keep the strip its natural height; pills must not stretch vertically
-  monthScroll: { flexGrow: 0, flexShrink: 0 },
-  monthStrip: { paddingHorizontal: 16, paddingTop: 2, paddingBottom: 10, gap: 6, alignItems: 'center' },
-  monthChip: { paddingHorizontal: 17, paddingVertical: 6, borderRadius: 20, borderWidth: 1.5, ...shadowCard },
-  monthChipText: { fontFamily: uiFont(500), fontSize: 12.5 },
-  monthChipTextOn: { fontFamily: uiFont(700), color: '#fff' },
-
-  // hero
-  // Split in two: the shadow (incl. Android `elevation`) lives on this outer,
-  // unclipped wrapper, while `hero` below clips the gradient/blob to the
-  // rounded corners. Combining overflow:'hidden' with elevation on the same
-  // View clips Android's shadow into a glitchy rectangular offset  this
-  // wrapper/content split is the standard fix.
-  heroShadowWrap: { marginHorizontal: 16, borderRadius: 26 },
-  hero: { borderRadius: 26, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 16, overflow: 'hidden' },
-  heroShadowPos: platformShadow('#0c2214', 0.28, 24, { width: 0, height: 14 }, 8),
-  heroShadowNeg: platformShadow('#5a0a14', 0.32, 24, { width: 0, height: 14 }, 8),
-  heroBlob: { position: 'absolute', top: -50, right: -40, width: 160, height: 160, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
-  heroPip: { position: 'absolute', top: 14, right: 16 },
-  heroEyebrow: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1.1, color: 'rgba(255,255,255,0.50)', textTransform: 'uppercase', marginBottom: 16 },
-  heroLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 10 },
-  heroLineBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.10)', paddingTop: 10 },
-  heroLineLabel: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 0.9, textTransform: 'uppercase', color: 'rgba(255,255,255,0.46)' },
-  heroVal: { fontFamily: HERO_NUM, fontSize: 20, color: '#fff' },
-  heroNcf: { fontFamily: HERO_NUM, fontSize: 28 },
-  heroBreakdown: { color: '#ffffff', fontSize: 13, fontFamily: uiFont(700), fontWeight: '700', marginTop: -4, marginBottom: 6 },
-
-  // net-worth strip
-  nwStrip: { marginTop: 16, backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  nwLabel: { fontFamily: uiFont(500), fontSize: 11, letterSpacing: 0.7, textTransform: 'uppercase', color: 'rgba(255,255,255,0.45)', marginBottom: 3 },
-  nwVal: { fontFamily: HERO_NUM, fontSize: 18, color: '#fff' },
-  nwDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.12)' },
-  nwDeltaRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  nwDelta: { fontFamily: HERO_NUM, fontSize: 18 },
-
-  // section headers
-  sectionHead: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 4, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  sectionLabel: { fontFamily: uiFont(700), fontSize: 12, letterSpacing: 0.3 },
-  sectionSub: { fontFamily: numFont(600), fontSize: 12 },
-  improveHead: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  improveTab: { width: 4, height: 18, borderRadius: 2 },
-  signalPill: { marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 9 },
-  signalText: { fontFamily: uiFont(700), fontSize: 11 },
-
-  listCard: { marginHorizontal: 16, marginTop: 4, borderRadius: 20, overflow: 'hidden' },
-
-  // competence feedback
-  competenceCard: {
-    marginHorizontal: 16,
-    marginTop: 18,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    ...shadowCard,
-  },
-  competenceStat: { flex: 1, alignItems: 'center' },
-  competenceVal: { fontFamily: numFont(700), fontSize: 19 },
-  competenceLabel: { fontFamily: uiFont(500), fontSize: 11, marginTop: 2, textAlign: 'center' },
-  competenceDivider: { width: 1, height: 30 },
-
-  // month-over-month comparison
-  compareRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 11 },
-  compareLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5 },
-  compareNow: { fontFamily: numFont(700), fontSize: 13.5 },
-  comparePrev: { fontFamily: uiFont(500), fontSize: 11, marginTop: 1 },
-
-  // category row
-  catRow: { paddingHorizontal: 16, paddingVertical: 11 },
-  divider: { borderTopWidth: 1 },
-  catTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  catIconLabel: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
-  catLabel: { fontFamily: uiFont(600), fontSize: 13, flexShrink: 1 },
-  catNums: { flexDirection: 'row', alignItems: 'baseline' },
-  catActual: { fontFamily: numFont(700), fontSize: 13.5 },
-  catTarget: { fontFamily: uiFont(500), fontSize: 11 },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7, borderWidth: 1 },
-  badgeText: { fontFamily: uiFont(700), fontSize: 11 },
-  barTrack: { height: 5, borderRadius: 3, backgroundColor: 'rgba(20,40,30,0.07)', overflow: 'hidden' },
-  barFill: { position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 3 },
-  catFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  catPct: { fontFamily: uiFont(600), fontSize: 11 },
-  catBudget: { fontFamily: uiFont(400), fontSize: 11 },
-  unbudgetedIcon: { width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-
-  // insight row
-  insightRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingVertical: 11 },
-  insightIcon: { width: 26, height: 26, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  insightText: { flex: 1, fontFamily: uiFont(500), fontSize: 12.5, lineHeight: 19 },
-
-  // empty
-  emptyPad: { paddingHorizontal: 24, paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontFamily: uiFont(500), fontSize: 13, lineHeight: 21, textAlign: 'center' },
-
-  // month dropdown
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(16,32,24,0.35)', justifyContent: 'flex-end' },
-  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 10 },
-  modalHandle: { alignSelf: 'center', width: 38, height: 4, borderRadius: 999, marginBottom: 12 },
-  modalTitle: { fontFamily: uiFont(700), fontSize: 13, letterSpacing: 0.3, marginBottom: 6, paddingHorizontal: 4 },
-  monthOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14 },
-  monthOptionText: { fontFamily: uiFont(600), fontSize: 15 },
-
-  // export card
-  exportCard: {
-    marginHorizontal: 16,
-    marginTop: 18,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    ...shadowCard,
-  },
-  exportIconWrap: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  exportCardTitle: { fontFamily: uiFont(700), fontSize: 13.5 },
-  exportCardSub: { fontFamily: uiFont(400), fontSize: 11.5, marginTop: 2 },
+  nav: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingBottom: spacing.sm },
+  navTitle: { flex: 1, textAlign: 'center' },
+  iconButton: { minWidth: 48, minHeight: 48, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: spacing.base },
+  monthRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
+  monthPicker: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: spacing.sm, minHeight: 48, paddingVertical: spacing.sm },
+  hero: { borderRadius: radius.md, padding: spacing.lg },
+  intro: { flexDirection: 'row', alignItems: 'center', gap: spacing.base },
+  grow: { flex: 1, minWidth: 0, gap: spacing.xs },
+  moneyRow: { flexDirection: 'row', gap: spacing.base, borderTopWidth: 1, paddingTop: spacing.md, marginTop: spacing.md },
+  stack: { flexDirection: 'column', alignItems: 'stretch' },
+  recordNote: { marginTop: spacing.sm },
+  addButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: 48, gap: spacing.sm, padding: spacing.base, marginTop: spacing.md, borderRadius: radius.sm },
+  section: { marginTop: spacing.lg, gap: spacing.md },
+  sectionHeading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  surface: { borderRadius: radius.md, overflow: 'hidden' },
+  categoryRow: { padding: spacing.base, gap: spacing.sm },
+  categoryTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  categoryAmount: { maxWidth: '42%', textAlign: 'right', flexShrink: 1 },
+  barTrack: { height: 4, borderRadius: 4, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 4 },
+  textButton: { minHeight: 48, paddingHorizontal: spacing.base, paddingVertical: spacing.sm, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
+  changeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.base },
+  tripHeading: { marginTop: spacing.lg, marginBottom: spacing.sm },
+  tripCard: { borderRadius: radius.md, borderWidth: 0, boxShadow: 'none', shadowOpacity: 0, elevation: 0 },
+  detailsToggle: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  inlineAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: 1, paddingTop: spacing.sm, gap: spacing.md },
+  actionButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, flex: 1, borderRadius: radius.sm },
+  details: { borderTopWidth: 1, paddingVertical: spacing.base, gap: spacing.base },
+  budgetRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  budgetAmount: { maxWidth: '50%', alignItems: 'flex-end', gap: spacing.xs },
+  networth: { gap: spacing.sm },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  monthSheet: { width: '100%', maxWidth: 560, alignSelf: 'center', maxHeight: '75%', borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, gap: spacing.base },
+  monthOption: { minHeight: 56, padding: spacing.base, borderRadius: radius.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
 });

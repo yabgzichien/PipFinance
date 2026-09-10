@@ -22,6 +22,7 @@ import {
   STREAK_STACK_GAP,
   UP_ARROW_SVG,
   dotsRowSvg,
+  expandedStreakMetrics,
   streakSlotMetrics,
 } from './mascot/chrome';
 
@@ -31,10 +32,10 @@ export interface QuickRecordWidgetProps {
   config?: WidgetMascotConfig;
 }
 
-function badgeIconDocument(icon: BadgeIcon, color: BadgeColor): string | null {
+function badgeIconDocument(icon: BadgeIcon, color: BadgeColor, size: number = STREAK_ICON_SIZE): string | null {
   const fragment = badgeIconSvg(icon, color);
   if (!fragment) return null;
-  return `<svg data-streak-icon width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`;
+  return `<svg data-streak-icon width="${size}" height="${size}" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`;
 }
 
 function Divider() {
@@ -49,13 +50,16 @@ export function QuickRecordWidget({
   const mascot = MASCOT_SIZES[config.mascotNotch];
   const badge = BADGE_THEMES[config.badgeColor];
 
-  const expanded = config.slot1 === 'none' && config.slot2 === 'none';
-  const hasStreakSlot = config.slot1 === 'streak' || config.slot2 === 'streak';
+  const hasSlot1 = config.slot1 !== 'none';
+  const hasSlot2 = config.slot2 !== 'none';
+  const hasStreak = config.slot1 === 'streak' || config.slot2 === 'streak';
+  const expanded =
+    (config.slot1 === 'streak' && !hasSlot2) || (config.slot2 === 'streak' && !hasSlot1);
 
   // The mascot's own badge pill is suppressed wherever the streak is already shown elsewhere —
   // in the expanded column, or in a slot — so the count never appears twice.
   const mascotSvg = composeMascot(
-    expanded || hasStreakSlot ? { ...config, badgeIcon: 'none' } : config,
+    hasStreak ? { ...config, badgeIcon: 'none' } : config,
     streak
   );
 
@@ -74,7 +78,8 @@ export function QuickRecordWidget({
   if (expanded) {
     // Nothing beside the mascot, so the freed space carries the streak and the whole widget
     // becomes one add target.
-    const expandedIcon = badgeIconDocument(config.badgeIcon, config.badgeColor);
+    const m = expandedStreakMetrics(config.buttonNotch);
+    const expandedIcon = badgeIconDocument(config.badgeIcon, config.badgeColor, m.icon);
     return (
       <FlexWidget
         style={{ ...shell, justifyContent: 'flex-start' }}
@@ -83,12 +88,12 @@ export function QuickRecordWidget({
         accessibilityLabel="Add Transaction"
       >
         <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
-        <FlexWidget style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
-          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
-            {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: STREAK_ICON_SIZE, height: STREAK_ICON_SIZE }} />}
+        <FlexWidget style={{ flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
+          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 6 }}>
+            {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: m.icon, height: m.icon }} />}
             <TextWidget
               text={String(streak)}
-              style={{ fontSize: STREAK_COUNT_FONT_SIZE, fontWeight: '700', color: badge.text as HexColor }}
+              style={{ fontSize: m.font, fontWeight: '700', color: badge.text as HexColor }}
             />
           </FlexWidget>
           <SvgWidget svg={dotsRowSvg(dots, badge.icon)} style={{ width: DOTS_ROW_WIDTH, height: DOTS_ROW_HEIGHT }} />
@@ -113,7 +118,7 @@ export function QuickRecordWidget({
 
     if (content === 'streak') {
       const m = streakSlotMetrics(size);
-      const icon = badgeIconDocument(config.badgeIcon, config.badgeColor);
+      const icon = badgeIconDocument(config.badgeIcon, config.badgeColor, m.icon);
       return (
         <FlexWidget
           key={which}

@@ -14,6 +14,7 @@ export function NotchedSlider({
   label,
   defaultValue,
   defaultLabel,
+  compact = false,
 }: {
   value: number;
   count: number;
@@ -21,6 +22,7 @@ export function NotchedSlider({
   label?: string;
   defaultValue?: number;
   defaultLabel?: string;
+  compact?: boolean;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -30,6 +32,12 @@ export function NotchedSlider({
   const onChangeRef = useRef(onChange);
   countRef.current = count;
   onChangeRef.current = onChange;
+
+  const thumbSize = compact ? 17 : THUMB;
+  const rowHeight = compact ? 33 : 44;
+  const trackHeight = compact ? 5 : 7;
+  const markerSize = compact ? 7 : 9;
+  const markerMargin = compact ? -3.5 : -4.5;
 
   const onLayout = (event: LayoutChangeEvent) => {
     const nextWidth = event.nativeEvent.layout.width;
@@ -56,9 +64,13 @@ export function NotchedSlider({
 
   return (
     <View>
-      {label ? <Caption>{label}</Caption> : null}
+      {label ? (
+        <Caption style={compact ? { fontSize: 11.5, lineHeight: 15 } : undefined}>
+          {label}
+        </Caption>
+      ) : null}
       <View
-        style={styles.row}
+        style={[styles.row, { height: rowHeight }]}
         onLayout={onLayout}
         {...pan.panHandlers}
         accessible
@@ -72,12 +84,12 @@ export function NotchedSlider({
           onChangeRef.current(notchAfterAccessibilityAction(value, count, action));
         }}
       >
-        <View style={[styles.track, { backgroundColor: colorTheme.line }]} />
+        <View style={[styles.track, { height: trackHeight, backgroundColor: colorTheme.line }]} />
         <View
           style={[
             styles.track,
             styles.fill,
-            { width: `${pct * 100}%`, backgroundColor: theme.accent },
+            { height: trackHeight, width: `${pct * 100}%`, backgroundColor: theme.accent },
           ]}
         />
         {Array.from({ length: count }, (_, index) => (
@@ -90,10 +102,10 @@ export function NotchedSlider({
                 backgroundColor: index + 1 <= value ? theme.accent : colorTheme.line,
               },
               index + 1 === defaultValue && {
-                width: 9,
-                height: 9,
-                marginLeft: -4.5,
-                borderWidth: 2,
+                width: markerSize,
+                height: markerSize,
+                marginLeft: markerMargin,
+                borderWidth: compact ? 1.5 : 2,
                 borderColor: theme.accent,
                 backgroundColor: colorTheme.surface,
               },
@@ -104,14 +116,20 @@ export function NotchedSlider({
           style={[
             styles.thumb,
             {
-              left: Math.max(0, Math.min(width - THUMB, pct * width - THUMB / 2)),
+              width: thumbSize,
+              height: thumbSize,
+              borderWidth: compact ? 2.5 : 3,
+              left: Math.max(0, Math.min(width - thumbSize, pct * width - thumbSize / 2)),
               backgroundColor: theme.accent,
             },
           ]}
         />
       </View>
       {defaultLabel ? (
-        <Caption color={colorTheme.ink2} style={styles.defaultLabel}>
+        <Caption
+          color={colorTheme.ink2}
+          style={[styles.defaultLabel, compact && { fontSize: 11, lineHeight: 14, marginTop: -3 }]}
+        >
           {defaultLabel}
         </Caption>
       ) : null}

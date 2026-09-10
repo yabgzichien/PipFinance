@@ -1,4 +1,8 @@
-import { setSlot, setSlotContent } from '../src/lib/widgetCustomizer';
+import {
+  isWidgetMascotConfigEqual,
+  setSlot,
+  setSlotContent,
+} from '../src/lib/widgetCustomizer';
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
 import { applyPreset } from '../src/widget/mascot/presets';
 
@@ -55,5 +59,47 @@ describe('setSlotContent', () => {
 
   it('is a no-op when the value is unchanged', () => {
     expect(setSlotContent(base, 'slot1', base.slot1)).toBe(base);
+  });
+});
+
+describe('isWidgetMascotConfigEqual', () => {
+  const base = DEFAULT_WIDGET_MASCOT_CONFIG;
+
+  it('returns true for identical configs and clones', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base })).toBe(true);
+  });
+
+  it('detects preset change', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base, preset: 'nerdy' })).toBe(false);
+  });
+
+  it('detects slot changes', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base, head: 'strawHat' })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, eyes: 'shades' })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, mouth: 'open' })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, holding: 'flask' })).toBe(false);
+  });
+
+  it('detects notch changes', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base, mascotNotch: 4 })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, buttonNotch: 1 })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, animationNotch: 5 })).toBe(false);
+  });
+
+  it('detects widget slot content changes', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base, slot1: 'streak' })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, slot2: 'none' })).toBe(false);
+  });
+
+  it('detects badge icon and color changes', () => {
+    expect(isWidgetMascotConfigEqual(base, { ...base, badgeIcon: 'sprout' })).toBe(false);
+    expect(isWidgetMascotConfigEqual(base, { ...base, badgeColor: 'green' })).toBe(false);
+  });
+
+  it('returns true when a changed property is reverted', () => {
+    const modified = { ...base, animationNotch: 1 as const };
+    expect(isWidgetMascotConfigEqual(base, modified)).toBe(false);
+    const reverted = { ...modified, animationNotch: base.animationNotch };
+    expect(isWidgetMascotConfigEqual(base, reverted)).toBe(true);
   });
 });

@@ -6,6 +6,8 @@ import {
   computeAdherence,
   hasComparisonData,
   monthlyIncomeStatement,
+  monthlyRecapSummary,
+  completedRecapComparisons,
   prevMonthKey,
   spentByCategory,
 } from '../src/lib/recap';
@@ -19,6 +21,57 @@ function txn(over: Partial<Transaction>): Transaction {
     createdAt: '2026-06-10T10:00:00.000Z', source: 'manual', ...over,
   };
 }
+
+describe('monthlyRecapSummary', () => {
+  it('provides spending rows without any budget and separates missing income from recorded income', () => {
+    const summary = monthlyRecapSummary([
+      txn({ amount: 33, categoryId: null }),
+      txn({ amount: 12, categoryId: 'dining' }),
+      txn({ type: 'transfer', amount: 1000 }),
+      txn({ amount: 999, date: '2026-05-01' }),
+    ], '2026-06');
+    expect(summary).toMatchObject({ income: 0, expenses: 45, net: -45, incomeCount: 0, expenseCount: 2 });
+    expect(summary.categories).toEqual([
+      { catId: 'other', amount: 33, count: 1 },
+      { catId: 'dining', amount: 12, count: 1 },
+    ]);
+  });
+
+  it('uses the same transaction conversion for totals and category rows', () => {
+    const summary = monthlyRecapSummary([
+      txn({ amount: 45, nativeAmount: 10, currency: 'USD' }),
+      txn({ type: 'income', amount: 450, nativeAmount: 100, currency: 'USD' }),
+    ], '2026-06', (t) => t.nativeAmount ?? t.amount);
+    expect(summary).toMatchObject({ income: 100, expenses: 10, net: 90, incomeCount: 1, expenseCount: 1 });
+    expect(summary.categories).toEqual([{ catId: 'dining', amount: 10, count: 1 }]);
+  });
+
+  it('handles empty and income-only months without invented spending categories', () => {
+    expect(monthlyRecapSummary([], '2026-06')).toMatchObject({ incomeCount: 0, expenseCount: 0, categories: [] });
+    expect(monthlyRecapSummary([txn({ type: 'income', date: null, amount: 100 })], '2026-06'))
+      .toMatchObject({ income: 100, expenses: 0, incomeCount: 1, expenseCount: 0, categories: [] });
+  });
+});
+
+describe('completedRecapComparisons', () => {
+  const records = [
+    txn({ date: '2026-05-05', amount: 100 }),
+    txn({ date: '2026-06-05', amount: 40 }),
+    txn({ date: '2026-06-05', amount: 90, categoryId: 'fuel' }),
+  ];
+  it('does not compare an unfinished or future month with a full previous month', () => {
+    expect(completedRecapComparisons(records, '2026-06', new Date(2026, 5, 20))).toEqual([]);
+    expect(completedRecapComparisons(records, '2026-06', new Date(2026, 4, 20))).toEqual([]);
+  });
+  it('requires recorded expenses in both completed months and ranks the largest changes', () => {
+    expect(completedRecapComparisons(records, '2026-06', new Date(2026, 6, 1))).toEqual([
+      { catId: 'fuel', current: 90, previous: 0, deltaAbs: 90 },
+      { catId: 'dining', current: 40, previous: 100, deltaAbs: -60 },
+    ]);
+    expect(completedRecapComparisons(records, '2026-07', new Date(2026, 7, 1))).toEqual([]);
+    expect(completedRecapComparisons(records, '2026-05', new Date(2026, 7, 1))).toEqual([]);
+  });
+});
 
 describe('monthlyIncomeStatement', () => {
   it('sums income and expenses for the given month and nets them', () => {

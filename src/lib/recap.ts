@@ -1,13 +1,73 @@
 // src/lib/recap.ts
 // Pure, deterministic helpers for the monthly income-statement recap. No UI or
 // database imports  everything here is unit-tested.
-import { txnMonthKey, type Allocations } from './budget';
+import { currentMonthKey, txnMonthKey, type Allocations } from './budget';
 import type { Transaction } from './types';
 
 export interface IncomeStatement {
   income: number;
   expenses: number;
   net: number;
+}
+
+export interface RecapCategory {
+  catId: string;
+  amount: number;
+  count: number;
+}
+
+/** Presentation totals are independent of budgets. The caller supplies the same conversion
+ * used for transaction drill-downs and trip totals, preserving native currency amounts. */
+export function monthlyRecapSummary(
+  txns: Transaction[],
+  month: string,
+  convert: (txn: Transaction) => number = (txn) => txn.amount,
+) {
+  let income = 0;
+  let expenses = 0;
+  let incomeCount = 0;
+  let expenseCount = 0;
+  const categories = new Map<string, RecapCategory>();
+  for (const txn of txns) {
+    if (txnMonthKey(txn) !== month || txn.type === 'transfer') continue;
+    const amount = convert(txn);
+    if (txn.type === 'income') {
+      income += amount;
+      incomeCount++;
+    } else if (txn.type === 'expense') {
+      expenses += amount;
+      expenseCount++;
+      const catId = txn.categoryId ?? 'other';
+      const row = categories.get(catId) ?? { catId, amount: 0, count: 0 };
+      row.amount += amount;
+      row.count++;
+      categories.set(catId, row);
+    }
+  }
+  return { income, expenses, net: income - expenses, incomeCount, expenseCount,
+    categories: [...categories.values()].sort((a, b) => b.amount - a.amount || a.catId.localeCompare(b.catId)) };
+}
+
+/** Calendar-complete periods only; recorded totals do not imply complete account coverage.
+ * Never interpret an empty month as a reduction in spending. */
+export function completedRecapComparisons(
+  txns: Transaction[], month: string, now: Date = new Date(),
+  convert: (txn: Transaction) => number = (txn) => txn.amount,
+): CategoryComparison[] {
+  if (month >= currentMonthKey(now)) return [];
+  const current = monthlyRecapSummary(txns, month, convert);
+  const previous = monthlyRecapSummary(txns, prevMonthKey(month), convert);
+  if (current.expenses <= 0 || previous.expenses <= 0) return [];
+  const currentMap = new Map(current.categories.map((c) => [c.catId, c.amount]));
+  const previousMap = new Map(previous.categories.map((c) => [c.catId, c.amount]));
+  return [...new Set([...currentMap.keys(), ...previousMap.keys()])]
+    .map((catId) => {
+      const cur = currentMap.get(catId) ?? 0;
+      const prev = previousMap.get(catId) ?? 0;
+      return { catId, current: cur, previous: prev, deltaAbs: cur - prev };
+    })
+    .filter((c) => Math.abs(c.deltaAbs) > 0.005)
+    .sort((a, b) => Math.abs(b.deltaAbs) - Math.abs(a.deltaAbs) || a.catId.localeCompare(b.catId));
 }
 
 export interface Overspend {

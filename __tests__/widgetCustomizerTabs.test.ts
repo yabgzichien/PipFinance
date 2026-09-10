@@ -15,8 +15,8 @@ const cfg = (over: Partial<WidgetMascotConfig> = {}): WidgetMascotConfig => ({
 });
 
 describe('tab structure', () => {
-  it('has the seven agreed tabs in order', () => {
-    expect(CUSTOMIZER_TABS).toEqual(['preset', 'head', 'eyes', 'mouth', 'holding', 'layout', 'badge']);
+  it('has the six agreed tabs in order', () => {
+    expect(CUSTOMIZER_TABS).toEqual(['preset', 'head', 'eyes', 'mouth', 'holding', 'badge']);
   });
 
   it('identifies exactly the catalog-backed tabs as slot tabs', () => {
@@ -73,24 +73,14 @@ describe('tabIsModified', () => {
     expect(modifiedTabs(config)).toEqual([tab]);
   });
 
-  it.each([
-    ['mascot size', cfg({ mascotNotch: 5 })],
-    ['button size', cfg({ buttonNotch: 1 })],
-    ['a slot', cfg({ slot2: 'streak' })],
-  ])('flags the layout tab for %s', (_label, config) => {
-    expect(tabIsModified('layout', config)).toBe(true);
-    expect(modifiedTabs(config)).toEqual(['layout']);
-  });
-
   it('does not flag a tab for a change another tab owns', () => {
     const config = cfg({ head: 'strawHat' });
     expect(tabIsModified('eyes', config)).toBe(false);
-    expect(tabIsModified('layout', config)).toBe(false);
     expect(tabIsModified('badge', config)).toBe(false);
   });
 
   it('reports several tabs at once, in display order', () => {
     const config = cfg({ badgeIcon: 'star', head: 'goggles', mascotNotch: 1 });
-    expect(modifiedTabs(config)).toEqual(['head', 'layout', 'badge']);
+    expect(modifiedTabs(config)).toEqual(['head', 'badge']);
   });
 });

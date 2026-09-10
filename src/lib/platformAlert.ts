@@ -10,6 +10,7 @@ import { dispatchAlert } from '../state/alertHost';
 export interface ConfirmNeutralAction {
   label: string;
   onPress: () => void | Promise<void>;
+  style?: 'primary' | 'neutral';
 }
 
 /** A single-button informational message. */
@@ -23,7 +24,16 @@ export function confirmAction(
   message: string,
   confirmLabel: string,
   onConfirm: () => void | Promise<void>,
-  neutralAction?: ConfirmNeutralAction
+  neutralAction?: ConfirmNeutralAction,
+  cancelLabel?: string
 ): void {
-  dispatchAlert({ kind: 'confirm', title, message, confirmLabel, onConfirm, ...(neutralAction ? { neutralAction } : {}) });
+  dispatchAlert({
+    kind: 'confirm',
+    title,
+    message,
+    confirmLabel,
+    onConfirm,
+    ...(neutralAction ? { neutralAction } : {}),
+    ...(cancelLabel ? { cancelLabel } : {}),
+  });
 }

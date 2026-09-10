@@ -4,9 +4,9 @@ import {
   type SlotContent,
   type WidgetMascotConfig,
 } from '../src/widget/mascot/config';
-import { contentWidth, contentHeight, MASCOT_SIZES } from '../src/widget/mascot/sizing';
+import { MASCOT_SIZES } from '../src/widget/mascot/sizing';
 import { UP_ARROW_PATH, DOWN_ARROW_PATH, SHELL_BG, DIVIDER_COLOR } from '../src/widget/mascot/chrome';
-import { composeWidgetPreview } from '../src/widget/mascot/previewCompose';
+import { composeWidgetPreview, PREVIEW_WIDTH, PREVIEW_HEIGHT } from '../src/widget/mascot/previewCompose';
 
 const cfg = (over: Partial<WidgetMascotConfig> = {}): WidgetMascotConfig => ({
   ...DEFAULT_WIDGET_MASCOT_CONFIG,
@@ -25,10 +25,7 @@ describe('composeWidgetPreview', () => {
     expect(svg.match(/<svg/g)).toHaveLength(1);
   });
 
-  /** The anti-drift guard. `contentWidth` is the shared source of truth the real widget's layout
-   *  is measured against; if the preview ever lays out to a different width, the two renderers
-   *  have diverged and this fails. */
-  it('lays out to exactly contentWidth and contentHeight for every configuration', () => {
+  it('keeps the widget container size constant across all mascot and button notch sizes', () => {
     for (const m of NOTCHES) {
       for (const b of NOTCHES) {
         for (const slot1 of CONTENTS) {
@@ -36,8 +33,8 @@ describe('composeWidgetPreview', () => {
             if (slot1 === 'streak' && slot2 === 'streak') continue; // unreachable via the parser
             const c = cfg({ mascotNotch: m, buttonNotch: b, slot1, slot2 });
             const p = composeWidgetPreview(c, 7, DOTS);
-            expect(p.width).toBe(contentWidth(c));
-            expect(p.height).toBe(contentHeight(c));
+            expect(p.width).toBe(PREVIEW_WIDTH);
+            expect(p.height).toBe(PREVIEW_HEIGHT);
           }
         }
       }
@@ -86,8 +83,8 @@ describe('slot contents', () => {
   });
 
   describe('streak badge in a slot', () => {
-    it('draws the count in the slot and drops the mascot pill', () => {
-      const { svg } = composeWidgetPreview(cfg({ slot2: 'streak' }), 9, DOTS);
+    it('draws the count in the slot and drops the mascot pill when paired with an arrow', () => {
+      const { svg } = composeWidgetPreview(cfg({ slot1: 'income', slot2: 'streak' }), 9, DOTS);
       expect(svg).toContain('data-streak-slot');
       expect(svg).toContain('>9<');
       // Suppressed so the streak is not shown twice.
@@ -107,31 +104,48 @@ describe('slot contents', () => {
   });
 });
 
-describe('expanded layout (both slots empty)', () => {
-  const expanded = (streak = 9, dots = DOTS) =>
-    composeWidgetPreview(cfg({ slot1: 'none', slot2: 'none' }), streak, dots).svg;
+describe('streak layout (fire selected)', () => {
+  const fireSelected = (streak = 9, dots = DOTS) =>
+    composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none' }), streak, dots).svg;
 
-  it('shows the count and the seven-day dots', () => {
-    expect(expanded()).toContain('data-streak-dots');
-    expect(expanded()).toContain('>9<');
+  it('shows the count and the seven-day dots when fire is selected', () => {
+    expect(fireSelected()).toContain('data-streak-dots');
+    expect(fireSelected()).toContain('>9<');
   });
 
   it('drops all arrows and dividers', () => {
-    expect(expanded()).not.toContain(UP_ARROW_PATH);
-    expect(expanded()).not.toContain(DOWN_ARROW_PATH);
-    expect(expanded()).not.toContain(DIVIDER_COLOR);
+    expect(fireSelected()).not.toContain(UP_ARROW_PATH);
+    expect(fireSelected()).not.toContain(DOWN_ARROW_PATH);
+    expect(fireSelected()).not.toContain(DIVIDER_COLOR);
   });
 
   it('suppresses the mascot badge so the streak is not drawn twice', () => {
-    expect(expanded()).not.toContain('data-part="badge"');
+    expect(fireSelected()).not.toContain('data-part="badge"');
   });
 
   it('renders seven dots regardless of the input array length', () => {
-    expect(expanded(3, []).match(/data-dot=/g)).toHaveLength(7);
+    expect(fireSelected(3, []).match(/data-dot=/g)).toHaveLength(7);
   });
 
-  it('does not appear in any compact layout', () => {
+  it('leaves the right side completely empty when none is selected for both slots', () => {
+    const noneSvg = composeWidgetPreview(cfg({ slot1: 'none', slot2: 'none' }), 9, DOTS).svg;
+    expect(noneSvg).not.toContain('data-streak-dots');
+    expect(noneSvg).not.toContain('data-streak-slot');
+    expect(noneSvg).not.toContain(UP_ARROW_PATH);
+    expect(noneSvg).not.toContain(DOWN_ARROW_PATH);
+    expect(noneSvg).not.toContain(DIVIDER_COLOR);
+  });
+
+  it('does not show streak dots when only arrows are used', () => {
     expect(composeWidgetPreview(cfg(), 9, DOTS).svg).not.toContain('data-streak-dots');
-    expect(composeWidgetPreview(cfg({ slot2: 'streak' }), 9, DOTS).svg).not.toContain('data-streak-dots');
+  });
+
+  it('scales the fire icon and count with button size notch when fire is selected', () => {
+    const notch1 = composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 1 }), 9, DOTS).svg;
+    const notch5 = composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 5 }), 9, DOTS).svg;
+    expect(notch1).toContain('scale(0.24)');
+    expect(notch5).toContain('scale(0.44)');
+    expect(notch1).toContain('font-size="15"');
+    expect(notch5).toContain('font-size="22"');
   });
 });

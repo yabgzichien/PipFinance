@@ -109,7 +109,18 @@ export interface Translations {
   widgetSize: string;
   widgetMascotSize: string;
   widgetButtonSize: string;
+  widgetAnimationSpeed: string;
+  widgetAnimationSpeed_1: string;
+  widgetAnimationSpeed_2: string;
+  widgetAnimationSpeed_3: string;
+  widgetAnimationSpeed_4: string;
+  widgetAnimationSpeed_5: string;
   widgetDefaultNotch: string;
+  widgetUnsavedTitle: string;
+  widgetUnsavedBody: string;
+  widgetSaveAndQuit: string;
+  widgetQuitWithoutSaving: string;
+  widgetKeepEditing: string;
   widgetButtons: string;
   widgetShowIncome: string;
   widgetShowExpense: string;

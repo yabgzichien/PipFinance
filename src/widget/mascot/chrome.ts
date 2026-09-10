@@ -13,6 +13,7 @@
 // Type-only import: erased at build time, so this module stays free of any runtime dependency on
 // the Android widget library and remains importable from the in-app preview.
 import type { HexColor } from 'react-native-android-widget';
+import type { Notch } from './config';
 
 /** Widget background. Warm off-white, matching the app's paper tone rather than pure white. */
 export const SHELL_BG: HexColor = '#faf8f2';
@@ -72,21 +73,47 @@ export function dotsRowFragment(dots: boolean[], color: string): string {
 }
 
 export function dotsRowSvg(dots: boolean[], color: string): string {
-  return `<svg data-streak-dots width="${DOTS_ROW_WIDTH}" height="${DOTS_ROW_HEIGHT}" viewBox="0 0 ${DOTS_ROW_WIDTH} ${DOTS_ROW_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">${dotsRowFragment(dots, color)}</svg>`;
+  return `<svg data-streak-dots="true" width="${DOTS_ROW_WIDTH}" height="${DOTS_ROW_HEIGHT}" viewBox="0 0 ${DOTS_ROW_WIDTH} ${DOTS_ROW_HEIGHT}" fill="none" xmlns="http://www.w3.org/2000/svg">${dotsRowFragment(dots, color)}</svg>`;
 }
 
+/** Expanded streak icon sizes across button notches (notch 5 is the max 44dp size). */
+export const EXPANDED_STREAK_ICON_SIZES: Record<Notch, number> = {
+  1: 24,
+  2: 29,
+  3: 34,
+  4: 39,
+  5: 44,
+};
+
+/** Expanded streak count font sizes across button notches. */
+export const EXPANDED_STREAK_FONT_SIZES: Record<Notch, number> = {
+  1: 15,
+  2: 17,
+  3: 19,
+  4: 21,
+  5: 22,
+};
+
 /** Expanded-layout streak count typography, shared so preview and widget agree. */
-export const STREAK_COUNT_FONT_SIZE = 18;
-export const STREAK_ICON_SIZE = 16;
-export const STREAK_STACK_GAP = 4;
+export const STREAK_COUNT_FONT_SIZE = EXPANDED_STREAK_FONT_SIZES[5];
+export const STREAK_ICON_SIZE = EXPANDED_STREAK_ICON_SIZES[5];
+export const STREAK_STACK_GAP = 3;
+
+export function expandedStreakMetrics(notch: Notch): { icon: number; font: number; gap: number } {
+  return {
+    icon: EXPANDED_STREAK_ICON_SIZES[notch],
+    font: EXPANDED_STREAK_FONT_SIZES[notch],
+    gap: STREAK_STACK_GAP,
+  };
+}
 
 /** Icon and text sizes for a streak badge occupying one of the two slots beside the mascot.
  *  Derived from the slot's own width rather than tabled per notch, so the badge always fills its
  *  slot proportionally however the ladder is later retuned. */
 export function streakSlotMetrics(slotWidth: number): { icon: number; font: number; gap: number } {
   return {
-    icon: Math.round(slotWidth * 0.42),
-    font: Math.round(slotWidth * 0.38),
+    icon: Math.round(slotWidth * 0.52),
+    font: Math.round(slotWidth * 0.42),
     gap: 2,
   };
 }

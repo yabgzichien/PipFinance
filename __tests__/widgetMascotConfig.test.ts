@@ -31,6 +31,7 @@ describe('parseWidgetMascotConfig', () => {
       holding: 'lollipop',
       mascotNotch: 99,
       buttonNotch: 2,
+      animationNotch: 4,
       slot1: 'streak',
       slot2: 'nonsense',
       badgeIcon: 'star',
@@ -45,6 +46,7 @@ describe('parseWidgetMascotConfig', () => {
     expect(c.mouth).toBe('grin');
     expect(c.mascotNotch).toBe(DEFAULT_WIDGET_MASCOT_CONFIG.mascotNotch);
     expect(c.buttonNotch).toBe(2);
+    expect(c.animationNotch).toBe(4);
     expect(c.slot1).toBe('streak');
     expect(c.slot2).toBe(DEFAULT_WIDGET_MASCOT_CONFIG.slot2);
     expect(c.badgeIcon).toBe('star');
@@ -77,6 +79,7 @@ describe('parseWidgetMascotConfig', () => {
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.version).toBe(2);
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.mascotNotch).toBe(3);
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.buttonNotch).toBe(3);
+    expect(DEFAULT_WIDGET_MASCOT_CONFIG.animationNotch).toBe(3);
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.slot1).toBe('income');
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.slot2).toBe('expense');
     expect(DEFAULT_WIDGET_MASCOT_CONFIG.badgeIcon).toBe('flame');

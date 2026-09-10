@@ -6,6 +6,7 @@ import { AccentSwatchRow } from '../components/AccentSwatchRow';
 import { InfoButton } from '../components/InfoButton';
 import { Pip } from '../components/Pip';
 import { Card, Eyebrow, TopBar } from '../components/ui';
+import { WidgetCustomizerBadge } from '../components/WidgetCustomizerBadge';
 import { getActiveCurrencies } from '../db/currencyRepo';
 import { clearMemory } from '../db/memoryRepo';
 import { getProvider, llmErrorMessage } from '../llm';
@@ -97,7 +98,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     matchingKeys.has('language') ||
     matchingKeys.has('accent') ||
     matchingKeys.has('motion') ||
-    (Platform.OS === 'android' && Boolean(onOpenWidgetCustomizer) && matchingKeys.has('widgetMascot')) ||
+    ((Platform.OS === 'android' || Platform.OS === 'web') && Boolean(onOpenWidgetCustomizer) && matchingKeys.has('widgetMascot')) ||
     matchingKeys.has('sounds') ||
     matchingKeys.has('streak');
 
@@ -188,7 +189,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
           <>
             <Eyebrow style={{ marginBottom: 10 }}>{t('appearance')}</Eyebrow>
             <View style={{ gap: 12 }}>
-              {Platform.OS === 'android' && onOpenWidgetCustomizer && matchingKeys.has('widgetMascot') && (
+              {(Platform.OS === 'android' || Platform.OS === 'web') && onOpenWidgetCustomizer && matchingKeys.has('widgetMascot') && (
                 <Pressable
                   onPress={onOpenWidgetCustomizer}
                   style={({ pressed }) => [
@@ -199,9 +200,7 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   ]}
                   accessibilityRole="button"
                 >
-                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-                    <Icon name="sparkles" size={18} color={theme.accent} />
-                  </View>
+                  <WidgetCustomizerBadge size={38} rad={11} />
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.providerName, { color: colorTheme.ink }]}>
                       {t('widgetCustomizer')}

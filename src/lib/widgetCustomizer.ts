@@ -26,6 +26,32 @@ export function setSlotContent(
   if (config[which] === content) return config;
   const other = which === 'slot1' ? 'slot2' : 'slot1';
   const next = { ...config, [which]: content };
-  if (content === 'streak' && config[other] === 'streak') next[other] = 'none';
+  if (content === 'streak' || config[other] === 'streak') {
+    next[other] = 'none';
+  }
   return next;
 }
+
+/**
+ * Checks whether two widget mascot configurations are identical across all configurable options.
+ */
+export function isWidgetMascotConfigEqual(
+  a: WidgetMascotConfig,
+  b: WidgetMascotConfig
+): boolean {
+  return (
+    a.preset === b.preset &&
+    a.head === b.head &&
+    a.eyes === b.eyes &&
+    a.mouth === b.mouth &&
+    a.holding === b.holding &&
+    a.mascotNotch === b.mascotNotch &&
+    a.buttonNotch === b.buttonNotch &&
+    a.animationNotch === b.animationNotch &&
+    a.slot1 === b.slot1 &&
+    a.slot2 === b.slot2 &&
+    a.badgeIcon === b.badgeIcon &&
+    a.badgeColor === b.badgeColor
+  );
+}
+

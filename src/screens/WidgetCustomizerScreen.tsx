@@ -1,13 +1,18 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
-import { MascotOptionTile } from '../components/MascotOptionTile';
+import { MascotOptionTile, TILE_SIZE } from '../components/MascotOptionTile';
 import { NotchedSlider } from '../components/NotchedSlider';
 import { TabStrip } from '../components/TabStrip';
 import { Body, BtnLabel, Caption, Card, Eyebrow, PrimaryButton, TopBar } from '../components/ui';
 import { useLanguage } from '../i18n';
-import { setSlot, setSlotContent } from '../lib/widgetCustomizer';
+import { confirmAction } from '../lib/platformAlert';
+import {
+  isWidgetMascotConfigEqual,
+  setSlot,
+  setSlotContent,
+} from '../lib/widgetCustomizer';
 import {
   CUSTOMIZER_TABS,
   THUMB_FRAMES,
@@ -18,7 +23,8 @@ import {
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
-import { BADGE_THEMES, badgeIconSvg } from '../widget/mascot/badge';
+import { useBackHandler } from '../state/useBackHandler';
+import { BADGE_THEMES, badgeIconSvg, badgeAnimationCss } from '../widget/mascot/badge';
 import { DOWN_ARROW_SVG, UP_ARROW_SVG } from '../widget/mascot/chrome';
 import { composeMascotThumbnail, composeWidgetPreview } from '../widget/mascot/previewCompose';
 import type {
@@ -37,6 +43,7 @@ const BADGE_ICONS: BadgeIcon[] = ['flame', 'star', 'leaf', 'sprout', 'none'];
 const BADGE_COLORS: BadgeColor[] = ['amber', 'red', 'green', 'blue', 'violet'];
 const WIDGET_SLOTS: ('slot1' | 'slot2')[] = ['slot1', 'slot2'];
 const SLOT_CONTENTS: SlotContent[] = ['income', 'expense', 'streak', 'none'];
+const SLOT_TILE_SIZE = Math.round(TILE_SIZE * 0.75);
 
 /** A sample streak for the preview, with a matching week: a 7-day streak means all seven days
  *  are active, so showing gaps here would preview a state that cannot exist. */
@@ -122,10 +129,50 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const presetName =
     draft.preset === 'custom' ? t('widgetPreviewHint') : t(`widgetPreset_${draft.preset}`);
 
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const styleId = 'pip-badge-animations';
+    let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = badgeAnimationCss(draft.animationNotch);
+  }, [draft.animationNotch]);
+
+  const handleBack = () => {
+    if (saving) return;
+    const hasUnsavedChanges = !isWidgetMascotConfigEqual(draft, widgetMascotConfig);
+    if (!hasUnsavedChanges) {
+      onBack();
+      return;
+    }
+    confirmAction(
+      t('widgetUnsavedTitle'),
+      t('widgetUnsavedBody'),
+      t('widgetQuitWithoutSaving'),
+      onBack,
+      {
+        label: t('widgetSaveAndQuit'),
+        onPress: async () => {
+          await save();
+        },
+        style: 'primary',
+      },
+      t('widgetKeepEditing')
+    );
+  };
+
+  useBackHandler(() => {
+    handleBack();
+    return true;
+  });
+
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={t('widgetCustomizer')} onBack={onBack} />
+        <TopBar title={t('widgetCustomizer')} onBack={handleBack} />
       </View>
 
       {/* Pinned: the preview must stay visible while options change, which is the whole reason
@@ -158,55 +205,6 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
                 onPress={tile.apply}
               />
             ))}
-          </View>
-        ) : null}
-
-        {tab === 'layout' ? (
-          <View style={styles.section}>
-            <Card style={styles.controlCard}>
-              <NotchedSlider
-                label={t('widgetMascotSize')}
-                value={draft.mascotNotch}
-                count={5}
-                defaultValue={3}
-                defaultLabel={t('widgetDefaultNotch', { value: 3 })}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, mascotNotch: value as Notch }))
-                }
-              />
-              <NotchedSlider
-                label={t('widgetButtonSize')}
-                value={draft.buttonNotch}
-                count={5}
-                defaultValue={3}
-                defaultLabel={t('widgetDefaultNotch', { value: 3 })}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, buttonNotch: value as Notch }))
-                }
-              />
-            </Card>
-
-            {WIDGET_SLOTS.map((which) => (
-              <View key={which} style={styles.section}>
-                <Eyebrow>{t(`widgetSlotPosition_${which}`)}</Eyebrow>
-                <View style={styles.tiles}>
-                  {SLOT_CONTENTS.map((content) => (
-                    <MascotOptionTile
-                      key={content}
-                      svg={slotContentSvg(content, draft)}
-                      label={t(`widgetSlotContent_${content}`)}
-                      selected={draft[which] === content}
-                      onPress={() => setDraft((current) => setSlotContent(current, which, content))}
-                    />
-                  ))}
-                </View>
-              </View>
-            ))}
-
-            {draft.slot1 === 'none' && draft.slot2 === 'none' ? (
-              <Caption color={colorTheme.ink2}>{t('widgetArrowsOffHint')}</Caption>
-            ) : null}
-            {!fits ? <Caption color={colorTheme.ink2}>{t('widgetNeedsBigger')}</Caption> : null}
           </View>
         ) : null}
 
@@ -254,6 +252,64 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
             </View>
           </View>
         ) : null}
+
+        <View style={styles.section}>
+          <Card style={styles.controlCard}>
+            <NotchedSlider
+              compact
+              label={t('widgetMascotSize')}
+              value={draft.mascotNotch}
+              count={5}
+              defaultValue={3}
+              defaultLabel={t('widgetDefaultNotch', { value: 3 })}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, mascotNotch: value as Notch }))
+              }
+            />
+            <NotchedSlider
+              compact
+              label={t('widgetButtonSize')}
+              value={draft.buttonNotch}
+              count={5}
+              defaultValue={3}
+              defaultLabel={t('widgetDefaultNotch', { value: 3 })}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, buttonNotch: value as Notch }))
+              }
+            />
+            <NotchedSlider
+              compact
+              label={t('widgetAnimationSpeed')}
+              value={draft.animationNotch}
+              count={5}
+              defaultValue={3}
+              defaultLabel={t(`widgetAnimationSpeed_${draft.animationNotch}` as any)}
+              onChange={(value) =>
+                setDraft((current) => ({ ...current, animationNotch: value as Notch }))
+              }
+            />
+          </Card>
+
+          {WIDGET_SLOTS.map((which) => (
+            <View key={which} style={styles.slotSection}>
+              <Eyebrow style={styles.slotEyebrow}>{t(`widgetSlotPosition_${which}`)}</Eyebrow>
+              <View style={styles.slotTiles}>
+                {SLOT_CONTENTS.map((content) => (
+                  <MascotOptionTile
+                    key={content}
+                    size={SLOT_TILE_SIZE}
+                    svg={slotContentSvg(content, draft)}
+                    label={t(`widgetSlotContent_${content}`)}
+                    selected={draft[which] === content}
+                    onPress={() => setDraft((current) => setSlotContent(current, which, content))}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
+
+          {!fits ? <Caption color={colorTheme.ink2}>{t('widgetNeedsBigger')}</Caption> : null}
+        </View>
       </ScrollView>
 
       {/* Pinned: with tabs there is no longer an end-of-scroll for Save to sit at. */}
@@ -278,7 +334,10 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24, gap: 20 },
   section: { gap: 12 },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  controlCard: { padding: 16, gap: 12 },
+  controlCard: { padding: 12, gap: 8 },
+  slotSection: { gap: 6 },
+  slotEyebrow: { fontSize: 10, letterSpacing: 0.8 },
+  slotTiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   swatches: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   swatch: { width: 40, height: 40, borderRadius: 999 },
   footer: { paddingHorizontal: 18, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },

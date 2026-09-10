@@ -15,6 +15,7 @@ import { Icon } from './Icon';
 export function AppAlertModal() {
   const { request, dismiss } = useAlertHost();
   const [busy, setBusy] = React.useState(false);
+  const [busyAction, setBusyAction] = React.useState<'confirm' | 'neutral' | null>(null);
   // Guards a fast double-tap on the confirm button from running onConfirm twice (same class of
   // bug as the passport send-button spam fix): a ref flips synchronously, state doesn't.
   const confirmingRef = useRef(false);
@@ -29,11 +30,13 @@ export function AppAlertModal() {
     if (request.kind !== 'confirm' || confirmingRef.current) return;
     confirmingRef.current = true;
     setBusy(true);
+    setBusyAction('confirm');
     try {
       await request.onConfirm();
     } finally {
       confirmingRef.current = false;
       setBusy(false);
+      setBusyAction(null);
       dismiss();
     }
   };
@@ -43,11 +46,13 @@ export function AppAlertModal() {
     const action = request.neutralAction.onPress;
     confirmingRef.current = true;
     setBusy(true);
+    setBusyAction('neutral');
     try {
       await action();
     } finally {
       confirmingRef.current = false;
       setBusy(false);
+      setBusyAction(null);
       dismiss();
     }
   };
@@ -69,10 +74,28 @@ export function AppAlertModal() {
                 <Pressable
                   onPress={handleNeutral}
                   disabled={busy}
-                  style={({ pressed }) => [styles.btn, styles.btnNeutral, { borderColor: theme.accent }, (pressed || busy) && { opacity: 0.85 }]}
+                  style={({ pressed }) => [
+                    styles.btn,
+                    styles.btnNeutral,
+                    request.neutralAction?.style === 'primary'
+                      ? { backgroundColor: theme.accentInk, borderColor: theme.accentInk }
+                      : { borderColor: theme.accent },
+                    (pressed || busy) && { opacity: 0.85 },
+                  ]}
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.btnNeutralText, { color: theme.accentInk }]}>{request.neutralAction.label}</Text>
+                  {busyAction === 'neutral' ? (
+                    <ActivityIndicator size="small" color={request.neutralAction?.style === 'primary' ? colors.onAccent : theme.accentInk} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.btnNeutralText,
+                        { color: request.neutralAction?.style === 'primary' ? colors.onAccent : theme.accentInk },
+                      ]}
+                    >
+                      {request.neutralAction.label}
+                    </Text>
+                  )}
                 </Pressable>
               ) : null}
               <View style={styles.row}>
@@ -82,7 +105,7 @@ export function AppAlertModal() {
                   style={({ pressed }) => [styles.btn, styles.btnCancel, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }, (pressed || busy) && { opacity: 0.85 }]}
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.btnCancelText, { color: colorTheme.ink2 }]}>Cancel</Text>
+                  <Text style={[styles.btnCancelText, { color: colorTheme.ink2 }]}>{request.cancelLabel ?? 'Cancel'}</Text>
                 </Pressable>
                 <Pressable
                   onPress={handleConfirm}
@@ -90,7 +113,7 @@ export function AppAlertModal() {
                   style={({ pressed }) => [styles.btn, styles.btnDanger, { backgroundColor: colorTheme.red }, (pressed || busy) && { opacity: 0.9 }]}
                   accessibilityRole="button"
                 >
-                  {busy ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Text style={styles.btnDangerText}>{request.confirmLabel}</Text>}
+                  {busyAction === 'confirm' ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Text style={styles.btnDangerText}>{request.confirmLabel}</Text>}
                 </Pressable>
               </View>
             </View>

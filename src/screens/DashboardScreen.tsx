@@ -9,6 +9,7 @@ import { InfoButton } from '../components/InfoButton';
 import { PieChart } from '../components/PieChart';
 import { Pip } from '../components/Pip';
 import { TripBadge } from '../components/TripBadge';
+import { RecapEntry } from '../components/recap/RecapEntry';
 import { TaskListSheet } from '../components/TaskListSheet';
 import { TourAnchor } from '../components/TourAnchor';
 import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title } from '../components/ui';
@@ -83,7 +84,7 @@ export function DashboardScreen({
   onOpenBudget?: () => void;
   /** Tapping a category row on the budget card (not "Manage"). */
   onOpenCategory?: (id: string) => void;
-  onOpenRecap?: () => void;
+  onOpenRecap?: (month?: string) => void;
   onOpenNetWorth?: () => void;
   onOpenTrip?: (tripId: string) => void;
   onOpenOwed?: () => void;
@@ -348,7 +349,7 @@ export function DashboardScreen({
           </View>
           <View style={styles.headerActions}>
             <TourAnchor id="tour_recap_btn" activeId={activeTourAnchor}>
-              <HeaderIcon name="chart" onPress={onOpenRecap} accessibilityLabel={t('monthlyRecap')} />
+              <HeaderIcon name="chart" onPress={() => onOpenRecap()} accessibilityLabel={t('monthlyRecap')} />
             </TourAnchor>
             <View ref={mascotRef} style={styles.mascotWrap}>
               <Pressable
@@ -439,6 +440,8 @@ export function DashboardScreen({
                 <Icon name="chevronRight" size={16} color={colorTheme.ink3} />
               </Pressable>
             )}
+
+            <RecapEntry transactions={transactions} now={now} onOpen={onOpenRecap} />
 
             {/* This month budget */}
             <TourAnchor id="tour_budget_card" activeId={activeTourAnchor}>

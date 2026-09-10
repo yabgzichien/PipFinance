@@ -97,7 +97,6 @@ const ALLOWLIST = new Set([
   'src/screens/NetWorthScreen.tsx',
   'src/screens/OnboardingScreen.tsx',
   'src/screens/OwedScreen.tsx',
-  'src/screens/RecapScreen.tsx',
   'src/screens/ReceiptScanScreen.tsx',
   'src/screens/SavedScreen.tsx',
   'src/screens/SettingsScreen.tsx',

@@ -31,6 +31,7 @@ export interface WidgetMascotConfig {
   holding: string;
   mascotNotch: Notch;
   buttonNotch: Notch;
+  animationNotch: Notch;
   slot1: SlotContent;
   slot2: SlotContent;
   badgeIcon: BadgeIcon;
@@ -47,6 +48,7 @@ export const DEFAULT_WIDGET_MASCOT_CONFIG: WidgetMascotConfig = {
   holding: 'none',
   mascotNotch: 3,
   buttonNotch: 3,
+  animationNotch: 3,
   slot1: 'income',
   slot2: 'expense',
   badgeIcon: 'flame',
@@ -133,6 +135,7 @@ export function parseWidgetMascotConfig(raw: string | null): WidgetMascotConfig 
     holding: str(o.holding, d.holding),
     mascotNotch: notch(o.mascotNotch, d.mascotNotch),
     buttonNotch: notch(o.buttonNotch, d.buttonNotch),
+    animationNotch: notch(o.animationNotch, d.animationNotch),
     ...enforceSingleStreak(slots),
     badgeIcon: oneOf(o.badgeIcon, BADGE_ICONS, d.badgeIcon) as BadgeIcon,
     badgeColor: oneOf(o.badgeColor, BADGE_COLORS, d.badgeColor) as BadgeColor,
