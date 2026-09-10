@@ -32,6 +32,13 @@
         }
       ],
       [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Pip to access photos you choose.",
+          "savePhotosPermission": "Allow Pip to save your selected monthly story cards."
+        }
+      ],
+      [
         "react-native-document-scanner-plugin",
         {
           "cameraPermission": "Pip needs the camera to scan your statement or receipt."
