@@ -2,6 +2,7 @@ import type { Transaction } from '../src/lib/types';
 import {
   buildRecapStoryModel,
   isCompletedStoryMonth,
+  RECAP_PERSONA_KEYS,
   recapStoryMerchantCandidates,
   transactionDay,
 } from '../src/lib/recapStory';
@@ -55,6 +56,15 @@ function assertPrivate(value: unknown): void {
 
 describe('buildRecapStoryModel', () => {
   beforeEach(() => { sequence = 0; });
+
+  it('exports each recap persona key exactly once', () => {
+    expect(RECAP_PERSONA_KEYS).toEqual([
+      'food', 'shopping', 'entertainment', 'travelling', 'learning', 'family', 'medical',
+      'utilities', 'subscriptions', 'rental', 'phoneBill', 'insurance', 'other', 'consistent',
+      'explorer', 'smallChapter', 'incomeOnly',
+    ]);
+    expect(new Set(RECAP_PERSONA_KEYS).size).toBe(RECAP_PERSONA_KEYS.length);
+  });
 
   it('accepts only completed, non-empty months and distinguishes sparse and full stories', () => {
     const income = txn({ type: 'income', categoryId: 'salary' });

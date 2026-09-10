@@ -2,11 +2,12 @@ import { currentMonthKey, txnMonthKey } from './budget';
 import type { Transaction } from './types';
 
 export type RecapStoryKind = 'sparse' | 'full';
-export type RecapPersonaKey =
-  | 'food' | 'shopping' | 'entertainment' | 'travelling'
-  | 'learning' | 'family' | 'medical' | 'utilities'
-  | 'subscriptions' | 'rental' | 'phoneBill' | 'insurance'
-  | 'other' | 'consistent' | 'explorer' | 'smallChapter' | 'incomeOnly';
+export const RECAP_PERSONA_KEYS = [
+  'food', 'shopping', 'entertainment', 'travelling', 'learning', 'family', 'medical',
+  'utilities', 'subscriptions', 'rental', 'phoneBill', 'insurance', 'other', 'consistent',
+  'explorer', 'smallChapter', 'incomeOnly',
+] as const;
+export type RecapPersonaKey = typeof RECAP_PERSONA_KEYS[number];
 
 export type RecapBadgeKey =
   | 'fiveExpenses' | 'threeDays' | 'threeWeeks' | 'fourWeeks' | 'fourCategories'
