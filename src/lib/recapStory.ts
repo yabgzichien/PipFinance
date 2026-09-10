@@ -9,7 +9,7 @@ export type RecapPersonaKey =
   | 'other' | 'consistent' | 'explorer' | 'smallChapter' | 'incomeOnly';
 
 export type RecapBadgeKey =
-  | 'threeDays' | 'threeWeeks' | 'fourWeeks' | 'fourCategories'
+  | 'fiveExpenses' | 'threeDays' | 'threeWeeks' | 'fourWeeks' | 'fourCategories'
   | 'weekendRhythm' | 'weekdayRhythm' | 'firstChapter';
 
 export type RecapStoryScene =
@@ -40,10 +40,13 @@ const PERSONA_CATEGORY_IDS = new Set<RecapPersonaKey>([
   'utilities', 'subscriptions', 'rental', 'phoneBill', 'insurance',
 ]);
 
-const BADGE_ORDER: RecapBadgeKey[] = [
-  'fourWeeks', 'threeWeeks', 'fourCategories', 'weekendRhythm', 'weekdayRhythm',
-  'threeDays', 'firstChapter',
+export const RECAP_BADGE_KEYS: RecapBadgeKey[] = [
+  // A full story necessarily proves these two facts, so keep them ahead of optional badges.
+  'fiveExpenses', 'threeDays', 'fourWeeks', 'threeWeeks', 'fourCategories',
+  'weekendRhythm', 'weekdayRhythm', 'firstChapter',
 ];
+
+const MONEY_SCALE = 1_000_000;
 
 export function isCompletedStoryMonth(month: string, now: Date = new Date()): boolean {
   return /^\d{4}-\d{2}$/.test(month) && month < currentMonthKey(now);
@@ -71,7 +74,7 @@ function expensesByCategory(transactions: Transaction[]): Map<string, number> {
   const totals = new Map<string, number>();
   for (const transaction of transactions) {
     const id = categoryId(transaction);
-    totals.set(id, (totals.get(id) ?? 0) + Math.abs(transaction.amount));
+    totals.set(id, (totals.get(id) ?? 0) + Math.round(Math.abs(transaction.amount) * MONEY_SCALE));
   }
   return totals;
 }
@@ -116,6 +119,7 @@ function comparisonFor(
 }
 
 function storyBadges(
+  expenseCount: number,
   activityDays: number,
   activityWeeks: number,
   expenseCategoryCount: number,
@@ -128,6 +132,7 @@ function storyBadges(
   }).length;
   const weekdayDays = activityDayKeys.size - weekendDays;
   const earned = new Set<RecapBadgeKey>();
+  if (expenseCount >= 5) earned.add('fiveExpenses');
   if (activityWeeks >= 4) earned.add('fourWeeks');
   if (activityWeeks >= 3) earned.add('threeWeeks');
   if (expenseCategoryCount >= 4) earned.add('fourCategories');
@@ -135,7 +140,7 @@ function storyBadges(
   if (weekdayDays >= 3 && weekdayDays > weekendDays) earned.add('weekdayRhythm');
   if (activityDays >= 3) earned.add('threeDays');
   if (isFirstRecordedMonth) earned.add('firstChapter');
-  return BADGE_ORDER.filter((badge) => earned.has(badge)).slice(0, 3);
+  return RECAP_BADGE_KEYS.filter((badge) => earned.has(badge)).slice(0, 3);
 }
 
 /**
@@ -196,6 +201,7 @@ export function buildRecapStoryModel({
     transaction.type !== 'transfer' && (txnMonthKey(transaction) ?? '') < month,
   );
   const badges = storyBadges(
+    expenses.length,
     activityDays.size,
     activityWeeks,
     categoryTotals.size,
@@ -216,14 +222,14 @@ export function buildRecapStoryModel({
     };
   }
 
-  const cameo = merchantCameo?.trim();
+  const hasCameo = !!merchantCameo?.trim();
   const pattern: Extract<RecapStoryScene, { id: 'pattern' }> = {
     id: 'pattern',
     type: 'pattern',
     categoryId: winner.id,
     recordedSharePercent,
     ...comparisonFor(transactions, month, winner.id, recordedSharePercent),
-    ...(cameo ? { merchantCameo: cameo } : {}),
+    ...(hasCameo ? { merchantCameo: merchantCameo! } : {}),
   };
   return {
     month,

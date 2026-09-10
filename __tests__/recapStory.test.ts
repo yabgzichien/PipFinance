@@ -114,6 +114,19 @@ describe('buildRecapStoryModel', () => {
     expect(scene(tieModel, 'pattern')).toMatchObject({ categoryId: 'food', recordedSharePercent: 50 });
   });
 
+  it('breaks decimal monetary ties by category id instead of floating-point residue', () => {
+    const decimalTie = [
+      txn({ categoryId: 'food', amount: 0.30, date: '2026-08-03' }),
+      txn({ categoryId: 'shopping', amount: 0.10, date: '2026-08-04' }),
+      txn({ categoryId: 'shopping', amount: 0.20, date: '2026-08-05' }),
+      txn({ categoryId: 'other', amount: 0.01, date: '2026-08-05' }),
+      txn({ categoryId: 'other', amount: 0.01, date: '2026-08-05' }),
+    ];
+
+    expect(scene(buildRecapStoryModel({ transactions: decimalTie, month: '2026-08', now }), 'pattern'))
+      .toMatchObject({ categoryId: 'food' });
+  });
+
   it('prioritizes consistency before explorer when no category reaches 35 percent', () => {
     const rows = [
       txn({ categoryId: 'food', amount: 10, date: '2026-08-03' }),
@@ -145,11 +158,20 @@ describe('buildRecapStoryModel', () => {
     const weekday = ['2026-08-03', '2026-08-10', '2026-08-17', '2026-08-24', '2026-08-31']
       .map((date) => txn({ date, categoryId: 'custom' }));
     expect(scene(buildRecapStoryModel({ transactions: weekend, month: '2026-08', now }), 'finale')).toMatchObject({
-      badges: ['fourWeeks', 'threeWeeks', 'weekendRhythm'],
+      badges: ['fiveExpenses', 'threeDays', 'fourWeeks'],
     });
     expect(scene(buildRecapStoryModel({ transactions: weekday, month: '2026-08', now }), 'finale')).toMatchObject({
-      badges: ['fourWeeks', 'threeWeeks', 'weekdayRhythm'],
+      badges: ['fiveExpenses', 'threeDays', 'fourWeeks'],
     });
+  });
+
+  it('awards every full story its factual five-expense and three-day badges', () => {
+    const full = buildRecapStoryModel({ transactions: fullMonth(), month: '2026-08', now });
+    const fourExpenses = buildRecapStoryModel({ transactions: fullMonth().slice(0, 4), month: '2026-08', now });
+
+    expect(scene(full, 'finale'))
+      .toMatchObject({ badges: ['fiveExpenses', 'threeDays', 'fourWeeks'] });
+    expect(scene(fourExpenses, 'finale')).not.toMatchObject({ badges: expect.arrayContaining(['fiveExpenses']) });
   });
 
   it('keeps default models free of private financial and merchant data', () => {
@@ -176,11 +198,11 @@ describe('buildRecapStoryModel', () => {
       txn({ categoryId: 'food', merchantRaw: '   ', merchantKey: 'blank' }),
     ];
     const defaultModel = buildRecapStoryModel({ transactions: rows, month: '2026-08', now });
-    const disclosedModel = buildRecapStoryModel({ transactions: rows, month: '2026-08', now, merchantCameo: 'Alpha Cafe' });
+    const disclosedModel = buildRecapStoryModel({ transactions: rows, month: '2026-08', now, merchantCameo: ' Alpha Cafe ' });
 
     expect(defaultModel).not.toHaveProperty('merchantCameo');
     expect(scene(defaultModel, 'pattern')).not.toHaveProperty('merchantCameo');
-    expect(scene(disclosedModel, 'pattern')).toMatchObject({ merchantCameo: 'Alpha Cafe' });
+    expect(scene(disclosedModel, 'pattern')).toMatchObject({ merchantCameo: ' Alpha Cafe ' });
     expect(recapStoryMerchantCandidates(rows, '2026-08', 'food')).toEqual(['Zeta Market', 'Alpha Cafe']);
   });
 });
