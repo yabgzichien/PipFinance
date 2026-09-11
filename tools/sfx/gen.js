@@ -34,6 +34,7 @@ const path = require('path');
 const SAMPLE_RATE = 44100;
 const BIT_DEPTH = 16;
 const SHIPPED = path.join(__dirname, '..', '..', 'assets', 'sounds', 'saved.wav');
+const STORY_SHIPPED = path.join(__dirname, '..', '..', 'assets', 'sounds', 'monthly-story.wav');
 
 /** The voice written to assets/sounds/saved.wav by a bare `node tools/sfx/gen.js`. */
 const DEFAULT_VOICE = 'triad';
@@ -52,6 +53,76 @@ const DEFAULT_VOICE = 'triad';
 
 /** @type {Record<string, Voice>} */
 const VOICES = {
+  /**
+   * Four compact, inharmonic bell strikes make a jaunty heel-toe rhythm without quoting a
+   * melody. Each strike gets its own filtered contact burst; the final tail fades safely
+   * inside the two-second container.
+   */
+  cowbell: {
+    label: 'Cowbell — four warm, inharmonic taps for the monthly story opening.',
+    durationSec: 2.0,
+    peak: 0.64,
+    releaseSec: 0.14,
+    lowpassHz: 3600,
+    lowpassPoles: 2,
+    noise: [
+      { freq: 1450, at: 0.0, gain: 0.16, decaySec: 0.018 },
+      { freq: 1500, at: 0.34, gain: 0.14, decaySec: 0.018 },
+      { freq: 1400, at: 0.72, gain: 0.15, decaySec: 0.02 },
+      { freq: 1550, at: 1.12, gain: 0.17, decaySec: 0.022 },
+    ],
+    notes: [
+      {
+        freq: 196,
+        at: 0.0,
+        gain: 0.88,
+        decaySec: 0.21,
+        attackSec: 0.003,
+        partials: [
+          { ratio: 1.49, gain: 0.52, decayScale: 0.72 },
+          { ratio: 2.63, gain: 0.24, decayScale: 0.46 },
+          { ratio: 3.91, gain: 0.09, decayScale: 0.3 },
+        ],
+      },
+      {
+        freq: 246.94,
+        at: 0.34,
+        gain: 0.8,
+        decaySec: 0.19,
+        attackSec: 0.003,
+        partials: [
+          { ratio: 1.47, gain: 0.5, decayScale: 0.7 },
+          { ratio: 2.68, gain: 0.22, decayScale: 0.44 },
+          { ratio: 3.86, gain: 0.08, decayScale: 0.28 },
+        ],
+      },
+      {
+        freq: 220,
+        at: 0.72,
+        gain: 0.86,
+        decaySec: 0.23,
+        attackSec: 0.003,
+        partials: [
+          { ratio: 1.51, gain: 0.5, decayScale: 0.72 },
+          { ratio: 2.61, gain: 0.23, decayScale: 0.45 },
+          { ratio: 3.94, gain: 0.08, decayScale: 0.3 },
+        ],
+      },
+      {
+        freq: 293.66,
+        at: 1.12,
+        gain: 1,
+        decaySec: 0.42,
+        attackSec: 0.004,
+        partials: [
+          { ratio: 1.48, gain: 0.48, decayScale: 0.7 },
+          { ratio: 2.66, gain: 0.2, decayScale: 0.44 },
+          { ratio: 3.89, gain: 0.07, decayScale: 0.28 },
+        ],
+      },
+    ],
+  },
+
   // ── The counter-example ──────────────────────────────────────────────────────
   horn: {
     label: 'Two sine tones a fifth apart, overlapping — the honk. Kept for comparison.',
@@ -417,5 +488,6 @@ if (argv.includes('--all')) {
   const dir = flag('--out') ?? path.join(__dirname, 'preview');
   for (const name of Object.keys(VOICES)) write(name, path.join(dir, `${name}.wav`));
 } else {
-  write(flag('--voice') ?? DEFAULT_VOICE, flag('--out') ?? SHIPPED);
+  if (argv.includes('--story')) write('cowbell', STORY_SHIPPED);
+  else write(flag('--voice') ?? DEFAULT_VOICE, flag('--out') ?? SHIPPED);
 }

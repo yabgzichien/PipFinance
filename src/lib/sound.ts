@@ -11,12 +11,18 @@ import { Platform } from 'react-native';
 /** Below full volume: a save confirmation should sit under whatever the user is listening
  *  to, not announce itself over the top of it. */
 const VOLUME = 0.6;
+const STORY_VOLUME = 0.5;
 
 let enabled = true;
 let player: AudioPlayer | null = null;
 /** Set once a player build has failed. A device that can't open an audio session won't start
  *  being able to mid-session, so retrying on every save just burns work and log noise. */
 let unavailable = false;
+
+/** The monthly-story sting is independent from the save chime so pausing the story never
+ * interrupts a save payoff (and vice versa). It is decoded only when the story opens. */
+let storyPlayer: AudioPlayer | null = null;
+let storyUnavailable = false;
 
 /** Wired up from AppDataProvider whenever the `soundEnabled` preference changes. Sound gets
  *  its own switch rather than riding on the motion setting: it carries into a room the way
@@ -48,6 +54,25 @@ function getPlayer(): AudioPlayer | null {
   return player;
 }
 
+function getStoryPlayer(): AudioPlayer | null {
+  if (storyPlayer || storyUnavailable) return storyPlayer;
+  try {
+    void setAudioModeAsync({
+      playsInSilentMode: false,
+      shouldPlayInBackground: false,
+      interruptionMode: 'mixWithOthers',
+    }).catch(() => {
+      // System defaults are an acceptable fallback for this optional sting.
+    });
+    storyPlayer = createAudioPlayer(require('../../assets/sounds/monthly-story.wav'));
+    storyPlayer.volume = STORY_VOLUME;
+  } catch {
+    storyUnavailable = true;
+    return null;
+  }
+  return storyPlayer;
+}
+
 /** The reward moment — a save landed. Pairs with haptics.payoff() at the same call site so
  *  the sound and the buzz read as one event (docs/ui-engagement-plan.md §1: reward the
  *  looking, never the state of the finances). */
@@ -65,5 +90,57 @@ export function payoff(): void {
   } catch {
     // Audio is a nicety; a denied audio focus or a busy output device should never surface
     // as an error on the screen that just told the user their save worked.
+  }
+}
+
+/** Starts the opening sting from its first beat. The story UI owns when this is called. */
+export function storyIntro(): void {
+  if (!enabled || Platform.OS === 'web') return;
+  const active = getStoryPlayer();
+  if (!active) return;
+  try {
+    void active.seekTo(0).catch(() => {
+      // A failed rewind must not prevent the visual story from opening.
+    });
+  } catch {
+    // Some native players can reject a seek synchronously while changing audio routes.
+  }
+  try {
+    active.play();
+  } catch {
+    // The sting is optional and never blocks the story.
+  }
+}
+
+/** Holds the sting at its current position for the viewer's press-and-hold gesture. */
+export function pauseStoryIntro(): void {
+  if (Platform.OS === 'web' || !storyPlayer) return;
+  try {
+    storyPlayer.pause();
+  } catch {
+    // A disappearing audio route should stay invisible to the story UI.
+  }
+}
+
+/** Continues from the held position; deliberately does not seek or lazily create a player. */
+export function resumeStoryIntro(): void {
+  if (!enabled || Platform.OS === 'web' || !storyPlayer) return;
+  try {
+    storyPlayer.play();
+  } catch {
+    // The visual timeline remains authoritative if audio focus is unavailable.
+  }
+}
+
+/** Ends story audio for navigation/close and leaves the existing player ready at the start. */
+export function stopStoryIntro(): void {
+  if (Platform.OS === 'web' || !storyPlayer) return;
+  pauseStoryIntro();
+  try {
+    void storyPlayer.seekTo(0).catch(() => {
+      // Rewind is best-effort; the next storyIntro call also seeks before playing.
+    });
+  } catch {
+    // Keep navigation and close paths silent even when native teardown races the seek.
   }
 }

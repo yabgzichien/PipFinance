@@ -4,8 +4,14 @@
  */
 
 const mockPlay = jest.fn();
+const mockPause = jest.fn();
 const mockSeekTo = jest.fn(() => Promise.resolve());
-const mockCreateAudioPlayer = jest.fn(() => ({ play: mockPlay, seekTo: mockSeekTo, volume: 1 }));
+const mockCreateAudioPlayer = jest.fn(() => ({
+  play: mockPlay,
+  pause: mockPause,
+  seekTo: mockSeekTo,
+  volume: 1,
+}));
 const mockSetAudioModeAsync = jest.fn(() => Promise.resolve());
 
 jest.mock('expo-audio', () => ({
@@ -25,8 +31,12 @@ function load(os: string = 'ios'): typeof import('../src/lib/sound') {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockPlay.mockImplementation(() => undefined);
+  mockPause.mockImplementation(() => undefined);
+  mockSeekTo.mockImplementation(() => Promise.resolve());
   mockCreateAudioPlayer.mockImplementation(() => ({
     play: mockPlay,
+    pause: mockPause,
     seekTo: mockSeekTo,
     volume: 1,
   }));
@@ -102,6 +112,117 @@ describe('setSoundEnabled', () => {
   it('defaults to on, so a first-run install hears the save land', () => {
     load().payoff();
     expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('monthly story intro', () => {
+  it('lazily builds the story player at half volume, rewinds it, and plays the new asset', () => {
+    const storyAsset = require('../assets/sounds/monthly-story.wav');
+    const sound = load();
+
+    sound.storyIntro();
+
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(storyAsset);
+    expect(mockCreateAudioPlayer.mock.results[0].value.volume).toBe(0.5);
+    expect(mockSeekTo).toHaveBeenCalledWith(0);
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses a playing intro without rewinding it', () => {
+    const sound = load();
+    sound.storyIntro();
+    mockSeekTo.mockClear();
+
+    sound.pauseStoryIntro();
+
+    expect(mockPause).toHaveBeenCalledTimes(1);
+    expect(mockSeekTo).not.toHaveBeenCalled();
+  });
+
+  it('resumes a held intro without seeking, so it continues from its held position', () => {
+    const sound = load();
+    sound.storyIntro();
+    sound.pauseStoryIntro();
+    mockPlay.mockClear();
+    mockSeekTo.mockClear();
+
+    sound.resumeStoryIntro();
+
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    expect(mockSeekTo).not.toHaveBeenCalled();
+  });
+
+  it('stops an intro for navigation by pausing and rewinding it', () => {
+    const sound = load();
+    sound.storyIntro();
+    mockPause.mockClear();
+    mockSeekTo.mockClear();
+
+    sound.stopStoryIntro();
+
+    expect(mockPause).toHaveBeenCalledTimes(1);
+    expect(mockSeekTo).toHaveBeenCalledWith(0);
+  });
+
+  it('does not build a player just to pause or stop an intro that never started', () => {
+    const sound = load();
+    sound.pauseStoryIntro();
+    sound.stopStoryIntro();
+
+    expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
+  });
+
+  it('does not play or build the story player while Sounds are off', () => {
+    const sound = load();
+    sound.setSoundEnabled(false);
+    sound.storyIntro();
+    sound.resumeStoryIntro();
+
+    expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it('does not play or build the story player on web', () => {
+    const sound = load('web');
+    sound.storyIntro();
+    sound.resumeStoryIntro();
+
+    expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it('silently gives up when the story player cannot be created', () => {
+    mockCreateAudioPlayer.mockImplementation(() => {
+      throw new Error('story audio unavailable');
+    });
+    const sound = load();
+
+    expect(() => sound.storyIntro()).not.toThrow();
+    expect(() => sound.storyIntro()).not.toThrow();
+    expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a rejected story rewind without an unhandled rejection', async () => {
+    mockSeekTo.mockImplementation(() => Promise.reject(new Error('seek failed')));
+    const sound = load();
+
+    expect(() => sound.storyIntro()).not.toThrow();
+    await Promise.resolve();
+  });
+
+  it('swallows story play and pause failures', () => {
+    mockPlay.mockImplementation(() => {
+      throw new Error('play denied');
+    });
+    mockPause.mockImplementation(() => {
+      throw new Error('pause denied');
+    });
+    const sound = load();
+
+    expect(() => sound.storyIntro()).not.toThrow();
+    expect(() => sound.pauseStoryIntro()).not.toThrow();
+    expect(() => sound.stopStoryIntro()).not.toThrow();
+    expect(() => sound.resumeStoryIntro()).not.toThrow();
   });
 });
 
