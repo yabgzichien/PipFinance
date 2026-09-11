@@ -23,12 +23,15 @@ let unavailable = false;
  * interrupts a save payoff (and vice versa). It is decoded only when the story opens. */
 let storyPlayer: AudioPlayer | null = null;
 let storyUnavailable = false;
+/** Monotonic intent token: any action that supersedes a pending rewind advances it. */
+let storyStartVersion = 0;
 
 /** Wired up from AppDataProvider whenever the `soundEnabled` preference changes. Sound gets
  *  its own switch rather than riding on the motion setting: it carries into a room the way
  *  animation and haptics don't, so people mute it on its own schedule. */
 export function setSoundEnabled(next: boolean): void {
   enabled = next;
+  if (!next) storyStartVersion += 1;
 }
 
 /** Builds the player on first use rather than at import: an install that never saves (or one
@@ -96,24 +99,31 @@ export function payoff(): void {
 /** Starts the opening sting from its first beat. The story UI owns when this is called. */
 export function storyIntro(): void {
   if (!enabled || Platform.OS === 'web') return;
+  const startVersion = ++storyStartVersion;
   const active = getStoryPlayer();
   if (!active) return;
   try {
-    void active.seekTo(0).catch(() => {
-      // A failed rewind must not prevent the visual story from opening.
-    });
+    void active
+      .seekTo(0)
+      .then(() => {
+        if (startVersion !== storyStartVersion || !enabled || Platform.OS === 'web') return;
+        try {
+          active.play();
+        } catch {
+          // The sting is optional and never blocks the story.
+        }
+      })
+      .catch(() => {
+        // A failed rewind must not prevent the visual story from opening.
+      });
   } catch {
     // Some native players can reject a seek synchronously while changing audio routes.
-  }
-  try {
-    active.play();
-  } catch {
-    // The sting is optional and never blocks the story.
   }
 }
 
 /** Holds the sting at its current position for the viewer's press-and-hold gesture. */
 export function pauseStoryIntro(): void {
+  storyStartVersion += 1;
   if (Platform.OS === 'web' || !storyPlayer) return;
   try {
     storyPlayer.pause();

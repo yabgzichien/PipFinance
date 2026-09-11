@@ -29,6 +29,14 @@ function load(os: string = 'ios'): typeof import('../src/lib/sound') {
   return mod;
 }
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockPlay.mockImplementation(() => undefined);
@@ -116,7 +124,7 @@ describe('setSoundEnabled', () => {
 });
 
 describe('monthly story intro', () => {
-  it('lazily builds the story player at half volume, rewinds it, and plays the new asset', () => {
+  it('lazily builds the story player at half volume, rewinds it, and plays the new asset', async () => {
     const storyAsset = require('../assets/sounds/monthly-story.wav');
     const sound = load();
 
@@ -125,6 +133,66 @@ describe('monthly story intro', () => {
     expect(mockCreateAudioPlayer).toHaveBeenCalledWith(storyAsset);
     expect(mockCreateAudioPlayer.mock.results[0].value.volume).toBe(0.5);
     expect(mockSeekTo).toHaveBeenCalledWith(0);
+    await Promise.resolve();
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not play while the opening rewind is still pending', () => {
+    const rewind = deferred();
+    mockSeekTo.mockReturnValueOnce(rewind.promise);
+
+    load().storyIntro();
+
+    expect(mockPlay).not.toHaveBeenCalled();
+  });
+
+  it('plays only when the opening rewind resolves', async () => {
+    const rewind = deferred();
+    mockSeekTo.mockReturnValueOnce(rewind.promise);
+    load().storyIntro();
+    mockPlay.mockClear();
+
+    rewind.resolve();
+    await rewind.promise;
+
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['pause', 'stop', 'disable'] as const)(
+    '%s cancels playback waiting on an older rewind',
+    async (action) => {
+      const rewind = deferred();
+      mockSeekTo.mockReturnValueOnce(rewind.promise);
+      const sound = load();
+      sound.storyIntro();
+
+      if (action === 'pause') sound.pauseStoryIntro();
+      else if (action === 'stop') sound.stopStoryIntro();
+      else sound.setSoundEnabled(false);
+
+      rewind.resolve();
+      await rewind.promise;
+
+      expect(mockPlay).not.toHaveBeenCalled();
+    }
+  );
+
+  it('a newer start cancels the older rewind completion and only plays the newest one', async () => {
+    const olderRewind = deferred();
+    const newerRewind = deferred();
+    mockSeekTo
+      .mockReturnValueOnce(olderRewind.promise)
+      .mockReturnValueOnce(newerRewind.promise);
+    const sound = load();
+    sound.storyIntro();
+    sound.storyIntro();
+
+    olderRewind.resolve();
+    await olderRewind.promise;
+    expect(mockPlay).not.toHaveBeenCalled();
+
+    newerRewind.resolve();
+    await newerRewind.promise;
     expect(mockPlay).toHaveBeenCalledTimes(1);
   });
 
