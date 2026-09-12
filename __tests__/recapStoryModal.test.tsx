@@ -10,7 +10,7 @@ let mockMotion = 'full';
 let mockReduced = false;
 let mockZh = false;
 jest.mock('../src/state/store', () => ({ useAppData: () => ({ motionSetting: mockMotion,
-  catById: { custom: { id: 'custom', name: 'Pottery' } } }) }));
+  catById: { custom: { id: 'custom', label: 'Pottery', icon: 'dots', hue: 220, isDefault: false } } }) }));
 jest.mock('../src/state/useReducedMotion', () => ({ useReducedMotion: () => mockReduced }));
 jest.mock('../src/db/metaRepo', () => ({ getMeta: jest.fn(async () => null), setMeta: jest.fn() }));
 jest.mock('../src/lib/sound', () => ({ storyIntro: jest.fn(), stopStoryIntro: jest.fn(),
@@ -19,7 +19,10 @@ jest.mock('../src/components/recap/RecapStoryFrame', () => ({ RecapStoryFrame: (
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }) }));
 jest.mock('../src/i18n', () => {
   const actual = jest.requireActual('../src/i18n');
-  return { ...actual, useLanguage: () => ({ ...actual.useLanguage(), isZh: mockZh }) };
+  return { ...actual, useLanguage: () => ({ ...actual.useLanguage(), isZh: mockZh,
+    t: (key: string, params?: Record<string, string | number>) => actual.translate(mockZh ? 'zh' : 'en', key, params),
+    formatMonthLabel: () => mockZh ? '2026年8月' : 'August 2026',
+  }) };
 });
 const Renderer = require('react-test-renderer');
 let trees: any[] = [];
@@ -31,6 +34,9 @@ const defaults = { visible: true, model, mascotConfig: DEFAULT_WIDGET_MASCOT_CON
 function render(props = {}) {
   let tree: any;
   Renderer.act(() => { tree = Renderer.create(<RecapStoryModal {...defaults} {...props} />); });
+  Renderer.act(() => tree.root.findByProps({ testID: 'story-stage' }).props.onLayout({
+    nativeEvent: { layout: { width: 360, height: 640 } },
+  }));
   trees.push(tree);
   return tree;
 }
@@ -120,6 +126,7 @@ it('unmounts the session on close/hidden and reopens at the start with fresh mut
   const onClose = jest.fn(); const tree = render({ onClose });
   press(tree, 'Mute'); press(tree, 'Next'); press(tree, 'Close');
   expect(onClose).toHaveBeenCalledTimes(1); expect(sound.stopStoryIntro).toHaveBeenCalled();
+  expect(tree.root.findAllByType(RecapStoryFrame)).toHaveLength(0);
   Renderer.act(() => tree.update(<RecapStoryModal {...defaults} visible={false} />));
   expect(tree.root.findAllByType(RecapStoryFrame)).toHaveLength(0);
   Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
@@ -153,4 +160,53 @@ it('provides translated position/month/custom categories, safe scale, and 44-poi
   mockZh = true;
   Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
   expect(frame(tree).accessibilityPositionLabel).toBe('第 1 个故事，共 3 个');
+});
+
+it('keeps the gesture surface outside the transformed artwork so release coordinates use screen points', () => {
+  const tree = render();
+  const surface = tree.root.findByProps({ testID: 'story-gesture-surface' });
+  expect(StyleSheet.flatten(surface.props.style)).toMatchObject({ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 });
+  expect(surface.findAllByType(RecapStoryFrame)).toHaveLength(0);
+  expect(surface.props.accessible).toBe(false);
+});
+
+it('a visible pause control preserves its pause through a hold, and play continues the remaining time', () => {
+  const tree = render(); advance(2000); press(tree, 'Pause');
+  expect(tree.root.findByProps({ testID: 'story-status' }).props.accessibilityLabel).toBe('Paused');
+  grant(); advance(1000); release(); advance(6000);
+  expect(frame(tree).scene.id).toBe('ritual');
+  press(tree, 'Play'); advance(3000);
+  expect(frame(tree).scene.id).toBe('identity');
+});
+
+it('a cancelled hold resumes without navigation and duplicate swipe releases do not advance again', () => {
+  const tree = render(); advance(2000); grant(); advance(1000);
+  Renderer.act(() => gesture.onPanResponderTerminate());
+  advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(1); expect(frame(tree).scene.id).toBe('identity');
+  grant(); release(-48); release(-80);
+  expect(frame(tree).scene.id).toBe('finale');
+});
+
+it('turning motion off stops active audio and autoplay, with no new sound on re-enabling', () => {
+  const tree = render(); advance(2000);
+  mockMotion = 'off';
+  Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
+  expect(sound.stopStoryIntro).toHaveBeenCalled();
+  advance(10000); expect(frame(tree).scene.id).toBe('ritual');
+  mockMotion = 'full';
+  Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
+  advance(3000); expect(frame(tree).scene.id).toBe('identity');
+  expect(sound.storyIntro).toHaveBeenCalledTimes(1);
+});
+
+it('unmount stops audio and its pending timeline', () => {
+  const tree = render(); advance(2000);
+  const oldProgress = frame(tree).progress;
+  Renderer.act(() => tree.unmount()); trees = [];
+  const held = oldProgress.__getValue();
+  expect(sound.stopStoryIntro).toHaveBeenCalled();
+  advance(10000);
+  expect(oldProgress.__getValue()).toBe(held);
+  expect(jest.getTimerCount()).toBe(0);
 });

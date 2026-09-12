@@ -31,6 +31,13 @@ it('replays a new cycle while retaining mute only within that session', () => {
   expect(createPlaybackState()).toEqual({ index: 0, paused: false, completed: false, cycle: 0, muted: false });
 });
 
+it('explicit navigation clears pause and completion without changing session sound or replay cycle', () => {
+  const state = { index: 2, paused: true, completed: true, cycle: 4, muted: true };
+  expect(reduce(state, { type: 'GOTO', index: 1, total: 3 })).toEqual({
+    index: 1, paused: false, completed: false, cycle: 4, muted: true,
+  });
+});
+
 it.each([
   ['full', false, true], ['full', true, false], ['reduced', false, false],
   ['reduced', true, false], ['off', false, false], ['off', true, false],

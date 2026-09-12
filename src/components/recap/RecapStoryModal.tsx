@@ -1,0 +1,213 @@
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Animated, Easing, Modal, PanResponder, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLanguage } from '../../i18n';
+import type { RecapStoryModel, RecapStoryScene } from '../../lib/recapStory';
+import { createPlaybackState, recapStoryPlaybackReducer, STORY_DURATION_MS, storyAutoplays,
+  type PlaybackEvent } from '../../lib/recapStoryPlayback';
+import { STORY_LOGICAL_HEIGHT, STORY_LOGICAL_WIDTH } from '../../lib/recapStoryTheme';
+import { pauseStoryIntro, resumeStoryIntro, stopStoryIntro, storyIntro } from '../../lib/sound';
+import { useAppData } from '../../state/store';
+import { useReducedMotion } from '../../state/useReducedMotion';
+import type { WidgetMascotConfig } from '../../widget/mascot/config';
+import { Label } from '../ui';
+import { RecapStoryFrame } from './RecapStoryFrame';
+
+export interface RecapStoryModalProps {
+  visible: boolean;
+  model: RecapStoryModel;
+  mascotConfig: WidgetMascotConfig;
+  onClose: () => void;
+  onShareScene?: (sceneId: RecapStoryScene['id']) => void;
+  onChooseCards?: () => void;
+}
+
+/** Conditional mounting makes playback and mute belong only to the current viewing session. */
+export function RecapStoryModal(props: RecapStoryModalProps) {
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => { if (!props.visible) setDismissed(false); }, [props.visible]);
+  if (!props.visible || dismissed || props.model.scenes.length === 0) return null;
+  return <StorySession key={props.model.month} {...props} onClose={() => {
+    setDismissed(true);
+    props.onClose();
+  }} />;
+}
+
+function Control({ label, hint, onPress, disabled = false }: {
+  label: string; hint: string; onPress: () => void; disabled?: boolean;
+}) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityHint={hint}
+    accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
+    style={[styles.control, disabled && styles.disabled]}>
+    <Label color="#FFFFFF">{label}</Label>
+  </Pressable>;
+}
+
+function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCards }: RecapStoryModalProps) {
+  const { motionSetting, catById } = useAppData();
+  const reduced = useReducedMotion();
+  const { t, tCat, isZh, formatMonthLabel } = useLanguage();
+  const insets = useSafeAreaInsets();
+  const autoplay = storyAutoplays(motionSetting, reduced);
+  const motion = motionSetting === 'off' ? 'off' : autoplay ? 'full' : 'reduced';
+  const [state, dispatch] = useReducer(recapStoryPlaybackReducer, undefined, createPlaybackState);
+  // Navigation to the same clamped index still creates a fresh five-second card.
+  const [restart, setRestart] = useState(0);
+  const progress = useMemo(() => new Animated.Value(0), [state.index, state.cycle, restart]);
+  const pausedProgress = useRef(0);
+  const playedCycle = useRef<number | null>(null);
+  const soundActive = useRef(false);
+  const hold = useRef<{ started: number; wasPaused: boolean } | null>(null);
+  const [stage, setStage] = useState({ width: 0, height: 0 });
+  const total = model.scenes.length;
+  const scene = model.scenes[state.index];
+  const position = isZh ? `第 ${state.index + 1} 个故事，共 ${total} 个` : `Story ${state.index + 1} of ${total}`;
+  const status = state.paused ? (isZh ? '已暂停' : 'Paused') : position;
+  const scale = Math.max(0, Math.min(stage.width / STORY_LOGICAL_WIDTH, stage.height / STORY_LOGICAL_HEIGHT));
+
+  useEffect(() => { pausedProgress.current = 0; }, [progress]);
+
+  useEffect(() => {
+    if (!autoplay || state.paused || state.completed) return;
+    let active = true;
+    const animation = Animated.timing(progress, {
+      toValue: 1, duration: (1 - pausedProgress.current) * STORY_DURATION_MS,
+      easing: Easing.linear, useNativeDriver: false,
+    });
+    animation.start(({ finished }) => {
+      if (active && finished) dispatch({ type: 'TICK_COMPLETE', total });
+    });
+    return () => {
+      active = false;
+      progress.stopAnimation((value) => { pausedProgress.current = value; });
+    };
+  }, [progress, autoplay, state.paused, state.completed, total]);
+
+  useEffect(() => {
+    if (autoplay && !state.muted && scene.id === 'ritual' && playedCycle.current !== state.cycle) {
+      playedCycle.current = state.cycle;
+      soundActive.current = true;
+      storyIntro();
+    }
+    return () => { soundActive.current = false; stopStoryIntro(); };
+  }, [autoplay, state.muted, state.cycle, scene.id]);
+
+  function navigate(event: PlaybackEvent) {
+    soundActive.current = false;
+    stopStoryIntro();
+    progress.stopAnimation();
+    setRestart((value) => value + 1);
+    dispatch(event);
+  }
+
+  function pause() {
+    progress.stopAnimation((value) => { pausedProgress.current = value; });
+    if (soundActive.current) pauseStoryIntro();
+    dispatch({ type: 'PAUSE' });
+  }
+
+  function resume() {
+    if (soundActive.current && autoplay && !state.muted) resumeStoryIntro();
+    dispatch({ type: 'RESUME' });
+  }
+
+  function finishHold() {
+    const previous = hold.current;
+    hold.current = null;
+    if (previous && !previous.wasPaused) resume();
+  }
+
+  const responder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    onPanResponderGrant: () => {
+      hold.current = { started: Date.now(), wasPaused: state.paused };
+      if (!state.paused) pause();
+    },
+    onPanResponderRelease: (event, gesture) => {
+      const held = hold.current;
+      if (!held) return;
+      hold.current = null;
+      if (Math.abs(gesture.dx) >= 48 && Math.abs(gesture.dx) > Math.abs(gesture.dy)) {
+        navigate(gesture.dx < 0 ? { type: 'NEXT', total } : { type: 'PREVIOUS' });
+      } else if (Date.now() - held.started < 250 && Math.abs(gesture.dy) < 48) {
+        navigate(event.nativeEvent.locationX < (STORY_LOGICAL_WIDTH * scale) / 2
+          ? { type: 'PREVIOUS' } : { type: 'NEXT', total });
+      } else if (!held.wasPaused) resume();
+    },
+    onPanResponderTerminate: finishHold,
+    onPanResponderTerminationRequest: () => true,
+  });
+
+  return <Modal visible animationType="none" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <View accessibilityViewIsModal style={[styles.surround, {
+      paddingTop: insets.top, paddingBottom: insets.bottom,
+      paddingLeft: insets.left, paddingRight: insets.right,
+    }]}>
+      <View style={styles.toolbar}>
+        <Control label={t('close')} hint={isZh ? '关闭故事' : 'Close the story'} onPress={onClose} />
+        <Control label={t(state.muted ? 'recapStoryUnmute' : 'recapStoryMute')}
+          hint={isZh ? '切换本次故事的声音' : 'Toggle sound for this viewing session'}
+          onPress={() => dispatch({ type: 'TOGGLE_MUTE' })} />
+        <Control label={t('recapStoryReplay')} hint={isZh ? '从第一个故事重新开始' : 'Start again at the first story'}
+          onPress={() => navigate({ type: 'REPLAY' })} />
+      </View>
+      <View testID="story-progress" accessibilityRole="progressbar" accessibilityLabel={position}
+        accessibilityValue={{ min: 0, max: 100, now: state.completed ? 100 : Math.round(state.index / total * 100) }}
+        style={styles.segments}>
+        {model.scenes.map((card, index) => <View key={card.id} style={styles.segment}>
+          <Animated.View style={[styles.fill, { width: index < state.index || state.completed ? '100%'
+            : index === state.index ? progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) : '0%' }]} />
+        </View>)}
+      </View>
+      <View testID="story-stage" style={styles.stage} onLayout={({ nativeEvent: { layout } }) => {
+        setStage({ width: layout.width, height: layout.height });
+      }}>
+        <View testID="story-scaled-bounds" style={{ width: STORY_LOGICAL_WIDTH * scale,
+          height: STORY_LOGICAL_HEIGHT * scale }}>
+          <View style={{ width: STORY_LOGICAL_WIDTH, height: STORY_LOGICAL_HEIGHT,
+            transform: [{ scale }], transformOrigin: 'top left' }}>
+            <RecapStoryFrame scene={scene} mode="animated" motion={motion} progress={progress}
+              mascotConfig={mascotConfig} monthLabel={formatMonthLabel(model.month)}
+              categoryLabel={(id) => catById[id] ? tCat(catById[id]) : (isZh ? '未分类' : 'Uncategorized')}
+              accessibilityPositionLabel={position} />
+          </View>
+          {/* Receive touches in the displayed rectangle's coordinate system, independent
+              of which text or illustration lies beneath the finger. */}
+          <View testID="story-gesture-surface" accessible={false} importantForAccessibility="no"
+            style={StyleSheet.absoluteFillObject} {...responder.panHandlers} />
+        </View>
+      </View>
+      <View testID="story-status" accessible accessibilityLiveRegion="polite" accessibilityLabel={status}
+        style={styles.status}><Label color="#FFFFFF">{status}</Label></View>
+      <View style={styles.toolbar}>
+        <Control label={t('recapStoryPrevious')} hint={isZh ? '重新播放上一张卡片' : 'Restart the previous card'}
+          onPress={() => navigate({ type: 'PREVIOUS' })} />
+        {autoplay && <Control label={t(state.paused ? 'recapStoryPlay' : 'recapStoryPause')}
+          hint={isZh ? '暂停或继续当前故事' : 'Pause or resume the current story'}
+          onPress={state.paused ? resume : pause} />}
+        <Control label={t('recapStoryNext')} hint={isZh ? '查看下一张卡片' : 'View the next card'}
+          disabled={state.index === total - 1} onPress={() => navigate({ type: 'NEXT', total })} />
+      </View>
+      <View style={styles.toolbar}>
+        {onShareScene && <Control label={t('recapStoryShareCard')} hint={isZh ? '分享当前卡片' : 'Share the current card'}
+          onPress={() => { pause(); onShareScene(scene.id); }} />}
+        {scene.id === 'finale' && onChooseCards && <Control label={t('recapStoryChooseCards')}
+          hint={isZh ? '选择要分享的卡片' : 'Choose cards to share'} onPress={() => { pause(); onChooseCards(); }} />}
+      </View>
+    </View>
+  </Modal>;
+}
+
+const styles = StyleSheet.create({
+  surround: { flex: 1, backgroundColor: '#000000' },
+  toolbar: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 8 },
+  control: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, paddingVertical: 12,
+    alignItems: 'center', justifyContent: 'center' },
+  disabled: { opacity: 0.5 },
+  segments: { flexDirection: 'row', gap: 4, paddingHorizontal: 12, paddingVertical: 8 },
+  segment: { flex: 1, height: 4, backgroundColor: '#555555', borderRadius: 2, overflow: 'hidden' },
+  fill: { height: 4, backgroundColor: '#FFFFFF' },
+  stage: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 0 },
+  status: { minHeight: 24, alignItems: 'center', justifyContent: 'center' },
+});
