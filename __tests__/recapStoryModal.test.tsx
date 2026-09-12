@@ -210,3 +210,55 @@ it('unmount stops audio and its pending timeline', () => {
   expect(oldProgress.__getValue()).toBe(held);
   expect(jest.getTimerCount()).toBe(0);
 });
+
+it.each(['held release', 'termination', 'tap', 'swipe'] as const)(
+  'keeps native responder ownership across the grant rerender and handles %s once', (action) => {
+    // Use React Native's actual responder rather than the captured-config test helper.
+    jest.mocked(PanResponder.create).mockRestore();
+    const create = jest.spyOn(PanResponder, 'create');
+    const tree = render();
+    advance(2000);
+    const surface = () => tree.root.findByProps({ testID: 'story-gesture-surface' }).props;
+    const before = surface();
+    const responder = create.mock.results[create.mock.results.length - 1].value;
+    const event = {
+      nativeEvent: { locationX: 300, touches: [{ identifier: 0 }] },
+      touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: 1,
+        touchBank: [{ touchActive: true, currentTimeStamp: 1, currentPageX: 300,
+          currentPageY: 200, previousPageX: 300, previousPageY: 200 }] },
+    };
+    try {
+      Renderer.act(() => before.onResponderGrant(event));
+      expect(tree.root.findByProps({ testID: 'story-status' }).props.accessibilityLabel).toBe('Paused');
+      expect(responder.getInteractionHandle()).not.toBeNull();
+      if (action === 'held release' || action === 'termination') advance(500);
+      if (action === 'swipe') {
+        event.touchHistory.mostRecentTimeStamp = 2;
+        event.touchHistory.touchBank[0].currentTimeStamp = 2;
+        event.touchHistory.touchBank[0].currentPageX = 252;
+        // Left release position must not override a leftward swipe's NEXT direction.
+        event.nativeEvent.locationX = 0;
+        Renderer.act(() => surface().onResponderMove(event));
+      }
+      const end = action === 'termination' ? 'onResponderTerminate' : 'onResponderRelease';
+      Renderer.act(() => surface()[end](event));
+      Renderer.act(() => surface()[end](event));
+      expect(responder.getInteractionHandle()).toBeNull();
+      expect(surface().onResponderGrant).toBe(before.onResponderGrant);
+      expect(surface().onResponderRelease).toBe(before.onResponderRelease);
+      expect(surface().onResponderTerminate).toBe(before.onResponderTerminate);
+      expect(create).toHaveBeenCalledTimes(1);
+      if (action === 'held release' || action === 'termination') {
+        expect(sound.resumeStoryIntro).toHaveBeenCalledTimes(1);
+        advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+        advance(1); expect(frame(tree).scene.id).toBe('identity');
+      } else {
+        expect(sound.resumeStoryIntro).not.toHaveBeenCalled();
+        expect(frame(tree).scene.id).toBe('identity');
+      }
+    } finally {
+      // Also release ownership when the regression intentionally fails in the RED run.
+      Renderer.act(() => responder.panHandlers.onResponderTerminate(event));
+    }
+  },
+);

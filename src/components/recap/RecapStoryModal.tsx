@@ -117,14 +117,20 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
     if (previous && !previous.wasPaused) resume();
   }
 
-  const responder = PanResponder.create({
+  // The responder owns a native interaction handle from grant through release.
+  // Keep that owner stable while its handlers read the latest scene and callbacks.
+  const gestureActions = useRef({ paused: state.paused, scale, total, pause, resume, navigate, finishHold });
+  gestureActions.current = { paused: state.paused, scale, total, pause, resume, navigate, finishHold };
+  const [responder] = useState(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > Math.abs(gesture.dy),
     onPanResponderGrant: () => {
-      hold.current = { started: Date.now(), wasPaused: state.paused };
-      if (!state.paused) pause();
+      const { paused, pause } = gestureActions.current;
+      hold.current = { started: Date.now(), wasPaused: paused };
+      if (!paused) pause();
     },
     onPanResponderRelease: (event, gesture) => {
+      const { navigate, total, scale, resume } = gestureActions.current;
       const held = hold.current;
       if (!held) return;
       hold.current = null;
@@ -135,9 +141,9 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
           ? { type: 'PREVIOUS' } : { type: 'NEXT', total });
       } else if (!held.wasPaused) resume();
     },
-    onPanResponderTerminate: finishHold,
+    onPanResponderTerminate: () => gestureActions.current.finishHold(),
     onPanResponderTerminationRequest: () => true,
-  });
+  }));
 
   return <Modal visible animationType="none" presentationStyle="fullScreen" onRequestClose={onClose}>
     <View accessibilityViewIsModal style={[styles.surround, {
