@@ -10,7 +10,16 @@ import { fmtMoney, readTimeLabel } from '../lib/format';
 import { payoff } from '../lib/haptics';
 import type { AutoFillStats } from '../lib/recommend';
 import { payoff as playChime } from '../lib/sound';
-import { outstanding, sharesFromSplit } from '../lib/split';
+import { explodeItemized, outstanding, SELF, sharesFromSplit } from '../lib/split';
+import {
+  generateDeterministicReceipt,
+  generateGroupSplitReceipt,
+  groupReceiptCanvasInput,
+  type GeneratedReceipt,
+  type GroupSplitPersonInput,
+  type ReceiptCanvasInput,
+} from '../lib/receiptGenerator';
+import type { ReceiptDraftState } from './ReceiptScanScreen';
 import { buildGroupMessage, buildPersonMessage, type SplitMessageInput, type SplitWorkings } from '../lib/splitMessage';
 import type { Category, Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
@@ -30,6 +39,7 @@ export function SavedScreen({
   elapsedMs = null,
   autoFill = null,
   splitWorkings = null,
+  receiptDraftState = null,
   onDone,
 }: {
   result: Transaction[];
@@ -47,6 +57,8 @@ export function SavedScreen({
    *  already knew, next to the same measure for last calendar month. Null for a save that
    *  never ran a live extraction — there is no "scan" to measure. */
   autoFill?: { current: AutoFillStats; lastMonth: AutoFillStats } | null;
+  /** Receipt draft state if this save came from a scanned receipt split. */
+  receiptDraftState?: ReceiptDraftState | null;
   onDone: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -97,7 +109,7 @@ export function SavedScreen({
    * replay. When that recovery fails the portions stay undefined and the message drops its
    * rate line rather than inventing one.
    */
-  const sendable = useMemo((): { input: SplitMessageInput; receiptUri: string | null } | null => {
+  const sendable = useMemo(() => {
     const nameById = Object.fromEntries(people.map((p) => [p.id, p.name]));
     for (const txn of result) {
       const split = splits.find((s) => s.txnId === txn.id);
@@ -109,33 +121,128 @@ export function SavedScreen({
       const portions =
         split.method === 'shares' ? sharesFromSplit(split.gross, split.ownShare, flat) : null;
 
-      return {
-        input: {
-          merchant: txn.merchantRaw || '',
-          gross: split.gross,
-          currency: split.currency,
-          method: split.method,
-          ownShare: split.ownShare,
-          shares: open.map((s) => ({
+      const cat = txn.categoryId ? catById[txn.categoryId] : undefined;
+      const categoryName = cat ? tCat(cat) : undefined;
+      const merchantName = txn.merchantRaw || categoryName || (isZh ? '消费支出' : 'Expense');
+
+      // Build group receipt
+      let groupPeople: GroupSplitPersonInput[];
+      if (
+        split.method === 'itemized' &&
+        receiptDraftState &&
+        receiptDraftState.lines.length > 0
+      ) {
+        const participants = [SELF, ...open.map((s) => s.personId)];
+        const exploded = explodeItemized(
+          receiptDraftState.lines,
+          receiptDraftState.surcharges,
+          split.gross,
+          participants
+        );
+        groupPeople = exploded.map((p) => ({
+          ...p,
+          name: p.personId === SELF ? (isZh ? '你' : 'You') : (nameById[p.personId] ?? (isZh ? '朋友' : 'Friend')),
+        }));
+      } else {
+        groupPeople = [];
+        if (split.ownShare > 0) {
+          groupPeople.push({
+            personId: SELF,
+            name: isZh ? '你' : 'You',
+            items: [
+              {
+                label: categoryName || (isZh ? '消费支出' : 'Expense'),
+                amount: split.ownShare,
+                sharedBy: 1,
+              },
+            ],
+            itemsSubtotal: split.ownShare,
+            surcharge: 0,
+            total: split.ownShare,
+          });
+        }
+        for (const s of open) {
+          groupPeople.push({
             personId: s.personId,
-            name: nameById[s.personId] ?? '',
-            owed: s.owed,
-            portions: portions?.weights[s.personId],
-          })),
-          selfPortions: portions?.selfWeight,
+            name: nameById[s.personId] ?? (isZh ? '朋友' : 'Friend'),
+            items: [
+              {
+                label: categoryName || (isZh ? '消费支出' : 'Expense'),
+                amount: s.owed,
+                sharedBy: 1,
+              },
+            ],
+            itemsSubtotal: s.owed,
+            surcharge: 0,
+            total: s.owed,
+          });
+        }
+      }
+
+      const groupReceipt = generateGroupSplitReceipt({
+        merchant: merchantName,
+        billTotal: split.gross,
+        currency: split.currency,
+        billDate: txn.date,
+        categoryName,
+        people: groupPeople,
+        seedId: split.id,
+        isZh,
+      });
+      const groupCanvasInput: ReceiptCanvasInput = groupReceiptCanvasInput(groupReceipt, 'group');
+
+      // Build individual receipts
+      const individualReceiptsByPerson: Record<string, GeneratedReceipt> = {};
+      for (const s of open) {
+        individualReceiptsByPerson[s.personId] = generateDeterministicReceipt({
+          merchant: merchantName,
+          total: s.owed,
+          currency: split.currency,
+          personName: nameById[s.personId] ?? (isZh ? '朋友' : 'Friend'),
+          billDate: txn.date,
+          seedId: s.id,
+          categoryId: txn.categoryId,
+          categoryName,
+          gross: split.gross,
+          owed: s.owed,
+          paid: 0,
+          splitMethod: split.method,
+          participantCount: open.length + (split.ownShare > 0 ? 1 : 0),
           workings: splitWorkings,
           isZh,
-        },
-        receiptUri: txn.receiptUri ?? null,
+        });
+      }
+
+      const input: SplitMessageInput = {
+        merchant: txn.merchantRaw || '',
+        gross: split.gross,
+        currency: split.currency,
+        method: split.method,
+        ownShare: split.ownShare,
+        shares: open.map((s) => ({
+          personId: s.personId,
+          name: nameById[s.personId] ?? '',
+          owed: s.owed,
+          portions: portions?.weights[s.personId],
+        })),
+        selfPortions: portions?.selfWeight,
+        workings: splitWorkings,
+        isZh,
+      };
+
+      return {
+        input,
+        groupCanvasInput,
+        individualReceiptsByPerson,
       };
     }
     return null;
-  }, [result, splits, shares, people, splitWorkings, isZh]);
+  }, [result, splits, shares, people, splitWorkings, receiptDraftState, catById, tCat, isZh]);
 
   /** Everyone at once, then each friend on their own. */
   const sendOptions = useMemo((): SendMessageOption[] => {
     if (!sendable) return [];
-    const { input, receiptUri } = sendable;
+    const { input, groupCanvasInput, individualReceiptsByPerson } = sendable;
     return [
       {
         key: 'group',
@@ -143,14 +250,14 @@ export function SavedScreen({
         sub: t('splitShareEveryoneSub'),
         icon: 'gift',
         build: () => buildGroupMessage(input),
-        receiptUri,
+        canvasInput: groupCanvasInput,
       },
       ...input.shares.map((s): SendMessageOption => ({
         key: s.personId,
         label: s.name,
         sub: fmtMoney(s.owed, input.currency),
         build: () => buildPersonMessage(input, s.personId),
-        receiptUri,
+        receiptData: individualReceiptsByPerson[s.personId],
       })),
     ];
   }, [sendable, t]);
@@ -295,7 +402,7 @@ export function SavedScreen({
       <SendMessageSheet
         visible={sendOpen}
         title={t('splitShareTitle')}
-        subtitle={sendable?.receiptUri ? t('splitShareSubWithPhoto') : t('splitShareSub')}
+        subtitle={t('splitShareSub')}
         options={sendOptions}
         onClose={() => setSendOpen(false)}
       />

@@ -36,6 +36,8 @@ export interface ExtractedTxn {
   nativeAmount?: number | null;
   /** Optional creation timestamp. */
   createdAt?: string | null;
+  /** Optional trip name assigned during advanced import or classification. */
+  tripName?: string | null;
 }
 
 /** A category. `id` is a stable slug (also used as the memory value). `kind`

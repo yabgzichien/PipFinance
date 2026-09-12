@@ -33,9 +33,14 @@ describe('QuickRecordWidget layout', () => {
     expect(found['pip://add']).toBeDefined();
   });
 
-  it('collapses to a single add target when both slots are empty', () => {
-    const found = byUri(QuickRecordWidget({ streak: 5, config: cfg({ slot1: 'none', slot2: 'none' }) }));
+  it('collapses to a single add target and enlarges mascot when both slots are empty', () => {
+    const widget = QuickRecordWidget({ streak: 5, config: cfg({ slot1: 'none', slot2: 'none' }) });
+    const found = byUri(widget);
     expect(Object.keys(found)).toEqual(['pip://add']);
+    const json = JSON.stringify(widget);
+    const enlargedW = Math.round(MASCOT_SIZES[3].w * 1.35);
+    const enlargedH = Math.round(MASCOT_SIZES[3].h * 1.35);
+    expect(json).toContain(`"width":${enlargedW},"height":${enlargedH}`);
   });
 
   it('shows the expanded streak count and 7 dots when fire is selected', () => {
@@ -59,7 +64,7 @@ describe('QuickRecordWidget layout', () => {
     expect(JSON.stringify(notch5)).toContain('"fontSize":22');
   });
 
-  it('honours the selected badge icon and colour when fire is selected', () => {
+  it('honours the selected badge icon and colour when fire is selected, falling back to flame if none', () => {
     const withFire = QuickRecordWidget({
       streak: 9,
       config: cfg({
@@ -73,13 +78,13 @@ describe('QuickRecordWidget layout', () => {
     expect(json).toContain('data-streak-icon');
     expect(json).toContain('#2563EB');
 
-    const withoutIcon = JSON.stringify(
+    const withNone = JSON.stringify(
       QuickRecordWidget({
         streak: 9,
         config: cfg({ slot1: 'streak', slot2: 'none', badgeIcon: 'none' }),
       })
     );
-    expect(withoutIcon).not.toContain('data-streak-icon');
+    expect(withNone).toContain('data-streak-icon');
   });
 
   it('renders a streak badge in a slot without giving it a tap target', () => {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
+import { WebView } from 'react-native-webview';
 import { MascotOptionTile, TILE_SIZE } from '../components/MascotOptionTile';
 import { NotchedSlider } from '../components/NotchedSlider';
 import { TabStrip } from '../components/TabStrip';
@@ -81,6 +82,27 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   // nothing on screen. See mascot/previewCompose.ts on why it is a second renderer.
   const preview = composeWidgetPreview(draft, PREVIEW_STREAK, PREVIEW_DOTS);
   const fits = fitsDeclaredMinimum(draft);
+  const previewW = preview.width * PREVIEW_SCALE;
+  const previewH = preview.height * PREVIEW_SCALE;
+
+  const previewHtml = useMemo(() => {
+    const css = badgeAnimationCss(draft.animationNotch);
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; display: flex; align-items: center; justify-content: center; }
+    svg { width: 100%; height: 100%; display: block; }
+    ${css}
+  </style>
+</head>
+<body>
+  ${preview.svg}
+</body>
+</html>`;
+  }, [draft.animationNotch, preview.svg]);
 
   const tabItems = useMemo(
     () =>
@@ -179,11 +201,25 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
           this screen moved from one long scroll to tabs. */}
       <View style={styles.previewWrap}>
         <Card style={[styles.preview, { backgroundColor: theme.accentTint }]}>
-          <SvgXml
-            xml={preview.svg}
-            width={preview.width * PREVIEW_SCALE}
-            height={preview.height * PREVIEW_SCALE}
-          />
+          {Platform.OS === 'web' ? (
+            <SvgXml
+              xml={preview.svg}
+              width={previewW}
+              height={previewH}
+            />
+          ) : (
+            <View style={{ width: previewW, height: previewH, overflow: 'hidden' }}>
+              <WebView
+                source={{ html: previewHtml }}
+                style={{ width: previewW, height: previewH, backgroundColor: 'transparent' }}
+                originWhitelist={['*']}
+                scrollEnabled={false}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                overScrollMode="never"
+              />
+            </View>
+          )}
         </Card>
         <Caption color={colorTheme.ink2}>{presetName}</Caption>
       </View>

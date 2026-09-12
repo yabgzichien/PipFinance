@@ -296,7 +296,7 @@ export function ExportScreen({
       id: 'ewallet',
       title: isZh ? '电子钱包交易流水 (.csv)' : 'E-Wallet Transaction History (.csv)',
       sub: isZh ? '包含 Touch \'n Go、GrabPay、Boost、ShopeePay 等电子钱包的专属交易明细与渠道统计。' : 'Dedicated statement for Touch \'n Go, GrabPay, Boost, ShopeePay & DuitNow QR with provider breakdowns.',
-      badge: isZh ? `${ewalletCount} 笔钱包流水` : `${ewalletCount} e-wallet txns`,
+      badge: isZh ? `${ewalletCount} 笔流水` : `${ewalletCount} txns`,
       icon: 'scan',
       fileExt: 'csv',
       mimeType: 'text/csv',
@@ -575,9 +575,9 @@ export function ExportScreen({
         {/* LIVE PERIOD OVERVIEW CARD */}
         <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>{isZh ? '2. 报表概览' : '2. Statement Summary'}</Eyebrow>
         <Card style={{ padding: 16 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={[styles.summaryTitle, { color: themeColors.ink }]}>{activePeriod.label}</Text>
-            <View style={[styles.badgePill, { backgroundColor: theme.accentTint }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <Text style={[styles.summaryTitle, { color: themeColors.ink, flexShrink: 1 }]}>{activePeriod.label}</Text>
+            <View style={[styles.badgePill, { backgroundColor: theme.accentTint, flexShrink: 0 }]}>
               <Text style={[styles.badgeText, { color: theme.accent }]}>
                 {isZh ? `${reportData.incomeStatement.transactionCount} 笔交易` : `${reportData.incomeStatement.transactionCount} txns`}
               </Text>
@@ -643,8 +643,8 @@ export function ExportScreen({
                     color={selected ? '#fff' : themeColors.ink2}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.formatTitleRow}>
                     <Text style={[styles.formatTitle, { color: themeColors.ink }, selected && { color: theme.accent }]}>
                       {opt.title}
                     </Text>
@@ -930,6 +930,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.line2,
+    overflow: 'hidden',
   },
   formatIconWrap: {
     width: 40,
@@ -937,11 +938,20 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+  },
+  formatTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+    rowGap: 4,
   },
   formatTitle: {
     fontFamily: uiFont(700),
     fontSize: 14,
     color: colors.ink,
+    maxWidth: '100%',
   },
   formatBadge: {
     paddingHorizontal: 6,
@@ -950,6 +960,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface2,
     borderWidth: 1,
     borderColor: colors.line2,
+    alignSelf: 'flex-start',
+    flexShrink: 0,
   },
   formatBadgeText: {
     fontFamily: uiFont(600),
@@ -960,7 +972,7 @@ const styles = StyleSheet.create({
     fontFamily: uiFont(400),
     fontSize: 12,
     color: colors.ink2,
-    marginTop: 2,
+    marginTop: 3,
   },
   radioCircle: {
     width: 20,
@@ -970,6 +982,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   radioDot: {
     width: 8,

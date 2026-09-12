@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "build:web": "expo export -p web",
     "test": "jest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "NODE_OPTIONS=\"--max-old-space-size=8192\" tsc --noEmit",
     "audit:type": "node tools/typeAudit/audit.js",
     "audit:contrast": "node tools/contrastAudit/audit.js",
     "limits": "sucrase-node tools/limitDashboard/report.ts",

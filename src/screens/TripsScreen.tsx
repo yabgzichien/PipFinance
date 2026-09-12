@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
@@ -9,6 +9,12 @@ import { TripBadge, TripGlyph } from '../components/TripBadge';
 import { TripIconPickerSheet } from '../components/TripIconPickerSheet';
 import { formatRangeLabel } from '../lib/dateRange';
 import type { DateRange } from '../lib/dateRange';
+import {
+  extractBaseTripName,
+  getTripNameRecommendations,
+  loadStoredFrequencies,
+  recordTripSubmission,
+} from '../lib/recommendations';
 import { computeTripTotals } from '../lib/trips';
 import type { Trip } from '../lib/trips';
 import { useAccent } from '../state/accent';
@@ -105,6 +111,19 @@ export function TripsScreen({
 
   const dateLabel = formatRangeLabel(dates, isZh);
 
+  const [customTripCounts, setCustomTripCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    loadStoredFrequencies().then((res) => {
+      setCustomTripCounts(res.trips);
+    });
+  }, []);
+
+  const tripRecommendations = useMemo(
+    () => getTripNameRecommendations(trips, name, isZh, undefined, customTripCounts),
+    [trips, name, isZh, customTripCounts]
+  );
+
   const openCreate = () => {
     setName('');
     setIcon(null);
@@ -119,6 +138,14 @@ export function TripsScreen({
     if (!trimmed || !startDate || !endDate || saving) return;
     setSaving(true);
     try {
+      const base = extractBaseTripName(trimmed);
+      if (base) {
+        void recordTripSubmission(trimmed);
+        setCustomTripCounts((prev) => ({
+          ...prev,
+          [base.toLowerCase()]: (prev[base.toLowerCase()] || 0) + 1,
+        }));
+      }
       // No format check: the calendar is the only producer, so both values are valid
       // 'YYYY-MM-DD' strings by construction.
       const created = await addTrip(trimmed, startDate, endDate, icon);
@@ -170,6 +197,35 @@ export function TripsScreen({
                 <TripGlyph trip={{ name, icon }} size={22} color={theme.accent} />
               </Pressable>
             </View>
+            {tripRecommendations.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="always"
+                style={styles.chipRow}
+                contentContainerStyle={styles.chipContent}
+              >
+                {tripRecommendations.map((dest) => (
+                  <Pressable
+                    key={dest.name}
+                    onPress={() => setName(dest.name)}
+                    style={({ pressed }) => [
+                      styles.destChip,
+                      {
+                        backgroundColor: colorTheme.surface,
+                        borderColor: colorTheme.line,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={dest.name}
+                  >
+                    <TripGlyph trip={{ name: dest.name, icon: null }} size={16} color={theme.accent} />
+                    <Label weight={500} color={colorTheme.ink}>{dest.name}</Label>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
             <Caption color={colorTheme.ink2} style={{ marginTop: spacing.md, marginBottom: spacing.xs }}>
               {t('tripDatesRequired')}
             </Caption>
@@ -310,4 +366,16 @@ const styles = StyleSheet.create({
   inlineAction: { marginTop: 6, minHeight: 24, justifyContent: 'center' },
   emptyCard: { padding: spacing.lg, alignItems: 'center', marginTop: spacing.base },
   showArchivedRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 44, marginTop: spacing.base },
+  chipRow: { marginTop: spacing.sm },
+  chipContent: { gap: spacing.xs, paddingHorizontal: 0, paddingVertical: spacing.xs },
+  destChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: 32,
+  },
 });

@@ -34,50 +34,14 @@ import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
-
-/** How many "Pay from" accounts get a chip before the rest move behind "More". */
-const MAX_ACCOUNT_CHIPS = 5;
-/** The same cap for the optional rows in More details, which also spend a slot on "None". */
-const MAX_OPTIONAL_CHIPS = 4;
-
-/**
- * Score accounts to prioritize payment methods in order:
- * 1. Cash accounts
- * 2. Bank accounts
- * 3. E-wallet accounts
- * 4. Other Cash & Bank class accounts
- * 5. Other asset accounts
- */
-function getAccountPriority(a: Account): number {
-  const nameLower = a.name.toLowerCase().trim();
-  const inst = matchInstitution(a.name);
-
-  // 1. Cash accounts
-  if (nameLower === 'cash' || a.name === '现金' || nameLower.includes('cash') || nameLower.includes('现金')) {
-    return 1;
-  }
-  // 2. Bank accounts
-  if (inst?.kind === 'bank' || nameLower.includes('bank') || nameLower.includes('银行')) {
-    return 2;
-  }
-  // 3. E-wallet accounts
-  if (
-    inst?.kind === 'ewallet' ||
-    nameLower.includes('wallet') ||
-    nameLower.includes('tng') ||
-    nameLower.includes('touch') ||
-    nameLower.includes('grab') ||
-    nameLower.includes('boost') ||
-    nameLower.includes('pay')
-  ) {
-    return 3;
-  }
-  // 4. Other Cash & Bank class accounts
-  if (a.cls === 'cash') {
-    return 4;
-  }
-  return 5;
-}
+import {
+  AccountChipIcon,
+  ChoiceChip,
+  MAX_ACCOUNT_CHIPS,
+  MAX_OPTIONAL_CHIPS,
+  MoreChip,
+  getAccountPriority,
+} from '../components/AccountChips';
 
 export function ManualEntryScreen({
   categories,
@@ -979,87 +943,6 @@ export function ManualEntryScreen({
         onRemove={activeSplit ? () => { setSplit(null); setSplitting(false); } : undefined}
       />
     </View>
-  );
-}
-
-/**
- * One option in a capped chip row. Shared by "Pay from", "Reduce liability" and "Trip" so the
- * three rows cannot drift apart: the selected state is the same tint, weight and check mark
- * wherever the user meets it.
- */
-function ChoiceChip({
-  label,
-  on,
-  onPress,
-  accessibilityLabel,
-  children,
-}: {
-  label: string;
-  on: boolean;
-  onPress: () => void;
-  accessibilityLabel?: string;
-  /** Leading glyph — an account's brand logo or class icon, a trip's pin. */
-  children?: React.ReactNode;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[
-        styles.accountChip,
-        {
-          backgroundColor: on ? theme.accentTint : colorTheme.surface,
-          borderColor: on ? theme.accentSoft : colorTheme.line,
-        },
-      ]}
-      accessibilityRole="radio"
-      accessibilityState={{ selected: on }}
-      accessibilityLabel={accessibilityLabel ?? label}
-    >
-      {children}
-      <Text
-        style={[styles.accountChipText, { color: on ? theme.accent : colorTheme.ink2 }, on && { fontFamily: uiFont(700) }]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-      {on && <Icon name="check" size={13} color={theme.accent} stroke={2.4} />}
-    </Pressable>
-  );
-}
-
-/** The chip that hands the row's overflow to a full picker. Never carries a selected state —
- *  whatever is selected has already displaced a chip in the row (see visibleChoices). */
-function MoreChip({ onPress, accessibilityLabel }: { onPress: () => void; accessibilityLabel: string }) {
-  const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.accountChip, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-    >
-      <Text style={[styles.accountChipText, { color: colorTheme.ink2 }]}>{isZh ? '更多' : 'More'}</Text>
-      <Icon name="chevronDown" size={13} color={colorTheme.ink3} />
-    </Pressable>
-  );
-}
-
-/** An account's own mark: its bank's logo, its custom icon, or its class glyph. */
-function AccountChipIcon({ account, on }: { account: Account; on: boolean }) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const brand = matchBrand(account.name);
-  if (brand) return <BrandLogo brand={brand} size={16} />;
-  if (account.icon) return <Image source={{ uri: account.icon }} style={{ width: 16, height: 16, borderRadius: 4 }} />;
-  return (
-    <Icon
-      name={(CLASS_BY_ID[account.cls]?.icon ?? 'wallet') as IconName}
-      size={15}
-      color={on ? theme.accent : colorTheme.ink2}
-    />
   );
 }
 

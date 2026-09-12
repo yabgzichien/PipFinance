@@ -739,10 +739,10 @@ export const zh: Translations = {
   // Sending a split (Saved screen > Send the split)
   splitShareCta: '发送分摊明细',
   splitShareTitle: '发送分摊明细',
-  splitShareSub: 'Pip 帮您写好，发给谁由您决定。',
-  splitShareSubWithPhoto: '收据照片会一并发送。',
+  splitShareSub: 'Pip 自动生成分摊小票，发给谁由您决定。',
+  splitShareSubWithPhoto: '分摊小票会一并发送。',
   splitShareEveryone: '全部成员',
-  splitShareEveryoneSub: '一条消息，包含完整明细',
+  splitShareEveryoneSub: '包含全体明细的分摊小票',
   splitShareCopiedTitle: '明细已复制',
   splitSharePasteHint: '照片已就绪，请将明细粘贴到说明栏。',
   splitShareCopiedBody: '请粘贴到聊天窗口。',

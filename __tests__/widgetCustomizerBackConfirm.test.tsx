@@ -11,6 +11,10 @@ jest.mock('../src/lib/platformAlert', () => ({
   confirmAction: (...args: unknown[]) => mockConfirmAction(...args),
 }));
 
+jest.mock('react-native-webview', () => ({
+  WebView: 'WebView',
+}));
+
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));

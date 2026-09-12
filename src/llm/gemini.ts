@@ -118,7 +118,7 @@ export const GeminiProvider: LLMProvider = {
       model,
       apiKey,
       [{ text: DOC_USER_PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }],
-      { system: DOC_SYSTEM_PROMPT, json: true }
+      { system: DOC_SYSTEM_PROMPT, json: true, noThinking: true }
     );
     return parseOrThrow(contentOf(json));
   },
@@ -129,7 +129,7 @@ export const GeminiProvider: LLMProvider = {
       if (p.kind === 'binary') geminiParts.push({ inline_data: { mime_type: p.mimeType, data: p.base64 } });
       else geminiParts.push({ text: p.text });
     }
-    const json = await callGemini(model, apiKey, geminiParts, { system: DOC_SYSTEM_PROMPT, json: true });
+    const json = await callGemini(model, apiKey, geminiParts, { system: DOC_SYSTEM_PROMPT, json: true, noThinking: true });
     return parseOrThrow(contentOf(json));
   },
 
@@ -139,7 +139,7 @@ export const GeminiProvider: LLMProvider = {
       if (p.kind === 'binary') geminiParts.push({ inline_data: { mime_type: p.mimeType, data: p.base64 } });
       else geminiParts.push({ text: p.text });
     }
-    const json = await callGemini(model, apiKey, geminiParts, { system: HOLDINGS_SYSTEM_PROMPT, json: true });
+    const json = await callGemini(model, apiKey, geminiParts, { system: HOLDINGS_SYSTEM_PROMPT, json: true, noThinking: true });
     return parseCryptoHoldings(contentOf(json));
   },
 
@@ -149,7 +149,7 @@ export const GeminiProvider: LLMProvider = {
       if (p.kind === 'binary') geminiParts.push({ inline_data: { mime_type: p.mimeType, data: p.base64 } });
       else geminiParts.push({ text: p.text });
     }
-    const json = await callGemini(model, apiKey, geminiParts, { system: BALANCE_SYSTEM_PROMPT, json: true });
+    const json = await callGemini(model, apiKey, geminiParts, { system: BALANCE_SYSTEM_PROMPT, json: true, noThinking: true });
     return parseBalance(contentOf(json));
   },
 
@@ -159,7 +159,7 @@ export const GeminiProvider: LLMProvider = {
       if (p.kind === 'binary') geminiParts.push({ inline_data: { mime_type: p.mimeType, data: p.base64 } });
       else geminiParts.push({ text: p.text });
     }
-    const json = await callGemini(model, apiKey, geminiParts, { system: SNAPSHOT_SYSTEM_PROMPT, json: true });
+    const json = await callGemini(model, apiKey, geminiParts, { system: SNAPSHOT_SYSTEM_PROMPT, json: true, noThinking: true });
     return parseSnapshot(contentOf(json));
   },
 
@@ -169,7 +169,7 @@ export const GeminiProvider: LLMProvider = {
       if (p.kind === 'binary') geminiParts.push({ inline_data: { mime_type: p.mimeType, data: p.base64 } });
       else geminiParts.push({ text: p.text });
     }
-    const json = await callGemini(model, apiKey, geminiParts, { system: RECEIPT_SYSTEM_PROMPT, json: true });
+    const json = await callGemini(model, apiKey, geminiParts, { system: RECEIPT_SYSTEM_PROMPT, json: true, noThinking: true });
     return parseReceipt(contentOf(json));
   },
 

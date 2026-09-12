@@ -50,6 +50,30 @@ export function fmtCompact(n: number): string {
 }
 
 /**
+ * Format a compact amount for small calendar cells.
+ * - For 0: returns empty string.
+ * - For values >= 1000: abbreviates to K (e.g. 1500 → "1.5K", 1000 → "1K").
+ * - For fractional amounts in currencies that support decimals: shows formatted decimals (e.g. 23.5 → "23.50").
+ * - For whole numbers (or 0-subunit currencies like JPY): keeps clean integers (e.g. 20 → "20").
+ */
+export function compactAmt(n: number, currencyCode?: string): string {
+  if (n === 0) return '';
+  if (n >= 1000) {
+    const asK = n / 1000;
+    return `${trimTrailingZeros(asK.toFixed(1))}K`;
+  }
+
+  const decimals = currencyCode ? decimalsFor(currencyCode) : 2;
+  if (decimals > 0) {
+    const rounded = Number(n.toFixed(decimals));
+    if (Math.abs(rounded - Math.round(rounded)) > 1e-4) {
+      return rounded.toFixed(decimals);
+    }
+  }
+  return String(Math.round(n));
+}
+
+/**
  * The prefix a currency renders under. MYR keeps the local "RM" convention; everything else
  * uses the 3-letter code, because symbols are ambiguous (the yen sign covers both JPY and
  * CNY) and Hermes has patchy symbol font coverage.

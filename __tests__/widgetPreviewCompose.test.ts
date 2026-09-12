@@ -127,13 +127,25 @@ describe('streak layout (fire selected)', () => {
     expect(fireSelected(3, []).match(/data-dot=/g)).toHaveLength(7);
   });
 
-  it('leaves the right side completely empty when none is selected for both slots', () => {
+  it('leaves the right side completely empty and centers/enlarges mascot when none is selected for both slots', () => {
     const noneSvg = composeWidgetPreview(cfg({ slot1: 'none', slot2: 'none' }), 9, DOTS).svg;
     expect(noneSvg).not.toContain('data-streak-dots');
     expect(noneSvg).not.toContain('data-streak-slot');
     expect(noneSvg).not.toContain(UP_ARROW_PATH);
     expect(noneSvg).not.toContain(DOWN_ARROW_PATH);
     expect(noneSvg).not.toContain(DIVIDER_COLOR);
+
+    // Mascot is centered horizontally and enlarged by 1.35x
+    const enlargedW = Math.round(MASCOT_SIZES[3].w * 1.35);
+    const enlargedH = Math.round(MASCOT_SIZES[3].h * 1.35);
+    expect(noneSvg).toContain(`data-mascot="${enlargedW}x${enlargedH}"`);
+    const expectedX = PREVIEW_WIDTH / 2 - enlargedW / 2;
+    expect(noneSvg).toContain(`transform="translate(${expectedX},`);
+  });
+
+  it('falls back to flame icon if badgeIcon is none when fire is selected', () => {
+    const svg = composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none', badgeIcon: 'none' }), 9, DOTS).svg;
+    expect(svg).toContain('data-badge-anim="flame"');
   });
 
   it('does not show streak dots when only arrows are used', () => {

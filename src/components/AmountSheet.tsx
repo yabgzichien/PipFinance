@@ -10,11 +10,11 @@
 // consumes it unchanged; key handling lives in lib/calcKeypad.ts so it can be tested without
 // rendering this modal.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { cleanCalcInput, evaluateExpression } from '../lib/calc';
-import { applyCalcKey, type CalcKey } from '../lib/calcKeypad';
+import { evaluateExpression } from '../lib/calc';
+import { applyCalcKey, formatBankingInput, type CalcKey } from '../lib/calcKeypad';
 import { currencyPrefix } from '../lib/format';
 import { tap } from '../lib/haptics';
 import { useLanguage } from '../i18n';
@@ -30,7 +30,7 @@ const KEYS: CalcKey[] = [
   '7', '8', '9', '/',
   '4', '5', '6', '*',
   '1', '2', '3', '-',
-  '.', '0', 'backspace', '+',
+  '00', '0', 'backspace', '+',
 ];
 
 const GLYPH: Partial<Record<CalcKey, string>> = { '*': '×', '/': '÷', '-': '−' };
@@ -66,11 +66,15 @@ export function AmountSheet({
   const { isZh } = useLanguage();
 
   const [draft, setDraft] = useState(value);
+  const isFreshOpen = useRef(true);
 
   // Re-seed on open rather than on every `value` change, mirroring SplitSheet: while the sheet
   // is up the draft is the user's, and a parent re-render must not stamp over their typing.
   useEffect(() => {
-    if (visible) setDraft(value);
+    if (visible) {
+      setDraft(value);
+      isFreshOpen.current = true;
+    }
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const calc = evaluateExpression(draft, decimals);
@@ -78,6 +82,15 @@ export function AmountSheet({
 
   const press = (key: CalcKey) => {
     tap();
+    if (isFreshOpen.current) {
+      isFreshOpen.current = false;
+      // If the sheet was just opened with a pre-existing value and user types a digit,
+      // start fresh with that digit (mirroring selectTextOnFocus behavior in standard inputs).
+      if (/^[0-9]$/.test(key)) {
+        setDraft(applyCalcKey('', key, decimals));
+        return;
+      }
+    }
     setDraft((d) => applyCalcKey(d, key, decimals));
   };
 
@@ -108,9 +121,10 @@ export function AmountSheet({
                 component per platform, while the pad below stays the only input on a phone. */}
             <TextInput
               value={draft}
-              onChangeText={(t) => setDraft(cleanCalcInput(t, decimals > 0))}
+              onChangeText={(t) => setDraft(formatBankingInput(t, decimals))}
               showSoftInputOnFocus={false}
               autoFocus={Platform.OS === 'web'}
+              selectTextOnFocus
               onSubmitEditing={done}
               caretHidden={Platform.OS !== 'web'}
               placeholder={decimals === 0 ? '0' : '0.00'}

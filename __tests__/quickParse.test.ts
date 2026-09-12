@@ -1,4 +1,4 @@
-import { MAX_SEGMENTS, parseQuickText, type QuickParseOptions } from '../src/lib/quickParse';
+import { isNumberOnlyInput, MAX_SEGMENTS, parseQuickText, type QuickParseOptions } from '../src/lib/quickParse';
 
 const opts: QuickParseOptions = { activeCurrencies: ['MYR', 'USD'], today: '2026-08-28' };
 
@@ -103,8 +103,34 @@ describe('parseQuickText — currency', () => {
     expect(d.label).toBe('dinner');
   });
 
-  it('ignores a code the user has not activated', () => {
+  it('recognises a supported currency even if not activated in settings', () => {
     const d = parseQuickText('jpy 900 ramen', opts).drafts[0];
+    expect(d.currency).toBe('JPY');
+    expect(d.amount).toBe(900);
+    expect(d.label).toBe('ramen');
+  });
+
+  it('reads attached currency suffixes and typo aliases like lunch 3sdg', () => {
+    const d = parseQuickText('lunch 3sdg', opts).drafts[0];
+    expect(d.currency).toBe('SGD');
+    expect(d.amount).toBe(3);
+    expect(d.label).toBe('lunch');
+  });
+
+  it('reads attached currency prefixes like sgd3 or rm9.20', () => {
+    const d1 = parseQuickText('lunch sgd3', opts).drafts[0];
+    expect(d1.currency).toBe('SGD');
+    expect(d1.amount).toBe(3);
+    expect(d1.label).toBe('lunch');
+
+    const d2 = parseQuickText('rm9.20 lunch', opts).drafts[0];
+    expect(d2.currency).toBe('MYR');
+    expect(d2.amount).toBe(9.2);
+    expect(d2.label).toBe('lunch');
+  });
+
+  it('ignores an unsupported or unknown currency code', () => {
+    const d = parseQuickText('xyz 900 ramen', opts).drafts[0];
     expect(d.currency).toBeNull();
   });
 
@@ -195,3 +221,37 @@ describe('parseQuickText — segments', () => {
     expect(parseQuickText('lunch 9.2', opts).drafts[0].categoryId).toBeNull();
   });
 });
+
+describe('isNumberOnlyInput', () => {
+  it('identifies plain numbers as number-only', () => {
+    expect(isNumberOnlyInput('25')).toBe(true);
+    expect(isNumberOnlyInput('25.50')).toBe(true);
+    expect(isNumberOnlyInput('  1000  ')).toBe(true);
+    expect(isNumberOnlyInput('1,200.50')).toBe(true);
+    expect(isNumberOnlyInput('10, 20')).toBe(true);
+  });
+
+  it('identifies numbers with currencies or currency symbols as number-only', () => {
+    expect(isNumberOnlyInput('RM 25')).toBe(true);
+    expect(isNumberOnlyInput('RM25')).toBe(true);
+    expect(isNumberOnlyInput('25 RM')).toBe(true);
+    expect(isNumberOnlyInput('$50')).toBe(true);
+    expect(isNumberOnlyInput('$ 50.00')).toBe(true);
+    expect(isNumberOnlyInput('USD 100', ['USD'])).toBe(true);
+    expect(isNumberOnlyInput('100USD', ['USD'])).toBe(true);
+    expect(isNumberOnlyInput('€ 75')).toBe(true);
+  });
+
+  it('returns false when merchant or descriptive text is present', () => {
+    expect(isNumberOnlyInput('lunch 25')).toBe(false);
+    expect(isNumberOnlyInput('25 lunch')).toBe(false);
+    expect(isNumberOnlyInput('RM 25 coffee')).toBe(false);
+    expect(isNumberOnlyInput('$15 grab')).toBe(false);
+    expect(isNumberOnlyInput('lunch')).toBe(false);
+    expect(isNumberOnlyInput('')).toBe(false);
+    expect(isNumberOnlyInput('   ')).toBe(false);
+    expect(isNumberOnlyInput('RM')).toBe(false);
+    expect(isNumberOnlyInput('$')).toBe(false);
+  });
+});
+

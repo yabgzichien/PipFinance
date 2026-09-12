@@ -61,9 +61,9 @@ it('fires the chime and the haptic together when the read lands', () => {
   expect(haptics.payoff).not.toHaveBeenCalled();
   expect(sound.payoff).not.toHaveBeenCalled();
 
-  // Past the scripted 3200ms read.
+  // Past the scripted 800ms read.
   TestRenderer.act(() => {
-    jest.advanceTimersByTime(3400);
+    jest.advanceTimersByTime(850);
   });
 
   expect(haptics.payoff).toHaveBeenCalledTimes(1);
@@ -75,7 +75,7 @@ it('stays silent while the scan is still running', () => {
   renderScanningBeat(jest.fn());
 
   TestRenderer.act(() => {
-    jest.advanceTimersByTime(1500);
+    jest.advanceTimersByTime(400);
   });
 
   expect(haptics.payoff).not.toHaveBeenCalled();

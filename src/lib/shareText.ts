@@ -50,16 +50,15 @@ export async function shareSplitMessage(
   if (receiptUri) {
     const available = await Sharing.isAvailableAsync().catch(() => false);
     if (available) {
-      const copied = await copy(message);
       const isPng = receiptUri.toLowerCase().endsWith('.png');
       try {
         await Sharing.shareAsync(receiptUri, {
           mimeType: isPng ? 'image/png' : 'image/jpeg',
           UTI: isPng ? 'public.png' : 'public.jpeg',
         });
-        return copied ? 'shared-with-clipboard' : 'shared';
+        return 'shared';
       } catch {
-        return copied ? 'copied' : 'failed';
+        return 'failed';
       }
     }
     // No file sharing on this device: fall through and send the text on its own rather than

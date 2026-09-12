@@ -28,6 +28,9 @@ For each transaction row found, output:
     • If you genuinely cannot tell, write "?".
     • NEVER invent or guess a category when there is no evidence in the document.
 - account: specific account name as printed on the document (e.g. "Maybank Savings", "Touch 'n Go eWallet"), or "Unknown" if not stated.
+- trip: trip / vacation name (e.g. "Tokyo 2026", "Penang Trip") OR null.
+    • STRICT 100% CONFIDENCE RULE: ONLY assign a trip name if you are 100% certain based on explicit document evidence that this transaction is part of a vacation or trip (e.g. the statement/sheet explicitly names a trip, or there are unambiguous clusters of travel bookings like flights, accommodation, and overseas spending during that specific travel period).
+    • If you are NOT 100% sure (such as routine daily commute, local Grab/taxis, domestic petrol, or everyday online foreign currency shopping), you MUST leave trip as null and classify it into normal expense categories (e.g. "transport", "restaurant", "shopping").
 
 Skip ONLY: running balance lines, statement totals, opening/closing balances, disclosures, headers/footers.
 
@@ -41,7 +44,15 @@ Many trackers keep an overview tab laid out as a grid, where each ROW is a categ
 - NEVER double count. If a category is already itemised row-by-row on a monthly journal tab, do NOT also emit that category's cells from the summary tab. Emit summary cells ONLY for categories that appear nowhere in the journals.
 
 ──────────────────────────────────────
-SECTION 2 — ACCOUNT BALANCES
+TRIPS (Optional)
+──────────────────────────────────────
+If the document explicitly identifies one or more distinct trips or vacations:
+- name: trip name (e.g. "Tokyo 2026", "Penang Getaway") matching the "trip" field on transactions
+- startDate: YYYY-MM-DD (start of the trip)
+- endDate: YYYY-MM-DD (end of the trip)
+
+──────────────────────────────────────
+SECTION 2 — ACCOUNT BALANCES & INVESTMENTS
 ──────────────────────────────────────
 For each distinct account / holding in the file(s), output one entry:
 - name: account name as shown in the document
@@ -49,7 +60,10 @@ For each distinct account / holding in the file(s), output one entry:
 - balance: current balance as a POSITIVE number (outstanding amount for loans/cards)
 - currency: 3-letter code (e.g. "MYR", "USD", "SGD", "CNY", "JPY", "EUR", "GBP", etc.) — use "${defaultCurrency}" if not stated
 - as_of: YYYY-MM-DD date of the balance reading, or the statement end date
-- notes: ticker symbol for investments (e.g. "AAPL", "BTC"), or null
+- ticker: ticker symbol for investments or crypto (e.g. "AAPL", "BTC", "1155.KL", "GC=F"), or null
+- quantity: number of units/shares/coins held (positive number, not fiat value), or null if not stated
+- sub: "stock" | "crypto" | "commodity" for investments, or null
+- notes: additional notes or null
 
 ──────────────────────────────────────
 REPLY FORMAT — ONLY a JSON code block, no other text:
@@ -61,11 +75,14 @@ REPLY FORMAT — ONLY a JSON code block, no other text:
     "issuer": "<institution name or 'Multiple'>",
     "period": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" }
   },
+  "trips": [
+    { "name": "Tokyo 2026", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD" }
+  ],
   "transactions": [
-    { "date": "YYYY-MM-DD", "description": "...", "amount": -0.00, "currency": "${defaultCurrency}", "category": "...", "account": "..." }
+    { "date": "YYYY-MM-DD", "description": "...", "amount": -0.00, "currency": "${defaultCurrency}", "category": "...", "account": "...", "trip": null }
   ],
   "accounts": [
-    { "name": "...", "type": "Cash", "balance": 0.00, "currency": "${defaultCurrency}", "as_of": "YYYY-MM-DD", "notes": null }
+    { "name": "...", "type": "Cash", "balance": 0.00, "currency": "${defaultCurrency}", "as_of": "YYYY-MM-DD", "ticker": null, "quantity": null, "sub": null, "notes": null }
   ]
 }
 \`\`\`
@@ -92,11 +109,22 @@ interface LLMTxn {
   currency?: unknown;
   category?: unknown;
   account?: unknown;
+  trip?: unknown;
   remark?: unknown;
   source?: unknown;
   nativeAmount?: unknown;
   fxRate?: unknown;
   createdAt?: unknown;
+}
+
+interface LLMTrip {
+  id?: unknown;
+  name?: unknown;
+  startDate?: unknown;
+  start_date?: unknown;
+  endDate?: unknown;
+  end_date?: unknown;
+  icon?: unknown;
 }
 
 interface LLMAccount {
@@ -235,6 +263,7 @@ interface LLMPreferences {
 
 interface LLMOutput {
   version?: unknown;
+  trips?: LLMTrip[];
   transactions?: LLMTxn[];
   transfers?: LLMTransfer[];
   accounts?: LLMAccount[];
@@ -247,6 +276,12 @@ interface LLMOutput {
   taxRelief?: LLMTaxRelief;
   merchantMemory?: Record<string, string>;
   preferences?: LLMPreferences;
+}
+
+export interface ParsedTrip {
+  name: string;
+  startDate: string;
+  endDate: string;
 }
 
 export interface ParsedCategory {
@@ -288,6 +323,15 @@ export interface ParsedAccount {
   icon?: string | null;
   archived?: boolean;
   history?: ParsedAccountHistory[];
+}
+
+/** Check whether an account is eligible for live investment price tracking. */
+export function isInvestmentCandidate(a: ParsedAccount): boolean {
+  if (!a.include) return false;
+  if (a.cls === 'investments' || a.sub === 'crypto' || a.sub === 'stock' || a.sub === 'commodity') return true;
+  if (a.ticker || a.symbol) return true;
+  const text = `${a.name} ${a.notes ?? ''}`.toLowerCase();
+  return ['crypto', 'binance', 'luno', 'coin', 'stock', 'shares', 'etf', 'nasdaq', 'bursa', 'rakuten', 'stashaway', 'wahed', 'moomoo', 'tiger'].some((k) => text.includes(k));
 }
 
 /** A DCA/transfer contribution: neither income nor an expense (see TxnType in lib/types.ts),
@@ -431,6 +475,7 @@ export function resolveClsId(rawType: string): string {
 
 export interface ParseResult {
   version?: number;
+  trips?: ParsedTrip[];
   transactions: ExtractedTxn[];
   accounts: ParsedAccount[];
   transfers: ParsedTransfer[];
@@ -460,8 +505,53 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
   const obj = parsed as LLMOutput;
   const version = typeof obj.version === 'number' ? obj.version : undefined;
 
+  // ── Trips ──
+  const rawTrips = Array.isArray(obj.trips) ? obj.trips : [];
+  const tripMap = new Map<string, { name: string; startDate: string; endDate: string }>();
+
+  for (const tr of rawTrips) {
+    const name = typeof tr.name === 'string' ? tr.name.trim() : '';
+    if (!name) continue;
+    const rawStart = typeof tr.startDate === 'string' ? tr.startDate.trim() : (typeof tr.start_date === 'string' ? tr.start_date.trim() : '');
+    const rawEnd = typeof tr.endDate === 'string' ? tr.endDate.trim() : (typeof tr.end_date === 'string' ? tr.end_date.trim() : '');
+    const startDate = ISO_DATE_ONLY.test(rawStart) ? rawStart : '';
+    const endDate = ISO_DATE_ONLY.test(rawEnd) ? rawEnd : '';
+    tripMap.set(name.toLowerCase(), { name, startDate, endDate });
+  }
+
   // ── Transactions ──
   const txnRows = Array.isArray(obj.transactions) ? obj.transactions : [];
+
+  // Scan transactions to infer start/end dates for trips that lack them, or to discover trips from transaction rows
+  const tripDates = new Map<string, string[]>();
+  for (const r of txnRows) {
+    const tName = typeof r.trip === 'string' ? r.trip.trim() : '';
+    const rDate = typeof r.date === 'string' && ISO_DATE_ONLY.test(r.date.trim()) ? r.date.trim() : null;
+    if (tName && rDate) {
+      const key = tName.toLowerCase();
+      if (!tripDates.has(key)) tripDates.set(key, []);
+      tripDates.get(key)!.push(rDate);
+    }
+  }
+
+  for (const [key, dates] of tripDates.entries()) {
+    dates.sort();
+    const minDate = dates[0];
+    const maxDate = dates[dates.length - 1];
+    const existing = tripMap.get(key);
+    if (existing) {
+      if (!existing.startDate) existing.startDate = minDate;
+      if (!existing.endDate) existing.endDate = maxDate;
+    } else {
+      const origName = txnRows.find((r) => typeof r.trip === 'string' && r.trip.trim().toLowerCase() === key)?.trip as string;
+      tripMap.set(key, { name: origName.trim(), startDate: minDate, endDate: maxDate });
+    }
+  }
+
+  const parsedTrips: ParsedTrip[] = Array.from(tripMap.values()).filter(
+    (t) => ISO_DATE_ONLY.test(t.startDate) && ISO_DATE_ONLY.test(t.endDate) && t.startDate <= t.endDate
+  );
+
   const transactions: ExtractedTxn[] = txnRows.map((r): ExtractedTxn => {
     const rawAmt = typeof r.amount === 'number' ? r.amount : Number(r.amount ?? 0);
     const absAmt = Math.abs(rawAmt);
@@ -482,6 +572,20 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
         : null;
     const currency = normalizeCurrency(r.currency, defaultCurrency);
     const item: ExtractedTxn = { merchant, amount: absAmt, type, date, method: null, categoryHint, account, currency };
+
+    // Strict trip validation: transaction date MUST fall within trip date range
+    let tripName: string | null = null;
+    const rawTrip = typeof r.trip === 'string' ? r.trip.trim() : '';
+    if (rawTrip) {
+      const tripInfo = tripMap.get(rawTrip.toLowerCase());
+      if (tripInfo && tripInfo.startDate && tripInfo.endDate && date) {
+        if (date >= tripInfo.startDate && date <= tripInfo.endDate) {
+          tripName = tripInfo.name;
+        }
+      }
+    }
+    if (tripName) item.tripName = tripName;
+
     if (typeof r.remark === 'string' && r.remark.trim()) item.remark = r.remark.trim();
     if (typeof r.source === 'string') item.source = r.source as any;
     if (typeof r.id === 'string' && r.id.trim()) item.id = r.id.trim();
@@ -516,7 +620,9 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
     const interestRate = typeof r.interestRate === 'number' && Number.isFinite(r.interestRate) ? r.interestRate : null;
     const sub = typeof r.sub === 'string' && r.sub.trim() ? r.sub.trim() : null;
     const symbol = typeof r.symbol === 'string' && r.symbol.trim() ? r.symbol.trim() : null;
-    const ticker = typeof r.ticker === 'string' && r.ticker.trim() ? r.ticker.trim() : null;
+    const ticker = typeof r.ticker === 'string' && r.ticker.trim()
+      ? r.ticker.trim()
+      : (typeof r.notes === 'string' && r.notes.trim() && !r.notes.includes(' ') ? r.notes.trim() : null);
     const icon = typeof r.icon === 'string' && r.icon.trim() ? r.icon.trim() : null;
     const archived = Boolean(r.archived);
     const currency = normalizeCurrency(r.currency, defaultCurrency);
@@ -780,6 +886,7 @@ export function parseJSON(raw: string, defaultCurrency: string = BASE_CURRENCY):
 
   return {
     version,
+    trips: parsedTrips.length > 0 ? parsedTrips : undefined,
     transactions,
     accounts,
     transfers,

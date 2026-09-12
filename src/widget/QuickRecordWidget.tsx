@@ -55,6 +55,10 @@ export function QuickRecordWidget({
   const hasStreak = config.slot1 === 'streak' || config.slot2 === 'streak';
   const expanded =
     (config.slot1 === 'streak' && !hasSlot2) || (config.slot2 === 'streak' && !hasSlot1);
+  const isBothNone = !hasSlot1 && !hasSlot2;
+  const mascotScale = isBothNone ? 1.35 : 1;
+  const mascotW = Math.round(mascot.w * mascotScale);
+  const mascotH = Math.round(mascot.h * mascotScale);
 
   // The mascot's own badge pill is suppressed wherever the streak is already shown elsewhere —
   // in the expanded column, or in a slot — so the count never appears twice.
@@ -79,7 +83,8 @@ export function QuickRecordWidget({
     // Nothing beside the mascot, so the freed space carries the streak and the whole widget
     // becomes one add target.
     const m = expandedStreakMetrics(config.buttonNotch);
-    const expandedIcon = badgeIconDocument(config.badgeIcon, config.badgeColor, m.icon);
+    const actualIcon = config.badgeIcon === 'none' ? 'flame' : config.badgeIcon;
+    const expandedIcon = badgeIconDocument(actualIcon, config.badgeColor, m.icon);
     return (
       <FlexWidget
         style={{ ...shell, justifyContent: 'flex-start' }}
@@ -87,8 +92,12 @@ export function QuickRecordWidget({
         clickActionData={{ uri: 'pip://add' }}
         accessibilityLabel="Add Transaction"
       >
-        <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
-        <FlexWidget style={{ flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
+        <FlexWidget
+          style={{ width: 74, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
+        </FlexWidget>
+        <FlexWidget style={{ flex: 1, height: 'match_parent', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
           <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 6 }}>
             {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: m.icon, height: m.icon }} />}
             <TextWidget
@@ -118,7 +127,8 @@ export function QuickRecordWidget({
 
     if (content === 'streak') {
       const m = streakSlotMetrics(size);
-      const icon = badgeIconDocument(config.badgeIcon, config.badgeColor, m.icon);
+      const actualIcon = config.badgeIcon === 'none' ? 'flame' : config.badgeIcon;
+      const icon = badgeIconDocument(actualIcon, config.badgeColor, m.icon);
       return (
         <FlexWidget
           key={which}
@@ -151,12 +161,16 @@ export function QuickRecordWidget({
   return (
     <FlexWidget style={shell}>
       <FlexWidget
-        style={{ flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
+        style={
+          isBothNone
+            ? { flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }
+            : { width: 74, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }
+        }
         clickAction="OPEN_URI"
         clickActionData={{ uri: 'pip://add' }}
         accessibilityLabel="Add Transaction"
       >
-        <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
+        <SvgWidget svg={mascotSvg} style={{ width: mascotW, height: mascotH }} />
       </FlexWidget>
       {config.slot1 !== 'none' && <Divider />}
       {slot('slot1')}

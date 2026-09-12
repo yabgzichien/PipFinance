@@ -739,10 +739,10 @@ export const en: Translations = {
   // Sending a split (Saved screen > Send the split)
   splitShareCta: 'Send the split',
   splitShareTitle: 'Send the split',
-  splitShareSub: 'Pip writes the message. You pick where it goes.',
-  splitShareSubWithPhoto: 'The receipt photo goes with it.',
+  splitShareSub: 'Pip generates the split receipt. You pick where it goes.',
+  splitShareSubWithPhoto: 'The split receipt goes with it.',
   splitShareEveryone: 'Everyone',
-  splitShareEveryoneSub: 'One message with the full breakdown',
+  splitShareEveryoneSub: 'Full table split receipt image',
   splitShareCopiedTitle: 'Breakdown copied',
   splitSharePasteHint: 'The photo is ready to send. Paste the breakdown into the caption.',
   splitShareCopiedBody: 'Paste it into your chat.',

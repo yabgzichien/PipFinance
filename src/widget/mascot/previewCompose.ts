@@ -107,7 +107,8 @@ function arrowGroup(fragment: string, centerX: number, height: number, button: n
  */
 function streakColumn(config: WidgetMascotConfig, streak: number, dots: boolean[], centerX: number, height: number): string {
   const theme = BADGE_THEMES[config.badgeColor];
-  const icon = badgeIconSvg(config.badgeIcon, config.badgeColor);
+  const actualIcon = config.badgeIcon === 'none' ? 'flame' : config.badgeIcon;
+  const icon = badgeIconSvg(actualIcon, config.badgeColor);
   const count = String(streak);
 
   const m = expandedStreakMetrics(config.buttonNotch);
@@ -151,7 +152,8 @@ function streakSlot(
   size: number
 ): string {
   const theme = BADGE_THEMES[config.badgeColor];
-  const icon = badgeIconSvg(config.badgeIcon, config.badgeColor);
+  const actualIcon = config.badgeIcon === 'none' ? 'flame' : config.badgeIcon;
+  const icon = badgeIconSvg(actualIcon, config.badgeColor);
   const m = streakSlotMetrics(size);
   const count = String(streak);
 
@@ -188,6 +190,9 @@ export function composeWidgetPreview(
   const isExpandedStreak =
     (config.slot1 === 'streak' && !hasSlot2) || (config.slot2 === 'streak' && !hasSlot1);
   const isBothNone = !hasSlot1 && !hasSlot2;
+  const mascotScale = isBothNone ? 1.35 : 1;
+  const mascotW = Math.round(mascot.w * mascotScale);
+  const mascotH = Math.round(mascot.h * mascotScale);
 
   const width = PREVIEW_WIDTH;
   const height = PREVIEW_HEIGHT;
@@ -196,11 +201,11 @@ export function composeWidgetPreview(
     `<rect data-preview-shell="true" x="0" y="0" width="${width}" height="${height}" rx="${SHELL_RADIUS}" fill="${SHELL_BG}" />`,
   ];
 
-  // Mascot section: centered in its allocated area (x=8..82, center=45) and vertically in height
-  const mascotCenterX = 45;
+  // Mascot section: centered in its allocated area (x=8..82, center=45) or centered in whole widget if both slots empty
+  const mascotCenterX = isBothNone ? width / 2 : 45;
   const mascotCenterY = height / 2;
-  const mascotX = mascotCenterX - mascot.w / 2;
-  const mascotY = mascotCenterY - mascot.h / 2;
+  const mascotX = mascotCenterX - mascotW / 2;
+  const mascotY = mascotCenterY - mascotH / 2;
 
   // The mascot's own badge is suppressed wherever the streak is already shown elsewhere — in the
   // expanded column or in a slot — so the count never appears twice.
@@ -210,8 +215,8 @@ export function composeWidgetPreview(
       streak,
       mascotX,
       mascotY,
-      mascot.w,
-      mascot.h
+      mascotW,
+      mascotH
     )
   );
 

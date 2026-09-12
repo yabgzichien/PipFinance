@@ -1,0 +1,156 @@
+import React from 'react';
+import { PanResponder, StyleSheet } from 'react-native';
+import { RecapStoryModal } from '../src/components/recap/RecapStoryModal';
+import { RecapStoryFrame } from '../src/components/recap/RecapStoryFrame';
+import * as sound from '../src/lib/sound';
+import type { RecapStoryModel } from '../src/lib/recapStory';
+import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
+
+let mockMotion = 'full';
+let mockReduced = false;
+let mockZh = false;
+jest.mock('../src/state/store', () => ({ useAppData: () => ({ motionSetting: mockMotion,
+  catById: { custom: { id: 'custom', name: 'Pottery' } } }) }));
+jest.mock('../src/state/useReducedMotion', () => ({ useReducedMotion: () => mockReduced }));
+jest.mock('../src/db/metaRepo', () => ({ getMeta: jest.fn(async () => null), setMeta: jest.fn() }));
+jest.mock('../src/lib/sound', () => ({ storyIntro: jest.fn(), stopStoryIntro: jest.fn(),
+  pauseStoryIntro: jest.fn(), resumeStoryIntro: jest.fn() }));
+jest.mock('../src/components/recap/RecapStoryFrame', () => ({ RecapStoryFrame: () => null }));
+jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }) }));
+jest.mock('../src/i18n', () => {
+  const actual = jest.requireActual('../src/i18n');
+  return { ...actual, useLanguage: () => ({ ...actual.useLanguage(), isZh: mockZh }) };
+});
+const Renderer = require('react-test-renderer');
+let trees: any[] = [];
+let gesture: any;
+const model: RecapStoryModel = { month: '2026-08', kind: 'sparse',
+  scenes: [{ id: 'ritual', type: 'ritual' }, { id: 'identity', type: 'identity', persona: 'food', activityDays: 3 },
+    { id: 'finale', type: 'finale', badges: ['firstChapter'] }], defaultSelectedSceneIds: ['identity', 'finale'] };
+const defaults = { visible: true, model, mascotConfig: DEFAULT_WIDGET_MASCOT_CONFIG, onClose: jest.fn() };
+function render(props = {}) {
+  let tree: any;
+  Renderer.act(() => { tree = Renderer.create(<RecapStoryModal {...defaults} {...props} />); });
+  trees.push(tree);
+  return tree;
+}
+function advance(ms: number) { Renderer.act(() => jest.advanceTimersByTime(ms)); }
+function frame(tree: any) { return tree.root.findByType(RecapStoryFrame).props; }
+function press(tree: any, label: string) {
+  const button = tree.root.findAll((node: any) => node.props.accessibilityRole === 'button' && node.props.accessibilityLabel === label)[0];
+  Renderer.act(() => button.props.onPress());
+}
+function grant(x = 300) { Renderer.act(() => gesture.onPanResponderGrant({ nativeEvent: { locationX: x } }, {})); }
+function release(dx = 0, x = 300) { Renderer.act(() => gesture.onPanResponderRelease({ nativeEvent: { locationX: x } }, { dx, dy: 0 })); }
+
+beforeEach(() => {
+  jest.useFakeTimers();
+  jest.clearAllMocks();
+  mockMotion = 'full'; mockReduced = false; mockZh = false;
+  jest.spyOn(PanResponder, 'create').mockImplementation((config) => { gesture = config; return { panHandlers: {} }; });
+});
+afterEach(() => {
+  trees.forEach((tree) => Renderer.act(() => tree.unmount())); trees = [];
+  jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks();
+});
+
+it('advances at five seconds and stops after the last scene', () => {
+  const tree = render();
+  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(1); expect(frame(tree).scene.id).toBe('identity');
+  advance(5000); expect(frame(tree).scene.id).toBe('finale');
+  advance(5000); expect(tree.root.findByProps({ testID: 'story-progress' }).props.accessibilityValue.now).toBe(100);
+  advance(15000); expect(frame(tree).scene.id).toBe('finale');
+});
+
+it('visible buttons and the large left/right tap regions navigate', () => {
+  const tree = render();
+  press(tree, 'Next'); expect(frame(tree).scene.id).toBe('identity');
+  press(tree, 'Previous'); expect(frame(tree).scene.id).toBe('ritual');
+  grant(); release(); expect(frame(tree).scene.id).toBe('identity');
+  grant(0); release(0, 0); expect(frame(tree).scene.id).toBe('ritual');
+});
+
+it('one threshold-crossing swipe navigates once, with its direction taking precedence over release position', () => {
+  const tree = render();
+  grant(); release(-48, 0); expect(frame(tree).scene.id).toBe('identity');
+  grant(0); release(80, 300); expect(frame(tree).scene.id).toBe('ritual');
+});
+
+it('holds the current progress and resumes only its remaining three seconds', () => {
+  const tree = render(); advance(2000); grant();
+  const held = frame(tree).progress.__getValue();
+  expect(held).toBeCloseTo(0.4, 2);
+  advance(8000); expect(frame(tree).progress.__getValue()).toBeCloseTo(held, 2);
+  expect(frame(tree).scene.id).toBe('ritual');
+  release(); advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(1); expect(frame(tree).scene.id).toBe('identity');
+});
+
+it('previous restarts a card including the clamped first card', () => {
+  const tree = render(); advance(3000); press(tree, 'Previous');
+  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(1); expect(frame(tree).scene.id).toBe('identity');
+  advance(2000); press(tree, 'Previous');
+  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(1); expect(frame(tree).scene.id).toBe('identity');
+});
+
+it('plays once per cycle, pauses/resumes a held ritual, and stops for navigation or mute', () => {
+  const tree = render(); expect(sound.storyIntro).toHaveBeenCalledTimes(1);
+  advance(500); grant(); expect(sound.pauseStoryIntro).toHaveBeenCalledTimes(1);
+  advance(600); release(); expect(sound.resumeStoryIntro).toHaveBeenCalledTimes(1);
+  press(tree, 'Next'); expect(sound.stopStoryIntro).toHaveBeenCalled();
+  press(tree, 'Previous'); expect(sound.storyIntro).toHaveBeenCalledTimes(1);
+  press(tree, 'Replay'); expect(sound.storyIntro).toHaveBeenCalledTimes(2);
+  press(tree, 'Mute'); expect(sound.stopStoryIntro).toHaveBeenCalled();
+  press(tree, 'Unmute'); expect(sound.storyIntro).toHaveBeenCalledTimes(2);
+  press(tree, 'Replay'); expect(sound.storyIntro).toHaveBeenCalledTimes(3);
+});
+
+it.each([['reduced', false], ['off', false], ['full', true]])('motion %s OS reduction %s uses manual navigation and no sound', (motion, reduced) => {
+  mockMotion = motion as string; mockReduced = reduced as boolean;
+  const tree = render(); advance(20000);
+  expect(frame(tree).scene.id).toBe('ritual'); expect(sound.storyIntro).not.toHaveBeenCalled();
+  press(tree, 'Next'); expect(frame(tree).scene.id).toBe('identity');
+  expect(frame(tree).motion).toBe(motion === 'off' ? 'off' : 'reduced');
+});
+
+it('unmounts the session on close/hidden and reopens at the start with fresh mute', () => {
+  const onClose = jest.fn(); const tree = render({ onClose });
+  press(tree, 'Mute'); press(tree, 'Next'); press(tree, 'Close');
+  expect(onClose).toHaveBeenCalledTimes(1); expect(sound.stopStoryIntro).toHaveBeenCalled();
+  Renderer.act(() => tree.update(<RecapStoryModal {...defaults} visible={false} />));
+  expect(tree.root.findAllByType(RecapStoryFrame)).toHaveLength(0);
+  Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
+  expect(frame(tree).scene.id).toBe('ritual');
+  expect(sound.storyIntro).toHaveBeenCalledTimes(2);
+  press(tree, 'Mute');
+});
+
+it('offers current-card sharing and finale selection callbacks outside the frame', () => {
+  const onShareScene = jest.fn(); const onChooseCards = jest.fn();
+  const tree = render({ onShareScene, onChooseCards });
+  press(tree, 'Share card'); expect(onShareScene).toHaveBeenCalledWith('ritual');
+  press(tree, 'Next'); press(tree, 'Next'); press(tree, 'Choose cards');
+  expect(onChooseCards).toHaveBeenCalledTimes(1);
+});
+
+it('provides translated position/month/custom categories, safe scale, and 44-point controls', () => {
+  const tree = render();
+  expect(frame(tree).accessibilityPositionLabel).toContain('Story 1 of 3');
+  expect(frame(tree).monthLabel).toBe('August 2026');
+  expect(frame(tree).categoryLabel('custom')).toBe('Pottery');
+  const area = tree.root.findByProps({ testID: 'story-stage' });
+  Renderer.act(() => area.props.onLayout({ nativeEvent: { layout: { width: 320, height: 400 } } }));
+  const bounds = StyleSheet.flatten(tree.root.findByProps({ testID: 'story-scaled-bounds' }).props.style);
+  expect(bounds.width).toBe(225); expect(bounds.height).toBe(400);
+  for (const node of tree.root.findAll((n: any) => n.props.accessibilityRole === 'button' && typeof n.type !== 'string')) {
+    const style = StyleSheet.flatten(node.props.style);
+    expect(style.minWidth).toBeGreaterThanOrEqual(44); expect(style.minHeight).toBeGreaterThanOrEqual(44);
+    expect(node.props.accessibilityHint).toBeTruthy();
+  }
+  mockZh = true;
+  Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
+  expect(frame(tree).accessibilityPositionLabel).toBe('第 1 个故事，共 3 个');
+});

@@ -34,11 +34,13 @@ export interface SendMessageOption {
   icon?: IconName;
   /** Built lazily so a message is only composed for the row actually tapped. Null means the
    *  row has nothing to send, and tapping it does nothing rather than sending a blank. */
-  build: () => string | null;
+  build?: () => string | null;
   /** A receipt photo to send alongside, when this particular row has one. */
   receiptUri?: string | null;
   /** Deterministic receipt data to render as a Pip receipt image. */
   receiptData?: GeneratedReceipt | GeneratedReceipt[];
+  /** Multi-section or custom canvas input (e.g. group split receipts). */
+  canvasInput?: ReceiptCanvasInput;
 }
 
 export function SendMessageSheet({
@@ -68,6 +70,10 @@ export function SendMessageSheet({
     const inputs: ReceiptCanvasInput[] = [];
 
     for (const opt of options) {
+      if (opt.canvasInput) {
+        inputs.push(opt.canvasInput);
+        continue;
+      }
       if (!opt.receiptData) continue;
       const receipts = Array.isArray(opt.receiptData) ? opt.receiptData : [opt.receiptData];
       if (receipts.length === 0) continue;
@@ -111,39 +117,24 @@ export function SendMessageSheet({
   if (!visible || options.length === 0) return <Modal visible={false} transparent />;
 
   const send = async (option: SendMessageOption) => {
-    const message = option.build();
-    if (!message || busy) return;
+    if (busy) return;
+    const message = option.build ? option.build() : '';
     setBusy(true);
     tap();
 
     let imageUri = generatedUris[option.key] || option.receiptUri;
 
     // If receipt image is being prepared in WebView, wait briefly for it
-    if (!imageUri && option.receiptData) {
+    if (!imageUri && (option.receiptData || option.canvasInput)) {
       imageUri = await new Promise<string | undefined>((resolve) => {
         resolversRef.current[option.key] = resolve;
         setTimeout(() => resolve(undefined), 1200);
       });
     }
 
-    const outcome = await shareSplitMessage(message, imageUri);
+    const outcome = await shareSplitMessage(message ?? '', imageUri);
     setBusy(false);
-    // Only the clipboard paths need explaining. A plain share speaks for itself, and telling
-    // someone "shared!" after they have just watched the share sheet open is noise.
-    if (outcome === 'shared-with-clipboard') {
-      if (imageUri && imageUri === generatedUris[option.key]) {
-        notify(
-          t('splitShareCopiedTitle'),
-          isZh
-            ? '小票图片已分享！留言文字已复制到剪贴板，可粘贴到附言。'
-            : 'Receipt image shared! Message copied to clipboard to paste as caption.'
-        );
-      } else {
-        notify(t('splitShareCopiedTitle'), t('splitSharePasteHint'));
-      }
-    } else if (outcome === 'copied') {
-      notify(t('splitShareCopiedTitle'), t('splitShareCopiedBody'));
-    } else if (outcome === 'failed') {
+    if (outcome === 'failed') {
       notify(t('splitShareFailedTitle'), t('splitShareFailedBody'));
     }
     if (outcome !== 'failed') onClose();

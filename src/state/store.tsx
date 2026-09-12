@@ -401,7 +401,7 @@ export interface AppData {
   writeOffShare: (shareId: string) => Promise<void>;
   saveTransactionEdits: (
     txn: Transaction,
-    edits: { amount: number; type: TxnType; categoryId: string | null; remark?: string | null }
+    edits: { amount: number; type: TxnType; categoryId: string | null; remark?: string | null; date?: string | null }
   ) => Promise<void>;
   removeTransaction: (id: string) => Promise<void>;
   removeMany: (ids: string[]) => Promise<void>;
@@ -1165,9 +1165,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const saveTransactionEdits = useCallback(
     async (
       txn: Transaction,
-      edits: { amount: number; type: TxnType; categoryId: string | null; remark?: string | null }
+      edits: { amount: number; type: TxnType; categoryId: string | null; remark?: string | null; date?: string | null }
     ) => {
-      const patch = await updateTransactionFields(txn.id, edits.amount, edits.type, edits.categoryId, edits.remark);
+      const nextDate = edits.date !== undefined ? edits.date : txn.date;
+      const patch = await updateTransactionFields(txn.id, edits.amount, edits.type, edits.categoryId, edits.remark, nextDate);
       // Correcting a category re-teaches Pip for that merchant (expense or income), only if
       // merchant is non-empty. A transfer has no category, so there is nothing to teach.
       const learnedKey = txn.merchantKey && edits.categoryId ? txn.merchantKey : null;

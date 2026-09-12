@@ -26,7 +26,7 @@ export function setSlotContent(
   if (config[which] === content) return config;
   const other = which === 'slot1' ? 'slot2' : 'slot1';
   const next = { ...config, [which]: content };
-  if (content === 'streak' || config[other] === 'streak') {
+  if (content === 'streak' && config[other] === 'streak') {
     next[other] = 'none';
   }
   return next;

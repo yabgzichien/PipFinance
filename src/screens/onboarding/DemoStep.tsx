@@ -95,9 +95,9 @@ const SCAN_W = Math.round(SCAN_H * RECEIPT_ASPECT);
 /** Matches ExtractScreen's scanline band. */
 const SCANLINE_H = 28;
 
-/** Long enough to watch two narration stages land, short enough not to feel like a wait. */
-const SCAN_MS = 3200;
-const SCAN_TICK_MS = 100;
+/** Quick demo scan completed within 1 second. */
+const SCAN_MS = 800;
+const SCAN_TICK_MS = 50;
 
 /** Which dot is lit. Scanning belongs to the first dot — it is the same step, still working. */
 const BEAT_DOT: Record<DemoBeat, number> = {
@@ -177,16 +177,15 @@ export function DemoStep({
   const scan = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (beat !== 'scanning' || reducedMotion) return;
-    const loop = Animated.loop(
-      Animated.timing(scan, {
-        toValue: 1,
-        duration: 1500,
-        easing: Easing.inOut(Easing.ease),
-        useNativeDriver: true,
-      })
-    );
-    loop.start();
-    return () => loop.stop();
+    scan.setValue(0);
+    const anim = Animated.timing(scan, {
+      toValue: 1,
+      duration: SCAN_MS,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
   }, [beat, reducedMotion, scan]);
   const scanTranslate = scan.interpolate({
     inputRange: [0, 1],

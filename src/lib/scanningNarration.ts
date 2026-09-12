@@ -127,9 +127,11 @@ const STAGE_MAP: Record<ScanKind, StageDef[]> = {
 };
 
 /**
- * Calculates a natural completion percentage (0 - 100) based on elapsed seconds.
- * Starts with rapid initial momentum (15-40%), steadily advances through middle stages (40-85%),
- * and smoothly tapers towards 98% during prolonged processing, avoiding stalls at 100% until finished.
+ * Calculates a psychologically tuned completion percentage (0 - 100) based on elapsed seconds.
+ * - Endowed Progress: Immediately starts at 15% to eliminate zero-point inertia.
+ * - Labor Illusion & Operational Momentum: Steady advances through middle milestones (40% -> 65% -> 85%).
+ * - Stall Prevention (Soft Ceiling): Tapers to 95-96% during prolonged processing, deliberately avoiding
+ *   the "99% stall trap" so users never assume a crash, leaving headroom for a crisp Peak-End surge to 100%.
  */
 export function getScanProgress(elapsedSecs: number): number {
   const secs = Math.max(0, elapsedSecs);
@@ -138,9 +140,9 @@ export function getScanProgress(elapsedSecs: number): number {
   if (secs <= 6) return Math.round(40 + ((secs - 3) / 3) * 25); // 40% -> 65% (at 6s)
   if (secs <= 9) return Math.round(65 + ((secs - 6) / 3) * 20); // 65% -> 85% (at 9s)
   if (secs <= 13) return Math.round(85 + ((secs - 9) / 4) * 10); // 85% -> 95% (at 13s)
-  // 13s+: asymptotic approach towards 99%
+  // 13s+: Asymptotic soft ceiling at 96% to avoid the dreaded 99% freeze trap
   const extraSecs = secs - 13;
-  return Math.min(99, Math.round(95 + (1 - Math.exp(-extraSecs / 5)) * 4));
+  return Math.min(96, Math.round(95 + (1 - Math.exp(-extraSecs / 5)) * 1.2));
 }
 
 /**

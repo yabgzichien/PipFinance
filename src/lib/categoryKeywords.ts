@@ -23,20 +23,27 @@ const STARTER_KEYWORDS: Record<string, string[]> = {
   food: [
     'lunch', 'dinner', 'breakfast', 'brunch', 'meal', 'food', 'eat', 'eating',
     'restaurant', 'cafe', 'coffee', 'tea', 'snack', 'snacks', 'takeaway', 'delivery',
-    'groceries', 'grocery',
-    '午餐', '晚餐', '早餐', '早午餐', '餐', '吃饭', '咖啡', '奶茶', '零食', '外卖', '外食', '杂货', '超市',
+    'groceries', 'grocery', 'drink', 'drinks', 'laksa', 'bakery', 'starbucks', 'mcdonalds', 'mcd', 'kfc', 'boba',
+    'tealive', 'zus', 'zus coffee', 'gigi coffee', 'subway', 'marrybrown', 'foodpanda', 'grabfood',
+    'familymart', 'family mart', 'mixue', 'chagee', 'nasi lemak', 'roti canai', 'cendol', 'kopitiam', 'mamak',
+    '午餐', '晚餐', '早餐', '早午餐', '餐', '吃饭', '咖啡', '奶茶', '零食', '外卖', '外食', '杂货', '超市', '肯德基', '麦当劳', '星巴克', '海底捞', '喜茶', '霸王茶姬',
   ],
   travelling: [
-    'grab', 'taxi', 'uber', 'bus', 'train', 'mrt', 'lrt', 'petrol', 'fuel', 'parking', 'toll', 'flight', 'transport',
-    '打车', '出租车', '地铁', '公交', '油费', '停车', '过路费', '机票', '交通',
+    'grab', 'taxi', 'uber', 'bus', 'train', 'mrt', 'lrt', 'petrol', 'fuel', 'parking', 'toll', 'flight', 'transport', 'travel', 'travelling', 'trip', 'commute', 'tourism',
+    'petronas', 'shell', 'caltex', 'bhp', 'petron', 'setel', 'touch n go', "touch 'n go", 'tng', 'rapidkl', 'myrapid', 'ktm', 'airasia ride', 'indriver', 'plus toll', 'touchngo',
+    '打车', '出租车', '地铁', '公交', '油费', '停车', '过路费', '机票', '交通', '旅游', '出行', '加油', '油站', '捷运', '轻快铁',
   ],
   entertainment: [
     'movie', 'movies', 'cinema', 'netflix', 'spotify', 'game', 'games', 'concert', 'karaoke',
+    'tgv', 'gsc', 'golden screen cinemas', 'steam', 'playstation', 'nintendo',
     '电影', '游戏', '演唱会',
   ],
   shopping: [
-    'shopee', 'lazada', 'shopping', 'clothes', 'clothing', 'mall',
-    '购物', '衣服', '商场',
+    'shopee', 'lazada', 'shopping', 'clothes', 'clothing', 'mall', 'shoes', 'bag', 'uniqlo', 'zara', 'h&m',
+    'tiktok shop', 'taobao', 'watsons', 'guardian', 'mr diy', 'mr. diy', 'mrdiy', 'daiso', 'decathlon', 'kaison',
+    'popular bookstore', 'ikea', 'aeon', 'lotus', "lotus's", 'lotuss', 'jaya grocer', 'village grocer',
+    '99 speedmart', 'speedmart', 'econsave', 'giant',
+    '购物', '衣服', '商场', '屈臣氏', '万宁', '淘宝',
   ],
   rental: [
     'rent', 'rental', 'mortgage',
@@ -44,14 +51,16 @@ const STARTER_KEYWORDS: Record<string, string[]> = {
   ],
   'phone-bill': [
     'phone bill', 'mobile plan', 'data plan', 'unifi', 'broadband', 'phone', 'wifi', 'telco', 'internet',
+    'maxis', 'celcom', 'digi', 'u mobile', 'umobile', 'hotlink', 'xox', 'yoodo', 'yes 5g',
     '话费', '电话费', '宽带', 'wifi费',
   ],
   insurance: [
-    'insurance', 'premium',
+    'insurance', 'premium', 'prudential', 'great eastern', 'aia', 'allianz', 'etiqa',
     '保险',
   ],
   subscriptions: [
     'subscription', 'subscriptions', 'netflix', 'spotify', 'disney+', 'youtube premium', 'icloud', 'membership',
+    'apple.com/bill', 'google storage', 'google play', 'chatgpt', 'openai', 'claude', 'prime video',
     '订阅', '会员',
   ],
   family: [
@@ -68,6 +77,7 @@ const STARTER_KEYWORDS: Record<string, string[]> = {
   ],
   utilities: [
     'electricity', 'electric', 'water bill', 'gas bill', 'utility', 'utilities', 'tnb', 'power bill',
+    'tenaga nasional', 'syabas', 'air selangor', 'indah water', 'iwk', 'sada', 'sesb', 'sarawak energy',
     '电费', '水费', '煤气费', '水电',
   ],
 };

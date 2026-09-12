@@ -14,7 +14,7 @@
 
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -56,8 +56,13 @@ import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { merchantKey } from '../lib/normalize';
 import { defaultLinkEffect } from '../lib/networth';
+import { addTrip as dbAddTrip, listTrips, setTransactionsTrip as dbSetTransactionsTrip } from '../db/tripsRepo';
+import { searchInvestments } from '../prices';
+import { quotesMYR } from '../prices/yahoo';
+import { subFromType, type TickerResult } from '../lib/prices';
 import {
   buildPrompt,
+  isInvestmentCandidate,
   parseJSON,
   type ParsedAccount,
   type ParsedAppPreferences,
@@ -68,11 +73,13 @@ import {
   type ParsedSplit,
   type ParsedTaxRelief,
   type ParsedTransfer,
+  type ParsedTrip,
   type ParseResult,
 } from '../lib/advancedImport';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useBackHandler } from '../state/useBackHandler';
 import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { ImportReviewScreen } from './ImportReviewScreen';
@@ -182,6 +189,398 @@ function AccountReviewList({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Live tracking review
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface HoldingSetupState {
+  enabled: boolean;
+  symbol: string;
+  ticker: string;
+  sub: 'crypto' | 'stock' | 'commodity';
+  quantity: string;
+  priceMYR: number | null;
+  searching: boolean;
+  searchResults: TickerResult[];
+  showSearch: boolean;
+  searchQuery: string;
+}
+
+function LiveTrackingReview({
+  accounts,
+  onConfirm,
+  onSkip,
+  onBack,
+}: {
+  accounts: ParsedAccount[];
+  onConfirm: (updated: ParsedAccount[]) => void;
+  onSkip: () => void;
+  onBack: () => void;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+
+  const candidateIndices = useMemo<number[]>(() => {
+    return accounts
+      .map((a, i) => (isInvestmentCandidate(a) ? i : -1))
+      .filter((i) => i >= 0);
+  }, [accounts]);
+
+  const [holdingStates, setHoldingStates] = useState<Record<number, HoldingSetupState>>(() => {
+    const init: Record<number, HoldingSetupState> = {};
+    for (const idx of candidateIndices) {
+      const a = accounts[idx];
+      init[idx] = {
+        enabled: true,
+        symbol: a.symbol ?? a.ticker ?? '',
+        ticker: a.ticker ?? a.symbol ?? '',
+        sub: (a.sub as any) ?? 'stock',
+        quantity: a.quantity != null && a.quantity > 0 ? String(a.quantity) : '',
+        priceMYR: null,
+        searching: false,
+        searchResults: [],
+        showSearch: false,
+        searchQuery: a.ticker ?? a.name ?? '',
+      };
+    }
+    return init;
+  });
+
+  React.useEffect(() => {
+    let active = true;
+    const loadMatches = async () => {
+      for (const idx of candidateIndices) {
+        const a = accounts[idx];
+        const st = holdingStates[idx];
+        const query = st?.symbol || a.ticker || a.name;
+        if (!query) continue;
+
+        try {
+          const results = await searchInvestments(query);
+          if (!active) return;
+          if (results.length > 0) {
+            const best = results[0];
+            const sym = best.id;
+            const sub = subFromType(best.type);
+            const quotes = await quotesMYR([sym]);
+            if (!active) return;
+            const q = quotes[sym];
+            const price = q?.priceMYR ?? null;
+
+            setHoldingStates((prev) => {
+              const current = prev[idx];
+              if (!current) return prev;
+              let qty = current.quantity;
+              if (!qty && price && price > 0) {
+                const est = sub === 'crypto'
+                  ? Math.round((a.balance / price) * 10000) / 10000
+                  : Math.round((a.balance / price) * 100) / 100;
+                qty = String(est);
+              }
+              return {
+                ...prev,
+                [idx]: {
+                  ...current,
+                  symbol: sym,
+                  ticker: best.ticker,
+                  sub,
+                  priceMYR: price,
+                  quantity: qty,
+                },
+              };
+            });
+          }
+        } catch {}
+      }
+    };
+    void loadMatches();
+    return () => {
+      active = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSearch = async (idx: number, text: string) => {
+    setHoldingStates((prev) => {
+      const curr = prev[idx];
+      return {
+        ...prev,
+        [idx]: curr
+          ? { ...curr, searchQuery: text, searching: true }
+          : {
+              enabled: true,
+              symbol: '',
+              ticker: text,
+              sub: 'stock',
+              quantity: '',
+              priceMYR: null,
+              searching: true,
+              searchResults: [],
+              showSearch: true,
+              searchQuery: text,
+            },
+      };
+    });
+    try {
+      const results = await searchInvestments(text);
+      setHoldingStates((prev) => {
+        const curr = prev[idx];
+        if (!curr) return prev;
+        return {
+          ...prev,
+          [idx]: { ...curr, searchResults: results, searching: false },
+        };
+      });
+    } catch {
+      setHoldingStates((prev) => {
+        const curr = prev[idx];
+        if (!curr) return prev;
+        return {
+          ...prev,
+          [idx]: { ...curr, searchResults: [], searching: false },
+        };
+      });
+    }
+  };
+
+  const selectTicker = async (idx: number, res: TickerResult) => {
+    const a = accounts[idx];
+    const sym = res.id;
+    const sub = subFromType(res.type);
+    let price: number | null = null;
+    try {
+      const q = await quotesMYR([sym]);
+      price = q[sym]?.priceMYR ?? null;
+    } catch {}
+
+    setHoldingStates((prev) => {
+      const current = prev[idx];
+      let qty = current?.quantity ?? '';
+      if (price && price > 0 && (!qty || parseFloat(qty) <= 0)) {
+        const est = sub === 'crypto'
+          ? Math.round((a.balance / price) * 10000) / 10000
+          : Math.round((a.balance / price) * 100) / 100;
+        qty = String(est);
+      }
+      return {
+        ...prev,
+        [idx]: {
+          ...(current ?? {
+            enabled: true,
+            symbol: sym,
+            ticker: res.ticker,
+            sub,
+            priceMYR: price,
+            quantity: qty,
+            searching: false,
+            searchResults: [],
+            showSearch: false,
+            searchQuery: res.ticker,
+          }),
+          symbol: sym,
+          ticker: res.ticker,
+          sub,
+          priceMYR: price,
+          quantity: qty,
+          showSearch: false,
+        },
+      };
+    });
+  };
+
+  const handleApply = () => {
+    const updated = accounts.map((a, i) => {
+      const st = holdingStates[i];
+      if (!st || !st.enabled || !st.symbol) return a;
+      const numQty = parseFloat(st.quantity);
+      if (!Number.isFinite(numQty) || numQty <= 0) return a;
+      return {
+        ...a,
+        cls: 'investments',
+        symbol: st.symbol,
+        ticker: st.ticker,
+        sub: st.sub,
+        quantity: numQty,
+        cost: a.cost ?? a.balance,
+      };
+    });
+    onConfirm(updated);
+  };
+
+  return (
+    <View style={{ gap: 14 }}>
+      <View style={{ marginBottom: 4 }}>
+        <Text style={[styles.stepTitle, { color: colorTheme.ink, fontSize: 18 }]}>
+          {isZh ? '设置实时投资行情追踪' : 'Set Up Live Investment Tracking'}
+        </Text>
+        <Text style={[styles.copyHint, { color: colorTheme.ink2, textAlign: 'left', marginTop: 4 }]}>
+          {isZh
+            ? '发现以下可追踪行情的投资/加密资产。关联行情代码后，净值将自动根据实时市价更新。'
+            : 'We detected investment or crypto holdings. Link market tickers below to automatically track live portfolio value.'}
+        </Text>
+      </View>
+
+      {candidateIndices.map((idx) => {
+        const a = accounts[idx];
+        if (!a) return null;
+        const st = holdingStates[idx] ?? {
+          enabled: true,
+          symbol: a.symbol ?? a.ticker ?? '',
+          ticker: a.ticker ?? a.symbol ?? '',
+          sub: (a.sub as any) ?? 'stock',
+          quantity: a.quantity != null && a.quantity > 0 ? String(a.quantity) : '',
+          priceMYR: null,
+          searching: false,
+          searchResults: [],
+          showSearch: false,
+          searchQuery: a.ticker ?? a.name ?? '',
+        };
+
+        return (
+          <Card key={idx} style={{ padding: 14, gap: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flex: 1, marginRight: 10 }}>
+                <Text style={[styles.accName, { color: colorTheme.ink, fontSize: 15 }]}>{a.name}</Text>
+                <Text style={[styles.accMeta, { color: colorTheme.ink3 }]}>
+                  {a.clsLabel} · {fmtMoney(a.balance, a.currency)}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => setHoldingStates((prev) => {
+                  const curr = prev[idx] ?? st;
+                  return {
+                    ...prev,
+                    [idx]: { ...curr, enabled: !curr.enabled },
+                  };
+                })}
+                style={[
+                  styles.toggleChip,
+                  { backgroundColor: st.enabled ? theme.accentTint : colorTheme.surface2, borderColor: st.enabled ? theme.accent : colorTheme.line },
+                ]}
+              >
+                <Text style={{ fontFamily: uiFont(700), fontSize: 12, color: st.enabled ? theme.accent : colorTheme.ink3 }}>
+                  {st.enabled ? (isZh ? '实时追踪 开启' : 'Live Tracking ON') : (isZh ? '保存为普通账户' : 'Manual Value')}
+                </Text>
+              </Pressable>
+            </View>
+
+            {st.enabled && (
+              <View style={{ gap: 10, paddingTop: 6, borderTopWidth: 1, borderTopColor: colorTheme.line2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: uiFont(600), fontSize: 11, color: colorTheme.ink3, textTransform: 'uppercase' }}>
+                      {isZh ? '关联标的 / 代码' : 'Market Symbol'}
+                    </Text>
+                    <Text style={{ fontFamily: uiFont(700), fontSize: 14, color: colorTheme.ink, marginTop: 2 }}>
+                      {st.symbol ? `${st.ticker} (${st.symbol})` : (isZh ? '未关联标的' : 'No symbol linked')}
+                    </Text>
+                    {st.priceMYR != null && (
+                      <Text style={{ fontFamily: uiFont(500), fontSize: 12, color: theme.accent, marginTop: 2 }}>
+                        {isZh ? '实时单价: ' : 'Live Price: '}{fmtMoney(st.priceMYR, 'MYR')}
+                      </Text>
+                    )}
+                  </View>
+
+                  <Pressable
+                    onPress={() => {
+                      const nextShow = !st.showSearch;
+                      setHoldingStates((prev) => {
+                        const curr = prev[idx] ?? st;
+                        return {
+                          ...prev,
+                          [idx]: { ...curr, showSearch: nextShow },
+                        };
+                      });
+                      if (nextShow && (!st.searchResults || st.searchResults.length === 0)) {
+                        void handleSearch(idx, st.searchQuery);
+                      }
+                    }}
+                    style={[styles.smallBtn, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface2 }]}
+                  >
+                    <Text style={{ fontFamily: uiFont(600), fontSize: 12, color: colorTheme.ink }}>
+                      {st.showSearch ? (isZh ? '收起' : 'Done') : (isZh ? '更改标的' : 'Change')}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {st.showSearch && (
+                  <View style={{ gap: 8, marginTop: 4 }}>
+                    <TextInput
+                      value={st.searchQuery}
+                      onChangeText={(t) => void handleSearch(idx, t)}
+                      placeholder={isZh ? '搜索股票代码、币种或基金...' : 'Search ticker, e.g. AAPL, BTC, 1155.KL'}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.smallInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
+                    />
+                    {st.searching && <ActivityIndicator size="small" color={theme.accent} />}
+                    <ScrollView style={{ maxHeight: 120 }} nestedScrollEnabled>
+                      {st.searchResults.map((r) => (
+                        <Pressable
+                          key={r.id}
+                          onPress={() => void selectTicker(idx, r)}
+                          style={[styles.searchResultRow, { borderBottomColor: colorTheme.line2 }]}
+                        >
+                          <Text style={{ fontFamily: uiFont(700), fontSize: 12.5, color: colorTheme.ink }}>{r.ticker} · {r.id}</Text>
+                          <Text style={{ fontFamily: uiFont(400), fontSize: 11.5, color: colorTheme.ink3 }} numberOfLines={1}>{r.name}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
+                <View style={{ gap: 4 }}>
+                  <Text style={{ fontFamily: uiFont(600), fontSize: 11, color: colorTheme.ink3, textTransform: 'uppercase' }}>
+                    {isZh ? '持有数量 / 份额 (Units)' : 'Units / Shares Held'}
+                  </Text>
+                  <TextInput
+                    keyboardType="numeric"
+                    value={st.quantity}
+                    onChangeText={(txt) => setHoldingStates((prev) => {
+                      const curr = prev[idx] ?? st;
+                      return {
+                        ...prev,
+                        [idx]: { ...curr, quantity: txt },
+                      };
+                    })}
+                    placeholder="0.00"
+                    placeholderTextColor={colorTheme.ink3}
+                    style={[styles.smallInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, color: colorTheme.ink }]}
+                  />
+                  <Text style={{ fontFamily: uiFont(400), fontSize: 11, color: colorTheme.ink3 }}>
+                    {isZh
+                      ? '已根据账单金额与当前市价预估数量。如有出入请手动修改。'
+                      : 'Estimated from balance & market price. Edit if your actual units differ.'}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </Card>
+        );
+      })}
+
+      <View style={{ marginTop: 8, gap: 10 }}>
+        <PrimaryButton onPress={handleApply}>
+          <Icon name="check" size={18} color="#fff" stroke={2.4} />
+          <BtnLabel>{isZh ? '保存行情并继续' : 'Confirm & Continue'}</BtnLabel>
+        </PrimaryButton>
+
+        <Pressable onPress={onSkip} style={styles.backLink}>
+          <Text style={[styles.backLinkText, { color: colorTheme.ink3 }]}>
+            {isZh ? '跳过 (按普通账户导入)' : 'Skip (Keep as Manual Accounts)'}
+          </Text>
+        </Pressable>
+
+        <Pressable onPress={onBack} style={styles.backLink}>
+          <Text style={[styles.backLinkText, { color: colorTheme.ink3 }]}>
+            {isZh ? '返回账户列表' : 'Back to Accounts'}
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -189,6 +588,7 @@ type Phase =
   | 'guide'
   | 'pasting'
   | 'accountReview'   // reviewing parsed accounts before the txn review
+  | 'liveTrackingReview' // setup live investment tracking
   | 'txnReview'       // ImportReviewScreen takeover
   | 'saving'
   | 'done'
@@ -207,12 +607,13 @@ export function AdvancedImportScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { t } = useLanguage();
+  const { t, isZh } = useLanguage();
   const { commitCategorized, recordBalanceLink, refreshAll, setHoldingCost, updateHoldingQuantity, importParsedCommitments } = useAppData();
 
   const [phase, setPhase] = useState<Phase>('guide');
   const [jsonText, setJsonText] = useState('');
   const [defaultCurrency, setDefaultCurrency] = useState<string>(BASE_CURRENCY);
+  const [parsedTrips, setParsedTrips] = useState<ParsedTrip[]>([]);
   const [parsedTxns, setParsedTxns] = useState<ExtractedTxn[]>([]);
   const [parsedAccounts, setParsedAccounts] = useState<ParsedAccount[]>([]);
   const [parsedTransfers, setParsedTransfers] = useState<ParsedTransfer[]>([]);
@@ -225,16 +626,53 @@ export function AdvancedImportScreen({
   const [parsedTaxRelief, setParsedTaxRelief] = useState<ParsedTaxRelief | null>(null);
   const [parsedMerchantMemory, setParsedMerchantMemory] = useState<Record<string, string>>({});
   const [parsedPreferences, setParsedPreferences] = useState<ParsedAppPreferences | null>(null);
-  const [updateAccountBalances, setUpdateAccountBalances] = useState(true);
+  const [updateAccountBalances, setUpdateAccountBalances] = useState(false);
   const [error, setError] = useState('');
   const [txnCount, setTxnCount] = useState(0);
   const [txnSkipped, setTxnSkipped] = useState(0);
   const [accCount, setAccCount] = useState(0);
+  const [tripCount, setTripCount] = useState(0);
   const [transferCount, setTransferCount] = useState(0);
   const [commitmentCount, setCommitmentCount] = useState(0);
   const [splitCount, setSplitCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleBack = (): boolean => {
+    if (phase === 'txnReview') {
+      const prevPhase: Phase =
+        parsedAccounts.length > 0
+          ? parsedAccounts.some(isInvestmentCandidate)
+            ? 'liveTrackingReview'
+            : 'accountReview'
+          : 'pasting';
+      setPhase(prevPhase);
+      return true;
+    }
+    if (phase === 'liveTrackingReview') {
+      setPhase(parsedAccounts.length > 0 ? 'accountReview' : 'pasting');
+      return true;
+    }
+    if (phase === 'accountReview') {
+      setPhase('pasting');
+      return true;
+    }
+    if (phase === 'error') {
+      setPhase('pasting');
+      return true;
+    }
+    if (phase === 'saving') {
+      return true;
+    }
+    if (phase === 'done') {
+      (onSuccess ?? onClose)();
+      return true;
+    }
+    onClose();
+    return true;
+  };
+
+  useBackHandler(handleBack);
 
   React.useEffect(() => {
     getEntryCurrency().then(setDefaultCurrency);
@@ -292,6 +730,7 @@ export function AdvancedImportScreen({
     }
     try {
       const {
+        trips: pTrips,
         transactions,
         accounts,
         transfers,
@@ -311,6 +750,7 @@ export function AdvancedImportScreen({
         accounts.length === 0 &&
         transfers.length === 0 &&
         commitments.length === 0 &&
+        (!pTrips || pTrips.length === 0) &&
         (!pCats || pCats.length === 0) &&
         (!pSplits || pSplits.length === 0) &&
         !pBudget &&
@@ -320,6 +760,7 @@ export function AdvancedImportScreen({
         setPhase('error');
         return;
       }
+      setParsedTrips(pTrips ?? []);
       setParsedTxns(transactions);
       setParsedAccounts(accounts);
       setParsedTransfers(transfers);
@@ -437,6 +878,53 @@ export function AdvancedImportScreen({
       setTxnCount(created.length);
       setTxnSkipped(assignments.filter((a) => a === DROP).length);
       setAccCount(savedAcc);
+
+      // 2b. Commit & link Trips
+      if (parsedTrips.length > 0 || txns.some((t) => Boolean(t.tripName))) {
+        const existingTrips = await listTrips();
+        const tripMetaByName = new Map<string, { id: string; startDate: string; endDate: string }>();
+
+        for (const et of existingTrips) {
+          if (et.startDate && et.endDate) {
+            tripMetaByName.set(et.name.trim().toLowerCase(), { id: et.id, startDate: et.startDate, endDate: et.endDate });
+          }
+        }
+
+        for (const pt of parsedTrips) {
+          const key = pt.name.trim().toLowerCase();
+          const existing = tripMetaByName.get(key);
+          if (existing) continue;
+          try {
+            const added = await dbAddTrip(pt.name, pt.startDate, pt.endDate);
+            tripMetaByName.set(key, { id: added.id, startDate: added.startDate!, endDate: added.endDate! });
+          } catch {}
+        }
+
+        const txnsByTripId = new Map<string, string[]>();
+        let createdIdx = 0;
+        for (let i = 0; i < txns.length; i++) {
+          if (assignments[i] === DROP) continue;
+          const original = txns[i];
+          const createdTxn = created[createdIdx++];
+          if (!createdTxn) continue;
+
+          if (original.tripName && original.date) {
+            const tripMeta = tripMetaByName.get(original.tripName.trim().toLowerCase());
+            // STRICT DATE CHECK: Only link if transaction date is within the trip's start & end dates
+            if (tripMeta && original.date >= tripMeta.startDate && original.date <= tripMeta.endDate) {
+              if (!txnsByTripId.has(tripMeta.id)) txnsByTripId.set(tripMeta.id, []);
+              txnsByTripId.get(tripMeta.id)!.push(createdTxn.id);
+            }
+          }
+        }
+
+        for (const [tId, tTxnIds] of txnsByTripId.entries()) {
+          if (tTxnIds.length > 0) {
+            await dbSetTransactionsTrip(tTxnIds, tId);
+          }
+        }
+        setTripCount(txnsByTripId.size);
+      }
 
       // 3. Update account balances with imported transactions if option enabled.
       if (updateAccountBalances) {
@@ -652,7 +1140,7 @@ export function AdvancedImportScreen({
     return (
       <ImportReviewScreen
         items={parsedTxns}
-        onCancel={() => setPhase(parsedAccounts.length > 0 ? 'accountReview' : 'pasting')}
+        onCancel={() => setPhase(parsedAccounts.length > 0 ? (parsedAccounts.some(isInvestmentCandidate) ? 'liveTrackingReview' : 'accountReview') : 'pasting')}
         onConfirm={commitAll}
         updateAccountBalances={updateAccountBalances}
         onToggleUpdateAccountBalances={setUpdateAccountBalances}
@@ -666,7 +1154,7 @@ export function AdvancedImportScreen({
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={t('importAdvancedTitle')} onBack={onClose} />
+        <TopBar title={t('importAdvancedTitle')} onBack={handleBack} />
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -699,6 +1187,7 @@ export function AdvancedImportScreen({
                 {accCount > 0 && <> <B>{t('advImportAccClause', { count: accCount })}</B>.</>}
                 {transferCount > 0 && <> <B>{t('advImportTransferClause', { count: transferCount })}</B>.</>}
                 {commitmentCount > 0 && <> <B>{t('advImportCommitmentClause', { count: commitmentCount })}</B>.</>}
+                {tripCount > 0 && <> <B>{isZh ? `已关联 ${tripCount} 个旅行` : `Linked ${tripCount} trip${tripCount === 1 ? '' : 's'}`}</B>.</>}
                 {splitCount > 0 && <> <B>{t('advImportSplitClause', { count: splitCount })}</B>.</>}
               </>
             ) : phase === 'accountReview' ? (
@@ -707,6 +1196,12 @@ export function AdvancedImportScreen({
                   accPhrase: t('advImportFoundAccPhrase', { count: parsedAccounts.length }),
                   txnPhrase: t('advImportFoundTxnPhrase', { count: parsedTxns.length }),
                 })}
+              </>
+            ) : phase === 'liveTrackingReview' ? (
+              <>
+                {isZh
+                  ? '为你的投资与加密资产关联实时行情。'
+                  : 'Link live market prices for your investment and crypto holdings.'}
               </>
             ) : (
               <>
@@ -825,12 +1320,24 @@ export function AdvancedImportScreen({
 
             <View style={{ marginTop: 18, gap: 10 }}>
               {parsedTxns.length > 0 ? (
-                <PrimaryButton onPress={() => setPhase('txnReview')}>
+                <PrimaryButton onPress={() => {
+                  if (parsedAccounts.some(isInvestmentCandidate)) {
+                    setPhase('liveTrackingReview');
+                  } else {
+                    setPhase('txnReview');
+                  }
+                }}>
                   <Icon name="chevronRight" size={18} color="#fff" />
                   <BtnLabel>{t('advImportContinueReviewTxns', { count: parsedTxns.length })}</BtnLabel>
                 </PrimaryButton>
               ) : (
-                <PrimaryButton onPress={() => void commitAll([], [])}>
+                <PrimaryButton onPress={() => {
+                  if (parsedAccounts.some(isInvestmentCandidate)) {
+                    setPhase('liveTrackingReview');
+                  } else {
+                    void commitAll([], []);
+                  }
+                }}>
                   <Icon name="check" size={18} color="#fff" stroke={2.4} />
                   <BtnLabel>{t('advImportImportAccounts', { count: parsedAccounts.filter((a) => a.include).length })}</BtnLabel>
                 </PrimaryButton>
@@ -840,6 +1347,29 @@ export function AdvancedImportScreen({
               </Pressable>
             </View>
           </>
+        )}
+
+        {/* ── LIVE TRACKING REVIEW ── */}
+        {phase === 'liveTrackingReview' && (
+          <LiveTrackingReview
+            accounts={parsedAccounts}
+            onConfirm={(updated) => {
+              setParsedAccounts(updated);
+              if (parsedTxns.length > 0) {
+                setPhase('txnReview');
+              } else {
+                void commitAll([], []);
+              }
+            }}
+            onSkip={() => {
+              if (parsedTxns.length > 0) {
+                setPhase('txnReview');
+              } else {
+                void commitAll([], []);
+              }
+            }}
+            onBack={() => setPhase('accountReview')}
+          />
         )}
 
         {/* ── GUIDE + PASTING ── */}
@@ -1080,4 +1610,10 @@ const styles = StyleSheet.create({
   errorCard: { borderWidth: 1.5, borderRadius: radius.md, padding: 14 },
   errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   errorText: { fontFamily: uiFont(500), fontSize: 13.5, flex: 1, lineHeight: 19 },
+
+  // Live holding review
+  toggleChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1 },
+  smallBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1 },
+  smallInput: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 7, fontFamily: uiFont(500), fontSize: 13 },
+  searchResultRow: { paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth },
 });

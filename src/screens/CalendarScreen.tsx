@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line, Path } from 'react-native-svg';
-import { fmtMoney } from '../lib/format';
+import { compactAmt, fmtMoney } from '../lib/format';
 import type { Transaction } from '../lib/types';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -95,12 +95,7 @@ function computeMonthData(transactions: Transaction[], year: number, month: numb
   return { totalIncome, totalExpense, byDay };
 }
 
-/** Format a compact amount for the calendar cell. e.g. 7100 → "7.1K", 245 → "245". */
-function compactAmt(n: number): string {
-  if (n === 0) return '';
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
+
 
 const WEEKDAY_LABELS_EN = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const WEEKDAY_LABELS_ZH = ['一', '二', '三', '四', '五', '六', '日'];
@@ -380,6 +375,7 @@ function DayCell({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
+  const dc = useDisplayCurrency();
   if (day === null) return <View style={styles.cellEmpty} />;
 
   const hasIncome = dayData && dayData.income > 0;
@@ -405,15 +401,31 @@ function DayCell({
         {day}
       </Text>
       {hasIncome && (
-        <Text style={[styles.cellIncome, { color: theme.accentInk }]}>{compactAmt(dayData!.income)}</Text>
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          style={[styles.cellIncome, { color: theme.accentInk }]}
+        >
+          {compactAmt(dayData!.income, dc.code)}
+        </Text>
       )}
       {hasExpense && (
-        <Text style={[styles.cellExpense, { color: colorTheme.red }]}>{compactAmt(dayData!.expense)}</Text>
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          style={[styles.cellExpense, { color: colorTheme.red }]}
+        >
+          {compactAmt(dayData!.expense, dc.code)}
+        </Text>
       )}
       {(hasIncome || hasExpense) && (
         <View style={[styles.cellNet, { backgroundColor: netPositive ? theme.accentSoft : '#fce8e6' }]}>
-          <Text style={[styles.cellNetText, { color: netPositive ? theme.accentInk : colorTheme.red }]}>
-            {netPositive ? '+' : '−'}{compactAmt(Math.abs(net))}
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            style={[styles.cellNetText, { color: netPositive ? theme.accentInk : colorTheme.red }]}
+          >
+            {netPositive ? '+' : '−'}{compactAmt(Math.abs(net), dc.code)}
           </Text>
         </View>
       )}
@@ -819,9 +831,10 @@ const styles = StyleSheet.create({
   },
   cellNet: {
     marginTop: 2,
-    paddingHorizontal: 4,
+    paddingHorizontal: 3,
     paddingVertical: 1,
     borderRadius: 4,
+    maxWidth: '100%',
   },
   cellNetText: {
     fontFamily: numFont(700),

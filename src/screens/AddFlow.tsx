@@ -16,8 +16,8 @@ import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
 import { notify } from '../lib/platformAlert';
 import { type ScannedReceipt } from '../lib/parseReceipt';
-import { resolveQuickAdd } from '../lib/quickAdd';
-import type { QuickDraft } from '../lib/quickParse';
+import { resolveQuickAdd, resolveQuickAddWithoutAmount } from '../lib/quickAdd';
+import { isNumberOnlyInput, parseQuickText, type QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
 import { getScanProgress } from '../lib/scanningNarration';
 import { autoFillStats, type AutoFillStats } from '../lib/recommend';
@@ -244,10 +244,47 @@ function AddFlowPhases({
 
   const onQuickAdd = async (text: string) => {
     setQuickError(null);
+
+    const active = await getActiveCurrencies();
+
+    // Fast-path: When the user inputs only numbers / currencies (e.g. "25", "RM 50", "$10"),
+    // resolve immediately offline without full-screen loading or directing to an LLM.
+    if (isNumberOnlyInput(text, active)) {
+      const local = parseQuickText(text, { activeCurrencies: active, today: todayISO() });
+      if (local.drafts.length === 1) {
+        void markTaskDone('quickAdd');
+        setQuickPrefill(local.drafts[0]);
+        setReceiptResult(null);
+        setPhase('manual');
+        return;
+      } else if (local.drafts.length > 1) {
+        void markTaskDone('quickAdd');
+        setExtracted(
+          local.drafts.map((d) => ({
+            merchant: d.label,
+            amount: d.amount,
+            type: d.type,
+            date: d.date ?? todayISO(),
+            method: null,
+            remark: null,
+            currency: BASE_CURRENCY,
+            fxRate: null,
+          }))
+        );
+        setSuggestions(local.drafts.map(() => null));
+        setLearnedThisScan(local.drafts.map(() => null));
+        setLinkId(null);
+        setBatchSource('manual');
+        setExtractElapsedMs(null);
+        setPhase('categorize');
+        return;
+      }
+    }
+
     setQuickBusy(true);
     setPhase('quickparse');
 
-    const [llm, active] = await Promise.all([getLLM(), getActiveCurrencies()]);
+    const llm = await getLLM();
     const drafts = await resolveQuickAdd(text, {
       memory,
       categories: entryCategories,
@@ -259,8 +296,18 @@ function AddFlowPhases({
     setQuickBusy(false);
 
     if (drafts.length === 0) {
-      setQuickError(t('quickAddNoAmount'));
-      setPhase('attach');
+      const fallbackDraft = await resolveQuickAddWithoutAmount(text, {
+        memory,
+        categories: entryCategories,
+        activeCurrencies: active,
+        today: todayISO(),
+        llm,
+      });
+
+      void markTaskDone('quickAdd');
+      setQuickPrefill(fallbackDraft);
+      setReceiptResult(null);
+      setPhase('manual');
       return;
     }
 
@@ -306,7 +353,9 @@ function AddFlowPhases({
     setExtractElapsedMs(elapsedMs);
 
     const learned: (CategorySuggestion | null)[] = items.map((it) => {
-      const suggestion = resolveSuggestion(merchantKey(it.merchant), memory, entryCategories, null);
+      const key = merchantKey(it.merchant);
+      const keywordGuess = guessCategoryByKeyword(it.merchant, it.type, entryCategories);
+      const suggestion = resolveSuggestion(key, memory, entryCategories, keywordGuess);
       const cat = suggestion ? catById[suggestion.categoryId] : undefined;
       // only pre-fill if the learned category matches this item's kind
       return cat && cat.kind === it.type ? suggestion : null;
@@ -594,7 +643,13 @@ function AddFlowPhases({
         }
         startSplitting={phase === 'split'}
         initialMerchant={phase === 'split' ? receiptResult?.merchant ?? null : quickPrefill?.label ?? null}
-        initialAmount={phase === 'split' ? receiptResult?.charged ?? null : quickPrefill?.amount ?? null}
+        initialAmount={
+          phase === 'split'
+            ? receiptResult?.charged ?? null
+            : quickPrefill?.amount && quickPrefill.amount > 0
+            ? quickPrefill.amount
+            : null
+        }
         initialCurrency={phase === 'split' ? receiptResult?.currency ?? null : quickPrefill?.currency ?? null}
         initialType={quickPrefill?.type ?? initialType ?? null}
         initialDate={quickPrefill?.date ?? null}
@@ -641,6 +696,7 @@ function AddFlowPhases({
       elapsedMs={extractElapsedMs}
       autoFill={autoFill}
       splitWorkings={splitWorkings}
+      receiptDraftState={receiptResult?.resumeState ?? null}
       onDone={onClose}
     />
   );

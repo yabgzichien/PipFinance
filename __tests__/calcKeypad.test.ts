@@ -1,5 +1,5 @@
 // __tests__/calcKeypad.test.ts
-import { applyCalcKey, type CalcKey } from '../src/lib/calcKeypad';
+import { applyCalcKey, formatBankingInput, type CalcKey } from '../src/lib/calcKeypad';
 import { evaluateExpression } from '../src/lib/calc';
 
 /** Type a whole sequence of keys, so tests read like what the user's thumb did. */
@@ -7,73 +7,69 @@ function type(keys: (CalcKey | string)[], decimals = 2, start = ''): string {
   return keys.reduce<string>((acc, k) => applyCalcKey(acc, k as CalcKey, decimals), start);
 }
 
-describe('calc keypad', () => {
+describe('calc keypad (banking style)', () => {
   describe('digits', () => {
-    it('appends digits in order', () => {
-      expect(type(['1', '2', '3'])).toBe('123');
+    it('directly types 190 to yield 1.90 without needing decimal point', () => {
+      expect(type(['1', '9', '0'])).toBe('1.90');
     });
 
-    it('replaces a bare leading zero rather than stacking onto it', () => {
-      expect(type(['0', '5'])).toBe('5');
+    it('shifts in cents: 1 -> 0.01, 19 -> 0.19, 190 -> 1.90', () => {
+      expect(type(['1'])).toBe('0.01');
+      expect(type(['1', '9'])).toBe('0.19');
+      expect(type(['1', '9', '0'])).toBe('1.90');
+      expect(type(['1', '9', '0', '5'])).toBe('19.05');
     });
 
-    it('keeps a zero that is the integer part of a decimal', () => {
-      expect(type(['0', '.', '5'])).toBe('0.5');
+    it('ignores leading zeros when empty', () => {
+      expect(type(['0'])).toBe('');
+      expect(type(['0', '0'])).toBe('');
+      expect(type(['0', '5'])).toBe('0.05');
     });
 
-    it('treats each operand separately, so a zero after an operator still collapses', () => {
-      expect(type(['1', '2', '+', '0', '5'])).toBe('12+5');
+    it('formats whole amounts correctly: 500 -> 5.00', () => {
+      expect(type(['5', '0', '0'])).toBe('5.00');
+    });
+  });
+
+  describe('00 key', () => {
+    it('ignores 00 when empty', () => {
+      expect(type(['00'])).toBe('');
+    });
+
+    it('appends two zeros to quickly input whole currency amounts', () => {
+      expect(type(['5', '00'])).toBe('5.00');
+      expect(type(['1', '0', '00'])).toBe('10.00');
+      expect(type(['5', '0', '00'])).toBe('50.00');
     });
   });
 
   describe('decimal point', () => {
-    it('writes a leading dot as 0.', () => {
-      expect(type(['.', '5'])).toBe('0.5');
-    });
-
-    it('refuses a second dot in the same operand', () => {
-      expect(type(['1', '.', '5', '.'])).toBe('1.5');
-    });
-
-    it('allows a dot in a later operand', () => {
-      expect(type(['1', '.', '5', '+', '2', '.', '5'])).toBe('1.5+2.5');
-    });
-
-    it('is disabled entirely for zero-decimal currencies', () => {
-      expect(type(['1', '.', '5'], 0)).toBe('15');
-    });
-
-    it('caps fractional digits at the currency precision', () => {
-      expect(type(['1', '.', '2', '3', '4'])).toBe('1.23');
-    });
-
-    it('does not cap integer digits', () => {
-      expect(type(['1', '2', '3', '4', '5', '6'])).toBe('123456');
+    it('safely ignores decimal point key in banking mode', () => {
+      expect(type(['1', '.', '9', '0'])).toBe('1.90');
+      expect(type(['.'])).toBe('');
     });
   });
 
-  describe('operators', () => {
-    it('ignores an operator with no left-hand side', () => {
-      expect(type(['+'])).toBe('');
-      expect(type(['-'])).toBe('');
+  describe('different currency decimals', () => {
+    it('formats zero-decimal currencies (JPY, IDR) as whole integers', () => {
+      expect(type(['1', '9', '0'], 0)).toBe('190');
+      expect(type(['5', '00'], 0)).toBe('500');
+      expect(type(['0'], 0)).toBe('');
     });
 
-    it('appends an operator after a number', () => {
-      expect(type(['1', '2', '+'])).toBe('12+');
-    });
-
-    it('replaces a trailing operator when the user changes their mind', () => {
-      expect(type(['1', '2', '+', '*'])).toBe('12*');
-    });
-
-    it('replaces a dangling decimal point with the operator', () => {
-      expect(type(['1', '2', '.', '+'])).toBe('12+');
+    it('formats 3-decimal currencies (KWD)', () => {
+      expect(type(['1'], 3)).toBe('0.001');
+      expect(type(['1', '9'], 3)).toBe('0.019');
+      expect(type(['1', '9', '0'], 3)).toBe('0.190');
+      expect(type(['1', '9', '0', '5'], 3)).toBe('1.905');
     });
   });
 
   describe('edits', () => {
-    it('backspace removes the last character', () => {
-      expect(type(['1', '2', '3', 'backspace'])).toBe('12');
+    it('backspace shifts digits back out', () => {
+      expect(type(['1', '9', '0', 'backspace'])).toBe('0.19');
+      expect(type(['1', '9', '0', 'backspace', 'backspace'])).toBe('0.01');
+      expect(type(['1', '9', '0', 'backspace', 'backspace', 'backspace'])).toBe('');
     });
 
     it('backspace on empty stays empty', () => {
@@ -81,27 +77,52 @@ describe('calc keypad', () => {
     });
 
     it('clear empties the whole expression', () => {
-      expect(type(['1', '2', '+', '8', 'clear'])).toBe('');
+      expect(type(['1', '9', '0', '+', '8', '0', '0', 'clear'])).toBe('');
     });
   });
 
-  describe('hands off cleanly to the existing evaluator', () => {
-    it('produces an expression lib/calc.ts evaluates to the expected total', () => {
-      const text = type(['1', '2', '+', '8']);
-      expect(text).toBe('12+8');
-      expect(evaluateExpression(text, 2).result).toBe(20);
+  describe('operators and expressions', () => {
+    it('ignores an operator with no left-hand side', () => {
+      expect(type(['+'])).toBe('');
+      expect(type(['-'])).toBe('');
     });
 
-    it('produces a plain number for a non-expression entry', () => {
-      const text = type(['4', '2', '.', '5']);
-      const res = evaluateExpression(text, 2);
-      expect(res.isExpression).toBe(false);
-      expect(res.result).toBe(42.5);
+    it('appends an operator after a valid number', () => {
+      expect(type(['1', '9', '0', '+'])).toBe('1.90+');
     });
 
-    it('leaves a trailing operator that the live preview can still evaluate', () => {
-      const text = type(['1', '2', '+']);
-      expect(evaluateExpression(text, 2).result).toBe(12);
+    it('replaces a trailing operator when the user changes their mind', () => {
+      expect(type(['1', '9', '0', '+', '*'])).toBe('1.90*');
+    });
+
+    it('allows typing a second operand with banking digit shifting', () => {
+      const text = type(['1', '9', '0', '+', '2', '5', '0']);
+      expect(text).toBe('1.90+2.50');
+      expect(evaluateExpression(text, 2).result).toBe(4.4);
+      expect(evaluateExpression(text, 2).formatted).toBe('4.40');
+    });
+
+    it('backspaces across operands and operators', () => {
+      expect(type(['1', '9', '0', '+', '2', '5', '0', 'backspace'])).toBe('1.90+0.25');
+      expect(type(['1', '9', '0', '+', '2', '5', '0', 'backspace', 'backspace'])).toBe('1.90+0.02');
+      expect(type(['1', '9', '0', '+', '2', '5', '0', 'backspace', 'backspace', 'backspace'])).toBe('1.90+');
+      expect(type(['1', '9', '0', '+', '2', '5', '0', 'backspace', 'backspace', 'backspace', 'backspace'])).toBe('1.90');
+      expect(type(['1', '9', '0', '+', '2', '5', '0', 'backspace', 'backspace', 'backspace', 'backspace', 'backspace'])).toBe('0.19');
+    });
+  });
+
+  describe('formatBankingInput', () => {
+    it('formats raw digit strings to banking currency format', () => {
+      expect(formatBankingInput('190', 2)).toBe('1.90');
+      expect(formatBankingInput('1.90', 2)).toBe('1.90');
+      expect(formatBankingInput('500', 2)).toBe('5.00');
+      expect(formatBankingInput('190', 0)).toBe('190');
+    });
+
+    it('formats multi-operand expressions', () => {
+      expect(formatBankingInput('1.90+250', 2)).toBe('1.90+2.50');
+      expect(formatBankingInput('190*300', 2)).toBe('1.90*3.00');
     });
   });
 });
+

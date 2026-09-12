@@ -3,21 +3,26 @@
 // short — one LLM call, whose answer memory still overrides. Lives in lib/ rather than in the
 // screen so the whole tree is unit-testable with a fake provider and no React.
 
+import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import { guessCategoryByKeyword } from './categoryKeywords';
-import { parseQuickText, type QuickDraft, type QuickParseResult } from './quickParse';
+import { isNumberOnlyInput, parseQuickSegmentWithoutAmount, parseQuickText, type QuickDraft, type QuickParseResult } from './quickParse';
 import { suggestForMerchant } from './recommend';
-import type { Category, MemoryMap } from './types';
+import type { Category, MemoryMap, TxnType } from './types';
 import type { QuickAddCategoryOption } from '../llm/quickAddPrompt';
 
 /** The slice of FallbackProvider this module needs, declared narrowly so tests can fake it. */
 export interface QuickAddLLM {
-  can(cap: 'quickAdd'): boolean;
+  can(cap: 'quickAdd' | 'guessCategories'): boolean;
   quickAdd(input: {
     text: string;
     categories: QuickAddCategoryOption[];
     today: string;
     activeCurrencies: string[];
   }): Promise<QuickDraft[]>;
+  guessCategories?(input: {
+    items: Array<{ index: number; merchant: string; amount: number; method: string | null; kind: TxnType }>;
+    categories: Array<{ id: string; label: string; kind: TxnType }>;
+  }): Promise<Record<number, string | null> | (string | null)[]>;
 }
 
 export interface QuickAddDeps {
@@ -106,6 +111,12 @@ export async function resolveQuickAdd(
   const local = parseQuickText(text, { activeCurrencies, today });
   const localWithMemory = applyMemory(local.drafts, memory, categories);
 
+  // When the user inputs only numbers / currencies (e.g. "25", "RM 50", "$10"),
+  // resolve immediately offline without directing to an LLM.
+  if (isNumberOnlyInput(text, activeCurrencies) && local.drafts.length > 0) {
+    return localWithMemory;
+  }
+
   const needsHelp = !local.confident || localWithMemory.some((d) => !d.categoryId);
   if (!needsHelp || !llm || !llm.can('quickAdd')) return localWithMemory;
 
@@ -129,3 +140,108 @@ export async function resolveQuickAdd(
     return localWithMemory;
   }
 }
+
+/**
+ * Resolves a single draft when no amount could be found in the typed input.
+ * Prioritizes:
+ * 1. Learned memory for the extracted label
+ * 2. Exact or prefix match against category id / label
+ * 3. Keyword guessing (including collapsed repeated characters, e.g. "foood" -> "food")
+ * 4. LLM category guessing (if available)
+ * 5. Fallback category for the transaction kind (e.g. 'other' or 'other-income')
+ *
+ * Guaranteed to return a draft with a category auto-selected for the user, with amount: 0.
+ */
+export async function resolveQuickAddWithoutAmount(
+  text: string,
+  deps: QuickAddDeps,
+  timeoutMs: number = 3000
+): Promise<QuickDraft> {
+  const { memory, today, llm } = deps;
+  const categories = deps.categories ?? [];
+  const activeCurrencies = deps.activeCurrencies ?? [];
+
+  const draft = parseQuickSegmentWithoutAmount(text, { activeCurrencies, today });
+  const label = draft.label;
+  const type = draft.type;
+
+  // 1. Learned memory match
+  const learnedId = label ? suggestForMerchant(memory, label) : null;
+  const learnedCat = learnedId
+    ? categories.find((c) => c.id === learnedId && c.kind === type && !c.isHidden)
+    : undefined;
+  if (learnedCat) {
+    return { ...draft, categoryId: learnedCat.id, categorySource: 'learned' };
+  }
+
+  // 2. Direct category name / id matching
+  const labelLower = label.toLowerCase();
+  let directCat = categories.find(
+    (c) =>
+      c.kind === type &&
+      !c.isHidden &&
+      (c.id.toLowerCase() === labelLower || c.label.toLowerCase() === labelLower)
+  );
+  if (!directCat) {
+    directCat = categories.find(
+      (c) =>
+        c.kind === type &&
+        !c.isHidden &&
+        (c.id.toLowerCase().startsWith(labelLower) ||
+          labelLower.startsWith(c.id.toLowerCase()) ||
+          c.label.toLowerCase().startsWith(labelLower))
+    );
+  }
+  if (directCat) {
+    return { ...draft, categoryId: directCat.id, categorySource: 'guess' };
+  }
+
+  // 3. Keyword guessing
+  let keywordCatId = label ? guessCategoryByKeyword(label, type, categories) : null;
+  if (!keywordCatId && label) {
+    // Collapsing repeated characters (e.g. "foood" -> "food", "cooffee" -> "coffee")
+    const collapsed = label.replace(/(.)\1{2,}/g, '$1$1').replace(/(.)\1+/g, '$1');
+    if (collapsed !== label) {
+      keywordCatId = guessCategoryByKeyword(collapsed, type, categories);
+    }
+  }
+  if (keywordCatId) {
+    return { ...draft, categoryId: keywordCatId, categorySource: 'guess' };
+  }
+
+  // 4. LLM category guessing if available
+  if (llm && (llm.can('guessCategories') || llm.can('quickAdd'))) {
+    try {
+      if (llm.guessCategories) {
+        const guessed = await withTimeout(
+          llm.guessCategories({
+            items: [{ index: 0, merchant: label, amount: 0, method: null, kind: type }],
+            categories: categories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+          }),
+          timeoutMs
+        );
+        if (guessed && guessed[0]) {
+          const valid = categories.find((c) => c.id === guessed[0] && c.kind === type && !c.isHidden);
+          if (valid) {
+            return { ...draft, categoryId: valid.id, categorySource: 'guess' };
+          }
+        }
+      }
+    } catch {
+      // Degrade gracefully on LLM error/timeout
+    }
+  }
+
+  // 5. Fallback category: always have a category auto selected for the user
+  const defaultId = type === 'expense' ? DEFAULT_EXPENSE_ID : DEFAULT_INCOME_ID;
+  const fallbackCat =
+    categories.find((c) => c.kind === type && !c.isHidden && c.id === defaultId) ??
+    categories.find((c) => c.kind === type && !c.isHidden);
+
+  if (fallbackCat) {
+    return { ...draft, categoryId: fallbackCat.id, categorySource: 'guess' };
+  }
+
+  return draft;
+}
+

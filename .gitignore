@@ -84,3 +84,6 @@ tax-relief-evidence-*.zip
 
 # Subagent-driven-development scratch workspace (ledgers, briefs, review packages)
 .superpowers/
+
+# Certificates generator & previews
+certificates/

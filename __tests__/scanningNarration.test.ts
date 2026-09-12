@@ -123,6 +123,14 @@ describe('scanningNarration', () => {
       expect(getScanProgress(100)).toBeLessThanOrEqual(99);
       expect(getScanProgress(-5)).toBeGreaterThanOrEqual(0);
     });
+
+    it('enforces a psychological soft ceiling at 96% to prevent the 99% stall trap', () => {
+      // Even after 30s or 60s of processing, progress leaves headroom for completion surge
+      expect(getScanProgress(20)).toBeLessThanOrEqual(96);
+      expect(getScanProgress(30)).toBeLessThanOrEqual(96);
+      expect(getScanProgress(60)).toBeLessThanOrEqual(96);
+      expect(getScanProgress(60)).toBeGreaterThanOrEqual(95);
+    });
   });
 
   describe('edge cases', () => {
