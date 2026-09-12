@@ -1,9 +1,15 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLanguage } from '../i18n';
 import { formatRangeLabel, type DateRange } from '../lib/dateRange';
 import { createOpeningGuard } from '../lib/openingGuard';
+import {
+  extractBaseTripName,
+  getTripNameRecommendations,
+  loadStoredFrequencies,
+  recordTripSubmission,
+} from '../lib/recommendations';
 import { createTripForOpening, tripsForPicker } from '../lib/tripPicker';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -13,6 +19,7 @@ import { DateRangeSheet } from './DateRangeSheet';
 import { Icon } from './Icon';
 import { TripGlyph } from './TripBadge';
 import { TripIconPickerSheet } from './TripIconPickerSheet';
+import { Label } from './ui';
 
 /**
  * A compact optional-trip selector for a transaction or a multi-select Activity action.
@@ -60,6 +67,19 @@ export function TripPickerModal({
   const offeredTrips = useMemo(() => tripsForPicker(trips, showArchived), [trips, showArchived]);
   const archivedCount = useMemo(() => trips.filter((trip) => trip.archived).length, [trips]);
 
+  const [customTripCounts, setCustomTripCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    loadStoredFrequencies().then((res) => {
+      setCustomTripCounts(res.trips);
+    });
+  }, []);
+
+  const tripRecommendations = useMemo(
+    () => getTripNameRecommendations(trips, name, isZh, undefined, customTripCounts),
+    [trips, name, isZh, customTripCounts]
+  );
+
   const close = () => {
     openingGuard.current.close();
     setCreating(false);
@@ -81,6 +101,14 @@ export function TripPickerModal({
     const endDate = dates.end;
     if (!trimmed || !startDate || !endDate || saving) return;
     setSaving(true);
+    const base = extractBaseTripName(trimmed);
+    if (base) {
+      void recordTripSubmission(trimmed);
+      setCustomTripCounts((prev) => ({
+        ...prev,
+        [base.toLowerCase()]: (prev[base.toLowerCase()] || 0) + 1,
+      }));
+    }
     await createTripForOpening(
       openingGuard.current,
       () => addTrip(trimmed, startDate, endDate, icon),
@@ -97,7 +125,7 @@ export function TripPickerModal({
     <>
     <Modal visible transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.backdrop} onPress={close} />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.avoider} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled={Platform.OS === 'ios'} style={styles.avoider} pointerEvents="box-none">
         <View style={[styles.sheet, { backgroundColor: colorTheme.bg, paddingBottom: insets.bottom + 16 }]}>
           <View style={[styles.handle, { backgroundColor: colorTheme.line }]} />
           <View style={styles.head}>
@@ -168,6 +196,35 @@ export function TripPickerModal({
                     <TripGlyph trip={{ name, icon }} size={22} color={theme.accent} />
                   </Pressable>
                 </View>
+                {tripRecommendations.length > 0 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="always"
+                    style={styles.chipRow}
+                    contentContainerStyle={styles.chipContent}
+                  >
+                    {tripRecommendations.map((dest) => (
+                      <Pressable
+                        key={dest.name}
+                        onPress={() => setName(dest.name)}
+                        style={({ pressed }) => [
+                          styles.destChip,
+                          {
+                            backgroundColor: colorTheme.surface,
+                            borderColor: colorTheme.line,
+                            opacity: pressed ? 0.7 : 1,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityLabel={dest.name}
+                      >
+                        <TripGlyph trip={{ name: dest.name, icon: null }} size={16} color={theme.accent} />
+                        <Label weight={500} color={colorTheme.ink}>{dest.name}</Label>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                )}
                 <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{t('tripDatesRequired')}</Text>
                 <Pressable
                   onPress={() => setPickingDates(true)}
@@ -256,4 +313,16 @@ const styles = StyleSheet.create({
   actionLabel: { fontFamily: uiFont(700), fontSize: 13.5 },
   archivedToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 6 },
   archivedToggleLabel: { fontFamily: uiFont(700), fontSize: 12.5 },
+  chipRow: { marginTop: spacing.xs },
+  chipContent: { gap: spacing.xs, paddingHorizontal: 0, paddingVertical: spacing.xs },
+  destChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: 32,
+  },
 });

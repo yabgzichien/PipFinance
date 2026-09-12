@@ -307,6 +307,11 @@ export function ImportReviewScreen({
                       <Text style={[styles.meta, { color: colorTheme.ink2 }]} numberOfLines={1}>
                         {[r.item.merchant, r.item.date ? shortDate(r.item.date) : null].filter(Boolean).join(' · ')}
                       </Text>
+                      {Boolean(r.item.tripName) && (
+                        <View style={[styles.tripTag, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>
+                          <Text style={[styles.tripTagText, { color: colorTheme.ink2 }]} numberOfLines={1}>✈️ {r.item.tripName}</Text>
+                        </View>
+                      )}
                       {r.isDup && <Text style={styles.dupTag}>duplicate</Text>}
                     </View>
                   </View>
@@ -406,7 +411,8 @@ function RowEditModal({
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
         style={styles.sheetAvoider}
         pointerEvents="box-none"
       >
@@ -494,6 +500,8 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   meta: { fontFamily: uiFont(500), fontSize: 12, flexShrink: 1 },
   dupTag: { fontFamily: uiFont(700), fontSize: 11, color: '#d98a00', backgroundColor: '#fbf0d8', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, overflow: 'hidden' },
+  tripTag: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, borderWidth: 1, overflow: 'hidden', maxWidth: 140 },
+  tripTagText: { fontFamily: uiFont(600), fontSize: 10.5 },
   amount: { fontFamily: numFont(700), fontSize: 14 },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, borderTopWidth: 1 },
 

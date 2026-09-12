@@ -153,7 +153,8 @@ export function PipIntroStep({ onNext }: { onNext: () => void }) {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => setPickerOpen(false)}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            enabled={Platform.OS === 'ios'}
             style={styles.modalAvoider}
             pointerEvents="box-none"
           >

@@ -46,7 +46,8 @@ export function AddPersonModal({
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
         style={[styles.center, { pointerEvents: 'box-none' }]}
       >
         <View style={[styles.card, { backgroundColor: colorTheme.surface, marginBottom: insets.bottom }]}>

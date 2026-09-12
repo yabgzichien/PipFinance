@@ -346,14 +346,7 @@ export function OwedScreen({ onBack }: { onBack: () => void }) {
       const effectiveImageUri = imageUri || share.receiptUri || undefined;
       const outcome = await shareSplitMessage(message, effectiveImageUri);
 
-      if (outcome === 'shared-with-clipboard') {
-        notify(
-          t('splitShareCopiedTitle'),
-          isZh
-            ? '分摊小票已分享！留言文字已复制到剪贴板，可粘贴到附言。'
-            : 'Split receipt shared! Message copied to clipboard to paste as caption.'
-        );
-      } else if (outcome === 'copied') {
+      if (outcome === 'copied') {
         notify(t('splitShareCopiedTitle'), t('splitShareCopiedBody'));
       } else if (outcome === 'failed') {
         notify(t('splitShareFailedTitle'), t('splitShareFailedBody'));
@@ -745,7 +738,8 @@ function SettleSheet({
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
         style={styles.sheetAvoider}
         pointerEvents="box-none"
       >

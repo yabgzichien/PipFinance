@@ -1198,7 +1198,8 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
         style={styles.sheetAvoider}
         pointerEvents="box-none"
       >
@@ -1722,13 +1723,11 @@ const styles = StyleSheet.create({
 
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(16,32,24,0.4)' },
   sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
-  // Same visual sheet as `sheet`, but positioned by flexbox rather than `position: absolute`. Needed
-  // wherever the sheet holds a focusable TextInput: on Android, KeyboardAvoidingView's `height` behavior
-  // measures this view's own onLayout frame to compute the post-keyboard height, and an absolutely
-  // positioned view with only `bottom: 0` (no `top`/explicit height) reports an unstable frame, so the
-  // resize never applies and the keyboard just covers the field. Giving the KeyboardAvoidingView `flex: 1`
-  // (full modal height, stable from first layout) and letting flexbox push the card to the bottom instead
-  // fixes it. This is the same structure already used by AddCategoryModal/AddPersonModal, which don't hit the bug.
+  // Same visual sheet as `sheet`, but positioned by flexbox rather than `position: absolute`.
+  // On Android, windowSoftInputMode="adjustResize" automatically resizes the Modal window when the keyboard opens;
+  // giving the KeyboardAvoidingView `flex: 1` with `justifyContent: 'flex-end'` and disabling active height-avoidance
+  // on Android (`behavior={Platform.OS === 'ios' ? 'padding' : undefined}`) allows Android OS to resize the window
+  // cleanly without the 60 FPS oscillation loop caused by KeyboardAvoidingView's height calculation against navigation bar insets.
   sheetAvoider: { flex: 1, justifyContent: 'flex-end' },
   sheetCard: { borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, paddingHorizontal: 18, paddingTop: 10, maxHeight: '88%' },
   handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999, marginBottom: 12 },

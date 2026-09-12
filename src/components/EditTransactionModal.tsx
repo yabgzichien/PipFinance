@@ -4,12 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_EXPENSE_ID, DEFAULT_INCOME_ID } from '../data/categories';
 import type { Transaction, TxnType } from '../lib/types';
 import { BASE_CURRENCY, deriveNative, round2 } from '../lib/currency';
-import { cleanCalcInput, evaluateExpression } from '../lib/calc';
+import { evaluateExpression } from '../lib/calc';
+import { formatBankingInput } from '../lib/calcKeypad';
 import { decimalsFor } from '../lib/currencies';
 import { todayISO } from '../lib/duplicates';
+import { isValidIsoDate } from '../lib/dates';
 import { listFxRates } from '../db/fxRepo';
 import { rateFor, ratesFromCache } from '../lib/fx';
-import { defaultLinkEffect, type LinkEffect } from '../lib/networth';
+import { type LinkEffect } from '../lib/networth';
 import { confirmAction } from '../lib/platformAlert';
 import { deleteReceiptImage } from '../lib/receiptStorage';
 import { tap } from '../lib/haptics';
@@ -18,7 +20,18 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { numFont, radius, shadowToggle, uiFont } from '../theme';
-import { AccountLinkField } from './AccountLinkField';
+import {
+  AccountChipIcon,
+  AccountPickerModal,
+  ChoiceChip,
+  MAX_ACCOUNT_CHIPS,
+  MAX_OPTIONAL_CHIPS,
+  MoreChip,
+  getAccountPriority,
+} from './AccountChips';
+import { AddAccountModal } from './AddAccountModal';
+import { useModalHandoff } from '../lib/modalHandoff';
+import { visibleChoices } from '../lib/chipRow';
 import { AddCategorySheet } from './AddCategorySheet';
 import { CalcBadge } from './CalcBadge';
 import { InfoButton } from './InfoButton';
@@ -35,7 +48,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh, t, tCat } = useLanguage();
+  const { isZh, t, tCat, formatFullDate } = useLanguage();
   const {
     categories,
     accounts,
@@ -55,9 +68,18 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const [type, setType] = useState<TxnType>('expense');
   const [cat, setCat] = useState<string | null>(null);
   const [remark, setRemark] = useState('');
+  const [dateText, setDateText] = useState(txn?.date ?? todayISO());
+  const [dateFocused, setDateFocused] = useState(false);
+  const [dateEditing, setDateEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [fromAccountId, setFromAccountId] = useState<string | null>(null);
   const [toAccountId, setToAccountId] = useState<string | null>(null);
+  const [addingAccount, setAddingAccount] = useState(false);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [liabilityPickerOpen, setLiabilityPickerOpen] = useState(false);
+  const [addingLiability, setAddingLiability] = useState(false);
+  const { request: requestLiabilitySheet, onDismiss: onLiabilityPickerDismissed } = useModalHandoff();
+  const { request: requestAccountSheet, onDismiss: onAccountPickerDismissed } = useModalHandoff();
   const [splitting, setSplitting] = useState(false);
   const [viewingReceipt, setViewingReceipt] = useState(false);
   const [tripPickerOpen, setTripPickerOpen] = useState(false);
@@ -70,6 +92,41 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const assetAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'asset'), [accounts]);
   const liabilityAccounts = useMemo(() => accounts.filter((a) => !a.archived && a.kind === 'liability'), [accounts]);
 
+  const paymentAccounts = useMemo(() => {
+    const active = accounts.filter((a) => !a.archived);
+    const assets = active.filter((a) => a.kind === 'asset' && a.cls !== 'receivable' && a.cls !== 'illiquid');
+    const list = assets.length > 0 ? assets : active.filter((a) => a.cls !== 'receivable');
+    return [...list].sort((a, b) => {
+      const pA = getAccountPriority(a);
+      const pB = getAccountPriority(b);
+      if (pA !== pB) return pA - pB;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+  }, [accounts]);
+
+  const visibleAccounts = useMemo(
+    () => visibleChoices(paymentAccounts, fromAccountId, MAX_ACCOUNT_CHIPS),
+    [paymentAccounts, fromAccountId]
+  );
+
+  const visibleLiabilities = useMemo(
+    () => visibleChoices(liabilityAccounts, toAccountId, MAX_OPTIONAL_CHIPS),
+    [liabilityAccounts, toAccountId]
+  );
+
+  const dateTrimmed = dateText.trim();
+  const validDate = isValidIsoDate(dateTrimmed) ? dateTrimmed : null;
+
+  const today = todayISO();
+  const yesterday = todayISO(new Date(Date.now() - 86_400_000));
+  const otherDate = dateEditing || (dateTrimmed !== today && dateTrimmed !== yesterday);
+
+  const pickDate = (iso: string) => {
+    setDateText(iso);
+    setDateEditing(false);
+    setDateFocused(false);
+  };
+
   const openId = txn?.id;
   useEffect(() => {
     if (txn) {
@@ -80,6 +137,9 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       setType(txn.type);
       setCat(txn.categoryId);
       setRemark(txn.remark ?? '');
+      setDateText(txn.date ?? todayISO());
+      setDateFocused(false);
+      setDateEditing(false);
       setFromAccountId(null);
       setToAccountId(null);
       setSplitting(false);
@@ -197,7 +257,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   const toAccount = toAccountId ? accounts.find((a) => a.id === toAccountId) ?? null : null;
   const toConvertible =
     !toAccount || toAccount.currency === txn.currency || toAccount.currency === BASE_CURRENCY || rateFor(rates, toAccount.currency) != null;
-  const canSave = fromConvertible && toConvertible;
+  const canSave = fromConvertible && toConvertible && (!dateEditing || !!validDate);
 
   const switchType = (t: TxnType) => {
     if (t === type) return;
@@ -227,9 +287,10 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
         ? round2(n)
         : nativeCurrent;
     const categoryId = type === 'transfer' ? null : cat ?? (type === 'income' ? DEFAULT_INCOME_ID : DEFAULT_EXPENSE_ID);
+    const effectiveDate = validDate ? dateTrimmed : (txn.date ?? todayISO());
     // `updateTransactionFields` (via saveTransactionEdits) treats its amount as native and
     // re-derives the MYR column itself from the row's own frozen rate.
-    await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null });
+    await saveTransactionEdits(txn, { amount, type, categoryId, remark: remark.trim() || null, date: effectiveDate });
     // Trip membership is optional and applies only to an expense. Switching a previously-linked
     // row to income or transfer deliberately clears the stale membership rather than leaving a
     // non-expense attached to a trip whose totals can never include it.
@@ -245,14 +306,14 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
       const effect: LinkEffect = type === 'income' ? 'add' : 'subtract';
       const linkAmount =
         fromAccount.currency === txn.currency ? amount : deriveNative(myrAmount, fromAccount.currency, rateFor(rates, fromAccount.currency));
-      await recordBalanceLink(fromAccountId, linkAmount, effect, txn.date ?? todayISO());
+      await recordBalanceLink(fromAccountId, linkAmount, effect, effectiveDate);
     }
 
     // 2. Reduce liability account for expense
     if (type === 'expense' && toAccountId && toAccount) {
       const toAmount =
         toAccount.currency === txn.currency ? amount : deriveNative(myrAmount, toAccount.currency, rateFor(rates, toAccount.currency));
-      await recordBalanceLink(toAccountId, toAmount, 'subtract', txn.date ?? todayISO());
+      await recordBalanceLink(toAccountId, toAmount, 'subtract', effectiveDate);
     }
     onClose();
   };
@@ -281,7 +342,8 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
         style={styles.sheetAvoider}
         pointerEvents="box-none"
       >
@@ -359,7 +421,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
             >
               <TextInput
                 value={amountText}
-                onChangeText={(t) => setAmountText(cleanCalcInput(t, decimals > 0))}
+                onChangeText={(t) => setAmountText(formatBankingInput(t, decimals))}
                 onSubmitEditing={handleMerge}
                 keyboardType="numbers-and-punctuation"
                 selectTextOnFocus
@@ -404,6 +466,63 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
                   </Pressable>
                 </View>
               </View>
+            </>
+          )}
+
+          <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>{t('date')}</Text>
+          <View style={styles.dateChips}>
+            {[
+              { iso: today, label: isZh ? '今天' : 'Today' },
+              { iso: yesterday, label: isZh ? '昨天' : 'Yesterday' },
+            ].map((d) => {
+              const on = !dateEditing && dateTrimmed === d.iso;
+              return (
+                <Pressable
+                  key={d.iso}
+                  onPress={() => pickDate(d.iso)}
+                  style={[
+                    styles.dateChip,
+                    { backgroundColor: on ? theme.accentTint : colorTheme.surface, borderColor: on ? theme.accentSoft : colorTheme.line },
+                  ]}
+                >
+                  <Text style={[styles.dateChipText, { color: on ? theme.accent : colorTheme.ink2 }]}>{d.label}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => setDateEditing(true)}
+              style={[
+                styles.dateChip,
+                styles.dateChipWide,
+                { backgroundColor: otherDate ? theme.accentTint : colorTheme.surface, borderColor: otherDate ? theme.accentSoft : colorTheme.line },
+              ]}
+            >
+              <Text style={[styles.dateChipText, { color: otherDate ? theme.accent : colorTheme.ink2 }]} numberOfLines={1}>
+                {validDate && otherDate ? formatFullDate(validDate) : isZh ? '其他日期' : 'Other'}
+              </Text>
+              <Icon name="pencil" size={13} color={otherDate ? theme.accent : colorTheme.ink3} />
+            </Pressable>
+          </View>
+          {dateEditing && (
+            <>
+              <TextInput
+                value={dateFocused ? dateText : validDate ? formatFullDate(validDate) : dateText}
+                onChangeText={setDateText}
+                onFocus={() => setDateFocused(true)}
+                onBlur={() => setDateFocused(false)}
+                onSubmitEditing={() => setDateFocused(false)}
+                selectTextOnFocus
+                autoFocus
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colorTheme.ink3}
+                keyboardType="numbers-and-punctuation"
+                style={[styles.dateInput, { marginTop: 10, backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+              />
+              {!validDate && (
+                <Text style={[styles.dateHint, styles.dateHintBad, { color: colorTheme.ink2 }]}>
+                  {isZh ? '请输入有效日期 (YYYY-MM-DD)' : 'Enter a valid date (YYYY-MM-DD)'}
+                </Text>
+              )}
             </>
           )}
 
@@ -462,25 +581,73 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
 
           {type !== 'transfer' && (
             <>
-              <View style={{ marginTop: 18 }}>
-                <AccountLinkField
-                  accounts={assetAccounts.length > 0 ? assetAccounts : accounts}
-                  selectedId={fromAccountId}
-                  onSelect={setFromAccountId}
-                  label={type === 'expense' ? (isZh ? '扣款账户（选填）' : 'Pay from (optional)') : (isZh ? '存入账户（选填）' : 'Deposit into (optional)')}
+              <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 18 }]}>
+                {type === 'expense' ? (isZh ? '扣款账户（选填）' : 'Pay from (optional)') : (isZh ? '存入账户（选填）' : 'Deposit into (optional)')}
+              </Text>
+              <View style={styles.accountChips}>
+                <ChoiceChip
+                  label={isZh ? '无' : 'None'}
+                  on={!fromAccountId}
+                  onPress={() => {
+                    tap();
+                    setFromAccountId(null);
+                  }}
+                />
+                {visibleAccounts.map((a) => (
+                  <ChoiceChip
+                    key={a.id}
+                    label={a.name}
+                    on={fromAccountId === a.id}
+                    onPress={() => {
+                      tap();
+                      setFromAccountId(fromAccountId === a.id ? null : a.id);
+                    }}
+                  >
+                    <AccountChipIcon account={a} on={fromAccountId === a.id} />
+                  </ChoiceChip>
+                ))}
+                <MoreChip
+                  onPress={() => setAccountPickerOpen(true)}
+                  accessibilityLabel={isZh ? '选择其他账户' : 'More accounts'}
                 />
               </View>
 
-              {type === 'expense' && (
-                <View style={{ marginTop: 18 }}>
-                  <AccountLinkField
-                    accounts={liabilityAccounts}
-                    selectedId={toAccountId}
-                    onSelect={setToAccountId}
-                    label={isZh ? '抵扣负债账户（分期还款可选，如车贷/房贷）' : 'Reduce liability account (optional, e.g. car/mortgage loan)'}
-                    infoEntry="reduce_liability"
-                  />
-                </View>
+              {type === 'expense' && liabilityAccounts.length > 0 && (
+                <>
+                  <View style={styles.optionalLabelRow}>
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginBottom: 0 }]}>
+                      {isZh ? '抵扣负债账户（选填）' : 'Reduce liability account (optional)'}
+                    </Text>
+                    <InfoButton entry="reduce_liability" />
+                  </View>
+                  <View style={styles.accountChips}>
+                    <ChoiceChip
+                      label={isZh ? '无' : 'None'}
+                      on={!toAccountId}
+                      onPress={() => {
+                        tap();
+                        setToAccountId(null);
+                      }}
+                    />
+                    {visibleLiabilities.map((a) => (
+                      <ChoiceChip
+                        key={a.id}
+                        label={a.name}
+                        on={toAccountId === a.id}
+                        onPress={() => {
+                          tap();
+                          setToAccountId(toAccountId === a.id ? null : a.id);
+                        }}
+                      >
+                        <AccountChipIcon account={a} on={toAccountId === a.id} />
+                      </ChoiceChip>
+                    ))}
+                    <MoreChip
+                      onPress={() => setLiabilityPickerOpen(true)}
+                      accessibilityLabel={isZh ? '选择其他负债账户' : 'More liability accounts'}
+                    />
+                  </View>
+                </>
               )}
             </>
           )}
@@ -564,6 +731,54 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
           </Pressable>
         </Pressable>
       </Modal>
+
+      <AccountPickerModal
+        visible={accountPickerOpen}
+        title={type === 'expense' ? (isZh ? '选择扣款账户' : 'Select payment account') : (isZh ? '选择存入账户' : 'Select deposit account')}
+        accounts={paymentAccounts}
+        selectedId={fromAccountId}
+        allowNone
+        onSelect={setFromAccountId}
+        onClose={() => setAccountPickerOpen(false)}
+        onDismiss={onAccountPickerDismissed}
+        onCreateNew={() => {
+          requestAccountSheet(() => setAddingAccount(true));
+        }}
+      />
+
+      <AddAccountModal
+        visible={addingAccount}
+        onClose={() => setAddingAccount(false)}
+        onCreated={(id) => {
+          setFromAccountId(id);
+          setAddingAccount(false);
+        }}
+      />
+
+      <AccountPickerModal
+        visible={liabilityPickerOpen}
+        title={isZh ? '选择负债账户' : 'Select liability account'}
+        accounts={liabilityAccounts}
+        selectedId={toAccountId}
+        allowNone
+        onSelect={setToAccountId}
+        onClose={() => setLiabilityPickerOpen(false)}
+        onDismiss={onLiabilityPickerDismissed}
+        onCreateNew={() => {
+          requestLiabilitySheet(() => setAddingLiability(true));
+        }}
+        createNewText={isZh ? '创建新负债账户' : 'Create new liability account'}
+      />
+
+      <AddAccountModal
+        visible={addingLiability}
+        initialKind="liability"
+        onClose={() => setAddingLiability(false)}
+        onCreated={(id) => {
+          setToAccountId(id);
+          setAddingLiability(false);
+        }}
+      />
     </Modal>
   );
 }
@@ -593,6 +808,29 @@ const styles = StyleSheet.create({
   toggleText: { fontFamily: uiFont(600), fontSize: 14 },
   toggleTextOn: {},
   fieldLabel: { fontFamily: uiFont(600), fontSize: 12.5, marginBottom: 8 },
+  dateChips: { flexDirection: 'row', gap: 8 },
+  dateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+  },
+  dateChipWide: { flex: 1 },
+  dateChipText: { fontFamily: uiFont(600), fontSize: 13 },
+  dateInput: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontFamily: uiFont(600),
+    fontSize: 15,
+  },
+  dateHint: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 6, marginLeft: 2 },
+  dateHintBad: { color: '#c5402f' },
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rmPrefix: { fontFamily: numFont(600), fontSize: 18 },
   amountInput: {
@@ -644,6 +882,8 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   addChipText: { fontFamily: uiFont(700), fontSize: 13.5 },
+  accountChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionalLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 18, marginBottom: 8 },
   deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 16, marginTop: 4 },
   deleteText: { fontFamily: uiFont(700), fontSize: 14.5, color: '#b3261e' },
 });
