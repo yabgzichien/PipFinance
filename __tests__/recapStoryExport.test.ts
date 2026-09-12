@@ -3,6 +3,8 @@ import {
   saveSelectedStories,
   shareOneStory,
 } from '../src/lib/recapStoryExport';
+import { Linking } from 'react-native';
+import { recapStoryCaptureAdapter } from '../src/lib/recapStoryCapture';
 import type {
   RecapStoryCaptureAdapter,
   RecapStorySceneId,
@@ -209,5 +211,42 @@ describe('monthly story export coordinator', () => {
       'cleanup:tmp://habit',
       'cleanup:tmp://finale',
     ]);
+  });
+});
+
+describe('native monthly story capture adapter', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('Instagram absence returns false without trying to open it', async () => {
+    jest.spyOn(Linking, 'canOpenURL').mockResolvedValue(false);
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+
+    await expect(recapStoryCaptureAdapter.openInstagram()).resolves.toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test('Instagram availability lookup failure returns false', async () => {
+    jest.spyOn(Linking, 'canOpenURL').mockRejectedValue(new Error('lookup failed'));
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+
+    await expect(recapStoryCaptureAdapter.openInstagram()).resolves.toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test('Instagram launch failure returns false', async () => {
+    jest.spyOn(Linking, 'canOpenURL').mockResolvedValue(true);
+    jest.spyOn(Linking, 'openURL').mockRejectedValue(new Error('launch failed'));
+
+    await expect(recapStoryCaptureAdapter.openInstagram()).resolves.toBe(false);
+  });
+
+  test('successful Instagram launch returns true', async () => {
+    jest.spyOn(Linking, 'canOpenURL').mockResolvedValue(true);
+    const open = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+
+    await expect(recapStoryCaptureAdapter.openInstagram()).resolves.toBe(true);
+    expect(open).toHaveBeenCalledWith('instagram://app');
   });
 });

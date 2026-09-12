@@ -50,9 +50,13 @@ export const recapStoryCaptureAdapter: RecapStoryCaptureAdapter<NativeRecapStory
 
   async openInstagram() {
     const instagramUrl = 'instagram://app';
-    if (!(await Linking.canOpenURL(instagramUrl))) return false;
-    await Linking.openURL(instagramUrl);
-    return true;
+    try {
+      if (!(await Linking.canOpenURL(instagramUrl))) return false;
+      await Linking.openURL(instagramUrl);
+      return true;
+    } catch {
+      return false;
+    }
   },
 };
 
