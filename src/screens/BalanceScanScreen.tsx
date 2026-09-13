@@ -21,6 +21,9 @@ import type { Account, AccountKind } from '../lib/types';
 import { getScanStage } from '../lib/scanningNarration';
 import { ScanProgressBar } from '../components/ScanProgressBar';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
+import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -42,8 +45,18 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
+  const { isZh, t } = useLanguage();
   const { accounts, accountValues, addAccount, addHolding, setBalance } = useAppData();
+  const {
+    isPro,
+    canScan,
+    scansRemaining,
+    scansLimit,
+    dailyScansRemaining,
+    dailyScansLimit,
+    refreshAllowance,
+  } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const reducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>('pick');
   const [error, setError] = useState('');
@@ -89,6 +102,10 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   };
 
   const pickGallery = async () => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'networth');
+      return;
+    }
     if (busy) return; setBusy(true);
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -97,6 +114,10 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
     } finally { setBusy(false); }
   };
   const takePhoto = async () => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'networth');
+      return;
+    }
     if (busy) return; setBusy(true);
     try {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -111,6 +132,10 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
   };
 
   const run = async (base64: string, mime: string) => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'networth');
+      return;
+    }
     setPhase('scanning');
     setError('');
     resetBalanceState();
@@ -118,6 +143,7 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
       const llm = await getLLM();
       if (!llm.can('extractSnapshot')) { setPhase('needprovider'); return; }
       const snap = await llm.extractSnapshot({ parts: [{ kind: 'binary', base64, mimeType: mime }] });
+      void refreshAllowance();
 
       if (snap.kind === 'unknown') {
         setError(
@@ -226,6 +252,19 @@ export function BalanceScanScreen({ onClose }: { onClose: () => void }) {
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar title={isZh ? '扫描余额' : 'Scan Balance'} onBack={onClose} />
       </View>
+      {!isPro && (
+        <View style={{ paddingHorizontal: 18, paddingTop: 4 }}>
+          <ScanQuotaBadge
+            quota={{
+              monthRemaining: scansRemaining,
+              monthTotal: scansLimit,
+              dayRemaining: dailyScansRemaining,
+              dayTotal: dailyScansLimit,
+            }}
+            t={t}
+          />
+        </View>
+      )}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 110 }} keyboardShouldPersistTaps="handled">
         {phase === 'pick' && (

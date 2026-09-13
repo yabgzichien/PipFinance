@@ -23,6 +23,10 @@ import { getLLM, llmErrorMessage } from '../llm';
 import { getScanStage } from '../lib/scanningNarration';
 import { ScanProgressBar } from '../components/ScanProgressBar';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
+import { submitScan } from '../billing/scanProxy';
+import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -62,8 +66,19 @@ export function ExtractScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh, tCat } = useLanguage();
+  const { isZh, t, tCat } = useLanguage();
   const { memory, catById, accounts, entryCategories } = useAppData();
+  const {
+    tier,
+    isPro,
+    canScan,
+    scansRemaining,
+    scansLimit,
+    dailyScansRemaining,
+    dailyScansLimit,
+    refreshAllowance,
+  } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const [phase, setPhase] = useState<Phase>(cachedItems ? 'result' : 'scanning');
   const [items, setItems] = useState<ExtractedTxn[]>(cachedItems ?? []);
   const [error, setError] = useState('');
@@ -136,17 +151,53 @@ export function ExtractScreen({
       onItemsExtracted?.(cachedItems);
       return;
     }
+    if (!canScan) {
+      openPaywall('scan_quota', 'add');
+      setError(t('scansDailyNone') || 'Scan limit reached');
+      setPhase('error');
+      return;
+    }
     let alive = true;
     const start = Date.now();
     (async () => {
       try {
-        const llm = await getLLM();
-        const rows = await llm.extract({
-          imageBase64: image.base64,
-          mimeType: image.mime,
-          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-        });
+        let rows: ExtractedTxn[] = [];
+        try {
+          const proxyResult = await submitScan(
+            {
+              imageBase64: image.base64,
+              mimeType: image.mime,
+              categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+            },
+            tier
+          );
+          if (proxyResult.quotaBlocked) {
+            if (!alive) return;
+            openPaywall('scan_quota', 'add');
+            setError(t('scansDailyNone') || 'Scan limit reached');
+            setPhase('error');
+            return;
+          }
+          if (proxyResult.ok && proxyResult.items && proxyResult.items.length > 0) {
+            rows = proxyResult.items;
+          } else {
+            const llm = await getLLM();
+            rows = await llm.extract({
+              imageBase64: image.base64,
+              mimeType: image.mime,
+              categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+            });
+          }
+        } catch {
+          const llm = await getLLM();
+          rows = await llm.extract({
+            imageBase64: image.base64,
+            mimeType: image.mime,
+            categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
+          });
+        }
         if (!alive) return;
+        void refreshAllowance();
         setElapsedMs(Date.now() - start);
         setItems(rows);
         onItemsExtracted?.(rows);
@@ -160,7 +211,7 @@ export function ExtractScreen({
     return () => {
       alive = false;
     };
-  }, [image, cachedItems, onItemsExtracted, entryCategories]);
+  }, [image, cachedItems, onItemsExtracted, entryCategories, canScan, tier, openPaywall, refreshAllowance, t]);
 
   useEffect(() => {
     if (phase !== 'found') return;
@@ -205,6 +256,20 @@ export function ExtractScreen({
           }
           onBack={onBack}
         />
+
+        {!isPro && (
+          <View style={{ paddingHorizontal: 18, paddingTop: 4 }}>
+            <ScanQuotaBadge
+              quota={{
+                monthRemaining: scansRemaining,
+                monthTotal: scansLimit,
+                dayRemaining: dailyScansRemaining,
+                dayTotal: dailyScansLimit,
+              }}
+              t={t}
+            />
+          </View>
+        )}
 
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           {phase === 'scanning' && (() => {

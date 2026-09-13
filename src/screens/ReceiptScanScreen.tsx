@@ -27,6 +27,9 @@ import { ScanProgressBar } from '../components/ScanProgressBar';
 import { computeBillTotal, computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
+import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
@@ -111,9 +114,19 @@ export function ReceiptScanScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh } = useLanguage();
+  const { isZh, t } = useLanguage();
   const { people, addPerson } = useAppData();
   const reducedMotion = useReducedMotion();
+  const {
+    isPro,
+    canScan,
+    scansRemaining,
+    scansLimit,
+    dailyScansRemaining,
+    dailyScansLimit,
+    refreshAllowance,
+  } = useEntitlement();
+  const { openPaywall } = usePaywall();
 
   const [phase, setPhase] = useState<Phase>(cachedReceipt ? 'assign' : initialImage ? 'reading' : 'capture');
   const [error, setError] = useState('');
@@ -217,6 +230,10 @@ export function ReceiptScanScreen({
   };
 
   const read = async (image: PickedImage) => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'add');
+      return;
+    }
     setPickedImage(image);
     setPhase('reading');
     setError('');
@@ -224,6 +241,7 @@ export function ReceiptScanScreen({
       const scanned = await scanReceiptImage(image);
       applyScan(scanned);
       onScanned?.(scanned);
+      void refreshAllowance();
       setPhase('assign');
     } catch (e) {
       // A read failure (network, auth, or a reply nothing usable could be parsed from) still
@@ -265,6 +283,10 @@ export function ReceiptScanScreen({
   };
 
   const takePhoto = async () => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'add');
+      return;
+    }
     if (busy) return;
     setBusy(true);
     try {
@@ -290,6 +312,10 @@ export function ReceiptScanScreen({
   };
 
   const pickFromLibrary = async () => {
+    if (!canScan) {
+      openPaywall('scan_quota', 'add');
+      return;
+    }
     if (busy) return;
     setBusy(true);
     try {
@@ -466,6 +492,19 @@ export function ReceiptScanScreen({
         <View style={{ paddingTop: insets.top + 4 }}>
           <TopBar title={isZh ? '扫描消费小票' : 'Scan a receipt'} onBack={onBack} />
         </View>
+        {!isPro && (
+          <View style={{ paddingHorizontal: 18, paddingTop: 4 }}>
+            <ScanQuotaBadge
+              quota={{
+                monthRemaining: scansRemaining,
+                monthTotal: scansLimit,
+                dayRemaining: dailyScansRemaining,
+                dayTotal: dailyScansLimit,
+              }}
+              t={t}
+            />
+          </View>
+        )}
         <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }}>
           <PipSays expr="curious">
             <BubbleText>
