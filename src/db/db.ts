@@ -372,6 +372,15 @@ async function init(): Promise<SQLite.SQLiteDatabase> {
     // column already present
   }
 
+  // Migration (2026-09-13, settlement learning): stores the original bank transfer label on
+  // confirmed repayment matches so future transfers from the same person can be recognised
+  // with higher confidence even when names are formatted differently.
+  try {
+    await db.execAsync('ALTER TABLE split_payments ADD COLUMN bank_label TEXT');
+  } catch {
+    // column already present
+  }
+
   // Data repair: a backup-restore bug once wrote signed amounts straight into `amount` for
   // expense rows instead of normalizing to the always-positive convention every other write
   // path relies on (sign is meant to live in `type` alone). Devices that restored a backup

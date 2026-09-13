@@ -363,12 +363,14 @@ function InfiniteYearScroll({
 function DayCell({
   day,
   dayData,
+  checkInKind,
   selected,
   isToday,
   onPress,
 }: {
   day: number | null;
   dayData: DayData | null;
+  checkInKind?: string;
   selected: boolean;
   isToday: boolean;
   onPress: (day: number) => void;
@@ -382,6 +384,7 @@ function DayCell({
   const hasExpense = dayData && dayData.expense > 0;
   const net = dayData ? dayData.net : 0;
   const netPositive = net >= 0;
+  const isNoSpendCheckIn = !hasIncome && !hasExpense && Boolean(checkInKind);
 
   return (
     <Pressable
@@ -392,6 +395,7 @@ function DayCell({
         isToday && !selected && [styles.cellToday, { borderColor: theme.accent }],
         hasIncome && !hasExpense && [styles.cellIncomeOnly, { borderColor: theme.accentSoft }],
         hasExpense && !hasIncome && styles.cellExpenseOnly,
+        isNoSpendCheckIn && !selected && { borderColor: theme.accentSoft, backgroundColor: colorTheme.surface },
       ]}
       onPress={() => onPress(day)}
       accessibilityRole="button"
@@ -400,6 +404,20 @@ function DayCell({
       <Text style={[styles.cellDay, { color: colorTheme.ink }, selected && styles.cellDaySelected]}>
         {day}
       </Text>
+      {isNoSpendCheckIn && (
+        <View style={{ alignItems: 'center', marginTop: 2 }}>
+          <Svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={selected ? '#fff' : theme.accent} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+            <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+          </Svg>
+          <Text
+            numberOfLines={1}
+            style={[styles.cellIncome, { color: selected ? '#fff' : theme.accent, fontSize: 8.5, marginTop: 1 }]}
+          >
+            0
+          </Text>
+        </View>
+      )}
       {hasIncome && (
         <Text
           numberOfLines={1}
@@ -440,8 +458,8 @@ function DayTransactionList({
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { isZh, tCat } = useLanguage();
-  const { catById } = useAppData();
+  const { isZh, tCat, t } = useLanguage();
+  const { catById, checkIns } = useAppData();
   const dc = useDisplayCurrency();
   // e.g. "Tue, May 26"
   const d = new Date(year, month - 1, day);
@@ -450,12 +468,27 @@ function DayTransactionList({
     ? `${month}月${day}日 · ${FULL_WEEKDAY_ZH[weekdayIdx]}`
     : `${FULL_WEEKDAY_EN[weekdayIdx]}, ${MONTHS_SHORT_EN[month - 1]} ${day}`;
 
+  const iso = toIsoDate(year, month, day);
+  const checkInKind = checkIns ? checkIns[iso] : undefined;
+
   return (
     <View style={styles.daySection}>
       <Text style={[styles.daySectionTitle, { color: colorTheme.ink }]}>{dateLabel}</Text>
       {!dayData || dayData.txns.length === 0 ? (
         <View style={[styles.emptyDay, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
-          <Text style={[styles.emptyDayText, { color: colorTheme.ink2 }]}>{isZh ? '暂无交易记录' : 'No transactions'}</Text>
+          {checkInKind ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={theme.accent} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+                <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+              </Svg>
+              <Text style={[styles.emptyDayText, { color: theme.accent, fontFamily: uiFont(600) }]}>
+                {t('checkedInNoSpend')} · {compactAmt(0, dc.code)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={[styles.emptyDayText, { color: colorTheme.ink2 }]}>{isZh ? '暂无交易记录' : 'No transactions'}</Text>
+          )}
         </View>
       ) : (
         <View style={[styles.txnList, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 }]}>
@@ -513,7 +546,7 @@ export function CalendarScreen({
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
   const { formatMonthLabel, isZh } = useLanguage();
-  const { transactions } = useAppData();
+  const { transactions, checkIns } = useAppData();
   const [viewMode, setViewMode] = useState<'month' | 'year'>('month');
 
   // Initialise to the passed month or the current month
@@ -633,12 +666,14 @@ export function CalendarScreen({
                 {week.map((day, di) => {
                   const iso = day ? toIsoDate(ym.year, ym.month, day) : null;
                   const dayData = iso ? (monthData.byDay[iso] ?? null) : null;
+                  const checkInKind = iso && checkIns ? checkIns[iso] : undefined;
                   const isTodayCell = isCurrentMonth && day === today.getDate();
                   return (
                     <DayCell
                       key={di}
                       day={day}
                       dayData={dayData}
+                      checkInKind={checkInKind}
                       selected={day === selectedDay}
                       isToday={isTodayCell}
                       onPress={(d) => setSelectedDay(d)}

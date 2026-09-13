@@ -41,8 +41,22 @@ describe('guessCategoryByKeyword', () => {
     expect(guessCategoryByKeyword('petrol', 'expense', DEFAULT_CATEGORIES)).toBe('travelling');
   });
 
+  it('matches everyday laundry and service words to Other Expenses', () => {
+    for (const label of ['laundry', 'dobi', 'dry clean', 'laundromat', 'barber', 'haircut', '洗衣', '干洗', '快递']) {
+      expect(guessCategoryByKeyword(label, 'expense', DEFAULT_CATEGORIES)).toBe('other');
+    }
+  });
+
   it('is case-insensitive', () => {
     expect(guessCategoryByKeyword('LUNCH', 'expense', DEFAULT_CATEGORIES)).toBe('food');
+  });
+
+  it('is resilient to typos in everyday words (e.g. luch, diner, brekfast, coffe, petro)', () => {
+    expect(guessCategoryByKeyword('luch', 'expense', DEFAULT_CATEGORIES)).toBe('food');
+    expect(guessCategoryByKeyword('diner', 'expense', DEFAULT_CATEGORIES)).toBe('food');
+    expect(guessCategoryByKeyword('brekfast', 'expense', DEFAULT_CATEGORIES)).toBe('food');
+    expect(guessCategoryByKeyword('coffe', 'expense', DEFAULT_CATEGORIES)).toBe('food');
+    expect(guessCategoryByKeyword('petro', 'expense', DEFAULT_CATEGORIES)).toBe('travelling');
   });
 
   it('does not false-positive on a word merely containing a keyword', () => {

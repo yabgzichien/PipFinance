@@ -2,6 +2,7 @@
 // The single place a native amount becomes a MYR amount. Every write path goes
 // through deriveMyr so the stored invariant can only hold or throw, never drift.
 import { BASE_CURRENCY, currencyMeta, decimalsFor, type CurrencyMeta, SUPPORTED_CURRENCIES } from './currencies';
+import { resolveCurrencyToken } from './quickParse';
 
 export { BASE_CURRENCY, currencyMeta, decimalsFor, type CurrencyMeta, SUPPORTED_CURRENCIES };
 
@@ -92,8 +93,8 @@ export function isMultiCurrency(active: string[]): boolean {
 export function normalizeCurrency(raw: unknown, defaultCurrency: string = BASE_CURRENCY): string {
   const fallback = currencyMeta(defaultCurrency)?.code ?? BASE_CURRENCY;
   if (typeof raw !== 'string') return fallback;
-  const code = raw.trim().toUpperCase();
-  return currencyMeta(code) ? code : fallback;
+  const resolved = resolveCurrencyToken(raw);
+  return resolved ?? fallback;
 }
 
 /**

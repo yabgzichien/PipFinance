@@ -21,6 +21,7 @@ import {
   BALANCE_USER_PROMPT,
   DOC_SYSTEM_PROMPT,
   DOC_USER_PROMPT,
+  buildDocUserPrompt,
   HOLDINGS_SYSTEM_PROMPT,
   HOLDINGS_USER_PROMPT,
   RECEIPT_SYSTEM_PROMPT,
@@ -174,7 +175,8 @@ export const GroqProvider: LLMProvider = {
   // Ingests images and flattened text (CSV/XLSX/DOCX); PDF binaries fall back to Gemini.
   acceptsDocuments: true,
 
-  async extract({ apiKey, model, imageBase64, mimeType }: ExtractInput): Promise<ExtractedTxn[]> {
+  async extract({ apiKey, model, imageBase64, mimeType, categories }: ExtractInput): Promise<ExtractedTxn[]> {
+    const userPrompt = categories && categories.length > 0 ? buildDocUserPrompt(categories) : USER_PROMPT;
     const body = {
       model: model || DEFAULT_MODEL,
       messages: [
@@ -182,7 +184,7 @@ export const GroqProvider: LLMProvider = {
         {
           role: 'user',
           content: [
-            { type: 'text', text: USER_PROMPT },
+            { type: 'text', text: userPrompt },
             { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } },
           ],
         },

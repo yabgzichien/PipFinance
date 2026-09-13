@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { Platform } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -41,196 +41,980 @@ function csvEscape(val: string | number | null | undefined): string {
 // 1. EXCEL (.XLSX) MULTI-TAB WORKBOOK GENERATION
 // ---------------------------------------------------------------------------
 
+const EXCEL_PALETTE = {
+  forestDark: '1B4332',
+  forestMedium: '2D6A4F',
+  forestLight: '40916C',
+  sageBg: 'EAF2EC',
+  mintSoft: 'D1E7DD',
+  greenText: '0F5132',
+  redSoft: 'F8D7DA',
+  redText: '842029',
+  amberSoft: 'FFF3CD',
+  amberText: '664D03',
+  blueSoft: 'CFE2FF',
+  blueText: '084298',
+  charcoal: '1F2937',
+  charcoalDark: '111827',
+  mutedGray: '4B5563',
+  lightGray: 'F3F4F6',
+  zebraBg: 'F9FBFA',
+  white: 'FFFFFF',
+  borderLight: 'E5E7EB',
+  borderMedium: 'D1D5DB',
+  borderDark: '111827',
+};
+
+interface CellStyleOptions {
+  font?: {
+    name?: string;
+    sz?: number;
+    bold?: boolean;
+    italic?: boolean;
+    color?: { rgb: string };
+    underline?: boolean;
+  };
+  fill?: {
+    fgColor?: { rgb: string };
+    patternType?: string;
+  };
+  border?: {
+    top?: { style: string; color?: { rgb: string } };
+    bottom?: { style: string; color?: { rgb: string } };
+    left?: { style: string; color?: { rgb: string } };
+    right?: { style: string; color?: { rgb: string } };
+  };
+  alignment?: {
+    horizontal?: 'left' | 'center' | 'right';
+    vertical?: 'top' | 'center' | 'bottom';
+    wrapText?: boolean;
+  };
+  numFmt?: string;
+}
+
+interface ExcelCell {
+  v: string | number | boolean | null;
+  t?: 's' | 'n' | 'b';
+  s?: CellStyleOptions;
+  f?: string;
+  z?: string;
+}
+
+function xlCell(
+  val: string | number | boolean | null | undefined,
+  style?: CellStyleOptions,
+  formula?: string,
+): ExcelCell {
+  const v = val ?? '';
+  let t: 's' | 'n' | 'b' = 's';
+  if (typeof v === 'number') t = 'n';
+  else if (typeof v === 'boolean') t = 'b';
+  const c: ExcelCell = { v, t, s: style };
+  if (formula) c.f = formula;
+  if (style?.numFmt) c.z = style.numFmt;
+  return c;
+}
+
+const xlStyles = {
+  title: {
+    font: { name: 'Calibri', sz: 14, bold: true, color: { rgb: EXCEL_PALETTE.white } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.forestDark } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  metaLabel: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.charcoal } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  metaValue: {
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  section: {
+    font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: EXCEL_PALETTE.white } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.forestMedium } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  subSection: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  th: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.charcoal } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.lightGray } },
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'medium', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  thRight: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.charcoal } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.lightGray } },
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'medium', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  },
+  thCenter: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.charcoal } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.lightGray } },
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'medium', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+  },
+  td: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  }),
+  tdNum: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    numFmt: '#,##0.00',
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  }),
+  tdPercent: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    numFmt: '0.0%',
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  }),
+  tdInt: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    numFmt: '#,##0',
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  }),
+  tdDate: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+  }),
+  tdCenter: (isZebra = false) => ({
+    font: { name: 'Calibri', sz: 10, color: { rgb: EXCEL_PALETTE.charcoalDark } },
+    fill: isZebra ? { fgColor: { rgb: EXCEL_PALETTE.zebraBg } } : undefined,
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+  }),
+  subtotalText: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+    },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  subtotalNum: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    numFmt: '#,##0.00',
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+    },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  },
+  subtotalPercent: {
+    font: { name: 'Calibri', sz: 10, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    numFmt: '0.0%',
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+    },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  },
+  grandTotalText: {
+    font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'double', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+  },
+  grandTotalNum: {
+    font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    numFmt: '#,##0.00',
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'double', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  },
+  grandTotalPercent: {
+    font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: EXCEL_PALETTE.forestDark } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.sageBg } },
+    numFmt: '0.0%',
+    border: {
+      top: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderMedium } },
+      bottom: { style: 'double', color: { rgb: EXCEL_PALETTE.borderDark } },
+    },
+    alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+  },
+  badgeHealthy: {
+    font: { name: 'Calibri', sz: 9.5, bold: true, color: { rgb: EXCEL_PALETTE.greenText } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.mintSoft } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  badgeWarning: {
+    font: { name: 'Calibri', sz: 9.5, bold: true, color: { rgb: EXCEL_PALETTE.redText } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.redSoft } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  badgeModerate: {
+    font: { name: 'Calibri', sz: 9.5, bold: true, color: { rgb: EXCEL_PALETTE.amberText } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.amberSoft } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  badgeBlue: {
+    font: { name: 'Calibri', sz: 9.5, bold: true, color: { rgb: EXCEL_PALETTE.blueText } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.blueSoft } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+  badgeNeutral: {
+    font: { name: 'Calibri', sz: 9.5, color: { rgb: EXCEL_PALETTE.charcoal } },
+    fill: { fgColor: { rgb: EXCEL_PALETTE.lightGray } },
+    alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+    border: { bottom: { style: 'thin', color: { rgb: EXCEL_PALETTE.borderLight } } },
+  },
+};
+
 export function generateExcelWorkbook(data: FinancialReportData): Uint8Array {
   const wb = XLSX.utils.book_new();
-
-  // --- SHEET 1: Income Statement ---
-  const isRows: (string | number)[][] = [
-    ['FINANCIAL REPORT: INCOME STATEMENT (PROFIT & LOSS)'],
-    ['Name:', data.userName],
-    ['Period:', data.period.label],
-    ['Generated At:', data.generatedAt.slice(0, 19).replace('T', ' ')],
-    ['Currency:', 'MYR (Malaysian Ringgit)'],
-    [],
-    ['=== REVENUES / INCOME ===', 'Amount (MYR)', '% of Total Income'],
-  ];
-
-  for (const row of data.incomeStatement.incomeRows) {
-    isRows.push([row.categoryLabel, row.amount, `${row.percentage}%`]);
-  }
-  isRows.push(['TOTAL REVENUE / INCOME', data.incomeStatement.totalIncome, '100.0%']);
-  isRows.push([]);
-  isRows.push(['=== OPERATING & LIVING EXPENSES ===', 'Amount (MYR)', '% of Total Expense']);
-
-  for (const row of data.incomeStatement.expenseRows) {
-    isRows.push([row.categoryLabel, row.amount, `${row.percentage}%`]);
-  }
-  isRows.push(['TOTAL EXPENSES', data.incomeStatement.totalExpense, '100.0%']);
-  isRows.push([]);
-  isRows.push(['=== NET FINANCIAL SUMMARY ===', 'Value']);
-  isRows.push(['NET INCOME / SAVINGS (Revenue - Expenses)', data.incomeStatement.netIncome]);
-  isRows.push(['SAVINGS RATE (%)', `${data.incomeStatement.savingsRate}%`]);
-  isRows.push(['RECORDED TRANSACTIONS COUNT', data.incomeStatement.transactionCount]);
-
-  const wsIS = XLSX.utils.aoa_to_sheet(isRows);
-  wsIS['!cols'] = [{ wch: 42 }, { wch: 20 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, wsIS, 'Income Statement');
-
-  // --- SHEET 2: Balance Sheet ---
-  const bsRows: (string | number)[][] = [
-    ['FINANCIAL REPORT: BALANCE SHEET'],
-    ['Name:', data.userName],
-    ['As of Date:', data.balanceSheet.asOfDate],
-    ['Generated At:', data.generatedAt.slice(0, 19).replace('T', ' ')],
-    ['Currency:', 'MYR (Malaysian Ringgit)'],
-    [],
-    ['=== ASSETS ===', 'Class', 'Value (MYR)'],
-  ];
-
-  for (const g of data.balanceSheet.assetGroups) {
-    for (const item of g.items) {
-      const detail = item.symbol ? ` (${item.quantity ?? ''} ${item.symbol})` : '';
-      bsRows.push([`  ${item.name}${detail}`, g.clsLabel, item.value]);
-    }
-    bsRows.push([`SUBTOTAL ${g.clsLabel.toUpperCase()}`, '', g.total]);
-  }
-  bsRows.push(['TOTAL ASSETS', '', data.balanceSheet.totalAssets]);
-  bsRows.push([]);
-  bsRows.push(['=== LIABILITIES ===', 'Class', 'Value (MYR)']);
-
-  for (const g of data.balanceSheet.liabilityGroups) {
-    for (const item of g.items) {
-      bsRows.push([`  ${item.name}`, g.clsLabel, item.value]);
-    }
-    bsRows.push([`SUBTOTAL ${g.clsLabel.toUpperCase()}`, '', g.total]);
-  }
-  bsRows.push(['TOTAL LIABILITIES', '', data.balanceSheet.totalLiabilities]);
-  bsRows.push([]);
-  bsRows.push(['=== OWNER EQUITY / NET POSITION ===', '', 'Value (MYR)']);
-  bsRows.push(['TOTAL NET WORTH (Assets - Liabilities)', '', data.balanceSheet.netWorth]);
-  bsRows.push(['RETAINED FINANCIAL VALUE', '', data.balanceSheet.retainedEarnings]);
-  bsRows.push(['BALANCE CHECK', '', data.balanceSheet.balanced ? 'BALANCED (Assets = Liabilities + Equity)' : 'UNBALANCED']);
-
-  const wsBS = XLSX.utils.aoa_to_sheet(bsRows);
-  wsBS['!cols'] = [{ wch: 42 }, { wch: 22 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, wsBS, 'Balance Sheet');
-
-  // --- SHEET 3: Transaction Ledger ---
   const catMap = new Map<string, string>();
   for (const c of data.categories) catMap.set(c.id, c.label);
 
-  const ledgerRows: (string | number)[][] = [
-    ['Date', 'Type', 'Category', 'Merchant / Payee', 'Amount (MYR)', 'Direction', 'Source', 'Remark'],
+  const appendSheet = (
+    name: string,
+    rows: (string | number | boolean | ExcelCell | null)[][],
+    widths: number[],
+    options?: {
+      tableHeaderRow?: number;
+      merges?: { s: { r: number; c: number }; e: { r: number; c: number } }[];
+      rowHeights?: number[];
+    },
+  ) => {
+    const normalizedRows: ExcelCell[][] = rows.map((row, rIdx) => {
+      const isZebra = rIdx % 2 === 1;
+      return row.map((val) => {
+        if (val && typeof val === 'object' && 'v' in val) {
+          return val as ExcelCell;
+        }
+        if (typeof val === 'number') {
+          return xlCell(val, xlStyles.tdNum(isZebra));
+        }
+        if (typeof val === 'boolean') {
+          return xlCell(val, xlStyles.tdCenter(isZebra));
+        }
+        return xlCell(val ?? '', xlStyles.td(isZebra));
+      });
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(normalizedRows);
+    ws['!cols'] = widths.map((wch) => ({ wch }));
+
+    if (options?.rowHeights && options.rowHeights.length > 0) {
+      ws['!rows'] = options.rowHeights.map((hpt) => ({ hpt }));
+    }
+
+    if (options?.merges && options.merges.length > 0) {
+      ws['!merges'] = options.merges;
+    }
+
+    if (options?.tableHeaderRow != null && rows.length > options.tableHeaderRow + 1) {
+      const lastColumn = XLSX.utils.encode_col(Math.max(0, rows[options.tableHeaderRow].length - 1));
+      ws['!autofilter'] = { ref: `A${options.tableHeaderRow + 1}:${lastColumn}${rows.length}` };
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  };
+
+  // Financial health calculations
+  const totalIncome = data.incomeStatement.totalIncome;
+  const totalExpense = data.incomeStatement.totalExpense;
+  const netIncome = data.incomeStatement.netIncome;
+  const savingsRate = data.incomeStatement.savingsRate;
+  const transactionCount = data.incomeStatement.transactionCount;
+  const totalAssets = data.balanceSheet.totalAssets;
+  const totalLiabilities = data.balanceSheet.totalLiabilities;
+  const netWorth = data.balanceSheet.netWorth;
+  const balanced = data.balanceSheet.balanced;
+
+  // Liquid assets (cash and e-wallets)
+  let liquidAssets = 0;
+  for (const group of data.balanceSheet.assetGroups) {
+    if (group.cls === 'cash' || group.cls === 'ewallet' || group.cls === 'depository') {
+      liquidAssets += group.total;
+    }
+  }
+  if (liquidAssets === 0 && totalAssets > 0) {
+    liquidAssets = totalAssets;
+  }
+
+  // Ratios
+  const expenseRatio = totalIncome > 0 ? (totalExpense / totalIncome) * 100 : 100;
+  const runwayMonths = totalExpense > 0 ? liquidAssets / totalExpense : 0;
+  const debtToAssets = totalAssets > 0 ? (totalLiabilities / totalAssets) * 100 : 0;
+
+  // Days in period estimate
+  let periodDays = 30;
+  if (data.period.startDate && data.period.endDate) {
+    const dStart = new Date(data.period.startDate).getTime();
+    const dEnd = new Date(data.period.endDate).getTime();
+    const diff = Math.round((dEnd - dStart) / (1000 * 60 * 60 * 24)) + 1;
+    if (diff > 0 && diff < 3660) periodDays = diff;
+  }
+  const avgDailySpend = totalExpense / Math.max(1, periodDays);
+
+  // Top expense categories with Pareto cumulative
+  const sortedExpenses = [...data.incomeStatement.expenseRows].sort((a, b) => b.amount - a.amount);
+  let cumExpense = 0;
+  const topExpensesWithPareto = sortedExpenses.map((row, idx) => {
+    cumExpense += row.amount;
+    const cumPct = totalExpense > 0 ? (cumExpense / totalExpense) * 100 : 0;
+    return {
+      rank: idx + 1,
+      categoryLabel: row.categoryLabel,
+      amount: row.amount,
+      percentage: row.percentage,
+      cumPercentage: cumPct,
+      paretoClassification: cumPct <= 80 || (cumExpense - row.amount) / totalExpense < 0.8 ? 'Core 80% Spend' : 'Long Tail 20%',
+    };
+  });
+
+  // -------------------------------------------------------------------------
+  // 1. Overview Sheet (Executive Dashboard & Financial Health Scorecard)
+  // -------------------------------------------------------------------------
+  const overviewRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [xlCell('PERSONAL FINANCE ANALYSIS: EXECUTIVE DASHBOARD & SCORECARD', xlStyles.title), null, null, null, null],
+    [xlCell('Name', xlStyles.metaLabel), xlCell(data.userName, xlStyles.metaValue), null, null, null],
+    [xlCell('Period', xlStyles.metaLabel), xlCell(data.period.label, xlStyles.metaValue), null, null, null],
+    [xlCell('Generated', xlStyles.metaLabel), xlCell(data.generatedAt.slice(0, 19).replace('T', ' '), xlStyles.metaValue), null, null, null],
+    [xlCell('Base currency', xlStyles.metaLabel), xlCell('MYR', xlStyles.metaValue), null, null, null],
+    [xlCell('', xlStyles.td()), null, null, null, null],
+    [xlCell('=== WORKBOOK DIRECTORY & TABLE OF CONTENTS ===', xlStyles.section), null, null, null, null],
+    [
+      xlCell('#', xlStyles.thCenter),
+      xlCell('Sheet Name', xlStyles.th),
+      xlCell('Report Focus', xlStyles.th),
+      xlCell('Key Included Metrics', xlStyles.th),
+      xlCell('Modeling & Functionality', xlStyles.th),
+    ],
+    [xlCell('1', xlStyles.tdCenter()), xlCell('Overview', xlStyles.td()), xlCell('Executive Summary & Scorecard', xlStyles.td()), xlCell('KPIs, health ratios, top spending spotlight', xlStyles.td()), xlCell('Executive decision dashboard', xlStyles.td())],
+    [xlCell('2', xlStyles.tdCenter()), xlCell('Income Statement', xlStyles.td()), xlCell('Statement of Profit & Loss (P&L)', xlStyles.td()), xlCell('Operating revenues, living expenses, net surplus', xlStyles.td()), xlCell('Live Excel formulas (=SUM, =IF)', xlStyles.td())],
+    [xlCell('3', xlStyles.tdCenter()), xlCell('Balance Sheet', xlStyles.td()), xlCell('Statement of Financial Position', xlStyles.td()), xlCell('Assets, liabilities, net worth, equity', xlStyles.td()), xlCell('Double-entry balance check formula', xlStyles.td())],
+    [xlCell('4', xlStyles.tdCenter()), xlCell('Transactions', xlStyles.td()), xlCell('Itemized Financial Audit Ledger', xlStyles.td()), xlCell('All transaction rows with categories & accounts', xlStyles.td()), xlCell('AutoFilter enabled, filterable by date/merchant', xlStyles.td())],
+    [xlCell('5', xlStyles.tdCenter()), xlCell('Categories', xlStyles.td()), xlCell('Spending Deep Dive & Pareto 80/20 Analysis', xlStyles.td()), xlCell('Ranked expense/income categories, cumulative shares', xlStyles.td()), xlCell('Pareto core vs long-tail classification', xlStyles.td())],
+    [xlCell('6', xlStyles.tdCenter()), xlCell('Accounts', xlStyles.td()), xlCell('Institution & Account Register', xlStyles.td()), xlCell('Depository, card, loan & investment balances', xlStyles.td()), xlCell('Grouped by asset and liability class', xlStyles.td())],
+    [xlCell('7', xlStyles.tdCenter()), xlCell('Monthly Trends', xlStyles.td()), xlCell('Historical Trajectory & Growth Analysis', xlStyles.td()), xlCell('Monthly cash flows, savings rates, MoM growth', xlStyles.td()), xlCell('Trend metrics & period summary', xlStyles.td())],
+    [xlCell('8', xlStyles.tdCenter()), xlCell('E-Wallets', xlStyles.td()), xlCell('Digital Payment & Wallet Activity', xlStyles.td()), xlCell('Provider breakdown summary & e-wallet transactions', xlStyles.td()), xlCell('Cashless lifestyle analytics', xlStyles.td())],
+    [xlCell('', xlStyles.td()), null, null, null, null],
+    [xlCell('=== EXECUTIVE KPI SCORECARD ===', xlStyles.section), null, null, null, null],
+    [
+      xlCell('Metric', xlStyles.th),
+      xlCell('Value', xlStyles.thRight),
+      xlCell('Unit', xlStyles.thCenter),
+      xlCell('Category / Section', xlStyles.th),
+      xlCell('Status / Benchmark', xlStyles.thCenter),
+    ],
+    [xlCell('Recorded income', xlStyles.td()), xlCell(totalIncome, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Revenues & Inflows', xlStyles.td()), xlCell('Primary cash inflow', xlStyles.td())],
+    [xlCell('Recorded spending', xlStyles.td()), xlCell(totalExpense, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Operating & Living Expenses', xlStyles.td()), xlCell('Primary cash outflow', xlStyles.td())],
+    [xlCell('Net saved', xlStyles.td()), xlCell(netIncome, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Net Surplus / Deficit', xlStyles.td()), xlCell(netIncome >= 0 ? 'Surplus ✓' : 'Deficit ⚠️', netIncome >= 0 ? xlStyles.badgeHealthy : xlStyles.badgeWarning)],
+    [xlCell('Savings rate', xlStyles.td()), xlCell(savingsRate / 100, xlStyles.tdPercent()), xlCell('%', xlStyles.tdCenter()), xlCell('Savings Efficiency', xlStyles.td()), xlCell(savingsRate >= 20 ? 'Strong (≥20%)' : savingsRate >= 10 ? 'Moderate (10-20%)' : 'Needs Focus (<10%)', savingsRate >= 20 ? xlStyles.badgeHealthy : savingsRate >= 10 ? xlStyles.badgeModerate : xlStyles.badgeWarning)],
+    [xlCell('Transactions', xlStyles.td()), xlCell(transactionCount, xlStyles.tdInt()), xlCell('Txns', xlStyles.tdCenter()), xlCell('Activity Volume', xlStyles.td()), xlCell('Audit trail', xlStyles.td())],
+    [xlCell('Assets', xlStyles.td()), xlCell(totalAssets, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Store of Value', xlStyles.td()), xlCell('Cash, banks, investments', xlStyles.td())],
+    [xlCell('Liabilities', xlStyles.td()), xlCell(totalLiabilities, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Obligations & Debt', xlStyles.td()), xlCell('Credit cards, loans', xlStyles.td())],
+    [xlCell('Net worth', xlStyles.td()), xlCell(netWorth, xlStyles.tdNum()), xlCell('MYR', xlStyles.tdCenter()), xlCell('Owner Equity', xlStyles.td()), xlCell(netWorth >= 0 ? 'Positive Equity' : 'Negative Equity', netWorth >= 0 ? xlStyles.badgeHealthy : xlStyles.badgeWarning)],
+    [xlCell('', xlStyles.td()), null, null, null, null],
+    [xlCell('=== FINANCIAL HEALTH & RESILIENCE INDICATORS ===', xlStyles.section), null, null, null, null],
+    [
+      xlCell('Indicator / Ratio', xlStyles.th),
+      xlCell('Value', xlStyles.thRight),
+      xlCell('Formula / Derivation', xlStyles.th),
+      xlCell('Standard Benchmark', xlStyles.thCenter),
+      xlCell('Assessment', xlStyles.thCenter),
+    ],
+    [xlCell('Expense-to-Income Ratio', xlStyles.td()), xlCell(expenseRatio / 100, xlStyles.tdPercent()), xlCell('Expenses / Income', xlStyles.td()), xlCell('< 70.0% Optimal', xlStyles.tdCenter()), xlCell(expenseRatio <= 70 ? 'Healthy' : 'High Outflow', expenseRatio <= 70 ? xlStyles.badgeHealthy : xlStyles.badgeWarning)],
+    [xlCell('Estimated Liquid Runway (Months)', xlStyles.td()), xlCell(runwayMonths, xlStyles.tdNum()), xlCell('Liquid Assets / Period Expense', xlStyles.td()), xlCell('3.0 - 6.0 Months', xlStyles.tdCenter()), xlCell(runwayMonths >= 6 ? 'Strong Reserve' : runwayMonths >= 3 ? 'Adequate' : 'Low Buffer', runwayMonths >= 6 ? xlStyles.badgeHealthy : runwayMonths >= 3 ? xlStyles.badgeModerate : xlStyles.badgeWarning)],
+    [xlCell('Debt-to-Asset Ratio', xlStyles.td()), xlCell(debtToAssets / 100, xlStyles.tdPercent()), xlCell('Liabilities / Total Assets', xlStyles.td()), xlCell('< 30.0% Healthy', xlStyles.tdCenter()), xlCell(debtToAssets <= 30 ? 'Conservative' : 'Leveraged', debtToAssets <= 30 ? xlStyles.badgeHealthy : xlStyles.badgeWarning)],
+    [xlCell('Average Daily Spend', xlStyles.td()), xlCell(avgDailySpend, xlStyles.tdNum()), xlCell('Total Expenses / Period Days', xlStyles.td()), xlCell('Budget Target', xlStyles.tdCenter()), xlCell('Daily Run Rate', xlStyles.tdCenter())],
+    [xlCell('Double-Entry Accounting Balance', xlStyles.td()), xlCell(balanced ? 'BALANCED ✓' : 'UNBALANCED', balanced ? xlStyles.badgeHealthy : xlStyles.badgeWarning), xlCell('Assets = Liabilities + Equity', xlStyles.td()), xlCell('Exact Match', xlStyles.thCenter), xlCell(balanced ? 'Verified Double-Entry' : 'Audit Required', balanced ? xlStyles.badgeHealthy : xlStyles.badgeWarning)],
+    [xlCell('', xlStyles.td()), null, null, null, null],
+    [xlCell('=== TOP 5 EXPENSE CATEGORIES SPOTLIGHT ===', xlStyles.section), null, null, null, null],
+    [
+      xlCell('Rank', xlStyles.thCenter),
+      xlCell('Category', xlStyles.th),
+      xlCell('Amount (MYR)', xlStyles.thRight),
+      xlCell('Share of Spending', xlStyles.thRight),
+      xlCell('Cumulative Share', xlStyles.thRight),
+    ],
   ];
 
-  for (const t of data.transactions) {
-    const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Expense');
-    ledgerRows.push([
-      t.date || 'N/A',
-      t.type.toUpperCase(),
-      catName,
-      t.merchantRaw || t.merchantKey || 'N/A',
-      Math.abs(t.amount),
-      t.type === 'income' ? 'IN (+)' : 'OUT (-)',
-      t.source,
-      t.remark || '',
+  for (const item of topExpensesWithPareto.slice(0, 5)) {
+    overviewRows.push([
+      xlCell(`#${item.rank}`, xlStyles.tdCenter()),
+      xlCell(item.categoryLabel, xlStyles.td()),
+      xlCell(item.amount, xlStyles.tdNum()),
+      xlCell(item.percentage / 100, xlStyles.tdPercent()),
+      xlCell(item.cumPercentage / 100, xlStyles.tdPercent()),
     ]);
   }
 
-  const wsLedger = XLSX.utils.aoa_to_sheet(ledgerRows);
-  wsLedger['!cols'] = [
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 24 },
-    { wch: 32 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 35 },
-  ];
-  XLSX.utils.book_append_sheet(wb, wsLedger, 'Transaction Ledger');
+  appendSheet('Overview', overviewRows, [34, 26, 22, 28, 26], {
+    merges: [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } },
+      { s: { r: 6, c: 0 }, e: { r: 6, c: 4 } },
+      { s: { r: 17, c: 0 }, e: { r: 17, c: 4 } },
+      { s: { r: 28, c: 0 }, e: { r: 28, c: 4 } },
+      { s: { r: 35, c: 0 }, e: { r: 35, c: 4 } },
+    ],
+    rowHeights: [36, 20, 20, 20, 20, 14, 26, 22],
+  });
 
-  // --- SHEET 4: Monthly Trends & Statistics ---
-  const statsRows: (string | number)[][] = [
-    ['FINANCIAL STATISTICAL ANALYSIS & MONTHLY TRENDS'],
-    ['Period:', data.period.label],
-    [],
-    ['=== STATISTICAL METRICS ===', 'Metric Value'],
-    ['Mean (Average) Monthly Income', data.statistics.meanMonthlyIncome],
-    ['Median Monthly Income', data.statistics.medianMonthlyIncome],
-    ['Standard Deviation (Income Volatility)', data.statistics.stdDevMonthlyIncome],
-    ['Income Coefficient of Variation (CV)', data.statistics.cvMonthlyIncome],
-    ['Mean (Average) Monthly Expenses', data.statistics.meanMonthlyExpense],
-    ['Median Monthly Expenses', data.statistics.medianMonthlyExpense],
-    ['Standard Deviation (Expense)', data.statistics.stdDevMonthlyExpense],
-    ['Minimum Monthly Income', data.statistics.minMonthlyIncome],
-    ['Maximum Monthly Income', data.statistics.maxMonthlyIncome],
-    ['Total Income Across Period', data.statistics.totalIncome],
-    ['Total Expenses Across Period', data.statistics.totalExpense],
-    ['Net Period Savings', data.statistics.netSavings],
-    ['Overall Period Savings Rate (%)', `${data.statistics.overallSavingsRate}%`],
-    [],
-    ['=== MONTHLY TIME-SERIES BREAKDOWN ==='],
-    ['Month', 'Income (MYR)', 'Expenses (MYR)', 'Net Savings (MYR)', 'Savings Rate (%)', 'Month-End Net Worth (MYR)'],
+  // -------------------------------------------------------------------------
+  // 2. Income Statement Sheet (P&L with Dynamic Formulas)
+  // -------------------------------------------------------------------------
+  const incomeStatementRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [xlCell('FINANCIAL REPORT: STATEMENT OF PROFIT & LOSS (INCOME STATEMENT)', xlStyles.title), null, null],
+    [xlCell('Name', xlStyles.metaLabel), xlCell(data.userName, xlStyles.metaValue), null],
+    [xlCell('Period', xlStyles.metaLabel), xlCell(data.period.label, xlStyles.metaValue), null],
+    [xlCell('Generated', xlStyles.metaLabel), xlCell(data.generatedAt.slice(0, 19).replace('T', ' '), xlStyles.metaValue), null],
+    [xlCell('Base currency', xlStyles.metaLabel), xlCell('MYR', xlStyles.metaValue), null],
+    [xlCell('', xlStyles.td()), null, null],
+    [xlCell('=== REVENUES & INFLOWS ===', xlStyles.section), xlCell('Amount (MYR)', xlStyles.thRight), xlCell('Share of Revenue', xlStyles.thRight)],
   ];
 
-  for (const m of data.statistics.monthlyTrends) {
-    statsRows.push([
-      m.monthKey,
-      m.income,
-      m.expense,
-      m.netSavings,
-      `${m.savingsRate}%`,
-      m.netWorth,
+  const revDataStartRow = 8; // 1-indexed row in Excel
+  let revCount = 0;
+  for (const row of data.incomeStatement.incomeRows) {
+    incomeStatementRows.push([
+      xlCell(row.categoryLabel, xlStyles.td()),
+      xlCell(row.amount, xlStyles.tdNum()),
+      xlCell(row.percentage / 100, xlStyles.tdPercent()),
     ]);
+    revCount++;
   }
+  const revTotalRow = revCount > 0 ? revDataStartRow + revCount : revDataStartRow;
+  const revSumFormula = revCount > 0 ? `SUM(B${revDataStartRow}:B${revTotalRow - 1})` : undefined;
 
-  const wsStats = XLSX.utils.aoa_to_sheet(statsRows);
-  wsStats['!cols'] = [
-    { wch: 35 },
-    { wch: 18 },
-    { wch: 18 },
-    { wch: 18 },
-    { wch: 18 },
-    { wch: 24 },
+  incomeStatementRows.push([
+    xlCell('TOTAL REVENUE / INFLOWS', xlStyles.subtotalText),
+    xlCell(totalIncome, xlStyles.subtotalNum, revSumFormula),
+    xlCell(1.0, xlStyles.subtotalPercent),
+  ]);
+
+  incomeStatementRows.push([xlCell('', xlStyles.td()), null, null]);
+
+  const expHeaderRowIndex = incomeStatementRows.length;
+  incomeStatementRows.push([
+    xlCell('=== OPERATING & LIVING EXPENSES ===', xlStyles.section),
+    xlCell('Amount (MYR)', xlStyles.thRight),
+    xlCell('Share of Expenses', xlStyles.thRight),
+  ]);
+
+  const expDataStartRow = expHeaderRowIndex + 2; // 1-indexed row in Excel
+  let expCount = 0;
+  for (const row of data.incomeStatement.expenseRows) {
+    incomeStatementRows.push([
+      xlCell(row.categoryLabel, xlStyles.td()),
+      xlCell(row.amount, xlStyles.tdNum()),
+      xlCell(row.percentage / 100, xlStyles.tdPercent()),
+    ]);
+    expCount++;
+  }
+  const expTotalRow = expCount > 0 ? expDataStartRow + expCount : expDataStartRow;
+  const expSumFormula = expCount > 0 ? `SUM(B${expDataStartRow}:B${expTotalRow - 1})` : undefined;
+
+  incomeStatementRows.push([
+    xlCell('TOTAL EXPENSES', xlStyles.subtotalText),
+    xlCell(totalExpense, xlStyles.subtotalNum, expSumFormula),
+    xlCell(1.0, xlStyles.subtotalPercent),
+  ]);
+
+  incomeStatementRows.push([xlCell('', xlStyles.td()), null, null]);
+  incomeStatementRows.push([
+    xlCell('=== NET FINANCIAL RESULT ===', xlStyles.section),
+    xlCell('Value', xlStyles.thRight),
+    xlCell('Benchmark / Margin', xlStyles.thCenter),
+  ]);
+
+  const netFormula = `B${revTotalRow}-B${expTotalRow}`;
+  const savingsRateFormula = `IF(B${revTotalRow}>0,(B${revTotalRow}-B${expTotalRow})/B${revTotalRow},0)`;
+
+  incomeStatementRows.push([
+    xlCell('NET INCOME / SURPLUS (Revenues - Expenses)', xlStyles.grandTotalText),
+    xlCell(netIncome, xlStyles.grandTotalNum, netFormula),
+    xlCell(netIncome >= 0 ? 'Operating Surplus ✓' : 'Operating Deficit ⚠️', netIncome >= 0 ? xlStyles.badgeHealthy : xlStyles.badgeWarning),
+  ]);
+
+  incomeStatementRows.push([
+    xlCell('SAVINGS RATE (%)', xlStyles.grandTotalText),
+    xlCell(savingsRate / 100, xlStyles.grandTotalPercent, savingsRateFormula),
+    xlCell('Target: ≥ 20.0%', xlStyles.badgeModerate),
+  ]);
+
+  incomeStatementRows.push([
+    xlCell('RECORDED TRANSACTIONS COUNT', xlStyles.subtotalText),
+    xlCell(transactionCount, xlStyles.tdInt()),
+    xlCell('Audit Trail', xlStyles.tdCenter()),
+  ]);
+
+  appendSheet('Income Statement', incomeStatementRows, [46, 22, 22], {
+    merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }],
+    rowHeights: [36, 20, 20, 20, 20, 14, 26],
+  });
+
+  // -------------------------------------------------------------------------
+  // 3. Balance Sheet Sheet (Statement of Financial Position)
+  // -------------------------------------------------------------------------
+  const balanceSheetRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [xlCell('FINANCIAL REPORT: STATEMENT OF FINANCIAL POSITION (BALANCE SHEET)', xlStyles.title), null, null, null, null, null, null],
+    [xlCell('Name', xlStyles.metaLabel), xlCell(data.userName, xlStyles.metaValue), null, null, null, null, null],
+    [xlCell('As of Date', xlStyles.metaLabel), xlCell(data.balanceSheet.asOfDate, xlStyles.metaValue), null, null, null, null, null],
+    [xlCell('Generated', xlStyles.metaLabel), xlCell(data.generatedAt.slice(0, 19).replace('T', ' '), xlStyles.metaValue), null, null, null, null],
+    [xlCell('Base currency', xlStyles.metaLabel), xlCell('MYR', xlStyles.metaValue), null, null, null, null, null],
+    [xlCell('', xlStyles.td()), null, null, null, null, null, null],
+    [
+      xlCell('=== ASSETS & HOLDINGS ===', xlStyles.section),
+      xlCell('Class', xlStyles.th),
+      xlCell('Value (MYR)', xlStyles.thRight),
+      xlCell('Native value', xlStyles.thRight),
+      xlCell('Currency', xlStyles.thCenter),
+      xlCell('Quantity', xlStyles.thRight),
+      xlCell('Symbol', xlStyles.thCenter),
+    ],
   ];
-  XLSX.utils.book_append_sheet(wb, wsStats, 'Trends & Statistics');
 
-  // --- OPTIONAL SHEET 5: E-Wallet History ---
-  const ewalletTxns = data.transactions.filter((t) => isEwalletTransaction(t, data.accounts));
-  if (ewalletTxns.length > 0) {
-    const ewRows: (string | number)[][] = [
-      ['Date', 'E-Wallet Provider', 'Type', 'Category', 'Merchant / Payee', 'Amount (MYR)', 'Direction', 'Source', 'Remark'],
-    ];
-    for (const t of ewalletTxns) {
-      const provider = getEwalletProviderName(t, data.accounts);
-      const catName = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Expense');
-      ewRows.push([
-        t.date || 'N/A',
-        provider,
-        t.type.toUpperCase(),
-        catName,
-        t.merchantRaw || t.merchantKey || 'N/A',
-        Math.abs(t.amount),
-        t.type === 'income' ? 'IN (+)' : 'OUT (-)',
-        t.source,
-        t.remark || '',
+  const assetSubtotalRows: number[] = [];
+  for (const group of data.balanceSheet.assetGroups) {
+    const startRowIdx = balanceSheetRows.length + 1; // 1-indexed
+    for (const item of group.items) {
+      balanceSheetRows.push([
+        xlCell(item.name, xlStyles.td()),
+        xlCell(group.clsLabel, xlStyles.tdCenter()),
+        xlCell(item.value, xlStyles.tdNum()),
+        xlCell(item.nativeValue, xlStyles.tdNum()),
+        xlCell(item.currency, xlStyles.tdCenter()),
+        xlCell(item.quantity, xlStyles.tdNum()),
+        xlCell(item.symbol, xlStyles.tdCenter()),
       ]);
     }
-    const wsEW = XLSX.utils.aoa_to_sheet(ewRows);
-    wsEW['!cols'] = [
-      { wch: 14 },
-      { wch: 22 },
-      { wch: 12 },
-      { wch: 24 },
-      { wch: 32 },
-      { wch: 16 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 35 },
-    ];
-    XLSX.utils.book_append_sheet(wb, wsEW, 'E-Wallet History');
+    const endRowIdx = balanceSheetRows.length; // 1-indexed
+    const subtotalFormula = group.items.length > 0 ? `SUM(C${startRowIdx}:C${endRowIdx})` : undefined;
+    const subtotalRowIdx = balanceSheetRows.length + 1;
+    assetSubtotalRows.push(subtotalRowIdx);
+
+    balanceSheetRows.push([
+      xlCell(`SUBTOTAL ${group.clsLabel.toUpperCase()}`, xlStyles.subtotalText),
+      xlCell('', xlStyles.subtotalText),
+      xlCell(group.total, xlStyles.subtotalNum, subtotalFormula),
+      null,
+      null,
+      null,
+      null,
+    ]);
   }
+
+  const assetSumFormula = assetSubtotalRows.length > 0 ? assetSubtotalRows.map((r) => `C${r}`).join('+') : undefined;
+  const totalAssetsRowIdx = balanceSheetRows.length + 1;
+  balanceSheetRows.push([
+    xlCell('TOTAL ASSETS', xlStyles.grandTotalText),
+    xlCell('', xlStyles.grandTotalText),
+    xlCell(totalAssets, xlStyles.grandTotalNum, assetSumFormula),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  balanceSheetRows.push([xlCell('', xlStyles.td()), null, null, null, null, null, null]);
+  balanceSheetRows.push([
+    xlCell('=== LIABILITIES & OBLIGATIONS ===', xlStyles.section),
+    xlCell('Class', xlStyles.th),
+    xlCell('Value (MYR)', xlStyles.thRight),
+    xlCell('Native value', xlStyles.thRight),
+    xlCell('Currency', xlStyles.thCenter),
+    null,
+    null,
+  ]);
+
+  const liabSubtotalRows: number[] = [];
+  for (const group of data.balanceSheet.liabilityGroups) {
+    const startRowIdx = balanceSheetRows.length + 1; // 1-indexed
+    for (const item of group.items) {
+      balanceSheetRows.push([
+        xlCell(item.name, xlStyles.td()),
+        xlCell(group.clsLabel, xlStyles.tdCenter()),
+        xlCell(item.value, xlStyles.tdNum()),
+        xlCell(item.nativeValue, xlStyles.tdNum()),
+        xlCell(item.currency, xlStyles.tdCenter()),
+        null,
+        null,
+      ]);
+    }
+    const endRowIdx = balanceSheetRows.length; // 1-indexed
+    const subtotalFormula = group.items.length > 0 ? `SUM(C${startRowIdx}:C${endRowIdx})` : undefined;
+    const subtotalRowIdx = balanceSheetRows.length + 1;
+    liabSubtotalRows.push(subtotalRowIdx);
+
+    balanceSheetRows.push([
+      xlCell(`SUBTOTAL ${group.clsLabel.toUpperCase()}`, xlStyles.subtotalText),
+      xlCell('', xlStyles.subtotalText),
+      xlCell(group.total, xlStyles.subtotalNum, subtotalFormula),
+      null,
+      null,
+      null,
+      null,
+    ]);
+  }
+
+  const liabSumFormula = liabSubtotalRows.length > 0 ? liabSubtotalRows.map((r) => `C${r}`).join('+') : undefined;
+  const totalLiabRowIdx = balanceSheetRows.length + 1;
+  balanceSheetRows.push([
+    xlCell('TOTAL LIABILITIES', xlStyles.grandTotalText),
+    xlCell('', xlStyles.grandTotalText),
+    xlCell(totalLiabilities, xlStyles.grandTotalNum, liabSumFormula),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  balanceSheetRows.push([xlCell('', xlStyles.td()), null, null, null, null, null, null]);
+  balanceSheetRows.push([
+    xlCell('=== OWNER EQUITY & NET POSITION ===', xlStyles.section),
+    null,
+    xlCell('Value (MYR)', xlStyles.thRight),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  const netWorthRowIdx = balanceSheetRows.length + 1;
+  const netWorthFormula = `C${totalAssetsRowIdx}-C${totalLiabRowIdx}`;
+  balanceSheetRows.push([
+    xlCell('TOTAL NET WORTH (Assets - Liabilities)', xlStyles.grandTotalText),
+    xlCell('', xlStyles.grandTotalText),
+    xlCell(netWorth, xlStyles.grandTotalNum, netWorthFormula),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  const totalLiabEquityFormula = `C${totalLiabRowIdx}+C${netWorthRowIdx}`;
+  balanceSheetRows.push([
+    xlCell('TOTAL LIABILITIES & EQUITY', xlStyles.subtotalText),
+    xlCell('', xlStyles.subtotalText),
+    xlCell(totalLiabilities + netWorth, xlStyles.subtotalNum, totalLiabEquityFormula),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  const balanceCheckFormula = `IF(ABS(C${totalAssetsRowIdx}-(C${totalLiabRowIdx}+C${netWorthRowIdx}))<0.01,"BALANCED (Assets = Liabilities + Equity) ✓","UNBALANCED")`;
+  balanceSheetRows.push([
+    xlCell('BALANCE CHECK', xlStyles.subtotalText),
+    xlCell('', xlStyles.subtotalText),
+    xlCell(balanced ? 'BALANCED (Assets = Liabilities + Equity)' : 'UNBALANCED', balanced ? xlStyles.badgeHealthy : xlStyles.badgeWarning, balanceCheckFormula),
+    null,
+    null,
+    null,
+    null,
+  ]);
+
+  appendSheet('Balance Sheet', balanceSheetRows, [44, 22, 20, 18, 12, 14, 14], {
+    merges: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }],
+    rowHeights: [36, 20, 20, 20, 20, 14, 26],
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Transactions Sheet (Audit Ledger with AutoFilter)
+  // -------------------------------------------------------------------------
+  const transactionRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [
+      xlCell('Date', xlStyles.thCenter),
+      xlCell('Type', xlStyles.thCenter),
+      xlCell('Category', xlStyles.th),
+      xlCell('Merchant', xlStyles.th),
+      xlCell('Amount', xlStyles.thRight),
+      xlCell('Direction', xlStyles.thCenter),
+      xlCell('Currency', xlStyles.thCenter),
+      xlCell('Native amount', xlStyles.thRight),
+      xlCell('Source', xlStyles.thCenter),
+      xlCell('Note', xlStyles.th),
+    ],
+  ];
+
+  for (let idx = 0; idx < data.transactions.length; idx++) {
+    const t = data.transactions[idx];
+    const category = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : t.type === 'transfer' ? 'Transfer' : 'Uncategorized');
+    const isZebra = idx % 2 === 1;
+    const direction = t.type === 'income' ? 'In' : t.type === 'transfer' ? 'Transfer' : 'Out';
+    const dirBadge = t.type === 'income' ? xlStyles.badgeHealthy : t.type === 'transfer' ? xlStyles.badgeBlue : xlStyles.badgeWarning;
+
+    transactionRows.push([
+      xlCell(t.date || 'N/A', xlStyles.tdDate(isZebra)),
+      xlCell(t.type, xlStyles.tdCenter(isZebra)),
+      xlCell(category, xlStyles.td(isZebra)),
+      xlCell(t.merchantRaw || t.merchantKey || 'N/A', xlStyles.td(isZebra)),
+      xlCell(Math.abs(t.amount), xlStyles.tdNum(isZebra)),
+      xlCell(direction, dirBadge),
+      xlCell(t.currency, xlStyles.tdCenter(isZebra)),
+      xlCell(Math.abs(t.nativeAmount ?? t.amount), xlStyles.tdNum(isZebra)),
+      xlCell(t.source, xlStyles.tdCenter(isZebra)),
+      xlCell(t.remark || '', xlStyles.td(isZebra)),
+    ]);
+  }
+  appendSheet('Transactions', transactionRows, [14, 12, 24, 32, 16, 12, 12, 16, 12, 36], {
+    tableHeaderRow: 0,
+    rowHeights: [24],
+  });
+
+  // -------------------------------------------------------------------------
+  // 5. Categories Sheet (Pareto 80/20 Spending Analysis)
+  // -------------------------------------------------------------------------
+  const categoryRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [
+      xlCell('Category', xlStyles.th),
+      xlCell('Type', xlStyles.thCenter),
+      xlCell('Amount', xlStyles.thRight),
+      xlCell('Share of type', xlStyles.thRight),
+      xlCell('Rank', xlStyles.thCenter),
+      xlCell('Cumulative share', xlStyles.thRight),
+      xlCell('Pareto classification', xlStyles.thCenter),
+      xlCell('Transactions', xlStyles.thCenter),
+      xlCell('Avg per txn', xlStyles.thRight),
+    ],
+  ];
+
+  const txnCountsByCat = new Map<string, number>();
+  for (const t of data.transactions) {
+    const key = t.categoryId || (t.type === 'income' ? 'income' : 'uncategorized');
+    txnCountsByCat.set(key, (txnCountsByCat.get(key) || 0) + 1);
+  }
+
+  for (let idx = 0; idx < topExpensesWithPareto.length; idx++) {
+    const item = topExpensesWithPareto[idx];
+    const cat = data.categories.find((c) => c.label === item.categoryLabel);
+    const count = cat ? (txnCountsByCat.get(cat.id) || 0) : 0;
+    const avgTicket = count > 0 ? item.amount / count : item.amount;
+    const isZebra = idx % 2 === 1;
+
+    categoryRows.push([
+      xlCell(item.categoryLabel, xlStyles.td(isZebra)),
+      xlCell('Expense', xlStyles.tdCenter(isZebra)),
+      xlCell(item.amount, xlStyles.tdNum(isZebra)),
+      xlCell(`${item.percentage}%`, xlStyles.tdPercent(isZebra)),
+      xlCell(`#${item.rank}`, xlStyles.tdCenter(isZebra)),
+      xlCell(`${item.cumPercentage.toFixed(1)}%`, xlStyles.tdPercent(isZebra)),
+      xlCell(item.paretoClassification, item.paretoClassification.startsWith('Core') ? xlStyles.badgeHealthy : xlStyles.badgeNeutral),
+      xlCell(count, xlStyles.tdInt(isZebra)),
+      xlCell(avgTicket, xlStyles.tdNum(isZebra)),
+    ]);
+  }
+
+  const sortedIncomes = [...data.incomeStatement.incomeRows].sort((a, b) => b.amount - a.amount);
+  let cumIncome = 0;
+  for (let idx = 0; idx < sortedIncomes.length; idx++) {
+    const row = sortedIncomes[idx];
+    cumIncome += row.amount;
+    const cumPct = totalIncome > 0 ? (cumIncome / totalIncome) * 100 : 0;
+    const cat = data.categories.find((c) => c.label === row.categoryLabel);
+    const count = cat ? (txnCountsByCat.get(cat.id) || 0) : 0;
+    const avgTicket = count > 0 ? row.amount / count : row.amount;
+    const isZebra = idx % 2 === 1;
+
+    categoryRows.push([
+      xlCell(row.categoryLabel, xlStyles.td(isZebra)),
+      xlCell('Income', xlStyles.tdCenter(isZebra)),
+      xlCell(row.amount, xlStyles.tdNum(isZebra)),
+      xlCell(`${row.percentage}%`, xlStyles.tdPercent(isZebra)),
+      xlCell(`#${idx + 1}`, xlStyles.tdCenter(isZebra)),
+      xlCell(`${cumPct.toFixed(1)}%`, xlStyles.tdPercent(isZebra)),
+      xlCell('Inflow Revenue', xlStyles.badgeBlue),
+      xlCell(count, xlStyles.tdInt(isZebra)),
+      xlCell(avgTicket, xlStyles.tdNum(isZebra)),
+    ]);
+  }
+  appendSheet('Categories', categoryRows, [30, 14, 18, 16, 10, 18, 22, 14, 16], {
+    tableHeaderRow: 0,
+    rowHeights: [24],
+  });
+
+  // -------------------------------------------------------------------------
+  // 6. Accounts Sheet (Asset & Liability Register)
+  // -------------------------------------------------------------------------
+  const accountRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [
+      xlCell('Account', xlStyles.th),
+      xlCell('Kind', xlStyles.thCenter),
+      xlCell('Class', xlStyles.thCenter),
+      xlCell('Value (MYR)', xlStyles.thRight),
+      xlCell('Native value', xlStyles.thRight),
+      xlCell('Currency', xlStyles.thCenter),
+      xlCell('Symbol', xlStyles.thCenter),
+      xlCell('Quantity', xlStyles.thRight),
+    ],
+  ];
+
+  let acctIdx = 0;
+  for (const group of [...data.balanceSheet.assetGroups, ...data.balanceSheet.liabilityGroups]) {
+    for (const item of group.items) {
+      const isZebra = acctIdx % 2 === 1;
+      accountRows.push([
+        xlCell(item.name, xlStyles.td(isZebra)),
+        xlCell(group.kind === 'asset' ? 'Asset' : 'Liability', group.kind === 'asset' ? xlStyles.badgeBlue : xlStyles.badgeWarning),
+        xlCell(group.clsLabel, xlStyles.tdCenter(isZebra)),
+        xlCell(item.value, xlStyles.tdNum(isZebra)),
+        xlCell(item.nativeValue, xlStyles.tdNum(isZebra)),
+        xlCell(item.currency, xlStyles.tdCenter(isZebra)),
+        xlCell(item.symbol, xlStyles.tdCenter(isZebra)),
+        xlCell(item.quantity, xlStyles.tdNum(isZebra)),
+      ]);
+      acctIdx++;
+    }
+  }
+  appendSheet('Accounts', accountRows, [32, 14, 22, 18, 18, 12, 14, 14], {
+    tableHeaderRow: 0,
+    rowHeights: [24],
+  });
+
+  // -------------------------------------------------------------------------
+  // 7. Monthly Trends Sheet (Financial Trajectory & MoM Growth)
+  // -------------------------------------------------------------------------
+  const trendRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [
+      xlCell('Month', xlStyles.thCenter),
+      xlCell('Income', xlStyles.thRight),
+      xlCell('Spending', xlStyles.thRight),
+      xlCell('Net saved', xlStyles.thRight),
+      xlCell('Savings rate', xlStyles.thRight),
+      xlCell('Net worth', xlStyles.thRight),
+      xlCell('MoM spending change', xlStyles.thCenter),
+    ],
+  ];
+
+  let sumIncome = 0;
+  let sumExpense = 0;
+  let sumSaved = 0;
+  for (let idx = 0; idx < data.statistics.monthlyTrends.length; idx++) {
+    const month = data.statistics.monthlyTrends[idx];
+    const prevMonth = idx > 0 ? data.statistics.monthlyTrends[idx - 1] : null;
+    const momChange = prevMonth && prevMonth.expense > 0
+      ? ((month.expense - prevMonth.expense) / prevMonth.expense) * 100
+      : null;
+    const momStr = momChange != null ? `${momChange >= 0 ? '+' : ''}${momChange.toFixed(1)}%` : 'Baseline';
+    const isZebra = idx % 2 === 1;
+
+    sumIncome += month.income;
+    sumExpense += month.expense;
+    sumSaved += month.netSavings;
+
+    trendRows.push([
+      xlCell(month.monthKey, xlStyles.tdCenter(isZebra)),
+      xlCell(month.income, xlStyles.tdNum(isZebra)),
+      xlCell(month.expense, xlStyles.tdNum(isZebra)),
+      xlCell(month.netSavings, xlStyles.tdNum(isZebra)),
+      xlCell(`${month.savingsRate}%`, xlStyles.tdPercent(isZebra)),
+      xlCell(month.netWorth, xlStyles.tdNum(isZebra)),
+      xlCell(momStr, momChange != null && momChange > 15 ? xlStyles.badgeWarning : momChange != null && momChange < -10 ? xlStyles.badgeHealthy : xlStyles.tdCenter(isZebra)),
+    ]);
+  }
+
+  const trendsCount = data.statistics.monthlyTrends.length;
+  if (trendsCount > 0) {
+    const avgInc = sumIncome / trendsCount;
+    const avgExp = sumExpense / trendsCount;
+    const avgSav = sumSaved / trendsCount;
+    const avgRate = sumIncome > 0 ? (sumSaved / sumIncome) * 100 : 0;
+    const latestNetWorth = data.statistics.monthlyTrends[trendsCount - 1].netWorth;
+
+    trendRows.push([
+      xlCell('TOTAL / CUMULATIVE', xlStyles.subtotalText),
+      xlCell(sumIncome, xlStyles.subtotalNum),
+      xlCell(sumExpense, xlStyles.subtotalNum),
+      xlCell(sumSaved, xlStyles.subtotalNum),
+      xlCell(`${avgRate.toFixed(1)}%`, xlStyles.subtotalPercent),
+      xlCell(latestNetWorth, xlStyles.subtotalNum),
+      xlCell('', xlStyles.subtotalText),
+    ]);
+
+    trendRows.push([
+      xlCell('MONTHLY AVERAGE', xlStyles.grandTotalText),
+      xlCell(avgInc, xlStyles.grandTotalNum),
+      xlCell(avgExp, xlStyles.grandTotalNum),
+      xlCell(avgSav, xlStyles.grandTotalNum),
+      xlCell(`${avgRate.toFixed(1)}%`, xlStyles.grandTotalPercent),
+      xlCell(latestNetWorth, xlStyles.grandTotalNum),
+      xlCell('Mean / Month', xlStyles.grandTotalText),
+    ]);
+  }
+
+  appendSheet('Monthly Trends', trendRows, [16, 18, 18, 18, 18, 20, 22], {
+    tableHeaderRow: 0,
+    rowHeights: [24],
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. E-Wallets Sheet (Digital Payment & Lifestyle Wallet Activity)
+  // -------------------------------------------------------------------------
+  const ewalletTxns = data.transactions.filter((t) => isEwalletTransaction(t, data.accounts));
+  const ewalletRows: (string | number | boolean | ExcelCell | null)[][] = [
+    [
+      xlCell('Date', xlStyles.thCenter),
+      xlCell('E-Wallet provider', xlStyles.th),
+      xlCell('Type', xlStyles.thCenter),
+      xlCell('Category', xlStyles.th),
+      xlCell('Merchant', xlStyles.th),
+      xlCell('Amount', xlStyles.thRight),
+      xlCell('Direction', xlStyles.thCenter),
+      xlCell('Source', xlStyles.thCenter),
+      xlCell('Note', xlStyles.th),
+    ],
+  ];
+
+  for (let idx = 0; idx < ewalletTxns.length; idx++) {
+    const t = ewalletTxns[idx];
+    const category = (t.categoryId ? catMap.get(t.categoryId) : null) || (t.type === 'income' ? 'Income' : 'Uncategorized');
+    const isZebra = idx % 2 === 1;
+    const direction = t.type === 'income' ? 'In' : 'Out';
+
+    ewalletRows.push([
+      xlCell(t.date || 'N/A', xlStyles.tdDate(isZebra)),
+      xlCell(getEwalletProviderName(t, data.accounts), xlStyles.td(isZebra)),
+      xlCell(t.type, xlStyles.tdCenter(isZebra)),
+      xlCell(category, xlStyles.td(isZebra)),
+      xlCell(t.merchantRaw || t.merchantKey || 'N/A', xlStyles.td(isZebra)),
+      xlCell(Math.abs(t.amount), xlStyles.tdNum(isZebra)),
+      xlCell(direction, t.type === 'income' ? xlStyles.badgeHealthy : xlStyles.badgeWarning),
+      xlCell(t.source, xlStyles.tdCenter(isZebra)),
+      xlCell(t.remark || '', xlStyles.td(isZebra)),
+    ]);
+  }
+  appendSheet('E-Wallets', ewalletRows, [14, 24, 12, 24, 32, 16, 12, 12, 36], {
+    tableHeaderRow: 0,
+    rowHeights: [24],
+  });
 
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Uint8Array(out);
@@ -1106,10 +1890,407 @@ export function generateHTMLReport(data: FinancialReportData): string {
 }
 
 // ---------------------------------------------------------------------------
-// 4. PRINTABLE FORMAL PDF HTML TEMPLATE
+// 4. PLAIN-LANGUAGE SPENDING SUMMARY
 // ---------------------------------------------------------------------------
 
-export function generatePrintablePDFHtml(data: FinancialReportData): string {
+/**
+ * A human-readable spending report for people who want to answer one question:
+ * "Where did my money go?" It deliberately excludes income statements, balance
+ * sheets, net worth, transfers, and the full transaction ledger.
+ */
+export function generateSpendingSummaryPDFHtml(
+  data: FinancialReportData,
+  language: 'en' | 'zh' = 'en',
+): string {
+  const isZh = language === 'zh';
+  const displayCode = data.displayCurrency || 'MYR';
+  const displayRates = data.displayRates || {};
+  const fmtC = (amount: number) => formatCurrency(amount, displayCode, displayRates);
+  const categoryById = new Map(data.categories.map((category) => [category.id, category.label]));
+  const expenses = data.transactions.filter((transaction) => transaction.type === 'expense');
+  const total = Math.round(expenses.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0) * 100) / 100;
+
+  const merchantTotals = new Map<string, number>();
+  for (const transaction of expenses) {
+    const merchant = transaction.merchantRaw || transaction.merchantKey || (isZh ? '未命名消费' : 'Unnamed expense');
+    merchantTotals.set(merchant, (merchantTotals.get(merchant) ?? 0) + Math.abs(transaction.amount));
+  }
+  const topMerchants = [...merchantTotals.entries()]
+    .map(([merchant, amount]) => ({ merchant, amount: Math.round(amount * 100) / 100 }))
+    .sort((a, b) => b.amount - a.amount || a.merchant.localeCompare(b.merchant))
+    .slice(0, 4);
+  const largestPurchases = [...expenses]
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount) || (b.date || '').localeCompare(a.date || ''))
+    .slice(0, 5);
+
+  const categoryRows = data.incomeStatement.expenseRows.map((row) => `
+    <div class="category-row">
+      <div class="row-copy">
+        <strong>${escapeHtml(row.categoryLabel)}</strong>
+        <span>${row.percentage.toFixed(1)}%</span>
+      </div>
+      <div class="bar"><span style="width: ${Math.max(2, Math.min(100, row.percentage))}%"></span></div>
+      <div class="row-amount">${fmtC(row.amount)}</div>
+    </div>
+  `).join('');
+
+  const merchantRows = topMerchants.map((row, index) => `
+    <tr>
+      <td class="rank"><span class="rank-badge">${index + 1}</span></td>
+      <td class="merchant-name">${escapeHtml(row.merchant)}</td>
+      <td class="amount">${fmtC(row.amount)}</td>
+    </tr>
+  `).join('');
+
+  const purchaseRows = largestPurchases.map((transaction) => `
+    <tr>
+      <td style="color: #617b70; white-space: nowrap;">${escapeHtml(transaction.date || (isZh ? '无日期' : 'No date'))}</td>
+      <td>
+        <strong style="color: #1a3328;">${escapeHtml(transaction.merchantRaw || transaction.merchantKey || (isZh ? '未命名消费' : 'Unnamed expense'))}</strong>
+        <span class="cat-tag">${escapeHtml((transaction.categoryId ? categoryById.get(transaction.categoryId) : null) || (isZh ? '未分类' : 'Uncategorized'))}</span>
+      </td>
+      <td class="amount">${fmtC(Math.abs(transaction.amount))}</td>
+    </tr>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="${isZh ? 'zh-CN' : 'en'}">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${isZh ? '消费概览' : 'Spending summary'} — ${escapeHtml(data.period.label)}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 18mm;
+    }
+    * { box-sizing: border-box; }
+    html {
+      background-color: #f4f7f5;
+    }
+    body {
+      margin: 0;
+      padding: 32px 20px;
+      color: #17352a;
+      background-color: #f4f7f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .report-page {
+      max-width: 840px;
+      margin: 0 auto;
+      padding: 40px 44px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+      border: 1px solid #e1ece6;
+    }
+    header {
+      padding-bottom: 18pt;
+      border-bottom: 1px solid #dce8e1;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16pt;
+    }
+    .brand-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #edf7f2;
+      border: 1px solid #d0e7dc;
+      border-radius: 6px;
+      font-size: 8pt;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: #12604b;
+      text-transform: uppercase;
+      margin-bottom: 8pt;
+    }
+    h1 {
+      margin: 0;
+      font-size: 24pt;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #142b20;
+    }
+    .period-badge {
+      display: inline-block;
+      margin-top: 6pt;
+      font-size: 10pt;
+      color: #4f685d;
+      font-weight: 500;
+    }
+    .header-meta {
+      text-align: right;
+      font-size: 8.5pt;
+      color: #6b8277;
+    }
+    .total-hero {
+      margin: 20pt 0 24pt;
+      padding: 20pt 22pt;
+      border-radius: 14pt;
+      background: linear-gradient(135deg, #edf7f2 0%, #e5f3eb 100%);
+      border: 1px solid #cce5d7;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20pt;
+    }
+    .total-label {
+      color: #4a685c;
+      font-size: 9.5pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .total-amount {
+      display: block;
+      margin-top: 4pt;
+      color: #105944;
+      font-size: 28pt;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums;
+    }
+    .total-sub {
+      color: #617b70;
+      font-size: 9pt;
+      margin-top: 4pt;
+    }
+    .total-pill {
+      padding: 6pt 12pt;
+      background: #ffffff;
+      border: 1px solid #c5e2d2;
+      border-radius: 999px;
+      color: #12604b;
+      font-weight: 700;
+      font-size: 9pt;
+      white-space: nowrap;
+    }
+    section {
+      margin-top: 24pt;
+      break-inside: avoid;
+    }
+    h2 {
+      margin: 0 0 12pt;
+      font-size: 14pt;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      color: #17352a;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .category-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 90pt;
+      column-gap: 14pt;
+      margin: 0 0 12pt;
+      padding: 4pt 0;
+    }
+    .row-copy {
+      display: flex;
+      justify-content: space-between;
+      gap: 10pt;
+      font-size: 10pt;
+    }
+    .row-copy strong {
+      color: #1a3328;
+    }
+    .row-copy span {
+      color: #617b70;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .bar {
+      height: 7pt;
+      margin-top: 6pt;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e8f0ec;
+    }
+    .bar span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #21845f, #2fa376);
+    }
+    .row-amount {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      align-self: center;
+      text-align: right;
+      font-weight: 700;
+      font-size: 11pt;
+      color: #12604b;
+      font-variant-numeric: tabular-nums;
+    }
+    .two-column {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 22pt;
+      align-items: start;
+    }
+    .card-panel {
+      border: 1px solid #e2ebe5;
+      border-radius: 12pt;
+      padding: 14pt 16pt;
+      background: #fafcfb;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    td {
+      padding: 8pt 0;
+      border-bottom: 1px solid #e7eeea;
+      vertical-align: middle;
+      font-size: 9.5pt;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    td + td {
+      padding-left: 10pt;
+    }
+    .rank-badge {
+      width: 20pt;
+      height: 20pt;
+      border-radius: 10pt;
+      background: #edf7f2;
+      color: #12604b;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 8.5pt;
+    }
+    .merchant-name {
+      font-weight: 600;
+      color: #1c3327;
+    }
+    .amount {
+      text-align: right;
+      white-space: nowrap;
+      font-weight: 700;
+      color: #17352a;
+      font-variant-numeric: tabular-nums;
+    }
+    .cat-tag {
+      display: inline-block;
+      margin-top: 2pt;
+      font-size: 8pt;
+      color: #617b70;
+      background: #eef3f0;
+      padding: 1pt 6pt;
+      border-radius: 4pt;
+    }
+    .empty {
+      color: #71837b;
+      padding: 12pt 0;
+      font-style: italic;
+    }
+    footer {
+      margin-top: 32pt;
+      padding-top: 14pt;
+      border-top: 1px solid #dce8e1;
+      display: flex;
+      justify-content: space-between;
+      color: #7a8c84;
+      font-size: 8.5pt;
+    }
+    @media print {
+      html, body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .report-page {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+      }
+    }
+    @media screen and (max-width: 620px) {
+      body { padding: 16px 10px; }
+      .report-page { padding: 22px 16px; border-radius: 10px; }
+      .two-column { grid-template-columns: 1fr; }
+      .total-hero { flex-direction: column; align-items: flex-start; }
+      header { flex-direction: column; align-items: flex-start; }
+      .header-meta { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-page">
+    <header>
+      <div>
+        <div class="brand-tag">Pip Finance &bull; ${isZh ? '消费概览' : 'Spending summary'}</div>
+        <h1>${isZh ? '钱都花到哪里去了' : 'Where your money went'}</h1>
+        <div class="period-badge">${escapeHtml(data.period.label)}</div>
+      </div>
+      <div class="header-meta">
+        <div><strong>${isZh ? '生成日期' : 'Generated'}:</strong> ${escapeHtml(data.generatedAt.slice(0, 10))}</div>
+        <div style="margin-top: 2pt;"><strong>${isZh ? '币种' : 'Currency'}:</strong> ${escapeHtml(displayCode)}</div>
+      </div>
+    </header>
+
+    <div class="total-hero">
+      <div>
+        <span class="total-label">${isZh ? '已记录支出' : 'Recorded spending'}</span>
+        <span class="total-amount">${fmtC(total)}</span>
+        <div class="total-sub">${isZh ? `${expenses.length} 笔消费，不含账户间转账` : `${expenses.length} purchases · transfers excluded`}</div>
+      </div>
+      <div class="total-pill">${isZh ? `${data.incomeStatement.expenseRows.length} 个支出分类` : `${data.incomeStatement.expenseRows.length} categories`}</div>
+    </div>
+
+    <section>
+      <h2>${isZh ? '按类别查看' : 'By category'}</h2>
+      <div style="background: #ffffff; border: 1px solid #e2ebe5; border-radius: 12pt; padding: 14pt 18pt;">
+        ${categoryRows || `<div class="empty">${isZh ? '此期间没有记录消费。' : 'No spending was recorded for this period.'}</div>`}
+      </div>
+    </section>
+
+    <div class="two-column" style="margin-top: 24pt;">
+      <section>
+        <h2>${isZh ? '常去商家' : 'Top merchants'}</h2>
+        <div class="card-panel">
+          ${merchantRows ? `<table>${merchantRows}</table>` : `<div class="empty">${isZh ? '暂无商家记录。' : 'No merchants to show.'}</div>`}
+        </div>
+      </section>
+      <section>
+        <h2>${isZh ? '最大笔消费' : 'Largest purchases'}</h2>
+        <div class="card-panel">
+          ${purchaseRows ? `<table>${purchaseRows}</table>` : `<div class="empty">${isZh ? '暂无消费记录。' : 'No purchases to show.'}</div>`}
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      <div>${isZh ? '由 Pip 生成 · 个人消费概览' : 'Generated by Pip · Personal Spending Summary'}</div>
+      <div>${escapeHtml(data.userName)} &bull; ${escapeHtml(data.period.label)}</div>
+    </footer>
+  </div>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
+// 5. PRINTABLE FORMAL PDF HTML TEMPLATE (EXECUTIVE FINANCIAL STATEMENT)
+// ---------------------------------------------------------------------------
+
+export function generatePrintablePDFHtml(
+  data: FinancialReportData,
+  language: 'en' | 'zh' = 'en',
+): string {
+  const isZh = language === 'zh';
   const catMap = new Map<string, string>();
   for (const c of data.categories) catMap.set(c.id, c.label);
   const displayCode = data.displayCurrency || 'MYR';
@@ -1117,335 +2298,493 @@ export function generatePrintablePDFHtml(data: FinancialReportData): string {
   const fmtC = (amt: number) => formatCurrency(amt, displayCode, displayRates);
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${isZh ? 'zh-CN' : 'en'}">
 <head>
-  <meta charset="UTF-8">
-  <title>Financial Statement - ${escapeHtml(data.userName)}</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${isZh ? '财务状况与经营成果报表' : 'Financial Statement'} — ${escapeHtml(data.userName)}</title>
   <style>
     @page {
       size: A4;
-      margin: 15mm 15mm 20mm 15mm;
+      margin: 16mm 18mm;
+    }
+    * { box-sizing: border-box; }
+    html {
+      background-color: #f4f7f5;
     }
     body {
-      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      color: #111;
+      margin: 0;
+      padding: 32px 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Helvetica, Arial, sans-serif;
+      color: #17352a;
       font-size: 9.5pt;
-      line-height: 1.35;
-      background: #fff;
+      line-height: 1.45;
+      background-color: #f4f7f5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .report-page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 44px 50px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+      border: 1px solid #e1ece6;
     }
     .header {
-      border-bottom: 2pt solid #111;
-      padding-bottom: 8pt;
-      margin-bottom: 12pt;
-    }
-    .header h1 {
-      font-size: 16pt;
-      font-weight: bold;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin: 0 0 2pt 0;
-    }
-    .header .sub {
-      font-size: 9pt;
-      color: #444;
-    }
-    .meta-grid {
+      border-bottom: 2px solid #17352a;
+      padding-bottom: 14pt;
+      margin-bottom: 14pt;
       display: flex;
       justify-content: space-between;
-      margin-bottom: 12pt;
+      align-items: flex-start;
+      gap: 16pt;
+    }
+    .brand-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      background: #edf7f2;
+      border: 1px solid #cbe5d7;
+      border-radius: 6px;
+      font-size: 8pt;
+      font-weight: 700;
+      color: #12604b;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 6pt;
+    }
+    .header h1 {
+      font-size: 18pt;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0 0 4pt 0;
+      color: #142b20;
+    }
+    .header .sub {
+      font-size: 9.5pt;
+      color: #557064;
+    }
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10pt;
+      margin-bottom: 16pt;
       font-size: 8.5pt;
-      background: #f8f8f8;
-      padding: 6pt 10pt;
-      border: 0.5pt solid #eee;
+      background: #f8faf9;
+      padding: 10pt 14pt;
+      border-radius: 10pt;
+      border: 1px solid #e2ebe5;
+    }
+    .meta-item .meta-lbl {
+      color: #647d72;
+      font-size: 7.5pt;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .meta-item .meta-val {
+      color: #17352a;
+      font-weight: 700;
+      font-size: 9.5pt;
+      margin-top: 2pt;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12pt;
+      margin-bottom: 18pt;
+    }
+    .kpi-card {
+      border: 1px solid #dbe7df;
+      padding: 12pt 14pt;
+      border-radius: 12pt;
+      background: #ffffff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+    }
+    .kpi-card.hero {
+      background: #edf7f2;
+      border-color: #c5e3d3;
+    }
+    .kpi-title {
+      font-size: 8pt;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: #557064;
+      letter-spacing: 0.04em;
+    }
+    .kpi-val {
+      font-size: 15pt;
+      font-weight: 800;
+      margin-top: 4pt;
+      color: #17352a;
+      font-variant-numeric: tabular-nums;
+    }
+    .kpi-val.inc { color: #15803d; }
+    .kpi-val.exp { color: #b91c1c; }
+    .kpi-sub {
+      font-size: 8pt;
+      color: #6b8277;
+      margin-top: 3pt;
     }
     .section-title {
-      font-size: 11pt;
-      font-weight: bold;
+      font-size: 11.5pt;
+      font-weight: 800;
       text-transform: uppercase;
-      border-bottom: 1pt solid #333;
-      padding-bottom: 3pt;
-      margin-top: 14pt;
-      margin-bottom: 6pt;
+      border-bottom: 1.5pt solid #17352a;
+      padding-bottom: 4pt;
+      margin-top: 18pt;
+      margin-bottom: 8pt;
       letter-spacing: 0.03em;
+      color: #142b20;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
     table {
       width: 100%;
       border-collapse: collapse;
       margin-bottom: 10pt;
-      font-size: 8.5pt;
+      font-size: 9pt;
     }
     th, td {
-      padding: 4pt 6pt;
+      padding: 6pt 8pt;
       text-align: left;
     }
     th {
-      border-bottom: 1pt solid #888;
-      font-weight: bold;
+      border-bottom: 1.5pt solid #8fa599;
+      font-weight: 700;
       font-size: 8pt;
       text-transform: uppercase;
+      color: #4a6357;
+      background: #fafcfb;
+    }
+    td {
+      border-bottom: 1px solid #e7eeea;
     }
     td.amount, th.amount {
       text-align: right;
       font-variant-numeric: tabular-nums;
-      font-family: 'Courier New', Courier, monospace;
+      font-weight: 600;
     }
     tr.subtotal td {
-      border-top: 0.5pt solid #888;
-      font-weight: bold;
-      background: #fafafa;
+      border-top: 1.5pt solid #8fa599;
+      border-bottom: 1.5pt solid #8fa599;
+      font-weight: 700;
+      background: #f4f8f6;
+      color: #142b20;
     }
     tr.grand-total td {
-      border-top: 1.5pt solid #111;
-      border-bottom: 2pt double #111;
-      font-weight: bold;
-      font-size: 9.5pt;
-      background: #f0f0f0;
+      border-top: 2pt solid #17352a;
+      border-bottom: 3px double #17352a;
+      font-weight: 800;
+      font-size: 10pt;
+      background: #edf7f2;
+      color: #105944;
     }
     .two-col {
-      display: flex;
-      gap: 14pt;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18pt;
     }
-    .col {
-      flex: 1;
+    .badge-status {
+      display: inline-block;
+      font-size: 7.5pt;
+      font-weight: 700;
+      padding: 2pt 8pt;
+      border-radius: 999px;
+      background: #edf7f2;
+      color: #15803d;
+      border: 1px solid #c2e5d2;
     }
-    .kpi-box {
-      border: 1pt solid #ccc;
-      padding: 8pt;
-      margin-bottom: 12pt;
-      background: #fafafa;
-      display: flex;
-      justify-content: space-around;
-      text-align: center;
-      page-break-inside: avoid;
+    .page-break {
+      page-break-before: always;
     }
-    .kpi-item .label { font-size: 8pt; text-transform: uppercase; color: #555; }
-    .kpi-item .val { font-size: 11pt; font-weight: bold; font-family: 'Courier New', Courier, monospace; }
-    .page-break { page-break-before: always; }
     .footer {
-      margin-top: 20pt;
-      border-top: 1pt solid #ccc;
-      padding-top: 6pt;
+      margin-top: 26pt;
+      border-top: 1px solid #dce8e1;
+      padding-top: 10pt;
       font-size: 8pt;
-      color: #666;
+      color: #6d8479;
       display: flex;
       justify-content: space-between;
+    }
+    @media print {
+      html, body {
+        background: #ffffff !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .report-page {
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+      }
+      .card, table, tr {
+        break-inside: avoid;
+      }
+    }
+    @media screen and (max-width: 680px) {
+      body { padding: 16px 10px; }
+      .report-page { padding: 22px 16px; border-radius: 10px; }
+      .two-col { grid-template-columns: 1fr; }
+      .meta-grid { grid-template-columns: repeat(2, 1fr); }
+      .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+      .header { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Statement of Financial Condition &amp; Operations</h1>
-    <div class="sub">Traditional Double-Entry Accounting Ledger &amp; Statistics</div>
-  </div>
+  <div class="report-page">
+    <div class="header">
+      <div>
+        <div class="brand-pill">Pip Finance &bull; ${isZh ? '专业财务报表' : 'Executive Financial Statement'}</div>
+        <h1>Statement of Financial Condition &amp; Operations</h1>
+        <div class="sub">${isZh ? '双式记账系统 · 损益表 (P&L) 与资产负债表 (SOFP)' : 'Traditional Double-Entry Accounting Ledger & Statistics'}</div>
+      </div>
+      <div style="text-align: right;">
+        <span class="badge-status">${data.balanceSheet.balanced ? (isZh ? '对账平衡 ✓' : 'Balanced ✓') : (isZh ? '试算平衡' : 'Trial Balance')}</span>
+        <div style="font-size: 8pt; color: #647d72; margin-top: 4pt;">${isZh ? '系统参考编号' : 'Ref'}: PIP-${escapeHtml(data.period.label.replace(/[^a-zA-Z0-9]/g, ''))}</div>
+      </div>
+    </div>
 
-  <div class="meta-grid">
-    <div><strong>Name:</strong> ${escapeHtml(data.userName)}</div>
-    <div><strong>Period:</strong> ${escapeHtml(data.period.label)}</div>
-    <div><strong>As of Date:</strong> ${escapeHtml(data.balanceSheet.asOfDate)}</div>
-    <div><strong>Currency:</strong> ${escapeHtml(displayCode === 'MYR' ? 'MYR (Ringgit)' : displayCode)}</div>
-  </div>
+    <div class="meta-grid">
+      <div class="meta-item">
+        <div class="meta-lbl">${isZh ? '客户姓名' : 'Client / Name'}</div>
+        <div class="meta-val">${escapeHtml(data.userName)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-lbl">${isZh ? '报表周期' : 'Reporting Period'}</div>
+        <div class="meta-val">${escapeHtml(data.period.label)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-lbl">${isZh ? '资产负债表基准日' : 'As of Date'}</div>
+        <div class="meta-val">${escapeHtml(data.balanceSheet.asOfDate)}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-lbl">${isZh ? '记账币种' : 'Base Currency'}</div>
+        <div class="meta-val">${escapeHtml(displayCode === 'MYR' ? 'MYR (Ringgit)' : displayCode)}</div>
+      </div>
+    </div>
 
-  <!-- EXECUTIVE SUMMARY KPIS -->
-  <div class="kpi-box">
-    <div class="kpi-item">
-      <div class="label">Total Revenue</div>
-      <div class="val">${fmtC(data.incomeStatement.totalIncome)}</div>
+    <!-- EXECUTIVE SUMMARY KPIS -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-title">${isZh ? '总收入 / 流入' : 'Total Revenue'}</div>
+        <div class="kpi-val inc">${fmtC(data.incomeStatement.totalIncome)}</div>
+        <div class="kpi-sub">${isZh ? '月均' : 'Mean'}: ${fmtC(data.statistics.meanMonthlyIncome)}/mo</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">${isZh ? '总支出 / 流出' : 'Total Expenses'}</div>
+        <div class="kpi-val exp">${fmtC(data.incomeStatement.totalExpense)}</div>
+        <div class="kpi-sub">${isZh ? '月均' : 'Mean'}: ${fmtC(data.statistics.meanMonthlyExpense)}/mo</div>
+      </div>
+      <div class="kpi-card hero">
+        <div class="kpi-title">${isZh ? '净结余 / 储蓄' : 'Net Surplus / Savings'}</div>
+        <div class="kpi-val" style="color: #105944;">${fmtC(data.incomeStatement.netIncome)}</div>
+        <div class="kpi-sub">${isZh ? '储蓄率' : 'Savings Rate'}: <strong style="color: #12604b;">${data.incomeStatement.savingsRate}%</strong></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-title">${isZh ? '净资产规模' : 'Net Worth Position'}</div>
+        <div class="kpi-val">${fmtC(data.balanceSheet.netWorth)}</div>
+        <div class="kpi-sub">${isZh ? '资产' : 'Assets'}: ${fmtC(data.balanceSheet.totalAssets)}</div>
+      </div>
     </div>
-    <div class="kpi-item">
-      <div class="label">Total Expenses</div>
-      <div class="val">${fmtC(data.incomeStatement.totalExpense)}</div>
-    </div>
-    <div class="kpi-item">
-      <div class="label">Net Surplus / Savings</div>
-      <div class="val">${fmtC(data.incomeStatement.netIncome)}</div>
-    </div>
-    <div class="kpi-item">
-      <div class="label">Net Worth Position</div>
-      <div class="val">${fmtC(data.balanceSheet.netWorth)}</div>
-    </div>
-    <div class="kpi-item">
-      <div class="label">Savings Margin</div>
-      <div class="val">${data.incomeStatement.savingsRate}%</div>
-    </div>
-  </div>
 
-  <!-- INCOME STATEMENT -->
-  <div class="section-title">I. Income Statement (Statement of Profit &amp; Loss)</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 50%;">Account / Category Description</th>
-        <th class="amount" style="width: 20%;">Share (%)</th>
-        <th class="amount" style="width: 30%;">Amount (${escapeHtml(displayCode)})</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr><td colspan="3" style="font-weight: bold; background: #f0f0f0;">Revenues &amp; Inflows</td></tr>
-      ${data.incomeStatement.incomeRows.map((r) => `
+    <!-- INCOME STATEMENT -->
+    <div class="section-title">
+      <span>I. Income Statement (Statement of Profit &amp; Loss)</span>
+      <span style="font-size: 8pt; font-weight: normal; color: #5f7a6e;">${isZh ? '期间累计' : 'Period Total'}</span>
+    </div>
+    <table>
+      <thead>
         <tr>
-          <td style="padding-left: 12pt;">${escapeHtml(r.categoryLabel)}</td>
-          <td class="amount">${r.percentage}%</td>
-          <td class="amount">${fmtC(r.amount)}</td>
+          <th style="width: 52%;">${isZh ? '账户与类别说明' : 'Account / Category Description'}</th>
+          <th class="amount" style="width: 18%;">${isZh ? '占比' : 'Share (%)'}</th>
+          <th class="amount" style="width: 30%;">${isZh ? '金额' : 'Amount'} (${escapeHtml(displayCode)})</th>
         </tr>
-      `).join('')}
-      <tr class="subtotal">
-        <td>TOTAL REVENUES (A)</td>
-        <td class="amount">100.0%</td>
-        <td class="amount">${fmtC(data.incomeStatement.totalIncome)}</td>
-      </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="3" style="font-weight: 700; background: #fafcfb; color: #185e3e; font-size: 8pt; letter-spacing: 0.05em; text-transform: uppercase;">&bull; ${isZh ? '营业收入与现金流入' : 'Revenues &amp; Inflows'}</td></tr>
+        ${data.incomeStatement.incomeRows.length > 0 ? data.incomeStatement.incomeRows.map((r) => `
+          <tr>
+            <td style="padding-left: 14pt;">${escapeHtml(r.categoryLabel)}</td>
+            <td class="amount" style="color: #557064;">${r.percentage}%</td>
+            <td class="amount" style="color: #15803d;">${fmtC(r.amount)}</td>
+          </tr>
+        `).join('') : `<tr><td colspan="3" style="padding-left: 14pt; color: #7a8e84; font-style: italic;">${isZh ? '此期间无收入记录' : 'No revenue recorded'}</td></tr>`}
+        <tr class="subtotal">
+          <td>TOTAL REVENUES (A)</td>
+          <td class="amount">100.0%</td>
+          <td class="amount" style="color: #15803d;">${fmtC(data.incomeStatement.totalIncome)}</td>
+        </tr>
 
-      <tr><td colspan="3" style="font-weight: bold; background: #f0f0f0; margin-top: 6pt;">Operating &amp; Living Expenses</td></tr>
-      ${data.incomeStatement.expenseRows.map((r) => `
+        <tr><td colspan="3" style="font-weight: 700; background: #fafcfb; color: #8a5a16; font-size: 8pt; letter-spacing: 0.05em; text-transform: uppercase;">&bull; ${isZh ? '日常经营与生活支出' : 'Operating &amp; Living Expenses'}</td></tr>
+        ${data.incomeStatement.expenseRows.length > 0 ? data.incomeStatement.expenseRows.map((r) => `
+          <tr>
+            <td style="padding-left: 14pt;">${escapeHtml(r.categoryLabel)}</td>
+            <td class="amount" style="color: #557064;">${r.percentage}%</td>
+            <td class="amount">${fmtC(r.amount)}</td>
+          </tr>
+        `).join('') : `<tr><td colspan="3" style="padding-left: 14pt; color: #7a8e84; font-style: italic;">${isZh ? '此期间无支出记录' : 'No expenses recorded'}</td></tr>`}
+        <tr class="subtotal">
+          <td>TOTAL EXPENSES (B)</td>
+          <td class="amount">100.0%</td>
+          <td class="amount">${fmtC(data.incomeStatement.totalExpense)}</td>
+        </tr>
+
+        <tr class="grand-total">
+          <td>NET INCOME / SURPLUS FOR PERIOD (A - B)</td>
+          <td class="amount">${data.incomeStatement.savingsRate}%</td>
+          <td class="amount">${fmtC(data.incomeStatement.netIncome)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- BALANCE SHEET -->
+    <div class="section-title" style="margin-top: 22pt;">
+      <span>II. Balance Sheet (Statement of Financial Position)</span>
+      <span style="font-size: 8pt; font-weight: normal; color: #5f7a6e;">${isZh ? '截至' : 'As of'} ${escapeHtml(data.balanceSheet.asOfDate)}</span>
+    </div>
+    <div class="two-col">
+      <!-- ASSETS -->
+      <div>
+        <table>
+          <thead>
+            <tr><th>${isZh ? '资产与持仓' : 'Assets &amp; Holdings'}</th><th class="amount">${isZh ? '价值' : 'Value'} (${escapeHtml(displayCode)})</th></tr>
+          </thead>
+          <tbody>
+            ${data.balanceSheet.assetGroups.map((g) => `
+              <tr><td colspan="2" style="font-weight: 700; background: #fafcfb; color: #185e3e; font-size: 8pt; letter-spacing: 0.04em;">&bull; ${escapeHtml(g.clsLabel)}</td></tr>
+              ${g.items.map((i) => `
+                <tr>
+                  <td style="padding-left: 10pt;">${escapeHtml(i.name)}</td>
+                  <td class="amount">${fmtC(i.value)}</td>
+                </tr>
+              `).join('')}
+            `).join('')}
+            <tr class="grand-total">
+              <td>TOTAL ASSETS</td>
+              <td class="amount">${fmtC(data.balanceSheet.totalAssets)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- LIABILITIES & EQUITY -->
+      <div>
+        <table>
+          <thead>
+            <tr><th>${isZh ? '负债与所有者权益' : 'Liabilities &amp; Obligations'}</th><th class="amount">${isZh ? '价值' : 'Value'} (${escapeHtml(displayCode)})</th></tr>
+          </thead>
+          <tbody>
+            ${data.balanceSheet.liabilityGroups.length === 0 ? `<tr><td colspan="2" style="color: #7a8e84; font-style: italic; padding: 10pt;">${isZh ? '无未清偿负债记录' : 'No outstanding debt recorded'}</td></tr>` : ''}
+            ${data.balanceSheet.liabilityGroups.map((g) => `
+              <tr><td colspan="2" style="font-weight: 700; background: #fafcfb; color: #8a5a16; font-size: 8pt; letter-spacing: 0.04em;">&bull; ${escapeHtml(g.clsLabel)}</td></tr>
+              ${g.items.map((i) => `
+                <tr>
+                  <td style="padding-left: 10pt;">${escapeHtml(i.name)}</td>
+                  <td class="amount">${fmtC(i.value)}</td>
+                </tr>
+              `).join('')}
+            `).join('')}
+            <tr class="subtotal">
+              <td>TOTAL LIABILITIES</td>
+              <td class="amount">${fmtC(data.balanceSheet.totalLiabilities)}</td>
+            </tr>
+            <tr><td colspan="2" style="font-weight: 700; background: #fafcfb; color: #12604b; font-size: 8pt; letter-spacing: 0.04em;">&bull; ${isZh ? '所有者权益' : 'Owner Equity'}</td></tr>
+            <tr>
+              <td style="padding-left: 10pt;">${isZh ? '净资产头寸' : 'Net Worth Position'}</td>
+              <td class="amount" style="font-weight: 700; color: #12604b;">${fmtC(data.balanceSheet.netWorth)}</td>
+            </tr>
+            <tr class="grand-total">
+              <td>TOTAL LIABILITIES &amp; EQUITY</td>
+              <td class="amount">${fmtC(data.balanceSheet.totalLiabilities + data.balanceSheet.netWorth)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- STATISTICAL ANALYSIS -->
+    <div class="section-title" style="margin-top: 22pt;">
+      <span>III. Key Financial Statistics &amp; Regularity</span>
+      <span style="font-size: 8pt; font-weight: normal; color: #5f7a6e;">${isZh ? '统计分布指标' : 'Distribution Metrics'}</span>
+    </div>
+    <table>
+      <thead>
+        <tr><th style="width: 44%;">${isZh ? '财务统计指标' : 'Statistical Metric'}</th><th class="amount" style="width: 24%;">${isZh ? '计算数值' : 'Calculated Value'}</th><th style="width: 32%;">${isZh ? '分析与解读' : 'Interpretation'}</th></tr>
+      </thead>
+      <tbody>
         <tr>
-          <td style="padding-left: 12pt;">${escapeHtml(r.categoryLabel)}</td>
-          <td class="amount">${r.percentage}%</td>
-          <td class="amount">${fmtC(r.amount)}</td>
+          <td>Mean (Average) Monthly Income</td>
+          <td class="amount">${fmtC(data.statistics.meanMonthlyIncome)}</td>
+          <td style="color: #557064;">${isZh ? '月均综合现金进账水平' : 'Average monthly cash intake'}</td>
         </tr>
-      `).join('')}
-      <tr class="subtotal">
-        <td>TOTAL EXPENSES (B)</td>
-        <td class="amount">100.0%</td>
-        <td class="amount">${fmtC(data.incomeStatement.totalExpense)}</td>
-      </tr>
+        <tr>
+          <td>Median Monthly Income</td>
+          <td class="amount">${fmtC(data.statistics.medianMonthlyIncome)}</td>
+          <td style="color: #557064;">${isZh ? '月度收入中位数基准' : 'Central 50th percentile floor'}</td>
+        </tr>
+        <tr>
+          <td>Income Standard Deviation</td>
+          <td class="amount">${fmtC(data.statistics.stdDevMonthlyIncome)}</td>
+          <td style="color: #557064;">${isZh ? '收入波动率标准差' : 'Monthly earnings volatility measure'}</td>
+        </tr>
+        <tr>
+          <td>Coefficient of Variation (CV)</td>
+          <td class="amount">${data.statistics.cvMonthlyIncome.toFixed(2)}</td>
+          <td style="color: #557064;">${data.statistics.cvMonthlyIncome > 0.2 ? (isZh ? '偏向波动/非固定收入结构' : 'Irregular / Gig earnings profile') : (isZh ? '高度稳定连续收入' : 'Highly consistent income stream')}</td>
+        </tr>
+        <tr>
+          <td>Mean Monthly Expense</td>
+          <td class="amount">${fmtC(data.statistics.meanMonthlyExpense)}</td>
+          <td style="color: #557064;">${isZh ? '月度基本生活与营运支出' : 'Average living cost run-rate'}</td>
+        </tr>
+      </tbody>
+    </table>
 
-      <tr class="grand-total">
-        <td>NET INCOME / SURPLUS FOR PERIOD (A - B)</td>
-        <td class="amount">${data.incomeStatement.savingsRate}%</td>
-        <td class="amount">${fmtC(data.incomeStatement.netIncome)}</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <!-- BALANCE SHEET -->
-  <div class="section-title" style="margin-top: 18pt;">II. Balance Sheet (Statement of Financial Position)</div>
-  <div class="two-col">
-    <!-- ASSETS -->
-    <div class="col">
-      <table>
-        <thead>
-          <tr><th>Assets &amp; Holdings</th><th class="amount">Value (${escapeHtml(displayCode)})</th></tr>
-        </thead>
-        <tbody>
-          ${data.balanceSheet.assetGroups.map((g) => `
-            <tr><td colspan="2" style="font-weight: bold; background: #f5f5f5;">${escapeHtml(g.clsLabel)}</td></tr>
-            ${g.items.map((i) => `
-              <tr>
-                <td style="padding-left: 8pt;">${escapeHtml(i.name)}</td>
-                <td class="amount">${fmtC(i.value)}</td>
-              </tr>
-            `).join('')}
-          `).join('')}
-          <tr class="grand-total">
-            <td>TOTAL ASSETS</td>
-            <td class="amount">${fmtC(data.balanceSheet.totalAssets)}</td>
-          </tr>
-        </tbody>
-      </table>
+    <!-- ITEMIZED LEDGER -->
+    <div class="page-break"></div>
+    <div class="section-title">
+      <span>IV. Itemized Transaction Ledger (${data.transactions.length} Entries)</span>
+      <span style="font-size: 8pt; font-weight: normal; color: #5f7a6e;">${isZh ? '完整明细流水' : 'Full Transaction Audit'}</span>
     </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 14%;">${isZh ? '日期' : 'Date'}</th>
+          <th style="width: 10%;">${isZh ? '类型' : 'Type'}</th>
+          <th style="width: 22%;">${isZh ? '分类' : 'Category'}</th>
+          <th style="width: 32%;">${isZh ? '商家 / 交易对手' : 'Merchant / Counterparty'}</th>
+          <th class="amount" style="width: 22%;">${isZh ? '金额' : 'Amount'} (${escapeHtml(displayCode)})</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.transactions.slice(0, 150).map((t) => {
+          const cat = (t.categoryId ? catMap.get(t.categoryId) : null) || t.type;
+          return `
+            <tr>
+              <td style="color: #617b70; font-variant-numeric: tabular-nums;">${escapeHtml(t.date || 'N/A')}</td>
+              <td><span style="font-size: 7.5pt; font-weight: 700; padding: 1pt 5pt; border-radius: 4pt; background: ${t.type === 'income' ? '#edf7f2; color: #15803d;' : t.type === 'transfer' ? '#f0f4f8; color: #0284c7;' : '#fef2f2; color: #b91c1c;'}">${t.type.toUpperCase()}</span></td>
+              <td>${escapeHtml(cat)}</td>
+              <td><strong>${escapeHtml(t.merchantRaw || t.merchantKey || 'N/A')}</strong></td>
+              <td class="amount" style="color: ${t.type === 'income' ? '#15803d' : '#17352a'};">${t.type === 'income' ? '+' : '-'}${fmtC(Math.abs(t.amount))}</td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+    ${data.transactions.length > 150 ? `<p style="font-size: 8pt; color: #777; font-style: italic;">* ${isZh ? '当前展示前 150 笔明细。完整明细建议导出 Excel 工作簿查看。' : 'Displaying first 150 transactions. Complete ledger available in Excel/CSV exports.'}</p>` : ''}
 
-    <!-- LIABILITIES & EQUITY -->
-    <div class="col">
-      <table>
-        <thead>
-          <tr><th>Liabilities &amp; Obligations</th><th class="amount">Value (${escapeHtml(displayCode)})</th></tr>
-        </thead>
-        <tbody>
-          ${data.balanceSheet.liabilityGroups.length === 0 ? '<tr><td colspan="2">No outstanding debt recorded</td></tr>' : ''}
-          ${data.balanceSheet.liabilityGroups.map((g) => `
-            <tr><td colspan="2" style="font-weight: bold; background: #f5f5f5;">${escapeHtml(g.clsLabel)}</td></tr>
-            ${g.items.map((i) => `
-              <tr>
-                <td style="padding-left: 8pt;">${escapeHtml(i.name)}</td>
-                <td class="amount">${fmtC(i.value)}</td>
-              </tr>
-            `).join('')}
-          `).join('')}
-          <tr class="subtotal">
-            <td>TOTAL LIABILITIES</td>
-            <td class="amount">${fmtC(data.balanceSheet.totalLiabilities)}</td>
-          </tr>
-          <tr><td colspan="2" style="font-weight: bold; background: #f5f5f5;">Owner Equity</td></tr>
-          <tr>
-            <td style="padding-left: 8pt;">Net Worth Position</td>
-            <td class="amount">${fmtC(data.balanceSheet.netWorth)}</td>
-          </tr>
-          <tr class="grand-total">
-            <td>TOTAL LIABILITIES &amp; EQUITY</td>
-            <td class="amount">${fmtC(data.balanceSheet.totalLiabilities + data.balanceSheet.netWorth)}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="footer">
+      <div>Generated by Pip Financial OS &bull; Confidential Personal Financial Statement</div>
+      <div>Document Date: ${escapeHtml(data.generatedAt.slice(0, 10))} &bull; ${escapeHtml(data.userName)}</div>
     </div>
-  </div>
-
-  <!-- STATISTICAL ANALYSIS -->
-  <div class="section-title" style="margin-top: 18pt;">III. Key Financial Statistics &amp; Regularity</div>
-  <table>
-    <thead>
-      <tr><th>Statistical Metric</th><th class="amount">Calculated Value</th><th>Interpretation</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Mean (Average) Monthly Income</td>
-        <td class="amount">${fmtC(data.statistics.meanMonthlyIncome)}</td>
-        <td>Average monthly cash intake</td>
-      </tr>
-      <tr>
-        <td>Median Monthly Income</td>
-        <td class="amount">${fmtC(data.statistics.medianMonthlyIncome)}</td>
-        <td>Central 50th percentile floor</td>
-      </tr>
-      <tr>
-        <td>Income Standard Deviation</td>
-        <td class="amount">${fmtC(data.statistics.stdDevMonthlyIncome)}</td>
-        <td>Monthly earnings volatility measure</td>
-      </tr>
-      <tr>
-        <td>Coefficient of Variation (CV)</td>
-        <td class="amount">${data.statistics.cvMonthlyIncome.toFixed(2)}</td>
-        <td>${data.statistics.cvMonthlyIncome > 0.2 ? 'Irregular / Gig earnings profile' : 'Highly consistent income stream'}</td>
-      </tr>
-      <tr>
-        <td>Mean Monthly Expense</td>
-        <td class="amount">${fmtC(data.statistics.meanMonthlyExpense)}</td>
-        <td>Average living cost run-rate</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <!-- ITEMIZED LEDGER (PAGE BREAK) -->
-  <div class="page-break"></div>
-  <div class="section-title">IV. Itemized Transaction Ledger (${data.transactions.length} Entries)</div>
-  <table>
-    <thead>
-      <tr>
-        <th style="width: 14%;">Date</th>
-        <th style="width: 10%;">Type</th>
-        <th style="width: 22%;">Category</th>
-        <th style="width: 32%;">Merchant / Counterparty</th>
-        <th class="amount" style="width: 22%;">Amount (${escapeHtml(displayCode)})</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${data.transactions.slice(0, 150).map((t) => {
-        const cat = (t.categoryId ? catMap.get(t.categoryId) : null) || t.type;
-        return `
-          <tr>
-            <td>${escapeHtml(t.date || 'N/A')}</td>
-            <td>${t.type.toUpperCase()}</td>
-            <td>${escapeHtml(cat)}</td>
-            <td>${escapeHtml(t.merchantRaw || t.merchantKey || 'N/A')}</td>
-            <td class="amount">${t.type === 'income' ? '+' : '-'}${fmtC(Math.abs(t.amount))}</td>
-          </tr>
-        `;
-      }).join('')}
-    </tbody>
-  </table>
-  ${data.transactions.length > 150 ? `<p style="font-size: 8pt; color: #777; font-style: italic;">* Displaying first 150 transactions. Complete ledger available in Excel/CSV exports.</p>` : ''}
-
-  <div class="footer">
-    <div>Generated by Pip Financial OS &bull; Confidential Personal Financial Statement</div>
-    <div>Document Date: ${escapeHtml(data.generatedAt.slice(0, 10))}</div>
   </div>
 </body>
 </html>`;

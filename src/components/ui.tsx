@@ -353,8 +353,43 @@ export function PrimaryButton({
   );
 }
 
-export function BtnLabel({ children }: { children: React.ReactNode }) {
-  return <Text style={styles.btnLabel}>{children}</Text>;
+export function SecondaryButton({
+  onPress,
+  disabled,
+  children,
+  height = 46,
+}: {
+  onPress: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+  height?: number;
+}) {
+  const theme = useAccent();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+      style={({ pressed }) => [
+        styles.btnPrimary,
+        {
+          backgroundColor: theme.accentTint,
+          borderColor: theme.accentSoft,
+          borderWidth: 1.5,
+          height,
+          opacity: disabled ? 0.4 : pressed ? 0.85 : 1,
+          transform: [{ scale: pressed && !disabled ? 0.98 : 1 }],
+        },
+      ]}
+    >
+      <View style={styles.btnRow}>{children}</View>
+    </Pressable>
+  );
+}
+
+export function BtnLabel({ children, color, style }: { children: React.ReactNode; color?: string; style?: any }) {
+  return <Text style={[styles.btnLabel, color ? { color } : undefined, style]}>{children}</Text>;
 }
 
 export function TopBar({

@@ -1,6 +1,6 @@
 {
   "name": "pip-expenses-tracker",
-  "version": "1.0.12",
+  "version": "1.0.15",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -64,7 +64,8 @@
     "react-native-view-shot": "4.0.3",
     "react-native-web": "^0.21.0",
     "react-native-webview": "13.15.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
     "@types/jest": "~29.5.14",

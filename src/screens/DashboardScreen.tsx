@@ -118,7 +118,9 @@ export function DashboardScreen({
     commitmentOccurrences,
     streak,
     streakWeek,
+    streakWeekKinds,
     streakTodayIndex,
+    checkInToday,
     streakFreezeAvailable,
     streakGraduated,
     streakStartLabel,
@@ -389,12 +391,16 @@ export function DashboardScreen({
                 <StreakCard
                   streak={streak}
                   week={streakWeek}
+                  weekKinds={streakWeekKinds}
                   todayIndex={streakTodayIndex}
                   freezeAvailable={streakFreezeAvailable}
                   graduated={streakGraduated}
                   startLabel={streakStartLabel}
                   paused={streakPaused}
                   onPress={onOpenCalendar}
+                  onNoSpendCheckIn={async () => {
+                    await checkInToday('no_spend');
+                  }}
                 />
                 {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
               </View>
@@ -561,25 +567,39 @@ function HeaderIcon({ name, onPress, accessibilityLabel }: { name: IconName; onP
 function StreakCard({
   streak,
   week,
+  weekKinds,
   todayIndex,
   freezeAvailable,
   graduated,
   startLabel,
   paused,
   onPress,
+  onNoSpendCheckIn,
 }: {
   streak: number;
   week: boolean[];
+  weekKinds?: ('spend' | 'checkin' | 'none')[];
   todayIndex: number;
   freezeAvailable: boolean;
   graduated: boolean;
   startLabel: string | null;
   paused: boolean;
   onPress?: () => void;
+  onNoSpendCheckIn?: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, isZh } = useLanguage();
+
+  const weekdayInitials = [
+    t('weekDayMonInitial'),
+    t('weekDayTueInitial'),
+    t('weekDayWedInitial'),
+    t('weekDayThuInitial'),
+    t('weekDayFriInitial'),
+    t('weekDaySatInitial'),
+    t('weekDaySunInitial'),
+  ];
   // Flame flicker — three layers (outer body, mid tongue, hot core) animate on independent
   // loops so the flame reads as an organic flicker rather than one rigid shape bobbing up and
   // down. All native-driver transforms (rotate/scale/translate), no per-frame JS.
@@ -691,45 +711,91 @@ function StreakCard({
             </Animated.View>
           </View>
         </View>
-        <View>
+        <View style={styles.streakCopy}>
           {graduated && startLabel ? (
             <>
-              <Label weight={700}>{startLabel}</Label>
+              <Label weight={700} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{startLabel}</Label>
               <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? `连续 ${streak} 天` : `${streak}-day run`)}</Caption>
             </>
           ) : (
             <>
               <Title numeric>{streak}</Title>
-              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? '天连续记账' : 'day streak')}</Caption>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? '天连续' : 'day streak')}</Caption>
             </>
           )}
         </View>
       </View>
       <View style={[styles.streakDivider, { backgroundColor: colorTheme.line }]} />
-      <View style={{ flex: 1 }}>
-        <View style={styles.dotsRow}>
-          {week.map((done, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                done
-                  ? [styles.dotDone, { backgroundColor: theme.accent }]
-                  : i === todayIndex
-                    ? styles.dotToday
-                    : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
-              ]}
-            >
-              {done ? (
-                <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
-                  <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
-                </Svg>
-              ) : i === todayIndex ? (
-                <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
-              ) : null}
+      <View style={styles.weekColumn}>
+        <View style={styles.weekLabelsRow}>
+          {weekdayInitials.map((label, i) => (
+            <View key={i} style={styles.weekLabelCell}>
+              <Text style={[styles.weekLabelText, { color: i === todayIndex ? theme.accent : colorTheme.ink3 }]}>
+                {label}
+              </Text>
             </View>
           ))}
         </View>
+        <View style={styles.dotsRow}>
+          {week.map((done, i) => {
+            const kind = weekKinds ? weekKinds[i] : 'spend';
+            return (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  done
+                    ? [styles.dotDone, { backgroundColor: theme.accent }]
+                    : i === todayIndex
+                      ? styles.dotToday
+                      : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
+                ]}
+              >
+                {done ? (
+                  kind === 'checkin' ? (
+                    <Svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                      <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+                      <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+                    </Svg>
+                  ) : (
+                    <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
+                      <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
+                    </Svg>
+                  )
+                ) : i === todayIndex ? (
+                  <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+        {!week[todayIndex] && onNoSpendCheckIn && (
+          <View style={styles.noSpendWrap}>
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation?.();
+                onNoSpendCheckIn();
+              }}
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.noSpendBtn,
+                {
+                  backgroundColor: theme.accentSoft,
+                  borderColor: theme.accent,
+                  opacity: pressed ? 0.75 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('noSpendToday')}
+            >
+              <Svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={theme.accent} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+                <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+              </Svg>
+              <Text style={[styles.noSpendText, { color: theme.accent }]}>{t('noSpendToday')}</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
     </Card>
   );
@@ -1432,9 +1498,10 @@ const styles = StyleSheet.create({
 
   /* streak */
   streakCard: { marginHorizontal: spacing.base, marginTop: spacing.xs, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  streakLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  streakLeft: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  streakCopy: { flex: 1, minWidth: 0 },
   flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
-  streakDivider: { width: 1, height: 38 },
+  streakDivider: { width: 1, height: 38, flexShrink: 0 },
   streakShield: {
     position: 'absolute',
     top: -6,
@@ -1447,11 +1514,26 @@ const styles = StyleSheet.create({
     zIndex: 1,
     ...shadowCard,
   },
+  weekLabelsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  weekColumn: { flex: 1, minWidth: 152 },
+  weekLabelCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  weekLabelText: { fontSize: 9.5, fontFamily: uiFont(700) },
   dotsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
   dotToday: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
+  noSpendWrap: { marginTop: 6, alignItems: 'flex-end' },
+  noSpendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  noSpendText: { fontSize: 10.5, fontFamily: uiFont(600) },
 
   /* streak celebration burst */
   streakWrap: { position: 'relative' },

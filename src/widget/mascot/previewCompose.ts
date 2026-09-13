@@ -22,6 +22,7 @@ import {
   MASCOT_SIZES,
   STREAK_COLUMN,
   STREAK_SLOT_SIZES,
+  WIDGET_MASCOT_LANE_WIDTH,
 } from './sizing';
 import {
   DIVIDER_COLOR,
@@ -29,6 +30,7 @@ import {
   DOTS_ROW_HEIGHT,
   DOTS_ROW_WIDTH,
   SHELL_BG,
+  SHELL_PADDING_H,
   SHELL_RADIUS,
   STREAK_COUNT_FONT_SIZE,
   STREAK_ICON_SIZE,
@@ -202,7 +204,7 @@ export function composeWidgetPreview(
   ];
 
   // Mascot section: centered in its allocated area (x=8..82, center=45) or centered in whole widget if both slots empty
-  const mascotCenterX = isBothNone ? width / 2 : 45;
+  const mascotCenterX = isBothNone ? width / 2 : SHELL_PADDING_H + WIDGET_MASCOT_LANE_WIDTH / 2;
   const mascotCenterY = height / 2;
   const mascotX = mascotCenterX - mascotW / 2;
   const mascotY = mascotCenterY - mascotH / 2;
@@ -236,7 +238,7 @@ export function composeWidgetPreview(
     // Both slots are none: leave it with nothing on the right side.
   } else if (isExpandedStreak) {
     // Fire is selected: show the fire and the streaks (enlarged fire, count, and 7-day dots).
-    body.push(streakColumn(config, streak, dots, 117, height));
+    body.push(streakColumn(config, streak, dots, SHELL_PADDING_H + WIDGET_MASCOT_LANE_WIDTH + STREAK_COLUMN / 2, height));
   } else if (hasSlot1 && hasSlot2) {
     body.push(divider(82, height));
     renderSlotContent(config.slot1, 100);

@@ -82,8 +82,10 @@ export function matchSourceCategory(
   const needle = hint.trim().toLowerCase();
   if (!needle) return null;
 
-  // 1. Exact label match (fast path, original behaviour).
-  const exact = categories.find((c) => c.kind === type && c.label.trim().toLowerCase() === needle);
+  // 1. Exact ID or label match (fast path).
+  const exact = categories.find(
+    (c) => c.kind === type && (c.id.trim().toLowerCase() === needle || c.label.trim().toLowerCase() === needle)
+  );
   if (exact) return exact.id;
 
   // 2. Fuzzy keyword scan: check if any keyword appears in the hint as a substring.

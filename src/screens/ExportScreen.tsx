@@ -1,9 +1,7 @@
-import * as Clipboard from 'expo-clipboard';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -13,60 +11,48 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
 import { ExportSuccessModal } from '../components/ExportSuccessModal';
-import { Icon, type IconName } from '../components/Icon';
-import { Amount, Card, Eyebrow, IconButton, TopBar } from '../components/ui';
+import { Icon } from '../components/Icon';
+import { Amount, Card, TopBar } from '../components/ui';
 import {
   buildFinancialReportBundle,
   buildReportPeriod,
   type ReportPeriodType,
 } from '../lib/bookkeeping';
-import { getAdvice } from '../db/budgetRepo';
-import { listDeletedDefaultCategories } from '../db/categoriesRepo';
-import { getActiveCurrencies } from '../db/currencyRepo';
-import { getReliefMemoryMap, listAllReliefTags } from '../db/reliefRepo';
 import {
-  buildReceiptExportList,
-  csvToHtmlTable,
-  generateAdvancedImportJSON,
-  generateCSV,
-  generateEwalletCSV,
-  generateEwalletPreviewHtml,
   generateExcelWorkbook,
-  generateHTMLReport,
   generatePrintablePDFHtml,
-  generateReceiptsPreviewHtml,
-  generateReceiptsZip,
-  isEwalletTransaction,
+  generateSpendingSummaryPDFHtml,
   saveOrDownloadExport,
   type ExportFormat,
-  type FullExportExtra,
 } from '../lib/financialExport';
 import { notify } from '../lib/platformAlert';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
-import { fmtMoney } from '../lib/format';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
-import { colors, numFont, platformShadow, radius, uiFont } from '../theme';
+import { platformShadow, radius, uiFont } from '../theme';
 
-interface FormatOption {
-  id: ExportFormat;
-  title: string;
-  sub: string;
-  badge: string;
-  icon: IconName;
-  fileExt: string;
-  mimeType: string;
-}
+type ExportMode = 'summary' | 'advanced';
+type AdvancedFormat = 'pdf' | 'xlsx';
 
 const PERIOD_TABS: { type: ReportPeriodType; labelEn: string; labelZh: string }[] = [
   { type: 'monthly', labelEn: 'Monthly', labelZh: '按月份' },
   { type: 'yearly', labelEn: 'Yearly', labelZh: '按年份' },
   { type: 'all-time', labelEn: 'All Time', labelZh: '全部时间' },
   { type: 'custom', labelEn: 'Custom Range', labelZh: '自定义区间' },
+];
+
+const WORKBOOK_SHEETS = [
+  { icon: 'chart' as const, en: 'Overview', zh: '财务概览', tagEn: 'KPI Scorecard & Health Ratios', tagZh: 'Executive 仪表盘与健康比率' },
+  { icon: 'receipt' as const, en: 'Income Statement (P&L)', zh: '损益表 (P&L)', tagEn: 'Operating Revenues & Margins', tagZh: '营业收入与盈余' },
+  { icon: 'wallet' as const, en: 'Balance Sheet (SOFP)', zh: '资产负债表 (SOFP)', tagEn: 'Assets, Debt & Equity Balance', tagZh: '资产负债与净值平衡' },
+  { icon: 'file' as const, en: 'Transactions', zh: '交易明细', tagEn: 'Filterable Audit Ledger', tagZh: '格式化流水与自动筛选' },
+  { icon: 'folder' as const, en: 'Categories', zh: '分类汇总', tagEn: 'Pareto 80/20 Spending Analysis', tagZh: '帕累托 80/20 支出分析' },
+  { icon: 'cash' as const, en: 'Accounts', zh: '账户清单', tagEn: 'Institutions & Holdings Register', tagZh: '机构资产与负债清单' },
+  { icon: 'trending' as const, en: 'Monthly trends', zh: '月度趋势', tagEn: 'MoM Trajectory & Averages', tagZh: '环比趋势与平均值' },
+  { icon: 'scan' as const, en: 'E-wallets', zh: '电子钱包', tagEn: 'Provider Breakdown & Activity', tagZh: '电子钱包流水与分析' },
 ];
 
 export function ExportScreen({
@@ -79,100 +65,24 @@ export function ExportScreen({
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const themeColors = useThemeColors();
-  const { t, formatMonthLabel, isZh } = useLanguage();
-  const {
-    transactions,
-    categories,
-    accounts,
-    balanceEntries,
-    commitments,
-    commitmentOccurrences,
-    people,
-    splits,
-    shares,
-    splitPayments,
-    expectedIncome,
-    allocations,
-    snapshots,
-    memory,
-    tasksDone,
-    onboardingComplete,
-    tutorialScanDone,
-    tutorialManualDone,
-    tutorialDismissed,
-    reminderCadence,
-    reminderHourOverride,
-    owedReminderEnabled,
-    commitmentReminderEnabled,
-    motionSetting,
-    soundEnabled,
-    markTaskDone,
-  } = useAppData();
-
-  const getFullExportExtra = async (): Promise<FullExportExtra> => {
-    const [reliefTags, reliefMemory, deletedCats, activeCurrencies, advice] = await Promise.all([
-      listAllReliefTags().catch(() => []),
-      getReliefMemoryMap().catch(() => ({})),
-      listDeletedDefaultCategories().catch(() => []),
-      getActiveCurrencies().catch(() => ['MYR']),
-      getAdvice().catch(() => null),
-    ]);
-
-    return {
-      commitments,
-      occurrences: commitmentOccurrences,
-      balanceEntries,
-      people,
-      splits,
-      shares,
-      splitPayments,
-      budget: {
-        expectedIncome,
-        allocations,
-      },
-      budgetSnapshots: snapshots,
-      budgetAdvice: advice,
-      reliefTags,
-      reliefMemory,
-      merchantMemory: memory,
-      deletedDefaultCategories: deletedCats,
-      activeCurrencies,
-      preferences: {
-        settings: {
-          reminderCadence,
-          reminderHourOverride,
-          owedReminderEnabled,
-          commitmentReminderEnabled,
-          motionSetting,
-          soundEnabled,
-        },
-        tasks: {
-          tasksDone,
-          onboardingComplete,
-          tutorialScanDone,
-          tutorialManualDone,
-          tutorialDismissed,
-        },
-      },
-      allTransactions: periodType === 'all-time' ? transactions : reportData.transactions,
-    };
-  };
+  const { formatMonthLabel, isZh } = useLanguage();
+  const { transactions, categories, accounts, balanceEntries, markTaskDone } = useAppData();
+  const displayCurrency = useDisplayCurrency();
 
   const now = useMemo(() => new Date(), []);
-  const curY = now.getFullYear();
-  const curM = String(now.getMonth() + 1).padStart(2, '0');
-  const defaultMonth = initialMonth || `${curY}-${curM}`;
+  const currentYear = now.getFullYear();
+  const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+  const defaultMonth = initialMonth || `${currentYear}-${currentMonth}`;
 
-  const [periodType, setPeriodType] = useState<ReportPeriodType>(initialMonth ? 'monthly' : 'all-time');
-  const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth);
-  const [selectedYear, setSelectedYear] = useState<number>(curY);
-  const [customStart, setCustomStart] = useState<string>(`${curY}-01-01`);
-  const [customEnd, setCustomEnd] = useState<string>(now.toISOString().slice(0, 10));
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormat>('pdf');
+  const [mode, setMode] = useState<ExportMode>('summary');
+  const [advancedFormat, setAdvancedFormat] = useState<AdvancedFormat>('pdf');
+  const [periodExpanded, setPeriodExpanded] = useState(false);
+  const [periodType, setPeriodType] = useState<ReportPeriodType>('monthly');
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [customStart, setCustomStart] = useState(`${currentYear}-01-01`);
+  const [customEnd, setCustomEnd] = useState(now.toISOString().slice(0, 10));
   const [exporting, setExporting] = useState(false);
-  const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewContent, setPreviewContent] = useState<string>('');
-  const [previewTitle, setPreviewTitle] = useState<string>('');
   const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [lastExport, setLastExport] = useState<{
     fileName: string;
@@ -184,626 +94,442 @@ export function ExportScreen({
   } | null>(null);
 
   const availableMonths = useMemo(() => {
-    const months = new Set<string>();
-    months.add(`${curY}-${curM}`);
-    for (const t of transactions) {
-      if (t.date && t.date.length >= 7) {
-        months.add(t.date.slice(0, 7));
-      }
+    const months = new Set<string>([`${currentYear}-${currentMonth}`]);
+    for (const transaction of transactions) {
+      if (transaction.date && transaction.date.length >= 7) months.add(transaction.date.slice(0, 7));
     }
     return [...months].sort().reverse();
-  }, [transactions, curY, curM]);
+  }, [transactions, currentYear, currentMonth]);
 
   const availableYears = useMemo(() => {
-    const years = new Set<number>();
-    years.add(curY);
-    for (const t of transactions) {
-      if (t.date && t.date.length >= 4) {
-        const y = parseInt(t.date.slice(0, 4), 10);
-        if (!isNaN(y)) years.add(y);
-      }
+    const years = new Set<number>([currentYear]);
+    for (const transaction of transactions) {
+      const year = transaction.date ? Number(transaction.date.slice(0, 4)) : NaN;
+      if (Number.isFinite(year)) years.add(year);
     }
-    return [...years].sort().reverse();
-  }, [transactions, curY]);
+    return [...years].sort((a, b) => b - a);
+  }, [transactions, currentYear]);
 
-  const activePeriod = useMemo(() => {
-    return buildReportPeriod(periodType, selectedMonth, selectedYear, customStart, customEnd, now);
-  }, [periodType, selectedMonth, selectedYear, customStart, customEnd, now]);
+  const activePeriod = useMemo(
+    () => buildReportPeriod(periodType, selectedMonth, selectedYear, customStart, customEnd, now),
+    [periodType, selectedMonth, selectedYear, customStart, customEnd, now],
+  );
 
-  const verifiedName = 'Pip User';
-
-  const dc = useDisplayCurrency();
-  const reportData = useMemo(() => {
-    return buildFinancialReportBundle(
+  const reportData = useMemo(
+    () => buildFinancialReportBundle(
       transactions,
       categories,
       accounts,
       balanceEntries,
       activePeriod,
-      verifiedName,
-      dc.rates,
-      dc.code
-    );
-  }, [transactions, categories, accounts, balanceEntries, activePeriod, verifiedName, dc.rates, dc.code]);
+      'Pip User',
+      displayCurrency.rates,
+      displayCurrency.code,
+    ),
+    [transactions, categories, accounts, balanceEntries, activePeriod, displayCurrency.rates, displayCurrency.code],
+  );
 
-  const periodReceipts = useMemo(() => {
-    return buildReceiptExportList(reportData.transactions, categories);
-  }, [reportData.transactions, categories]);
-
-  const periodEwalletTxns = useMemo(() => {
-    return reportData.transactions.filter((t) => isEwalletTransaction(t, accounts));
-  }, [reportData.transactions, accounts]);
-
-  const receiptsCount = periodReceipts.length;
-  const ewalletCount = periodEwalletTxns.length;
-
-  const formatOptions: FormatOption[] = [
-    {
-      id: 'pdf',
-      title: isZh ? 'PDF 财务对账单' : 'PDF Financial Statement',
-      sub: isZh ? '标准双栏资产负债表、收支损益表与明细账目。' : 'Traditional 2-column Balance Sheet, Income Statement & itemized ledger.',
-      badge: isZh ? '正式损益表' : 'Formal P&L',
-      icon: 'receipt',
-      fileExt: 'pdf.html',
-      mimeType: 'text/html',
-    },
-    {
-      id: 'xlsx',
-      title: isZh ? 'Excel 工作簿 (.xlsx)' : 'Excel Workbook (.xlsx)',
-      sub: isZh ? '包含利润表、资产负债表、流水明细、趋势及电子钱包流水。' : 'Multi-sheet workbook with P&L, Balance Sheet, Ledger, Trends & E-Wallets.',
-      badge: isZh ? '完整工作簿' : 'Full Workbook',
-      icon: 'table',
-      fileExt: 'xlsx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    },
-    {
-      id: 'html',
-      title: isZh ? '交互式 HTML 图表分析' : 'Interactive HTML Analytics',
-      sub: isZh ? '包含 SVG 现金流趋势图、分类支出甜甜圈图与净资产曲线。' : 'Visual report with SVG cash flow, category donut, and net worth charts.',
-      badge: isZh ? '可视化图表' : 'With Charts',
-      icon: 'trending',
-      fileExt: 'html',
-      mimeType: 'text/html',
-    },
-    {
-      id: 'csv',
-      title: isZh ? 'CSV 表格数据' : 'CSV Data Sheet',
-      sub: isZh ? '通用标准结构化会计表格，适配各类电子表格软件。' : 'Universal structured tabular accounting export for any spreadsheet.',
-      badge: isZh ? '通用格式' : 'Universal',
-      icon: 'file',
-      fileExt: 'csv',
-      mimeType: 'text/csv',
-    },
-    {
-      id: 'json',
-      title: isZh ? '高级导入 JSON' : 'Advanced Import JSON',
-      sub: isZh ? '与高级导入完全兼容的完整数据结构，可随时导出与重新导入。' : 'Same schema Advanced Import reads — copy or download, then re-import anytime.',
-      badge: isZh ? '可重新导入' : 'Re-importable',
-      icon: 'code',
-      fileExt: 'json',
-      mimeType: 'application/json',
-    },
-    {
-      id: 'receipts',
-      title: isZh ? '消费小票与凭据归档 (.zip)' : 'Receipts & Evidence Archive (.zip)',
-      sub: isZh ? '打包导出所选周期内保存的所有小票照片、发票及审计清单。' : 'Bundles all saved receipt photos, e-invoices, and manifest for the period into a ZIP archive.',
-      badge: isZh ? `${receiptsCount} 张小票` : `${receiptsCount} receipts`,
-      icon: 'camera',
-      fileExt: 'zip',
-      mimeType: 'application/zip',
-    },
-    {
-      id: 'ewallet',
-      title: isZh ? '电子钱包交易流水 (.csv)' : 'E-Wallet Transaction History (.csv)',
-      sub: isZh ? '包含 Touch \'n Go、GrabPay、Boost、ShopeePay 等电子钱包的专属交易明细与渠道统计。' : 'Dedicated statement for Touch \'n Go, GrabPay, Boost, ShopeePay & DuitNow QR with provider breakdowns.',
-      badge: isZh ? `${ewalletCount} 笔流水` : `${ewalletCount} txns`,
-      icon: 'scan',
-      fileExt: 'csv',
-      mimeType: 'text/csv',
-    },
-  ];
+  const expenseCount = useMemo(
+    () => reportData.transactions.filter((transaction) => transaction.type === 'expense').length,
+    [reportData.transactions],
+  );
+  const visibleCategories = reportData.incomeStatement.expenseRows.slice(0, 4);
 
   const handleExport = async () => {
     setExporting(true);
     try {
-      const sanitizedName = verifiedName.replace(/[^a-zA-Z0-9_-]/g, '_');
       const periodSlug = activePeriod.label.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const baseFileName = `${sanitizedName}_${periodSlug}`;
+      const isSummary = mode === 'summary';
+      const isPdf = isSummary || advancedFormat === 'pdf';
+      const content = isSummary
+        ? generateSpendingSummaryPDFHtml(reportData, isZh ? 'zh' : 'en')
+        : advancedFormat === 'pdf'
+          ? generatePrintablePDFHtml(reportData, isZh ? 'zh' : 'en')
+          : generateExcelWorkbook(reportData);
+      const extension = isPdf ? 'pdf.html' : 'xlsx';
+      const mimeType = isPdf
+        ? 'text/html'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      const fileName = `Pip_${isSummary ? 'Spending_Summary' : advancedFormat === 'pdf' ? 'Financial_Statement' : 'Analysis'}_${periodSlug}.${extension}`;
+      const result = await saveOrDownloadExport(fileName, content, mimeType, { autoShare: true });
 
-      let content: string | Uint8Array;
-      let ext: string = selectedFormat;
-      let mime = 'text/plain';
-
-      if (selectedFormat === 'xlsx') {
-        content = generateExcelWorkbook(reportData);
-        ext = 'xlsx';
-        mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      } else if (selectedFormat === 'csv') {
-        content = generateCSV(reportData);
-        ext = 'csv';
-        mime = 'text/csv';
-      } else if (selectedFormat === 'html') {
-        content = generateHTMLReport(reportData);
-        ext = 'html';
-        mime = 'text/html';
-      } else if (selectedFormat === 'json') {
-        const fullExtra = await getFullExportExtra();
-        content = generateAdvancedImportJSON(reportData, fullExtra);
-        ext = 'json';
-        mime = 'application/json';
-      } else if (selectedFormat === 'receipts') {
-        const reliefTags = await listAllReliefTags().catch(() => []);
-        content = generateReceiptsZip(reportData, reportData.transactions, reliefTags);
-        ext = 'zip';
-        mime = 'application/zip';
-      } else if (selectedFormat === 'ewallet') {
-        content = generateEwalletCSV(reportData, periodEwalletTxns);
-        ext = 'csv';
-        mime = 'text/csv';
-      } else {
-        content = generatePrintablePDFHtml(reportData);
-        ext = 'pdf.html';
-        mime = 'text/html';
+      if (!result.success) {
+        notify(
+          isZh ? '导出错误' : 'Export Error',
+          result.error || (isZh ? '无法保存导出文件。' : 'Unable to save the export file.'),
+        );
+        return;
       }
 
-      const fileName = `${baseFileName}.${ext}`;
-      const res = await saveOrDownloadExport(fileName, content, mime, { autoShare: true });
+      void markTaskDone('export');
+      setLastExport({
+        fileName,
+        format: isPdf ? 'pdf' : 'xlsx',
+        fileUri: result.uri,
+        fileSize: result.fileSize,
+        mimeType,
+        rawContent: typeof content === 'string' ? content : undefined,
+      });
+      setSuccessModalVisible(true);
 
-      if (res.success) {
-        void markTaskDone('export');
-        setLastExport({
-          fileName,
-          format: selectedFormat,
-          fileUri: res.uri,
-          fileSize: res.fileSize,
-          mimeType: mime,
-          rawContent: typeof content === 'string' ? content : undefined,
-        });
-        setSuccessModalVisible(true);
-
-        if (selectedFormat === 'pdf' && Platform.OS === 'web') {
-          const win = window.open('', '_blank');
-          if (win) {
-            win.document.write(content as string);
-            win.document.close();
-            win.focus();
-            setTimeout(() => win.print(), 350);
-          }
+      if (isPdf && Platform.OS === 'web') {
+        const win = window.open('', '_blank');
+        if (win) {
+          win.document.write(content as string);
+          win.document.close();
+          win.focus();
+          setTimeout(() => win.print(), 350);
         }
-      } else {
-        notify(isZh ? '导出错误' : 'Export Error', res.error || (isZh ? '无法保存导出文件。' : 'Unable to save export file.'));
       }
-    } catch (err: any) {
-      notify(isZh ? '导出失败' : 'Export Failed', err?.message || (isZh ? '导出过程中发生意外错误。' : 'An unexpected error occurred during export.'));
+    } catch (error: any) {
+      notify(
+        isZh ? '导出失败' : 'Export Failed',
+        error?.message || (isZh ? '导出过程中发生意外错误。' : 'Something went wrong while creating the export.'),
+      );
     } finally {
       setExporting(false);
     }
   };
 
-  const handlePreview = () => {
-    if (selectedFormat === 'xlsx' || selectedFormat === 'csv') {
-      const csvText = generateCSV(reportData);
-      setPreviewContent(csvText);
-      setPreviewTitle(`${selectedFormat.toUpperCase()} Preview (${activePeriod.label})`);
-      setPreviewVisible(true);
-    } else if (selectedFormat === 'html') {
-      const htmlText = generateHTMLReport(reportData);
-      setPreviewContent(htmlText);
-      setPreviewTitle(`HTML Report Preview (${activePeriod.label})`);
-      setPreviewVisible(true);
-    } else if (selectedFormat === 'json') {
-      getFullExportExtra().then((fullExtra) => {
-        const jsonText = generateAdvancedImportJSON(reportData, fullExtra);
-        setPreviewContent(jsonText);
-        setPreviewTitle(`JSON Export Preview (${activePeriod.label})`);
-        setPreviewVisible(true);
-      });
-    } else if (selectedFormat === 'receipts') {
-      listAllReliefTags().catch(() => []).then((reliefTags) => {
-        const receiptsHtml = generateReceiptsPreviewHtml(reportData, reportData.transactions, reliefTags);
-        setPreviewContent(receiptsHtml);
-        setPreviewTitle(isZh ? `消费小票与凭据预览 (${activePeriod.label})` : `Receipts Archive Preview (${activePeriod.label})`);
-        setPreviewVisible(true);
-      });
-    } else if (selectedFormat === 'ewallet') {
-      const ewalletHtml = generateEwalletPreviewHtml(reportData, periodEwalletTxns);
-      setPreviewContent(ewalletHtml);
-      setPreviewTitle(isZh ? `电子钱包流水预览 (${activePeriod.label})` : `E-Wallet History Preview (${activePeriod.label})`);
-      setPreviewVisible(true);
-    } else {
-      const pdfHtml = generatePrintablePDFHtml(reportData);
-      setPreviewContent(pdfHtml);
-      setPreviewTitle(`PDF Statement Preview (${activePeriod.label})`);
-      setPreviewVisible(true);
-    }
-  };
-
-  const [copyingJson, setCopyingJson] = useState(false);
-  const handleCopyJSON = async () => {
-    setCopyingJson(true);
-    try {
-      const fullExtra = await getFullExportExtra();
-      const json = generateAdvancedImportJSON(reportData, fullExtra);
-      await Clipboard.setStringAsync(json);
-      notify(isZh ? '已复制' : 'Copied', isZh ? '高级导入 JSON 已复制至剪贴板。' : 'Advanced Import JSON copied to clipboard. Paste it into Advanced Import to re-import.');
-    } catch (err: any) {
-      notify(isZh ? '复制失败' : 'Copy Failed', err?.message || (isZh ? '无法复制 JSON 至剪贴板。' : 'Unable to copy JSON to clipboard.'));
-    } finally {
-      setCopyingJson(false);
-    }
-  };
-
-  const isIncome = reportData.incomeStatement.totalIncome;
-  const isExpense = reportData.incomeStatement.totalExpense;
-  const isNet = reportData.incomeStatement.netIncome;
-
   return (
     <View style={[styles.root, { backgroundColor: themeColors.bg }]}>
       <View style={{ paddingTop: insets.top + 4 }}>
-        <TopBar title={isZh ? '财务报表与导出' : 'Financial Reports & Export'} onBack={onBack} />
+        <TopBar title={isZh ? '导出' : 'Export'} onBack={onBack} />
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 48 }} keyboardShouldPersistTaps="handled">
-        <Eyebrow style={{ marginBottom: 10 }}>{isZh ? '1. 报表周期' : '1. Reporting Period'}</Eyebrow>
-        <View style={[styles.periodTabs, { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 }]}>
-          {PERIOD_TABS.map((tab) => {
-            const active = periodType === tab.type;
-            return (
-              <Pressable
-                key={tab.type}
-                onPress={() => setPeriodType(tab.type)}
-                style={[styles.periodTabBtn, active && { backgroundColor: theme.accentInk }]}
-              >
-                <Text
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 48 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={[styles.intro, { color: themeColors.ink2 }]}>
+            {isZh ? '选择适合您的导出方式。' : 'Choose the export that fits what you want to do.'}
+          </Text>
+
+          <View style={[styles.modeSwitch, { backgroundColor: themeColors.surface2 }]}>
+            <ModeButton
+              active={mode === 'summary'}
+              label={isZh ? '简明' : 'Summary'}
+              accessibilityLabel="Spending summary mode"
+              onPress={() => setMode('summary')}
+              theme={theme}
+              themeColors={themeColors}
+            />
+            <ModeButton
+              active={mode === 'advanced'}
+              label={isZh ? '高级' : 'Advanced'}
+              accessibilityLabel="Advanced analysis mode"
+              onPress={() => setMode('advanced')}
+              theme={theme}
+              themeColors={themeColors}
+            />
+          </View>
+
+          <View style={styles.periodRow}>
+            <View style={styles.periodCopy}>
+              <Icon name="calendar" size={18} color={theme.accent} />
+              <View style={styles.flexOne}>
+                <Text style={[styles.periodLabel, { color: themeColors.ink2 }]}>
+                  {isZh ? '报表期间' : 'Reporting period'}
+                </Text>
+                <Text style={[styles.periodValue, { color: themeColors.ink }]}>{activePeriod.label}</Text>
+              </View>
+            </View>
+            <Pressable
+              accessibilityLabel="Change reporting period"
+              onPress={() => setPeriodExpanded((value) => !value)}
+              hitSlop={8}
+              style={({ pressed }) => [styles.changePeriod, { opacity: pressed ? 0.65 : 1 }]}
+            >
+              <Text style={[styles.changePeriodText, { color: theme.accent }]}>
+                {periodExpanded ? (isZh ? '完成' : 'Done') : (isZh ? '更改期间' : 'Change period')}
+              </Text>
+            </Pressable>
+          </View>
+
+          {periodExpanded && (
+            <PeriodControls
+              periodType={periodType}
+              setPeriodType={setPeriodType}
+              selectedMonth={selectedMonth}
+              setSelectedMonth={setSelectedMonth}
+              selectedYear={selectedYear}
+              setSelectedYear={setSelectedYear}
+              customStart={customStart}
+              setCustomStart={setCustomStart}
+              customEnd={customEnd}
+              setCustomEnd={setCustomEnd}
+              availableMonths={availableMonths}
+              availableYears={availableYears}
+              formatMonthLabel={formatMonthLabel}
+              isZh={isZh}
+              theme={theme}
+              themeColors={themeColors}
+            />
+          )}
+
+          {mode === 'summary' ? (
+            <>
+              <View style={styles.sectionHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={[styles.title, { color: themeColors.ink }]}>
+                    {isZh ? '消费概览' : 'Spending summary'}
+                  </Text>
+                  <Text style={[styles.subtitle, { color: themeColors.ink2 }]}>
+                    {isZh ? '快速看懂钱都花到哪里去了。' : 'A clear answer to where your money went.'}
+                  </Text>
+                </View>
+                <View style={[styles.fileBadge, { backgroundColor: theme.accentTint }]}>
+                  <Text style={[styles.fileBadgeText, { color: theme.accent }]}>PDF</Text>
+                </View>
+              </View>
+
+              <Card style={styles.summaryCard}>
+                <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                  {isZh ? '已记录支出' : 'Recorded spending'}
+                </Text>
+                <Amount value={reportData.incomeStatement.totalExpense} size={30} color={themeColors.ink} />
+                <Text style={[styles.metricNote, { color: themeColors.ink2 }]}>
+                  {isZh ? `${expenseCount} 笔消费，不含账户间转账` : `${expenseCount} purchases · transfers excluded`}
+                </Text>
+
+                <View style={[styles.divider, { backgroundColor: themeColors.line2 }]} />
+                <Text style={[styles.breakdownTitle, { color: themeColors.ink }]}>
+                  {isZh ? '按类别查看' : 'Where it went'}
+                </Text>
+                {visibleCategories.length > 0 ? visibleCategories.map((row) => (
+                  <View key={row.categoryId} style={styles.categoryRow}>
+                    <View style={[styles.categoryDot, { backgroundColor: `hsl(${categories.find((category) => category.id === row.categoryId)?.hue ?? 150}, 55%, 48%)` }]} />
+                    <Text style={[styles.categoryLabel, { color: themeColors.ink }]} numberOfLines={1}>{row.categoryLabel}</Text>
+                    <Text style={[styles.categoryPercent, { color: themeColors.ink2 }]}>{row.percentage}%</Text>
+                    <Amount value={row.amount} size={14} color={themeColors.ink} />
+                  </View>
+                )) : (
+                  <Text style={[styles.emptyText, { color: themeColors.ink2 }]}>
+                    {isZh ? '此期间没有记录消费。' : 'No spending recorded for this period.'}
+                  </Text>
+                )}
+              </Card>
+
+              <Text style={[styles.outputNote, { color: themeColors.ink2 }]}>
+                {isZh
+                  ? 'PDF 包含分类、常去商家和五笔最大消费，不包含完整交易明细。'
+                  : 'Includes categories, top merchants, and five largest purchases—not a full transaction list.'}
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.sectionHeader}>
+                <View style={styles.flexOne}>
+                  <Text style={[styles.title, { color: themeColors.ink }]}>
+                    {isZh ? '财务报表与分析' : 'Financial Statement & Analysis'}
+                  </Text>
+                  <Text style={[styles.subtitle, { color: themeColors.ink2 }]}>
+                    {isZh
+                      ? '包含损益表、资产负债表与可供深度分析的结构化数据。'
+                      : 'Formal Income Statement, Balance Sheet, and structured data.'}
+                  </Text>
+                </View>
+                <View style={[styles.fileBadge, { backgroundColor: theme.accentTint }]}>
+                  <Text style={[styles.fileBadgeText, { color: theme.accent }]}>
+                    {advancedFormat.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Format Switcher */}
+              <View style={[styles.advancedFormatSwitch, { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 }]}>
+                <Pressable
+                  accessibilityLabel="Export as PDF Financial Statement"
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: advancedFormat === 'pdf' }}
+                  onPress={() => setAdvancedFormat('pdf')}
                   style={[
-                    styles.periodTabText,
-                    { color: themeColors.ink2 },
-                    active && styles.periodTabTextActive,
+                    styles.advancedFormatBtn,
+                    advancedFormat === 'pdf' && { backgroundColor: themeColors.surface, borderColor: theme.accent },
                   ]}
                 >
-                  {isZh ? tab.labelZh : tab.labelEn}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {periodType === 'monthly' && (
-          <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '选择月份' : 'Select Month'}</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {availableMonths.map((m) => {
-                  const label = formatMonthLabel(m, true);
-                  const active = selectedMonth === m;
-                  return (
-                    <Pressable
-                      key={m}
-                      onPress={() => setSelectedMonth(m)}
-                      style={[
-                        styles.chipBtn,
-                        active
-                          ? { backgroundColor: theme.accent, borderColor: theme.accent }
-                          : { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          { color: themeColors.ink },
-                          active && { color: '#fff', fontWeight: '700' },
-                        ]}
-                      >
-                        {label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                  <Icon name="receipt" size={16} color={advancedFormat === 'pdf' ? theme.accent : themeColors.ink2} />
+                  <Text style={[styles.advancedFormatBtnText, { color: advancedFormat === 'pdf' ? theme.accent : themeColors.ink2 }]}>
+                    {isZh ? 'PDF 财务报表' : 'PDF Statement'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Export as Excel Workbook"
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: advancedFormat === 'xlsx' }}
+                  onPress={() => setAdvancedFormat('xlsx')}
+                  style={[
+                    styles.advancedFormatBtn,
+                    advancedFormat === 'xlsx' && { backgroundColor: themeColors.surface, borderColor: theme.accent },
+                  ]}
+                >
+                  <Icon name="table" size={16} color={advancedFormat === 'xlsx' ? theme.accent : themeColors.ink2} />
+                  <Text style={[styles.advancedFormatBtnText, { color: advancedFormat === 'xlsx' ? theme.accent : themeColors.ink2 }]}>
+                    {isZh ? 'Excel 工作簿' : 'Excel Workbook'}
+                  </Text>
+                </Pressable>
               </View>
-            </ScrollView>
-          </Card>
-        )}
 
-        {periodType === 'yearly' && (
-          <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '选择年份' : 'Select Year'}</Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-              {availableYears.map((y) => {
-                const active = selectedYear === y;
-                return (
-                  <Pressable
-                    key={y}
-                    onPress={() => setSelectedYear(y)}
+              {/* Financial Health Summary Card */}
+              <Card style={styles.summaryCard}>
+                <View style={styles.cardHeaderRow}>
+                  <Text style={[styles.breakdownTitle, { color: themeColors.ink }]}>
+                    {isZh ? '资产负债状况 (SOFP)' : 'Statement of Financial Position'}
+                  </Text>
+                  <View style={[styles.statusPill, { backgroundColor: theme.accentTint }]}>
+                    <Text style={[styles.statusPillText, { color: theme.accent }]}>
+                      {reportData.balanceSheet.balanced ? (isZh ? '平衡 ✓' : 'Balanced ✓') : (isZh ? '试算' : 'Trial')}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.kpiRow}>
+                  <View style={styles.kpiCol}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '总资产' : 'Total Assets'}
+                    </Text>
+                    <Amount value={reportData.balanceSheet.totalAssets} size={16} color={themeColors.ink} />
+                  </View>
+                  <View style={styles.kpiCol}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '总负债' : 'Total Liabilities'}
+                    </Text>
+                    <Amount value={reportData.balanceSheet.totalLiabilities} size={16} color={themeColors.ink2} />
+                  </View>
+                  <View style={styles.kpiCol}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '净资产规模' : 'Net Worth'}
+                    </Text>
+                    <Amount value={reportData.balanceSheet.netWorth} size={16} color={theme.accent} />
+                  </View>
+                </View>
+
+                <View style={[styles.divider, { backgroundColor: themeColors.line2 }]} />
+
+                {/* Income Statement Summary */}
+                <View style={styles.cardHeaderRow}>
+                  <Text style={[styles.breakdownTitle, { color: themeColors.ink }]}>
+                    {isZh ? '损益成果 (P&L)' : 'Income Statement (P&L)'}
+                  </Text>
+                  <View style={[styles.statusPill, { backgroundColor: themeColors.surface2 }]}>
+                    <Text style={[styles.statusPillText, { color: themeColors.ink2 }]}>
+                      {isZh ? `储蓄率 ${reportData.incomeStatement.savingsRate}%` : `${reportData.incomeStatement.savingsRate}% Saved`}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.pnlRow}>
+                  <View style={styles.pnlItem}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '营业收入 / 流入' : 'Inflows (Revenue)'}
+                    </Text>
+                    <Amount value={reportData.incomeStatement.totalIncome} size={14} color="#15803d" />
+                  </View>
+                  <View style={styles.pnlItem}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '生活支出 / 流出' : 'Outflows (Expense)'}
+                    </Text>
+                    <Amount value={reportData.incomeStatement.totalExpense} size={14} color="#b91c1c" />
+                  </View>
+                  <View style={styles.pnlItem}>
+                    <Text style={[styles.metricLabel, { color: themeColors.ink2 }]}>
+                      {isZh ? '期间结余 / 利润' : 'Net Surplus / Profit'}
+                    </Text>
+                    <Amount
+                      value={reportData.incomeStatement.netIncome}
+                      size={14}
+                      color={reportData.incomeStatement.netIncome >= 0 ? '#15803d' : '#b91c1c'}
+                    />
+                  </View>
+                </View>
+              </Card>
+
+              {/* Structure Checklist */}
+              <Text style={[styles.breakdownTitle, { color: themeColors.ink, marginTop: 18, marginBottom: 8 }]}>
+                {advancedFormat === 'pdf'
+                  ? (isZh ? '正式财务报表包含内容' : 'Formal Statement Sections')
+                  : (isZh ? '分析工作簿包含工作表' : 'Analysis workbook sheets')}
+              </Text>
+
+              {advancedFormat === 'xlsx' && (
+                <View style={styles.excelFeaturesRow}>
+                  {[
+                    isZh ? '8 个结构化工作表' : '8 Structured Sheets',
+                    isZh ? '动态公式 (=SUM)' : 'Live Formulas (=SUM, =IF)',
+                    isZh ? '帕累托 80/20 分析' : 'Pareto 80/20 Analysis',
+                    isZh ? 'Executive 仪表盘' : 'Executive Dashboard',
+                    isZh ? '专业会计格式' : 'Styled Cells & Borders',
+                  ].map((feat) => (
+                    <View key={feat} style={[styles.excelFeaturePill, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
+                      <Text style={[styles.excelFeaturePillText, { color: theme.accent }]}>{feat}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={[styles.sheetList, { borderColor: themeColors.line2 }]}>
+                {WORKBOOK_SHEETS.map((sheet, index) => (
+                  <View
+                    key={sheet.en}
                     style={[
-                      styles.chipBtn,
-                      active
-                        ? { backgroundColor: theme.accent, borderColor: theme.accent }
-                        : { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 },
+                      styles.sheetRow,
+                      index < WORKBOOK_SHEETS.length - 1 && { borderBottomColor: themeColors.line2, borderBottomWidth: StyleSheet.hairlineWidth },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        { color: themeColors.ink },
-                        active && { color: '#fff', fontWeight: '700' },
-                      ]}
-                    >
-                      {isZh ? `${y}年` : `Year ${y}`}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </Card>
-        )}
-
-        {periodType === 'custom' && (
-          <Card style={{ padding: 14, marginTop: 10 }}>
-            <Text style={[styles.subHeader, { color: themeColors.ink }]}>{isZh ? '日期范围 (YYYY-MM-DD)' : 'Date Range (YYYY-MM-DD)'}</Text>
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.inputLabel, { color: themeColors.ink2 }]}>{isZh ? '起始日期' : 'From Date'}</Text>
-                <TextInput
-                  value={customStart}
-                  onChangeText={setCustomStart}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={themeColors.ink3}
-                  style={[
-                    styles.dateInput,
-                    { color: themeColors.ink, borderColor: themeColors.line2, backgroundColor: themeColors.surface },
-                  ]}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.inputLabel, { color: themeColors.ink2 }]}>To Date</Text>
-                <TextInput
-                  value={customEnd}
-                  onChangeText={setCustomEnd}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={themeColors.ink3}
-                  style={[
-                    styles.dateInput,
-                    { color: themeColors.ink, borderColor: themeColors.line2, backgroundColor: themeColors.surface },
-                  ]}
-                />
-              </View>
-            </View>
-          </Card>
-        )}
-
-        {/* LIVE PERIOD OVERVIEW CARD */}
-        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>{isZh ? '2. 报表概览' : '2. Statement Summary'}</Eyebrow>
-        <Card style={{ padding: 16 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <Text style={[styles.summaryTitle, { color: themeColors.ink, flexShrink: 1 }]}>{activePeriod.label}</Text>
-            <View style={[styles.badgePill, { backgroundColor: theme.accentTint, flexShrink: 0 }]}>
-              <Text style={[styles.badgeText, { color: theme.accent }]}>
-                {isZh ? `${reportData.incomeStatement.transactionCount} 笔交易` : `${reportData.incomeStatement.transactionCount} txns`}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.statGrid}>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '总收入' : 'Revenue'}</Text>
-              <Amount value={isIncome} size={15} color="#15803d" />
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '总支出' : 'Expenses'}</Text>
-              <Amount value={isExpense} size={15} color="#b3261e" />
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '净结余' : 'Net Surplus'}</Text>
-              <Amount value={isNet} size={15} color={isNet >= 0 ? theme.accent : '#b3261e'} />
-            </View>
-            <View style={styles.statBox}>
-              <Text style={[styles.statLabel, { color: themeColors.ink2 }]}>{isZh ? '期末净资产' : 'Net Worth'}</Text>
-              <Amount value={reportData.balanceSheet.netWorth} size={15} />
-            </View>
-          </View>
-
-          <View style={[styles.statDivider, { backgroundColor: themeColors.line2 }]} />
-
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
-              {isZh ? '月均收入：' : 'Mean Monthly: '}<Text style={{ fontFamily: uiFont(700), color: themeColors.ink }}>{fmtMoney(dc.convert(reportData.statistics.meanMonthlyIncome), dc.code)}</Text>
-            </Text>
-            <Text style={[styles.statSubText, { color: themeColors.ink2 }]}>
-              {isZh ? '储蓄率：' : 'Savings Rate: '}<Text style={{ fontFamily: uiFont(700), color: theme.accent }}>{reportData.incomeStatement.savingsRate}%</Text>
-            </Text>
-          </View>
-        </Card>
-
-        {/* FORMAT SELECTION */}
-        <Eyebrow style={{ marginTop: 22, marginBottom: 10 }}>{isZh ? '3. 选择导出格式' : '3. Select Export Format'}</Eyebrow>
-        <View style={{ gap: 10 }}>
-          {formatOptions.map((opt) => {
-            const selected = selectedFormat === opt.id;
-            return (
-              <Pressable
-                key={opt.id}
-                onPress={() => setSelectedFormat(opt.id)}
-                style={({ pressed }) => [
-                  styles.formatCard,
-                  { backgroundColor: themeColors.surface, borderColor: themeColors.line2 },
-                  selected && { borderColor: theme.accent, backgroundColor: theme.accentTint },
-                  pressed && { opacity: 0.9 },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.formatIconWrap,
-                    { backgroundColor: selected ? theme.accent : themeColors.surface2 },
-                  ]}
-                >
-                  <Icon
-                    name={opt.icon}
-                    size={20}
-                    color={selected ? '#fff' : themeColors.ink2}
-                  />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <View style={styles.formatTitleRow}>
-                    <Text style={[styles.formatTitle, { color: themeColors.ink }, selected && { color: theme.accent }]}>
-                      {opt.title}
-                    </Text>
-                    <View style={[styles.formatBadge, { backgroundColor: themeColors.surface2, borderColor: themeColors.line2 }]}>
-                      <Text style={[styles.formatBadgeText, { color: themeColors.ink2 }]}>{opt.badge}</Text>
+                    <Icon name={sheet.icon} size={18} color={theme.accent} />
+                    <View style={styles.flexOne}>
+                      <Text style={[styles.sheetLabel, { color: themeColors.ink }]}>{isZh ? sheet.zh : sheet.en}</Text>
+                      <Text style={[styles.sheetTag, { color: themeColors.ink3 }]}>{isZh ? sheet.tagZh : sheet.tagEn}</Text>
                     </View>
+                    <Icon name="check" size={16} color={theme.accent} />
                   </View>
-                  <Text style={[styles.formatSub, { color: themeColors.ink2 }]}>{opt.sub}</Text>
-                </View>
-                <View
-                  style={[
-                    styles.radioCircle,
-                    { borderColor: themeColors.line },
-                    selected && { borderColor: theme.accent, backgroundColor: theme.accent },
-                  ]}
-                >
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
+                ))}
+              </View>
 
-        {/* ACTION BUTTONS */}
-        <View style={{ marginTop: 26, gap: 10 }}>
+              <Text style={[styles.outputNote, { color: themeColors.ink2 }]}>
+                {advancedFormat === 'pdf'
+                  ? (isZh
+                    ? 'PDF 包含完整的正式损益表、资产负债表、关键财务比率及明细流水。'
+                    : 'Formal PDF contains complete Income Statement, Balance Sheet, Key Ratios, and Itemized Ledger.')
+                  : (isZh
+                    ? 'Excel 包含 8 个格式化独立工作表，内置 Executive 仪表盘、帕累托支出分析、会计格式边框与动态求和公式。'
+                    : 'Formatted XLSX workbook with 8 dedicated sheets, Executive Dashboard, Pareto 80/20 analysis, accounting borders, and live formulas.')}
+              </Text>
+            </>
+          )}
+
           <Pressable
+            accessibilityLabel={
+              mode === 'summary'
+                ? 'Export spending summary'
+                : advancedFormat === 'pdf'
+                  ? 'Export Financial Statement'
+                  : 'Export Excel workbook'
+            }
             onPress={handleExport}
             disabled={exporting}
             style={({ pressed }) => [
-              styles.primaryBtn,
-              { backgroundColor: theme.accentInk, opacity: exporting ? 0.6 : pressed ? 0.92 : 1 },
-              platformShadow(theme.accent, 0.35, 10, { width: 0, height: 5 }, 3),
+              styles.primaryButton,
+              { backgroundColor: theme.accentInk, opacity: exporting ? 0.55 : pressed ? 0.9 : 1 },
+              platformShadow(theme.accent, 0.28, 10, { width: 0, height: 5 }, 3),
             ]}
           >
-            {exporting ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
+            {exporting ? <ActivityIndicator color="#fff" size="small" /> : (
               <>
                 <Icon name="download" size={18} color="#fff" />
-                <Text style={styles.primaryBtnText}>
-                  {selectedFormat === 'pdf' && Platform.OS === 'web'
-                    ? (isZh ? '打印 / 导出 PDF' : 'Print / Export PDF')
-                    : (isZh ? '导出并保存文件' : 'Export & Download')}
+                <Text style={styles.primaryButtonText}>
+                  {mode === 'summary'
+                    ? (isZh ? '导出消费概览' : 'Export spending summary')
+                    : advancedFormat === 'pdf'
+                      ? (isZh ? '导出财务报表 (PDF)' : 'Export Financial Statement (PDF)')
+                      : (isZh ? '导出 Excel 工作簿' : 'Export Excel workbook')}
                 </Text>
               </>
             )}
           </Pressable>
-
-          {selectedFormat === 'json' && (
-            <Pressable
-              onPress={handleCopyJSON}
-              disabled={copyingJson}
-              style={({ pressed }) => [
-                styles.secondaryBtn,
-                { backgroundColor: themeColors.surface, borderColor: themeColors.line2 },
-                { opacity: copyingJson ? 0.6 : pressed ? 0.85 : 1 },
-              ]}
-            >
-              <Icon name="copy" size={16} color={theme.accent} />
-              <Text style={[styles.secondaryBtnText, { color: theme.accent }]}>
-                {isZh ? '复制 JSON 至剪贴板' : 'Copy JSON to Clipboard'}
-              </Text>
-            </Pressable>
-          )}
-
-          <Pressable
-            onPress={handlePreview}
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              { backgroundColor: themeColors.surface, borderColor: themeColors.line2 },
-              { opacity: pressed ? 0.85 : 1 },
-            ]}
-          >
-            <Icon name="sparkles" size={16} color={theme.accent} />
-            <Text style={[styles.secondaryBtnText, { color: theme.accent }]}>
-              {isZh ? '预览报表内容' : 'Preview Report Content'}
-            </Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* DOCUMENT PREVIEW MODAL */}
-      <Modal
-        visible={previewVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setPreviewVisible(false)}
-      >
-        <View style={[styles.previewRoot, { backgroundColor: themeColors.bg }]}>
-          <View style={{ paddingTop: insets.top + 6 }}>
-            <TopBar
-              title={previewTitle || 'Document Preview'}
-              onClose={() => setPreviewVisible(false)}
-              right={
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {selectedFormat === 'json' && (
-                    <Pressable
-                      onPress={handleCopyJSON}
-                      disabled={copyingJson}
-                      style={[styles.modalActionBtn, { backgroundColor: themeColors.surface2 }]}
-                    >
-                      <Icon name="copy" size={16} color={theme.accent} />
-                      <Text style={[styles.modalActionText, { color: theme.accent }]}>Copy</Text>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    onPress={() => {
-                      setPreviewVisible(false);
-                      handleExport();
-                    }}
-                    style={[styles.modalActionBtn, { backgroundColor: themeColors.surface2 }]}
-                  >
-                    <Icon name="download" size={16} color={theme.accent} />
-                    <Text style={[styles.modalActionText, { color: theme.accent }]}>Export</Text>
-                  </Pressable>
-                </View>
-              }
-            />
-          </View>
-
-          {selectedFormat === 'json' ? (
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
-              <Card style={{ padding: 14 }}>
-                <Text style={[styles.previewRawText, { color: themeColors.ink }]}>{previewContent}</Text>
-              </Card>
-            </ScrollView>
-          ) : Platform.OS === 'web' ? (
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 30 }}>
-              {/* On Web, render in an interactive iframe */}
-              <View style={styles.webPreviewWrap}>
-                <iframe
-                  srcDoc={
-                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
-                      ? csvToHtmlTable(previewContent)
-                      : previewContent
-                  }
-                  title="Report Preview"
-                  style={{ width: '100%', height: 600, border: 'none', borderRadius: 8 }}
-                />
-              </View>
-            </ScrollView>
-          ) : (
-            // On native, render the actual document/table instead of dumping raw markup/CSV text
-            <View style={[styles.webPreviewWrap, { flex: 1, margin: 16, marginTop: 0 }]}>
-              <WebView
-                source={{
-                  html:
-                    selectedFormat === 'csv' || selectedFormat === 'xlsx'
-                      ? csvToHtmlTable(previewContent)
-                      : previewContent,
-                }}
-                style={{ flex: 1, backgroundColor: 'transparent' }}
-                originWhitelist={['*']}
-              />
-            </View>
-          )}
-        </View>
-      </Modal>
 
       {lastExport && (
         <ExportSuccessModal
@@ -815,236 +541,212 @@ export function ExportScreen({
           fileSize={lastExport.fileSize}
           mimeType={lastExport.mimeType}
           rawContent={lastExport.rawContent}
-          onPreview={handlePreview}
         />
       )}
     </View>
   );
 }
 
+function ModeButton({ active, label, accessibilityLabel, onPress, theme, themeColors }: {
+  active: boolean;
+  label: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+  theme: ReturnType<typeof useAccent>;
+  themeColors: ReturnType<typeof useThemeColors>;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [styles.modeButton, active && { backgroundColor: themeColors.surface }, pressed && { opacity: 0.75 }]}
+    >
+      <Text style={[styles.modeButtonText, { color: active ? theme.accent : themeColors.ink2 }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function PeriodControls({
+  periodType, setPeriodType, selectedMonth, setSelectedMonth, selectedYear, setSelectedYear,
+  customStart, setCustomStart, customEnd, setCustomEnd, availableMonths, availableYears,
+  formatMonthLabel, isZh, theme, themeColors,
+}: {
+  periodType: ReportPeriodType;
+  setPeriodType: (type: ReportPeriodType) => void;
+  selectedMonth: string;
+  setSelectedMonth: (month: string) => void;
+  selectedYear: number;
+  setSelectedYear: (year: number) => void;
+  customStart: string;
+  setCustomStart: (date: string) => void;
+  customEnd: string;
+  setCustomEnd: (date: string) => void;
+  availableMonths: string[];
+  availableYears: number[];
+  formatMonthLabel: (month: string, short?: boolean) => string;
+  isZh: boolean;
+  theme: ReturnType<typeof useAccent>;
+  themeColors: ReturnType<typeof useThemeColors>;
+}) {
+  return (
+    <View style={[styles.periodPanel, { backgroundColor: themeColors.surface, borderColor: themeColors.line2 }]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.periodTabs}>
+          {PERIOD_TABS.map((tab) => {
+            const active = periodType === tab.type;
+            return (
+              <Pressable
+                key={tab.type}
+                onPress={() => setPeriodType(tab.type)}
+                style={[styles.periodTab, { borderColor: active ? theme.accent : themeColors.line2, backgroundColor: active ? theme.accentTint : themeColors.surface2 }]}
+              >
+                <Text style={[styles.periodTabText, { color: active ? theme.accent : themeColors.ink2 }]}>
+                  {isZh ? tab.labelZh : tab.labelEn}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      {periodType === 'monthly' && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.choiceScroll}>
+          <View style={styles.choiceRow}>
+            {availableMonths.map((month) => (
+              <ChoiceChip
+                key={month}
+                label={formatMonthLabel(month, true)}
+                active={selectedMonth === month}
+                onPress={() => setSelectedMonth(month)}
+                theme={theme}
+                themeColors={themeColors}
+              />
+            ))}
+          </View>
+        </ScrollView>
+      )}
+
+      {periodType === 'yearly' && (
+        <View style={[styles.choiceRow, styles.choiceScroll]}>
+          {availableYears.map((year) => (
+            <ChoiceChip
+              key={year}
+              label={String(year)}
+              active={selectedYear === year}
+              onPress={() => setSelectedYear(year)}
+              theme={theme}
+              themeColors={themeColors}
+            />
+          ))}
+        </View>
+      )}
+
+      {periodType === 'custom' && (
+        <View style={styles.dateRow}>
+          <DateField label={isZh ? '开始' : 'From'} value={customStart} onChangeText={setCustomStart} themeColors={themeColors} />
+          <DateField label={isZh ? '结束' : 'To'} value={customEnd} onChangeText={setCustomEnd} themeColors={themeColors} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function ChoiceChip({ label, active, onPress, theme, themeColors }: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  theme: ReturnType<typeof useAccent>;
+  themeColors: ReturnType<typeof useThemeColors>;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.choiceChip, { backgroundColor: active ? theme.accent : themeColors.surface2, borderColor: active ? theme.accent : themeColors.line2 }]}
+    >
+      <Text style={[styles.choiceChipText, { color: active ? '#fff' : themeColors.ink }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function DateField({ label, value, onChangeText, themeColors }: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  themeColors: ReturnType<typeof useThemeColors>;
+}) {
+  return (
+    <View style={styles.flexOne}>
+      <Text style={[styles.dateLabel, { color: themeColors.ink2 }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder="YYYY-MM-DD"
+        placeholderTextColor={themeColors.ink3}
+        style={[styles.dateInput, { color: themeColors.ink, borderColor: themeColors.line2, backgroundColor: themeColors.surface2 }]}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  periodTabs: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface2,
-    borderRadius: radius.md,
-    padding: 3,
-    borderWidth: 1,
-    borderColor: colors.line2,
-  },
-  periodTabBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.sm,
-  },
-  periodTabText: {
-    fontFamily: uiFont(600),
-    fontSize: 13,
-    color: colors.ink2,
-  },
-  periodTabTextActive: {
-    color: '#fff',
-    fontFamily: uiFont(700),
-  },
-  subHeader: {
-    fontFamily: uiFont(700),
-    fontSize: 13,
-    color: colors.ink,
-  },
-  chipBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  chipText: {
-    fontFamily: uiFont(500),
-    fontSize: 12.5,
-    color: colors.ink,
-  },
-  inputLabel: {
-    fontFamily: uiFont(600),
-    fontSize: 11,
-    color: colors.ink2,
-    marginBottom: 4,
-    textTransform: 'uppercase',
-  },
-  dateInput: {
-    fontFamily: uiFont(500),
-    fontSize: 13,
-    color: colors.ink,
-    borderWidth: 1,
-    borderColor: colors.line2,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: colors.surface,
-  },
-  summaryTitle: {
-    fontFamily: uiFont(700),
-    fontSize: 15,
-    color: colors.ink,
-  },
-  badgePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-  },
-  badgeText: {
-    fontFamily: uiFont(700),
-    fontSize: 11.5,
-  },
-  statGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 14,
-  },
-  statBox: {
-    flex: 1,
-  },
-  statLabel: {
-    fontFamily: uiFont(600),
-    fontSize: 11,
-    color: colors.ink2,
-    marginBottom: 2,
-    textTransform: 'uppercase',
-  },
-  statDivider: {
-    height: 1,
-    backgroundColor: colors.line2,
-    marginVertical: 12,
-  },
-  statSubText: {
-    fontFamily: uiFont(500),
-    fontSize: 12,
-    color: colors.ink2,
-  },
-  formatCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: colors.line2,
-    overflow: 'hidden',
-  },
-  formatIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  formatTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-    rowGap: 4,
-  },
-  formatTitle: {
-    fontFamily: uiFont(700),
-    fontSize: 14,
-    color: colors.ink,
-    maxWidth: '100%',
-  },
-  formatBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: colors.surface2,
-    borderWidth: 1,
-    borderColor: colors.line2,
-    alignSelf: 'flex-start',
-    flexShrink: 0,
-  },
-  formatBadgeText: {
-    fontFamily: uiFont(600),
-    fontSize: 10,
-    color: colors.ink2,
-  },
-  formatSub: {
-    fontFamily: uiFont(400),
-    fontSize: 12,
-    color: colors.ink2,
-    marginTop: 3,
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  radioDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#fff',
-  },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 48,
-    borderRadius: 999,
-  },
-  primaryBtnText: {
-    fontFamily: uiFont(700),
-    fontSize: 15,
-    color: '#fff',
-  },
-  secondaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    height: 42,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.line2,
-    backgroundColor: colors.surface,
-  },
-  secondaryBtnText: {
-    fontFamily: uiFont(600),
-    fontSize: 13.5,
-  },
-  previewRoot: {
-    flex: 1,
-  },
-  modalActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: colors.surface2,
-  },
-  modalActionText: {
-    fontFamily: uiFont(700),
-    fontSize: 13,
-  },
-  webPreviewWrap: {
-    borderWidth: 1,
-    borderColor: colors.line2,
-    borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-  },
-  previewRawText: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-    color: colors.ink,
-    lineHeight: 16,
-  },
+  flexOne: { flex: 1 },
+  intro: { fontFamily: uiFont(400), fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  modeSwitch: { flexDirection: 'row', padding: 4, borderRadius: radius.md, marginBottom: 24 },
+  modeButton: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  modeButtonText: { fontFamily: uiFont(700), fontSize: 14 },
+  periodRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 8 },
+  periodCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  periodLabel: { fontFamily: uiFont(500), fontSize: 11, lineHeight: 15 },
+  periodValue: { fontFamily: uiFont(700), fontSize: 14, lineHeight: 19 },
+  changePeriod: { minHeight: 44, justifyContent: 'center' },
+  changePeriodText: { fontFamily: uiFont(700), fontSize: 13 },
+  periodPanel: { borderWidth: 1, borderRadius: radius.md, padding: 12, marginBottom: 24 },
+  periodTabs: { flexDirection: 'row', gap: 8 },
+  periodTab: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderRadius: 10 },
+  periodTabText: { fontFamily: uiFont(600), fontSize: 12 },
+  choiceScroll: { marginTop: 12 },
+  choiceRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  choiceChip: { paddingHorizontal: 12, minHeight: 36, justifyContent: 'center', borderRadius: 10, borderWidth: 1 },
+  choiceChipText: { fontFamily: uiFont(600), fontSize: 12 },
+  dateRow: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  dateLabel: { fontFamily: uiFont(600), fontSize: 11, marginBottom: 4 },
+  dateInput: { minHeight: 42, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, fontFamily: uiFont(500), fontSize: 13 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 16, marginTop: 20, marginBottom: 16 },
+  title: { fontFamily: uiFont(700), fontSize: 22, lineHeight: 28, letterSpacing: -0.35 },
+  subtitle: { fontFamily: uiFont(400), fontSize: 13, lineHeight: 19, marginTop: 4 },
+  fileBadge: { borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, marginTop: 2 },
+  fileBadgeText: { fontFamily: uiFont(700), fontSize: 11, letterSpacing: 0.3 },
+  summaryCard: { padding: 20 },
+  metricLabel: { fontFamily: uiFont(600), fontSize: 12, marginBottom: 4 },
+  metricNote: { fontFamily: uiFont(400), fontSize: 12, lineHeight: 17, marginTop: 4 },
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: 18 },
+  breakdownTitle: { fontFamily: uiFont(700), fontSize: 14, marginBottom: 8 },
+  categoryRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  categoryDot: { width: 8, height: 8, borderRadius: 4 },
+  categoryLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 13 },
+  categoryPercent: { width: 42, textAlign: 'right', fontFamily: uiFont(500), fontSize: 12 },
+  emptyText: { fontFamily: uiFont(400), fontSize: 13, lineHeight: 19, paddingVertical: 8 },
+  outputNote: { fontFamily: uiFont(400), fontSize: 12, lineHeight: 18, marginTop: 12 },
+  sheetList: { borderWidth: 1, borderRadius: radius.md, overflow: 'hidden' },
+  sheetRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16 },
+  sheetLabel: { flex: 1, fontFamily: uiFont(600), fontSize: 14 },
+  primaryButton: { minHeight: 52, borderRadius: radius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 28 },
+  primaryButtonText: { color: '#fff', fontFamily: uiFont(700), fontSize: 15 },
+  advancedFormatSwitch: { flexDirection: 'row', padding: 4, borderRadius: radius.md, marginBottom: 18, borderWidth: 1 },
+  advancedFormatBtn: { flex: 1, minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: radius.sm, borderWidth: 1, borderColor: 'transparent' },
+  advancedFormatBtnText: { fontFamily: uiFont(700), fontSize: 13 },
+  cardHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  statusPillText: { fontFamily: uiFont(700), fontSize: 11 },
+  kpiRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  kpiCol: { flex: 1 },
+  pnlRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  pnlItem: { flex: 1 },
+  excelFeaturesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 12 },
+  excelFeaturePill: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+  excelFeaturePillText: { fontFamily: uiFont(600), fontSize: 11 },
+  sheetTag: { fontFamily: uiFont(400), fontSize: 11, marginTop: 1 },
 });

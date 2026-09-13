@@ -7,6 +7,7 @@
 //   2. The payer absorbs every rounding residue. RM100 across three people is
 //      33.33 / 33.33 / 33.34, with the extra cent on the person who fronted the money.
 import { round2 } from './currency';
+import { damerauLevenshtein } from './categoryKeywords';
 import { merchantKey } from './normalize';
 import type { ShareStatus, SplitMethod } from './types';
 
@@ -653,64 +654,246 @@ export function oldestOverdueDays(open: OpenShare[], today: string): number {
 }
 
 /**
- * True when the transfer's label carries the person's name. A DuitNow transfer usually
- * arrives labelled with the sender, which is the strongest signal available on-device.
- * Matched per name token so "ALI BIN HASSAN" still recognises a person saved as "Ali",
- * with two-character tokens skipped so initials cannot match everything.
+ * True when the transfer's label carries the person's name using fuzzy matching.
+ *
+ * A DuitNow transfer usually arrives labelled with the sender, which is the strongest
+ * signal available on-device. Matched per name token so "ALI BIN HASSAN" still recognises
+ * a person saved as "Ali", with two-character tokens skipped so initials cannot match
+ * everything. Uses Damerau-Levenshtein for typo resilience (e.g. "ALEE" matches "Ali",
+ * "HASAN" matches "Hassan") and containment for concatenated names ("WEILIN" contains "wei").
  */
 function nameMatches(merchant: string, personName: string): boolean {
   const hay = merchantKey(merchant);
   if (!hay) return false;
-  return personName
-    .toLowerCase()
+  const hayNoSpace = hay.replace(/\s+/g, '');
+  const pName = personName.toLowerCase().trim();
+  const pNameNoSpace = pName.replace(/\s+/g, '');
+  const isCjk = /[^\x00-\x7F]/.test(pNameNoSpace);
+
+  // Whole-name containment: CJK >= 2 chars, or ASCII concatenated >= 4 chars (e.g. "fongyanyan", "weilin")
+  if ((isCjk && pNameNoSpace.length >= 2) || (pNameNoSpace.length >= 4 && hayNoSpace.includes(pNameNoSpace))) {
+    return true;
+  }
+
+  const hayTokens = hay.split(/\s+/).filter((t) => t.length >= 2);
+
+  return pName
     .split(/\s+/)
-    .filter((tok) => tok.length >= 3)
-    .some((tok) => hay.includes(tok));
+    .filter((tok) => tok.length >= 2)
+    .some((nameTok) => {
+      // Direct whole-word token match for short 2-char tokens (e.g. "Ng", "Bo", "YY")
+      if (nameTok.length === 2) {
+        return hayTokens.includes(nameTok);
+      }
+      // For tokens >= 3: direct token containment in merchant
+      if (hay.includes(nameTok)) return true;
+      // Token-level fuzzy: check each merchant token against each name token
+      return hayTokens.some((mt) => {
+        if (mt.length < 3) return false;
+        const maxDist = mt.length >= 7 || nameTok.length >= 7 ? 2 : 1;
+        return damerauLevenshtein(nameTok, mt, maxDist) <= maxDist;
+      });
+    });
+}
+
+/**
+ * Check if the merchant label matches any previously-confirmed bank labels for the person.
+ * Used to boost confidence on fuzzy matches (likely → strong), not to create new matches.
+ */
+function learnedNameMatches(
+  merchant: string,
+  personId: string,
+  knownBankLabels: Record<string, string[]>
+): boolean {
+  const labels = knownBankLabels[personId];
+  if (!labels || labels.length === 0) return false;
+  const hay = merchantKey(merchant);
+  if (!hay) return false;
+  return labels.some((label) => {
+    const lk = merchantKey(label);
+    // Exact key match (most bank labels repeat exactly)
+    if (lk === hay) return true;
+    // Containment (one is a substring of the other)
+    if (lk.length >= 3 && (hay.includes(lk) || lk.includes(hay))) return true;
+    return false;
+  });
+}
+
+/** A per-share allocation within a multi-debt settlement. */
+export interface SettlementAllocation {
+  share: OpenShare;
+  /** How much of the inbound row goes against this share. */
+  amount: number;
+}
+
+export interface MultiSettlementMatch {
+  personName: string;
+  personId: string;
+  /** Shares being settled, with per-share allocation amounts (oldest first). */
+  allocations: SettlementAllocation[];
+  /** Total amount going toward debt settlement. */
+  settledTotal: number;
+  /** Amount exceeding total debts (flows through as income). */
+  excess: number;
+  /** Whether settlement covers all outstanding or leaves some open. */
+  partial: boolean;
+  /** `strong` when both amount and name match; `likely` when one matches or amount is close. */
+  confidence: 'strong' | 'likely';
+}
+
+/**
+ * Suggest how an inbound transfer might settle one or more open debts.
+ *
+ * Groups debts by person, then for each person whose name fuzzy-matches the transfer label:
+ * - Allocates the transfer amount across their debts (oldest first)
+ * - Supports exact, partial, multi-debt, and excess (overpayment)
+ *
+ * Confidence tiers:
+ * - `strong`: name match + amount exactly equals total outstanding (or single debt)
+ * - `likely`: name match + amount within 10% of total, OR exact amount match without name
+ * - (weak matches with name but no amount correlation are not surfaced)
+ *
+ * Returns null when nothing fits. Ties break on highest confidence, then biggest total debt.
+ */
+export function suggestMultiSettlement(
+  open: OpenShare[],
+  candidate: SettlementCandidate,
+  today: string,
+  knownBankLabels: Record<string, string[]> = {}
+): MultiSettlementMatch | null {
+  const amountCents = toCents(candidate.amount);
+  if (amountCents <= 0) return null;
+  const day = dayOf(candidate.date) ?? today;
+
+  // Group open shares by person, filtering by date window
+  const byPerson = new Map<string, { personId: string; name: string; shares: OpenShare[]; totalCents: number }>();
+  for (const share of open) {
+    const outstandingCents = toCents(share.outstanding);
+    if (outstandingCents <= 0) continue;
+
+    const age = daysBetween(share.billDate, day);
+    // Allow repayments within the settlement window in either direction (up to 120 days).
+    // In practice, users frequently log debts after a repayment arrived (e.g. backlogged bills,
+    // money sent right at the table before entry, or testing against past statements).
+    if (age !== null && Math.abs(age) > SETTLEMENT_WINDOW_DAYS) continue;
+
+    const personKey = `${share.personId || ''}:${share.personName.toLowerCase()}`;
+    let entry = byPerson.get(personKey);
+    if (!entry) {
+      entry = { personId: share.personId, name: share.personName, shares: [], totalCents: 0 };
+      byPerson.set(personKey, entry);
+    }
+    entry.shares.push(share);
+    entry.totalCents += outstandingCents;
+  }
+
+  // Sort each person's shares oldest-first for allocation
+  for (const entry of byPerson.values()) {
+    entry.shares.sort((a, b) => (a.billDate ?? '').localeCompare(b.billDate ?? ''));
+  }
+
+  const matches: MultiSettlementMatch[] = [];
+
+  for (const [, { personId, name, shares, totalCents }] of byPerson) {
+    const hasNameMatch = nameMatches(candidate.merchant, name);
+    const hasLearnedMatch = learnedNameMatches(candidate.merchant, personId, knownBankLabels);
+
+    // Check for amount-only match against individual shares (no name needed)
+    const exactSingleHit = !hasNameMatch && shares.length > 0 &&
+      shares.some((s) => toCents(s.outstanding) === amountCents);
+
+    if (!hasNameMatch && !exactSingleHit) continue;
+
+    // Allocate the transfer across this person's debts, oldest first
+    let remainingCents = amountCents;
+    const allocations: SettlementAllocation[] = [];
+
+    for (const share of shares) {
+      if (remainingCents <= 0) break;
+      const shareCents = toCents(share.outstanding);
+      const allocCents = Math.min(remainingCents, shareCents);
+      allocations.push({ share, amount: fromCents(allocCents) });
+      remainingCents -= allocCents;
+    }
+
+    if (allocations.length === 0) continue;
+
+    const settledCents = amountCents - remainingCents;
+    const excessCents = remainingCents; // what's left after all debts are covered
+    const partial = settledCents < totalCents;
+    const amountExact = settledCents === totalCents ||
+      (allocations.length === 1 && toCents(allocations[0].share.outstanding) === amountCents);
+    const amountClose = !amountExact && settledCents > 0 &&
+      Math.abs(amountCents - totalCents) / totalCents <= 0.10;
+
+    // Determine confidence
+    let confidence: 'strong' | 'likely' | 'weak';
+    if (hasNameMatch && amountExact) {
+      confidence = 'strong';
+    } else if (hasNameMatch && (amountClose || settledCents > 0)) {
+      confidence = 'likely';
+    } else if (exactSingleHit && !hasNameMatch) {
+      confidence = 'likely';
+    } else {
+      confidence = 'weak';
+    }
+
+    // Learned name boost: likely → strong
+    if (confidence === 'likely' && hasLearnedMatch) {
+      confidence = 'strong';
+    }
+
+    // Skip weak matches entirely
+    if (confidence === 'weak') continue;
+
+    matches.push({
+      personName: name,
+      personId,
+      allocations,
+      settledTotal: fromCents(settledCents),
+      excess: fromCents(excessCents),
+      partial,
+      confidence,
+    });
+  }
+
+  if (matches.length === 0) return null;
+
+  // Best match: highest confidence first, then biggest debt total
+  matches.sort((a, b) => {
+    if (a.confidence !== b.confidence) return a.confidence === 'strong' ? -1 : 1;
+    return toCents(b.settledTotal) - toCents(a.settledTotal);
+  });
+
+  return matches[0];
 }
 
 /**
  * The open share an inbound row is most likely settling, or null when nothing fits.
  *
- * A row only qualifies if it is no larger than what is outstanding (an inbound bigger than
- * the debt is something else, most likely real income) and lands inside the window after the
- * bill. Beyond that it has to agree on the amount, the sender's name, or both. Ties break on
- * the oldest bill, so the debt that has been waiting longest clears first.
+ * Backward-compatible wrapper around `suggestMultiSettlement`. Returns a single-share
+ * `SettlementMatch` for callers that don't need multi-debt support.
  */
 export function suggestSettlement(
   open: OpenShare[],
   candidate: SettlementCandidate,
-  today: string
+  today: string,
+  knownBankLabels: Record<string, string[]> = {}
 ): SettlementMatch | null {
-  const amountCents = toCents(candidate.amount);
-  if (amountCents <= 0) return null;
-  const day = dayOf(candidate.date) ?? today;
-
-  const matches: SettlementMatch[] = [];
-  for (const share of open) {
-    const outstandingCents = toCents(share.outstanding);
-    if (outstandingCents <= 0 || amountCents > outstandingCents) continue;
-
-    const age = daysBetween(share.billDate, day);
-    if (age !== null && (age < 0 || age > SETTLEMENT_WINDOW_DAYS)) continue;
-
-    const amountHit = amountCents === outstandingCents;
-    const nameHit = nameMatches(candidate.merchant, share.personName);
-    if (!amountHit && !nameHit) continue;
-
-    matches.push({
-      share,
-      amount: fromCents(amountCents),
-      partial: amountCents < outstandingCents,
-      confidence: amountHit && nameHit ? 'strong' : 'likely',
-    });
+  const multi = suggestMultiSettlement(open, candidate, today, knownBankLabels);
+  if (!multi || multi.allocations.length === 0) return null;
+  // Legacy single-settlement wrapper does not match inbounds larger than the debt
+  if (multi.excess > 0) return null;
+  // Legacy single-settlement wrapper rejects transfers strictly before the bill date
+  if (candidate.date && daysBetween(multi.allocations[0].share.billDate, candidate.date)! < 0) {
+    return null;
   }
-
-  if (matches.length === 0) return null;
-  matches.sort((a, b) => {
-    if (a.confidence !== b.confidence) return a.confidence === 'strong' ? -1 : 1;
-    const ageA = daysBetween(a.share.billDate, day) ?? 0;
-    const ageB = daysBetween(b.share.billDate, day) ?? 0;
-    return ageB - ageA;
-  });
-  return matches[0];
+  const first = multi.allocations[0];
+  return {
+    share: first.share,
+    amount: first.amount,
+    partial: multi.partial,
+    confidence: multi.confidence,
+  };
 }
+

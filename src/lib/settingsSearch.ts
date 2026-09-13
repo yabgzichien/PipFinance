@@ -3,7 +3,6 @@
 export type SettingSectionKey =
   | 'appearance'
   | 'reminders'
-  | 'ai'
   | 'learning'
   | 'budget'
   | 'data'
@@ -20,8 +19,6 @@ export type SettingItemKey =
   | 'reminder_spending'
   | 'reminder_owed'
   | 'reminder_commitments'
-  | 'ai_groq'
-  | 'ai_gemini'
   | 'learning'
   | 'budget'
   | 'data_commitments'
@@ -315,53 +312,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       '固定账单',
       '定期扣款',
       '到期',
-    ],
-  },
-  {
-    key: 'ai_groq',
-    section: 'ai',
-    sectionTitleEn: 'AI providers',
-    sectionTitleZh: 'AI 模型供应商',
-    titleEn: 'Groq · primary',
-    titleZh: 'Groq 主力模型',
-    keywords: [
-      'ai',
-      'provider',
-      'groq',
-      'model',
-      'api key',
-      'llm',
-      'test connection',
-      'primary',
-      'artificial intelligence',
-      '人工智能',
-      '大模型',
-      '密钥',
-      '连接测试',
-    ],
-  },
-  {
-    key: 'ai_gemini',
-    section: 'ai',
-    sectionTitleEn: 'AI providers',
-    sectionTitleZh: 'AI 模型供应商',
-    titleEn: 'Gemini · fallback',
-    titleZh: 'Gemini 备用模型',
-    keywords: [
-      'ai',
-      'provider',
-      'gemini',
-      'google',
-      'model',
-      'api key',
-      'llm',
-      'test connection',
-      'fallback',
-      'artificial intelligence',
-      '人工智能',
-      '大模型',
-      '密钥',
-      '连接测试',
     ],
   },
   {

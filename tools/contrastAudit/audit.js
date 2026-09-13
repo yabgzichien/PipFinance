@@ -69,8 +69,16 @@ function readTokens(relPath) {
   return extractHexAssignments(source);
 }
 
-const pipThemeSrc = fs.readFileSync(path.join(__dirname, '../../..', 'PipComp/src/theme.ts'), 'utf8');
-const consoleTokensSrc = fs.readFileSync(path.join(__dirname, '../../../LenderConsole/app/tokens.ts'), 'utf8');
+const ROOT = path.resolve(__dirname, '../..');
+const pipThemePath = fs.existsSync(path.join(ROOT, 'src/theme.ts'))
+  ? path.join(ROOT, 'src/theme.ts')
+  : path.join(__dirname, '../../..', 'PipComp/src/theme.ts');
+const pipThemeSrc = fs.readFileSync(pipThemePath, 'utf8');
+
+const consoleTokensPath = path.join(__dirname, '../../../LenderConsole/app/tokens.ts');
+const hasConsoleTokens = fs.existsSync(consoleTokensPath);
+const consoleTokensSrc = hasConsoleTokens ? fs.readFileSync(consoleTokensPath, 'utf8') : '';
+
 // Two palettes (CLEAN, ALERT) share property names in the same file — split by the `const NAME:
 // Palette = { ... }` blocks so CLEAN's ink3 isn't shadowed by ALERT's ink3 in a flat regex pass.
 function readPaletteBlock(source, constName, typeAnnotation) {
@@ -78,8 +86,8 @@ function readPaletteBlock(source, constName, typeAnnotation) {
   if (!m) throw new Error(`Could not find palette block "${constName}" in source`);
   return extractHexAssignments(m[1]);
 }
-const consoleClean = readPaletteBlock(consoleTokensSrc, 'CLEAN', ': Palette');
-const consoleAlert = readPaletteBlock(consoleTokensSrc, 'ALERT', ': Palette');
+const consoleClean = hasConsoleTokens ? readPaletteBlock(consoleTokensSrc, 'CLEAN', ': Palette') : {};
+const consoleAlert = hasConsoleTokens ? readPaletteBlock(consoleTokensSrc, 'ALERT', ': Palette') : {};
 
 // theme.ts's `colors` export still holds the fixed, scheme-independent literals (accent*,
 // onAccent, shotHead/shotInk, deltaUp, passportDark) — the structural bg/surface/ink*/line*/
@@ -97,7 +105,10 @@ const pipTheme = { ...pipLight, ...pipFixed }; // light-mode structural + fixed 
 // preset's `light: { ... }` and `dark: { ... }` objects out individually — safe to match on
 // `[^}]*` since neither object nests any braces of its own.
 function readAccentPresets(relPath) {
-  const source = fs.readFileSync(path.join(__dirname, '../../..', relPath), 'utf8');
+  const full = fs.existsSync(path.join(ROOT, relPath))
+    ? path.join(ROOT, relPath)
+    : path.join(__dirname, '../../..', relPath);
+  const source = fs.readFileSync(full, 'utf8');
   const presets = [];
   const re = /id:\s*'(\w+)'[\s\S]*?light:\s*\{([^}]*)\}[\s\S]*?dark:\s*\{([^}]*)\}/g;
   let m;
@@ -106,7 +117,7 @@ function readAccentPresets(relPath) {
   }
   return presets;
 }
-const accentPresets = readAccentPresets('PipComp/src/state/accentPresets.ts');
+const accentPresets = readAccentPresets('src/state/accentPresets.ts');
 
 // ── Known foreground/background pairings this codebase actually renders ────────────────────
 // One entry per real text/UI-color pairing (label, fg, bg, large-text-or-UI-component flag).
@@ -178,8 +189,10 @@ const PAIRS = [
   ...pipPairs(pipTheme),
   ...structuralPairs('PipComp dark', pipDark),
   ...accentPresets.flatMap(accentPresetPairs),
-  ...consolePairs('LenderConsole CLEAN', consoleClean),
-  ...consolePairs('LenderConsole ALERT', consoleAlert),
+  ...(hasConsoleTokens ? [
+    ...consolePairs('LenderConsole CLEAN', consoleClean),
+    ...consolePairs('LenderConsole ALERT', consoleAlert),
+  ] : []),
 ];
 
 // ── Run ──────────────────────────────────────────────────────────────────────────────────

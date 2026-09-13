@@ -18,6 +18,7 @@ import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { shadowToggle, uiFont } from '../theme';
+import { ReviewCheckInToast } from '../components/ReviewCheckInToast';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
@@ -82,6 +83,7 @@ export function BreakdownScreen({
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
+      <ReviewCheckInToast />
       <View style={{ paddingTop: insets.top + 4 }}>
         <TopBar
           title={screenTitle}

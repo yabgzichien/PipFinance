@@ -5,7 +5,7 @@ import type { BadgeColor, BadgeIcon, SlotContent, WidgetMascotConfig } from './m
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from './mascot/config';
 import { composeMascot } from './mascot/compose';
 import { BADGE_THEMES, badgeIconSvg } from './mascot/badge';
-import { MASCOT_SIZES, slotWidth } from './mascot/sizing';
+import { MASCOT_SIZES, STREAK_COLUMN, WIDGET_MASCOT_LANE_WIDTH, slotWidth } from './mascot/sizing';
 // Shared with the in-app preview (mascot/previewCompose.ts) so the two renderers cannot drift.
 import {
   DIVIDER_COLOR,
@@ -18,6 +18,7 @@ import {
   SHELL_PADDING_V,
   SHELL_RADIUS,
   STREAK_COUNT_FONT_SIZE,
+  EXPANDED_STREAK_COUNT_WIDTH,
   STREAK_ICON_SIZE,
   STREAK_STACK_GAP,
   UP_ARROW_SVG,
@@ -93,16 +94,17 @@ export function QuickRecordWidget({
         accessibilityLabel="Add Transaction"
       >
         <FlexWidget
-          style={{ width: 74, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: WIDGET_MASCOT_LANE_WIDTH, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }}
         >
           <SvgWidget svg={mascotSvg} style={{ width: mascot.w, height: mascot.h }} />
         </FlexWidget>
-        <FlexWidget style={{ flex: 1, height: 'match_parent', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
-          <FlexWidget style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 6 }}>
+        <FlexWidget style={{ width: STREAK_COLUMN, height: 'match_parent', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flexGap: STREAK_STACK_GAP }}>
+          <FlexWidget style={{ width: 'match_parent', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexGap: 6 }}>
             {expandedIcon && <SvgWidget svg={expandedIcon} style={{ width: m.icon, height: m.icon }} />}
             <TextWidget
               text={String(streak)}
-              style={{ fontSize: m.font, fontWeight: '700', color: badge.text as HexColor }}
+              maxLines={1}
+              style={{ width: EXPANDED_STREAK_COUNT_WIDTH, fontSize: m.font, fontWeight: '700', color: badge.text as HexColor, adjustsFontSizeToFit: true, textAlign: 'center' }}
             />
           </FlexWidget>
           <SvgWidget svg={dotsRowSvg(dots, badge.icon)} style={{ width: DOTS_ROW_WIDTH, height: DOTS_ROW_HEIGHT }} />
@@ -164,7 +166,7 @@ export function QuickRecordWidget({
         style={
           isBothNone
             ? { flex: 1, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }
-            : { width: 74, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }
+            : { width: WIDGET_MASCOT_LANE_WIDTH, height: 'match_parent', alignItems: 'center', justifyContent: 'center' }
         }
         clickAction="OPEN_URI"
         clickActionData={{ uri: 'pip://add' }}

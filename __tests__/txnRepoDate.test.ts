@@ -53,7 +53,12 @@ describe('getAccountPriority', () => {
       currency: 'MYR',
       kind: 'asset',
       createdAt: '2026-01-01',
-      updatedAt: '2026-01-01',
+      archived: false,
+      sub: null,
+      symbol: null,
+      ticker: null,
+      quantity: null,
+      cost: null,
     };
     expect(getAccountPriority(cashAcct)).toBe(1);
   });
@@ -66,7 +71,12 @@ describe('getAccountPriority', () => {
       currency: 'MYR',
       kind: 'asset',
       createdAt: '2026-01-01',
-      updatedAt: '2026-01-01',
+      archived: false,
+      sub: null,
+      symbol: null,
+      ticker: null,
+      quantity: null,
+      cost: null,
     };
     const ewalletAcct: Account = {
       id: '3',
@@ -75,7 +85,12 @@ describe('getAccountPriority', () => {
       currency: 'MYR',
       kind: 'asset',
       createdAt: '2026-01-01',
-      updatedAt: '2026-01-01',
+      archived: false,
+      sub: null,
+      symbol: null,
+      ticker: null,
+      quantity: null,
+      cost: null,
     };
     expect(getAccountPriority(bankAcct)).toBe(2);
     expect(getAccountPriority(ewalletAcct)).toBe(3);

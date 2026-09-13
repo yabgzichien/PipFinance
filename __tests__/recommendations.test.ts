@@ -33,13 +33,18 @@ const mockTrip = (name: string, id: string): Trip => ({
 });
 
 describe('extractLabelFromQuickAdd', () => {
-  it('extracts merchant label removing amounts and currency symbols', () => {
+  it('extracts merchant label removing amounts, currencies, and currency symbols', () => {
     expect(extractLabelFromQuickAdd('laksa 22')).toBe('Laksa');
     expect(extractLabelFromQuickAdd('Laksa 22.50')).toBe('Laksa');
     expect(extractLabelFromQuickAdd('22 laksa')).toBe('Laksa');
     expect(extractLabelFromQuickAdd('RM25 coffee')).toBe('Coffee');
     expect(extractLabelFromQuickAdd('grab rm 30')).toBe('Grab');
     expect(extractLabelFromQuickAdd('50 电影')).toBe('电影');
+    expect(extractLabelFromQuickAdd('3sdg lunch')).toBe('Lunch');
+    expect(extractLabelFromQuickAdd('50cny dinner')).toBe('Dinner');
+    expect(extractLabelFromQuickAdd('50rmb dinner')).toBe('Dinner');
+    expect(extractLabelFromQuickAdd('50元 晚餐')).toBe('晚餐');
+    expect(extractLabelFromQuickAdd('30新币 午餐')).toBe('午餐');
     expect(extractLabelFromQuickAdd('22')).toBe('');
     expect(extractLabelFromQuickAdd('')).toBe('');
   });
@@ -160,6 +165,20 @@ describe('getQuickAddRecommendations', () => {
     expect(recs).toContain('Grab Food');
     expect(recs).toContain('Grab');
     expect(recs).not.toContain('Starbucks');
+  });
+
+  it('recommends labels matching typos such as luch -> Lunch, diner -> Dinner', () => {
+    const recsLuch = getQuickAddRecommendations([], 'luch', false);
+    expect(recsLuch).toContain('Lunch');
+
+    const recsDiner = getQuickAddRecommendations([], 'diner', false);
+    expect(recsDiner).toContain('Dinner');
+
+    const recsBrekfast = getQuickAddRecommendations([], 'brekfast', false);
+    expect(recsBrekfast).toContain('Breakfast');
+
+    const recsCoffe = getQuickAddRecommendations([], 'coffe', false);
+    expect(recsCoffe).toContain('Coffee');
   });
 
   it('omits exact match when user has already typed the exact label', () => {

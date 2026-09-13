@@ -40,7 +40,7 @@ export async function scanDocument(): Promise<ScanOutcome> {
   const { scannedImages, status } = await mod.default.scanDocument({
     maxNumDocuments: 1,
     responseType: mod.ResponseType.ImageFilePath,
-    croppedImageQuality: 75,
+    croppedImageQuality: 60,
   });
   if (status !== mod.ScanDocumentResponseStatus.Success || !scannedImages?.length) {
     return { status: 'cancelled' };

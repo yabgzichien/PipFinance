@@ -51,6 +51,9 @@ export const DIVIDER = 1;
 /** Expanded streak column: a 7-dot row at 8dp with 2dp gaps, which also comfortably fits the
  *  count rendered above it. */
 export const STREAK_COLUMN = 68;
+/** The Android widget gives Pip a stable lane; the SVG preview uses the same lane before the
+ * streak column so the two renderers share their horizontal geometry. */
+export const WIDGET_MASCOT_LANE_WIDTH = 74;
 export const COLUMN_GAP = 8;
 
 /** Width of one slot's content, or 0 if the slot is empty. */

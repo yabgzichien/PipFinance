@@ -1,7 +1,8 @@
 import React from 'react';
 import { QuickRecordWidget } from '../src/widget/QuickRecordWidget';
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
-import { MASCOT_SIZES, BUTTON_SIZES } from '../src/widget/mascot/sizing';
+import { MASCOT_SIZES, BUTTON_SIZES, STREAK_COLUMN } from '../src/widget/mascot/sizing';
+import { expandedStreakMetrics } from '../src/widget/mascot/chrome';
 
 const cfg = (over = {}) => ({ ...DEFAULT_WIDGET_MASCOT_CONFIG, ...over });
 
@@ -16,6 +17,22 @@ function byUri(el: any): Record<string, any> {
   };
   walk(el);
   return out;
+}
+
+function findTextWidget(el: any, text: string): any | undefined {
+  if (!el || typeof el !== 'object') return undefined;
+  if (el.props?.text === text) return el;
+  return React.Children.toArray(el.props?.children ?? [])
+    .map((child) => findTextWidget(child, text))
+    .find(Boolean);
+}
+
+function findElement(el: any, predicate: (node: any) => boolean): any | undefined {
+  if (!el || typeof el !== 'object') return undefined;
+  if (predicate(el)) return el;
+  return React.Children.toArray(el.props?.children ?? [])
+    .map((child) => findElement(child, predicate))
+    .find(Boolean);
 }
 
 describe('QuickRecordWidget layout', () => {
@@ -54,14 +71,41 @@ describe('QuickRecordWidget layout', () => {
     expect(JSON.stringify(withNone)).not.toContain('data-streak-dots');
   });
 
+  it('keeps a multi-digit expanded streak count on one fitted line', () => {
+    const widget = QuickRecordWidget({
+      streak: 205,
+      config: cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 5 }),
+    });
+    const count = findTextWidget(widget, '205');
+
+    expect(count).toBeDefined();
+    expect(count.props.maxLines).toBe(1);
+    expect(count.props.style).toEqual(expect.objectContaining({ adjustsFontSizeToFit: true, textAlign: 'center' }));
+  });
+
+  it('uses the same fixed streak column as the preview instead of weighted Android layout', () => {
+    const widget = QuickRecordWidget({ streak: 205, config: cfg({ slot1: 'streak', slot2: 'none' }) });
+    const streakColumn = findElement(
+      widget,
+      (node) => node.props?.style?.width === STREAK_COLUMN && node.props?.style?.flexDirection === 'column'
+    );
+
+    expect(streakColumn).toBeDefined();
+  });
+
+  it('keeps the largest fire and three-digit count within the streak column', () => {
+    const m = expandedStreakMetrics(5);
+    expect(m.icon + m.gap + 32).toBeLessThanOrEqual(STREAK_COLUMN);
+  });
+
   it('scales the fire icon and count with buttonNotch when fire is selected', () => {
     const dots = [true, true, false, true, false, false, true];
     const notch1 = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 1 }) });
     const notch5 = QuickRecordWidget({ streak: 9, dots, config: cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 5 }) });
-    expect(JSON.stringify(notch1)).toContain('"width":24,"height":24');
-    expect(JSON.stringify(notch5)).toContain('"width":44,"height":44');
-    expect(JSON.stringify(notch1)).toContain('"fontSize":15');
-    expect(JSON.stringify(notch5)).toContain('"fontSize":22');
+    expect(JSON.stringify(notch1)).toContain('"width":18,"height":18');
+    expect(JSON.stringify(notch5)).toContain('"width":30,"height":30');
+    expect(JSON.stringify(notch1)).toContain('"fontSize":12');
+    expect(JSON.stringify(notch5)).toContain('"fontSize":16');
   });
 
   it('honours the selected badge icon and colour when fire is selected, falling back to flame if none', () => {

@@ -42,12 +42,14 @@ jest.mock('../src/screens/ManualEntryScreen', () => {
   };
 });
 
+const mockGetLLM = jest.fn(async () => ({
+  can: () => true,
+  quickAdd: jest.fn(async () => []),
+  guessCategories: jest.fn(async () => []),
+}));
+
 jest.mock('../src/llm', () => ({
-  getLLM: async () => ({
-    can: () => false,
-    quickAdd: async () => [],
-    guessCategories: async () => [],
-  }),
+  getLLM: () => mockGetLLM(),
 }));
 
 jest.mock('../src/db/currencyRepo', () => ({
@@ -104,6 +106,7 @@ describe('AddFlow — Quick Add with no amount navigates to ManualEntryScreen', 
   beforeEach(() => {
     mockCapturedAttachProps = null;
     mockCapturedManualProps = null;
+    mockGetLLM.mockClear();
   });
 
   it('routes to ManualEntryScreen with auto-selected category when amount is missing', async () => {
@@ -162,6 +165,9 @@ describe('AddFlow — Quick Add with no amount navigates to ManualEntryScreen', 
       await Promise.resolve();
     });
 
+    // Reset mount check call to getLLM
+    mockGetLLM.mockClear();
+
     // Trigger quick add with pure number "25"
     await TestRenderer.act(async () => {
       await mockCapturedAttachProps.onQuickAdd('25');
@@ -173,6 +179,37 @@ describe('AddFlow — Quick Add with no amount navigates to ManualEntryScreen', 
     // Verify amount is prefilled with 25 and no merchant/category is forced
     expect(mockCapturedManualProps.initialAmount).toBe(25);
     expect(mockCapturedManualProps.initialMerchant).toBe('');
+    expect(mockGetLLM).not.toHaveBeenCalled();
+  });
+
+  it('routes to ManualEntryScreen immediately for suggestion click or no-amount input (e.g. "Laundry") without LLM', async () => {
+    let tree: any;
+    await TestRenderer.act(async () => {
+      tree = TestRenderer.create(<AddFlow onClose={jest.fn()} />);
+      await Promise.resolve();
+    });
+
+    // Reset mount check call to getLLM
+    mockGetLLM.mockClear();
+
+    // Trigger quick add with "Laundry" (as clicked from suggestion chip without number)
+    await TestRenderer.act(async () => {
+      await mockCapturedAttachProps.onQuickAdd('Laundry');
+      await Promise.resolve();
+    });
+
+    expect(mockCapturedManualProps).not.toBeNull();
+    expect(tree.root.findByProps({ testID: 'manual-entry-screen' })).toBeDefined();
+    // Verify props passed to ManualEntryScreen:
+    // - initialMerchant is "Laundry"
+    // - initialCategoryId is auto-selected to "other"
+    // - initialAmount is null
+    // - getLLM was never called during quick add
+    expect(mockCapturedManualProps.initialMerchant).toBe('Laundry');
+    expect(mockCapturedManualProps.initialCategoryId).toBe('other');
+    expect(mockCapturedManualProps.initialCategorySource).toBe('guess');
+    expect(mockCapturedManualProps.initialAmount).toBeNull();
+    expect(mockGetLLM).not.toHaveBeenCalled();
   });
 });
 

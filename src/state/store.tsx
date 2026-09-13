@@ -50,9 +50,12 @@ import {
   upsertPrice,
 } from '../db/accountsRepo';
 import {
+  addDirectDebt as dbAddDirectDebt,
+  deleteDirectDebt as dbDeleteDirectDebt,
   createSplit as dbCreateSplit,
   deleteSplitsForTxns as dbDeleteSplitsForTxns,
   findOrCreatePerson as dbFindOrCreatePerson,
+  getAllKnownBankLabels as dbGetAllKnownBankLabels,
   listPayments as dbListPayments,
   listPeople as dbListPeople,
   listShares as dbListShares,
@@ -96,7 +99,9 @@ import {
   streakStartDay,
   NO_STREAK_FREEZE,
   type StreakFreezeState,
+  type DayActivityKind,
 } from '../lib/streak';
+import { getCheckInDays, recordCheckIn, type CheckInKind, type CheckInMap } from '../db/checkinRepo';
 import { monthLabel } from '../lib/dates';
 import type { MerchantMemoryWritePolicy } from '../lib/categorySuggestion';
 import { syncAllWidgets } from '../widget/syncWidgets';
@@ -276,6 +281,10 @@ async function reconcileReceivable(
     return true;
   }
 
+  if (existing.name !== 'Owed to me') {
+    await dbUpdateAccount(existing.id, { name: 'Owed to me', cls: existing.cls });
+  }
+
   const mine = (await listBalanceEntries()).filter((e) => e.accountId === existing.id);
   if (Math.round(currentValue(mine) * 100) === Math.round(total * 100)) return false;
   await upsertDailyBalanceEntry(existing.id, total, todayKey());
@@ -378,9 +387,20 @@ export interface AppData {
   openShares: OpenShare[];
   /** All shares (open and settled) joined with person and bill context, for full traceability. */
   allOwedShares: OpenShare[];
+  /** All confirmed bank transfer labels per person, used to boost settlement match confidence. */
+  knownBankLabels: Record<string, string[]>;
   /** Remember a name (or return the one already saved under it, case-insensitively). */
   addPerson: (name: string) => Promise<Person>;
   renamePerson: (id: string, name: string) => Promise<void>;
+  /** Record a direct debt where someone owes money to the user. */
+  addDirectDebt: (
+    personName: string,
+    amount: number,
+    note?: string | null,
+    date?: string | null
+  ) => Promise<{ shareId: string; personId: string }>;
+  /** Delete a direct debt and its underlying share/split. */
+  deleteDirectDebt: (shareId: string) => Promise<void>;
   /** Split a transaction already in the ledger: its amount drops to the payer's own share. */
   splitTransaction: (txn: Transaction, draft: SplitDraft) => Promise<void>;
   /** Undo a split, restoring the transaction to the full amount that left the account. */
@@ -393,7 +413,8 @@ export interface AppData {
     paidOn: string,
     evidence: PaymentEvidence,
     matchedMerchant: string | null,
-    accountId: string | null
+    accountId: string | null,
+    bankLabel?: string | null
   ) => Promise<void>;
   /** Undo settlement of a share, reopening the debt. */
   unsettleShare: (shareId: string) => Promise<void>;
@@ -456,6 +477,12 @@ export interface AppData {
   /** Monday-first, this-week-only activity ring for the Home card (replaces the old rolling
    *  7-day dots there; the Android widget keeps its own rolling window, see StreakWidget.tsx). */
   streakWeek: boolean[];
+  /** Activity kind per day in streakWeek ('spend' | 'checkin' | 'none'). */
+  streakWeekKinds: DayActivityKind[];
+  /** Map of date strings to check-in kind for no-spend / review days. */
+  checkIns: CheckInMap;
+  /** Mark today as checked in without needing to record a financial transaction. */
+  checkInToday: (kind?: CheckInKind) => Promise<void>;
   /** Index of today within `streakWeek` (0=Mon..6=Sun). */
   streakTodayIndex: number;
   /** Whether an unspent monthly freeze is currently banked  shown as a small shield. */
@@ -584,6 +611,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [splits, setSplits] = useState<Split[]>([]);
   const [shares, setShares] = useState<SplitShare[]>([]);
   const [splitPayments, setSplitPayments] = useState<SplitPayment[]>([]);
+  const [knownBankLabels, setKnownBankLabels] = useState<Record<string, string[]>>({});
   const [prices, setPrices] = useState<Record<string, PriceQuote>>({});
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [tutorialScanDone, setTutorialScanDoneState] = useState(false);
@@ -601,6 +629,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [diagnosticsEnabled, setDiagnosticsEnabledState] = useState(true);
   const [streakFreeze, setStreakFreezeState] = useState<StreakFreezeState>(NO_STREAK_FREEZE);
   const [streakPausedSinceDay, setStreakPausedSinceDayState] = useState<number | null>(null);
+  const [checkIns, setCheckIns] = useState<CheckInMap>({});
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [commitmentOccurrences, setCommitmentOccurrences] = useState<CommitmentOccurrence[]>([]);
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
@@ -609,7 +638,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [recapStoryHomeHandledMonth, setRecapStoryHomeHandledMonth] = useState<string | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, recapStoryHomeHandledMonthRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, recapStoryHomeHandledMonthRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows, checkInDays, knownBankLabelMap] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -644,8 +673,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         dbListShares(),
         dbListPayments(),
         listTrips(),
+        getCheckInDays(),
+        dbGetAllKnownBankLabels(),
       ]);
+    setKnownBankLabels(knownBankLabelMap);
     setTrips(tripRows);
+    setCheckIns(checkInDays);
     setRecapStoryHomeHandledMonth(recapStoryHomeHandledMonthRaw || null);
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
@@ -806,13 +839,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     const now = new Date();
-    const payload = `${computeStreak(transactions, now)}|${compute7DayDots(transactions, now)
+    const payload = `${computeStreak(transactions, now, 1, checkIns)}|${compute7DayDots(transactions, now, checkIns)
       .map((d) => (d ? '1' : '0'))
       .join('')}`;
     if (lastWidgetPayload.current === payload) return;
     lastWidgetPayload.current = payload;
-    syncAllWidgets(transactions).catch(() => {});
-  }, [ready, transactions]);
+    syncAllWidgets(transactions, checkIns).catch(() => {});
+  }, [ready, transactions, checkIns]);
 
   // Spend a banked freeze the moment it's actually needed (docs/ui-engagement-plan.md Step 4).
   // Paused streaks never lapse in the first place, so there is nothing for a freeze to bridge
@@ -821,38 +854,38 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   // without this effect re-firing (see that function's own comment).
   useEffect(() => {
     if (!ready || streakPausedSinceDay !== null) return;
-    const { freezeSpent } = computeStreakWithFreeze(transactions, streakFreeze, new Date());
+    const { freezeSpent } = computeStreakWithFreeze(transactions, streakFreeze, new Date(), 1, checkIns);
     if (!freezeSpent) return;
-    const last = lastActiveDay(transactions, new Date());
+    const last = lastActiveDay(transactions, new Date(), checkIns);
     const next: StreakFreezeState = { ...streakFreeze, available: false, spentForLastDay: last };
     setStreakFreezeState(next);
     void setMeta(STREAK_FREEZE_AVAILABLE_KEY, 'false');
     void setMeta(STREAK_FREEZE_SPENT_FOR_KEY, last === null ? '' : String(last));
-  }, [ready, transactions, streakFreeze, streakPausedSinceDay]);
+  }, [ready, transactions, streakFreeze, streakPausedSinceDay, checkIns]);
 
   const streak = useMemo(
-    () => computeStreakPaused(transactions, streakPausedSinceDay, new Date()),
-    [transactions, streakPausedSinceDay]
+    () => computeStreakPaused(transactions, streakPausedSinceDay, new Date(), 1, checkIns),
+    [transactions, streakPausedSinceDay, checkIns]
   );
   const { streak: liveStreakForFreeze } = useMemo(
-    () => computeStreakWithFreeze(transactions, streakFreeze, new Date()),
-    [transactions, streakFreeze]
+    () => computeStreakWithFreeze(transactions, streakFreeze, new Date(), 1, checkIns),
+    [transactions, streakFreeze, checkIns]
   );
   // While paused the pause-frozen value governs (a pause always wins); otherwise the
   // freeze-aware figure does, since it's a superset of the plain streak that also bridges a
   // banked freeze.
   const effectiveStreak = streakPausedSinceDay !== null ? streak : liveStreakForFreeze;
-  const { days: streakWeek, todayIndex: streakTodayIndex } = useMemo(
-    () => computeWeekRing(transactions, new Date()),
-    [transactions]
+  const { days: streakWeek, kinds: streakWeekKinds, todayIndex: streakTodayIndex } = useMemo(
+    () => computeWeekRing(transactions, new Date(), checkIns),
+    [transactions, checkIns]
   );
   const streakGraduated = useMemo(() => isStreakGraduated(effectiveStreak), [effectiveStreak]);
   const streakStartLabel = useMemo(() => {
-    const startDay = streakStartDay(transactions, new Date());
+    const startDay = streakStartDay(transactions, new Date(), 1, checkIns);
     if (startDay === null) return null;
     const d = new Date(startDay * 86_400_000);
     return `Logging since ${monthLabel(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)}`;
-  }, [transactions]);
+  }, [transactions, checkIns]);
 
   // Fires the Home fire-burst (see DashboardScreen's StreakCelebration): a save that extends the
   // streak to a new day, freeze-bridged or not, bumps this token once. `null` on the ref means
@@ -874,17 +907,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
    * the account the money landed in too.
    */
   const refreshSplitState = useCallback(async () => {
-    const [peopleRows, splitRows, shareRows, paymentRows, accts] = await Promise.all([
+    const [peopleRows, splitRows, shareRows, paymentRows, accts, labels] = await Promise.all([
       dbListPeople(),
       dbListSplits(),
       dbListShares(),
       dbListPayments(),
       listAccounts(),
+      dbGetAllKnownBankLabels(),
     ]);
     setPeople(peopleRows);
     setSplits(splitRows);
     setShares(shareRows);
     setSplitPayments(paymentRows);
+    setKnownBankLabels(labels);
     await reconcileReceivable(shareRows, accts, splitRows);
     const [finalAccts, finalEntries] = await Promise.all([listAccounts(), listBalanceEntries()]);
     setAccounts(finalAccts);
@@ -1208,6 +1243,31 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
+   * Record a direct debt where someone owes money to the user.
+   */
+  const addDirectDebt = useCallback(
+    async (personName: string, amount: number, note?: string | null, date?: string | null) => {
+      const res = await dbAddDirectDebt(personName, amount, note, date);
+      setTransactions(await listTransactions());
+      await refreshSplitState();
+      return res;
+    },
+    [refreshSplitState]
+  );
+
+  /**
+   * Delete a direct debt and its underlying share/split.
+   */
+  const deleteDirectDebt = useCallback(
+    async (shareId: string) => {
+      await dbDeleteDirectDebt(shareId);
+      setTransactions(await listTransactions());
+      await refreshSplitState();
+    },
+    [refreshSplitState]
+  );
+
+  /**
    * Split a transaction that is already in the ledger. The row drops to the payer's own share
    * and the rest becomes a receivable, so the same bill now reads as what was consumed rather
    * than what was fronted.
@@ -1355,6 +1415,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const resumeStreak = useCallback(async () => {
     await setMeta(STREAK_PAUSED_SINCE_KEY, '');
     setStreakPausedSinceDayState(null);
+  }, []);
+
+  const checkInToday = useCallback(async (kind: CheckInKind = 'no_spend') => {
+    const today = todayKey();
+    const updated = await recordCheckIn(today, kind);
+    setCheckIns(updated);
+    setStreakCelebrationToken((t) => t + 1);
   }, []);
 
   const resetBudget = useCallback(async () => {
@@ -1859,7 +1926,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       paidOn: string,
       evidence: PaymentEvidence,
       matchedMerchant: string | null,
-      accountId: string | null
+      accountId: string | null,
+      bankLabel: string | null = null
     ) => {
       const share = shares.find((s) => s.id === shareId);
       const split = share ? splits.find((sp) => sp.id === share.splitId) : undefined;
@@ -1882,7 +1950,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           return;
         }
       }
-      const result = await dbRecordPayment(shareId, amount, paidOn, evidence, matchedMerchant, accountId);
+      const result = await dbRecordPayment(shareId, amount, paidOn, evidence, matchedMerchant, accountId, bankLabel);
       if (!result) return;
       // Credit what the payment ACTUALLY moved, not what was asked for. `recordPayment` caps
       // at the outstanding balance, so a second "Mark settled" on an already-square share (the
@@ -2298,8 +2366,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     splitPayments,
     openShares,
     allOwedShares,
+    knownBankLabels,
     addPerson,
     renamePerson,
+    addDirectDebt,
+    deleteDirectDebt,
     splitTransaction,
     unsplitTransaction,
     settleShare,
@@ -2330,7 +2401,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     markRecapStoryHomeHandled,
     streak: effectiveStreak,
     streakWeek,
+    streakWeekKinds,
     streakTodayIndex,
+    checkIns,
+    checkInToday,
     streakFreezeAvailable: streakFreeze.available,
     streakGraduated,
     streakStartLabel,

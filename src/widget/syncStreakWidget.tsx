@@ -5,6 +5,7 @@ import { computeStreak, compute7DayDots, type StreakInput } from '../lib/streak'
 import type { Transaction } from '../lib/types';
 import { listTransactions } from '../db/txnRepo';
 import { getMeta } from '../db/metaRepo';
+import { getCheckInDays, type CheckInMap } from '../db/checkinRepo';
 import { StreakWidget } from './StreakWidget';
 import {
   DEFAULT_WIDGET_MASCOT_CONFIG,
@@ -14,7 +15,7 @@ import {
 
 export { compute7DayDots };
 
-export async function getStreakWidgetData(providedTxns?: Transaction[]) {
+export async function getStreakWidgetData(providedTxns?: Transaction[], providedCheckIns?: CheckInMap) {
   let txns: Transaction[];
   if (providedTxns) {
     txns = providedTxns;
@@ -23,6 +24,17 @@ export async function getStreakWidgetData(providedTxns?: Transaction[]) {
       txns = await listTransactions();
     } catch {
       txns = [];
+    }
+  }
+
+  let checkIns: CheckInMap;
+  if (providedCheckIns) {
+    checkIns = providedCheckIns;
+  } else {
+    try {
+      checkIns = await getCheckInDays();
+    } catch {
+      checkIns = {};
     }
   }
 
@@ -36,14 +48,14 @@ export async function getStreakWidgetData(providedTxns?: Transaction[]) {
   }
 
   const now = new Date();
-  return { streak: computeStreak(txns, now), dots: compute7DayDots(txns, now), config };
+  return { streak: computeStreak(txns, now, 1, checkIns), dots: compute7DayDots(txns, now, checkIns), config };
 }
 
-export async function syncStreakWidget(txns?: Transaction[]): Promise<void> {
+export async function syncStreakWidget(txns?: Transaction[], checkIns?: CheckInMap): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   try {
-    const data = await getStreakWidgetData(txns);
+    const data = await getStreakWidgetData(txns, checkIns);
     await requestWidgetUpdate({
       widgetName: 'StreakWidget',
       renderWidget: () => (

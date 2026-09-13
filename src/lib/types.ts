@@ -240,6 +240,7 @@ export interface SplitPayment {
   evidence: PaymentEvidence;
   matchedMerchant: string | null;
   accountId: string | null;
+  bankLabel?: string | null;
   createdAt: string;
 }
 

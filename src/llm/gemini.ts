@@ -10,6 +10,7 @@ import {
   BALANCE_USER_PROMPT,
   DOC_SYSTEM_PROMPT,
   DOC_USER_PROMPT,
+  buildDocUserPrompt,
   HOLDINGS_SYSTEM_PROMPT,
   HOLDINGS_USER_PROMPT,
   RECEIPT_SYSTEM_PROMPT,
@@ -19,12 +20,19 @@ import {
 } from './extractPrompt';
 import {
   LLMError,
+  type CategoryGuessInput,
   type CoachInput,
   type DocExtractInput,
   type ExtractInput,
   type LLMProvider,
   type TestInput,
 } from './types';
+import {
+  buildCategoryGuessPrompt,
+  CATEGORY_GUESS_SYSTEM_PROMPT,
+  CategoryGuessParseError,
+  parseCategoryGuess,
+} from './categoryGuessPrompt';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
@@ -113,11 +121,12 @@ export const GeminiProvider: LLMProvider = {
   defaultModel: DEFAULT_MODEL,
   acceptsDocuments: true,
 
-  async extract({ apiKey, model, imageBase64, mimeType }: ExtractInput): Promise<ExtractedTxn[]> {
+  async extract({ apiKey, model, imageBase64, mimeType, categories }: ExtractInput): Promise<ExtractedTxn[]> {
+    const prompt = buildDocUserPrompt(categories);
     const json = await callGemini(
       model,
       apiKey,
-      [{ text: DOC_USER_PROMPT }, { inline_data: { mime_type: mimeType, data: imageBase64 } }],
+      [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }],
       { system: DOC_SYSTEM_PROMPT, json: true, noThinking: true }
     );
     return parseOrThrow(contentOf(json));
@@ -187,5 +196,20 @@ export const GeminiProvider: LLMProvider = {
       noThinking: true,
     });
     return contentOf(json).trim();
+  },
+
+  async guessCategories({ apiKey, model, items, categories }: CategoryGuessInput): Promise<Record<number, string | null>> {
+    const json = await callGemini(
+      model,
+      apiKey,
+      [{ text: buildCategoryGuessPrompt(items, categories) }],
+      { system: CATEGORY_GUESS_SYSTEM_PROMPT, json: true, noThinking: true }
+    );
+    try {
+      return parseCategoryGuess(contentOf(json), items, categories);
+    } catch (e) {
+      if (e instanceof CategoryGuessParseError) throw new LLMError('bad_response', e.message);
+      throw e;
+    }
   },
 };

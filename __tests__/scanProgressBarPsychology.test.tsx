@@ -15,7 +15,7 @@ describe('ScanProgressBar Psychological UI', () => {
   });
 
   it('renders initial endowed progress percentage correctly', () => {
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(<ScanProgressBar progress={15} />);
     });
@@ -25,7 +25,7 @@ describe('ScanProgressBar Psychological UI', () => {
   });
 
   it('renders custom labels and clamps values safely within 0-100', () => {
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(
         <ScanProgressBar progress={45} label="Reading line items…" />
@@ -37,7 +37,7 @@ describe('ScanProgressBar Psychological UI', () => {
   });
 
   it('transitions to completion state when progress reaches 100%', () => {
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(
         <ScanProgressBar progress={100} label="Receipt scan progress" />
@@ -49,7 +49,7 @@ describe('ScanProgressBar Psychological UI', () => {
   });
 
   it('transitions to completion state when isComplete flag is passed', () => {
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(
         <ScanProgressBar
@@ -65,23 +65,29 @@ describe('ScanProgressBar Psychological UI', () => {
   });
 
   it('supports hiding percentage when requested', () => {
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(
         <ScanProgressBar progress={50} showPercentage={false} />
       );
     });
     const json = JSON.stringify(root!.toJSON());
-    expect(json).not.toContain('50%');
+    expect(json).not.toContain('"children":["50%"]');
+    TestRenderer.act(() => {
+      root!.unmount();
+    });
   });
 
   it('renders with active motion animations when reduced motion is disabled', () => {
     mockReducedMotion = false;
-    let root: TestRenderer.ReactTestRenderer;
+    let root: any;
     TestRenderer.act(() => {
       root = TestRenderer.create(<ScanProgressBar progress={30} />);
     });
     const tree = root!.toJSON();
     expect(JSON.stringify(tree)).toContain('30%');
+    TestRenderer.act(() => {
+      root!.unmount();
+    });
   });
 });

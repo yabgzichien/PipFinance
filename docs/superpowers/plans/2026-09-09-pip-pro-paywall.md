@@ -4,9 +4,9 @@
 
 **Goal:** Ship a freemium paywall for Pip, powered by the RevenueCat SDK, in time for a first public Play Store release before 23 September 2026.
 
-**Architecture:** A self-contained `src/billing/` directory holds all monetization logic. Pure functions (scan quota, entitlement cache) are separated from the RevenueCat SDK wrapper so the bulk of the logic is unit-testable without native modules. A React context publishes entitlement state to the tree; six call sites check it before proceeding, routing to a new `paywall` screen when unentitled. Nothing touches the database schema: both persisted values use the existing `app_meta` key/value table via `src/db/metaRepo`.
+**Architecture:** A self-contained `src/billing/` directory holds client-side monetization logic. RevenueCat remains the entitlement source. A minimal multitenant Cloudflare Worker keeps AI-provider secrets off-device, verifies anonymous installations, routes provider calls and authoritatively enforces the Free allowance of 20 successful scans per UTC month and 3 per UTC day. Pro has no product quota. Local state is UI cache only and never authorizes a provider call. Financial records and receipt images are not persisted by the Worker.
 
-**Tech Stack:** Expo SDK 54, React Native 0.81, React 19, TypeScript, `expo-sqlite`, Jest with `jest-expo`, `react-native-purchases` (RevenueCat) with its Expo config plugin.
+**Tech Stack:** Expo SDK 54, React Native 0.81, React 19, TypeScript, `expo-sqlite`, Jest with `jest-expo`, `react-native-purchases` (RevenueCat), Cloudflare Workers and D1.
 
 **Spec:** `docs/superpowers/specs/2026-09-09-paywall-design.md`
 
@@ -24,9 +24,14 @@ These apply to every task below.
 - **No em dashes in user-facing copy.** House style, per `handoff.md` §4. Use commas, colons or full stops.
 - **Contrast audit:** run `npm run audit:contrast` after any task that adds colours.
 - **Entitlement identifier:** `pro`. Used verbatim in RevenueCat.
-- **Play product IDs:** subscription `pip_pro` with base plans `monthly` and `annual`; one-time product `pip_pro_lifetime`.
-- **Prices:** RM9.90/month, RM67/year, RM199 lifetime. 14-day trial on the annual base plan only.
-- **Free scan cap:** 20 per calendar month.
+- **Play product IDs:** subscription `pip_pro` with base plans `monthly` and `annual` only.
+- **Prices:** RM9.90/month and RM67/year. No lifetime product. The 14-day trial is on the annual base plan only.
+- **Free scan cap:** 20 successful scans per UTC calendar month and 3 per UTC calendar day.
+- **Pro scans:** unlimited, with no daily or monthly product quota. Anti-automation, concurrency and emergency provider circuit breakers are service protections, not a hidden Pro allowance.
+- **Exports:** every financial and tax export is Pro. The Export screen may be previewed for free; gate only the final export action.
+- **Always free:** Advanced Import, full backup/restore, monthly recap images, split-bill receipt sharing and other social images.
+- **BYOK:** do not ship it. Hide existing provider-key controls without deleting their underlying code.
+- **Upgrade timing:** never show a paywall after onboarding. Success moments use a small dismissible Pro card; only an explicit card CTA opens the paywall.
 - **Play effective fee:** 15% (10% service + 5% billing). Use this in any margin note.
 - **Never gate accuracy.** `src/prices/` and `NetWorthScreen.tsx` are never entitlement-checked. Only `NetWorthHistoryScreen.tsx` is.
 
@@ -38,15 +43,16 @@ These apply to every task below.
 
 | File | Responsibility |
 |---|---|
-| `src/billing/scanQuota.ts` | Monthly scan counter: parse, read, increment, month rollover |
+| `src/billing/scanQuota.ts` | Client types and presentation helpers for Worker quota state |
+| `src/billing/scanProxy.ts` | Authenticated client for Worker scan requests and quota responses |
 | `src/billing/entitlementCache.ts` | Last-known tier plus timestamp, 7-day offline grace resolution |
 | `src/billing/purchases.ts` | RevenueCat SDK wrapper: configure, offerings, purchase, restore |
 | `src/billing/entitlement.tsx` | `EntitlementProvider` and the `useEntitlement()` hook |
 | `src/billing/gates.ts` | The `GateTrigger` union and per-trigger paywall headlines |
 | `src/billing/upsellCadence.ts` | Frequency cap and rotation for the ambient mascot line |
-| `src/billing/moments.ts` | One-shot contextual prompts at success moments |
+| `src/billing/moments.ts` | One-shot small Pro cards at approved success moments |
 | `src/screens/PaywallScreen.tsx` | The paywall itself |
-| `src/components/ScanQuotaBadge.tsx` | "14 / 20 scans left this month" |
+| `src/components/ScanQuotaBadge.tsx` | Shows the tighter daily/monthly Free remainder |
 | `src/components/PipUpsellCard.tsx` | Dismissible in-character upgrade card |
 
 **Modified:**
@@ -57,217 +63,113 @@ These apply to every task below.
 | `App.tsx:229` | Wrap tree in `EntitlementProvider`, add paywall route and origin state |
 | `src/i18n/translations/en.ts`, `zh.ts` | Paywall and upsell strings |
 | `src/screens/TaxScreen.tsx:157`, `:196` | Gate `buildAuditPackPdf` and `buildEvidenceZip` |
-| `src/screens/ExportScreen.tsx` | Gate PDF and Excel, leave CSV and JSON free |
-| `src/screens/AdvancedImportScreen.tsx` | Gate entry |
+| `src/screens/ExportScreen.tsx` | Leave preview free; gate every final financial export action |
 | `src/screens/CurrencySettingsScreen.tsx` | Gate entry |
 | `src/screens/NetWorthHistoryScreen.tsx` | Gate entry |
 | `src/screens/WidgetCustomizerScreen.tsx` | Gate entry |
 | `src/screens/ScanKindScreen.tsx` and the three scan screens | Quota check plus badge |
-| `src/screens/SettingsScreen.tsx` | Subscription status row, restore, Customer Center |
+| `src/screens/SettingsScreen.tsx` | Subscription status row, restore, Customer Center; hide BYOK controls |
 | `src/db/restoreRepo.ts:438` | Degrade Pro-only mascot config on restore |
-| `app.json` | `react-native-purchases` config plugin |
+| `worker/src/index.ts`, `worker/wrangler.toml` | Multitenant AI proxy, D1 quota enforcement and provider routing |
+| `worker/test/` | Quota, entitlement, idempotency, abuse and provider-failure tests |
 
 ---
 
 ## Track A: Code
 
-### Task 1: Scan quota
+### Task 1: Worker-backed scan quota and secure provider proxy
+
+> **Normative replacement:** The earlier client-only counter design is not
+> secure enough for the approved multitenant architecture. Do not implement a
+> local counter as authorization. The implementation in this task must use the
+> Worker contract below; any remaining local-counter snippets in this task are
+> historical test scaffolding only and must be removed when executing the plan.
+
+The Worker accepts an anonymous installation credential, Play Integrity token
+when available, RevenueCat entitlement evidence, an idempotency key and the
+scan payload. Provider secrets are Worker secrets. D1 atomically reserves one
+slot, calls the selected provider, commits both UTC counters only for a valid
+extraction, and rolls the reservation back on failure or expiry.
+
+Required constants and response fields:
+
+```ts
+export const FREE_MONTHLY_SCANS = 20;
+export const FREE_DAILY_SCANS = 3;
+
+export interface ScanAllowance {
+  tier: 'free' | 'pro';
+  monthUsed: number;
+  monthLimit: number; // 20 or Infinity in the client representation
+  dayUsed: number;
+  dayLimit: number;   // 3 or Infinity in the client representation
+  canScan: boolean;
+  blockedBy: 'daily' | 'monthly' | null;
+}
+```
+
+Worker tests must cover the 3rd/4th daily scan, 20th/21st monthly scan, UTC
+rollovers, Pro bypass of both counters, atomic concurrent reservations,
+idempotent retries, invalid integrity/entitlement evidence, provider fallback,
+failure rollback and redaction of provider keys and financial payloads from
+logs. The mobile tests must prove that cached allowance cannot authorize a
+request and that the paywall is shown for either Free boundary.
 
 **Files:**
 - Create: `src/billing/scanQuota.ts`
-- Test: `__tests__/scanQuota.test.ts`
+- Create: `src/billing/scanProxy.ts`, `worker/src/index.ts`, `worker/src/quota.ts`, `worker/src/providers.ts`, `worker/wrangler.toml`, `worker/migrations/0001_quota.sql`
+- Test: `__tests__/scanQuota.test.ts`, `__tests__/scanProxy.test.ts`, `worker/test/quota.test.ts`, `worker/test/proxy.test.ts`
 
 **Interfaces:**
-- Consumes: `getMeta`, `setMeta` from `src/db/metaRepo`
-- Produces: `SCAN_QUOTA_KEY`, `FREE_MONTHLY_SCANS`, `ScanQuota`, `monthKey(d: Date): string`, `parseScanQuota(raw: string | null, now: Date): ScanQuota`, `readScanQuota(now?: Date): Promise<ScanQuota>`, `scansRemaining(q: ScanQuota, limit?: number): number`, `recordScan(now?: Date): Promise<ScanQuota>`
+- Consumes: anonymous installation credential, optional Play Integrity token, RevenueCat entitlement verification, D1 and Worker secrets
+- Produces: `FREE_MONTHLY_SCANS`, `FREE_DAILY_SCANS`, `ScanAllowance`, `fetchAllowance()`, `submitScan()` and structured `daily_limit` / `monthly_limit` responses
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write failing Worker and client contract tests**
 
-```ts
-// __tests__/scanQuota.test.ts
-jest.mock('../src/db/metaRepo', () => ({
-  getMeta: jest.fn(),
-  setMeta: jest.fn().mockResolvedValue(undefined),
-}));
+Start with Worker tests for both quota boundaries, Pro bypass, UTC rollover,
+atomic concurrency, idempotency and failed-provider rollback. Add client tests
+for parsing structured allowance/error responses and proving that a cached
+`canScan` value never skips the Worker request.
 
-import { getMeta, setMeta } from '../src/db/metaRepo';
-import {
-  FREE_MONTHLY_SCANS,
-  SCAN_QUOTA_KEY,
-  monthKey,
-  parseScanQuota,
-  readScanQuota,
-  recordScan,
-  scansRemaining,
-} from '../src/billing/scanQuota';
+- [ ] **Step 2: Create the D1 schema and atomic quota service**
 
-const SEPT = new Date('2026-09-15T10:00:00Z');
-const OCT = new Date('2026-10-01T00:30:00Z');
+Use one row per anonymous installation and UTC period, plus short-lived
+idempotency/reservation rows. An atomic transaction must reject the 4th Free
+success of a UTC day and the 21st Free success of a UTC month. Do not create
+quota rows for Pro successes. Add expiry indexes without performing an
+unbounded cleanup on the request path.
 
-describe('monthKey', () => {
-  it('zero-pads single-digit months', () => {
-    expect(monthKey(new Date('2026-03-04T00:00:00Z'))).toBe('2026-03');
-  });
-});
+- [ ] **Step 3: Implement the Worker proxy**
 
-describe('parseScanQuota', () => {
-  it('treats a missing value as a fresh month', () => {
-    expect(parseScanQuota(null, SEPT)).toEqual({ month: '2026-09', used: 0 });
-  });
+Validate request size/type, installation credential, integrity evidence when
+available and current Pro entitlement. Reserve capacity, call the configured
+provider with a Worker secret, validate the extraction, then commit or roll
+back. Return a normalized `ScanAllowance` on both success and quota rejection.
+Never log images, OCR text, financial output, authorization headers or provider
+keys. Apply per-installation and per-IP burst controls plus a provider-wide
+circuit breaker. These service protections do not impose a daily/monthly quota
+on legitimate Pro users.
 
-  it('keeps the count inside the same month', () => {
-    expect(parseScanQuota('{"month":"2026-09","used":7}', SEPT)).toEqual({
-      month: '2026-09',
-      used: 7,
-    });
-  });
+- [ ] **Step 4: Implement the mobile proxy client**
 
-  // The reset is a read-time consequence of the stored month no longer matching, so no
-  // scheduled job or app-open hook is needed for the rollover to happen on time.
-  it('resets to zero when the stored month has rolled over', () => {
-    expect(parseScanQuota('{"month":"2026-09","used":19}', OCT)).toEqual({
-      month: '2026-10',
-      used: 0,
-    });
-  });
+Replace direct Groq, Gemini and OpenRouter production calls with `submitScan`.
+Keep existing provider-key settings code but hide its UI; production bundles
+must not require any `EXPO_PUBLIC_GROQ_API_KEY`,
+`EXPO_PUBLIC_GEMINI_API_KEY` or `EXPO_PUBLIC_OPENROUTER_API_KEY`.
+The app may cache the last allowance for display, but every scan still reaches
+the Worker.
 
-  it('falls back to a fresh month on corrupt JSON', () => {
-    expect(parseScanQuota('not json', SEPT)).toEqual({ month: '2026-09', used: 0 });
-  });
+- [ ] **Step 5: Verify locally**
 
-  it('falls back to a fresh month when the shape is wrong', () => {
-    expect(parseScanQuota('{"month":9,"used":"x"}', SEPT)).toEqual({
-      month: '2026-09',
-      used: 0,
-    });
-  });
+Run the Worker tests, `npm test -- __tests__/scanQuota.test.ts
+__tests__/scanProxy.test.ts`, `npm run typecheck` and a secret scan confirming
+no provider key or real financial fixture is committed or logged.
 
-  it('clamps a negative stored count to zero', () => {
-    expect(parseScanQuota('{"month":"2026-09","used":-3}', SEPT).used).toBe(0);
-  });
-});
-
-describe('scansRemaining', () => {
-  it('reports what is left against the free cap', () => {
-    expect(scansRemaining({ month: '2026-09', used: 6 })).toBe(FREE_MONTHLY_SCANS - 6);
-  });
-
-  it('never reports a negative remainder', () => {
-    expect(scansRemaining({ month: '2026-09', used: 999 })).toBe(0);
-  });
-});
-
-describe('readScanQuota', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('reads from the agreed meta key', async () => {
-    (getMeta as jest.Mock).mockResolvedValue('{"month":"2026-09","used":3}');
-    const q = await readScanQuota(SEPT);
-    expect(getMeta).toHaveBeenCalledWith(SCAN_QUOTA_KEY);
-    expect(q.used).toBe(3);
-  });
-});
-
-describe('recordScan', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('increments and persists', async () => {
-    (getMeta as jest.Mock).mockResolvedValue('{"month":"2026-09","used":3}');
-    const next = await recordScan(SEPT);
-    expect(next).toEqual({ month: '2026-09', used: 4 });
-    expect(setMeta).toHaveBeenCalledWith(
-      SCAN_QUOTA_KEY,
-      JSON.stringify({ month: '2026-09', used: 4 })
-    );
-  });
-
-  it('starts a rolled-over month at one', async () => {
-    (getMeta as jest.Mock).mockResolvedValue('{"month":"2026-09","used":19}');
-    expect(await recordScan(OCT)).toEqual({ month: '2026-10', used: 1 });
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- __tests__/scanQuota.test.ts`
-Expected: FAIL, "Cannot find module '../src/billing/scanQuota'"
-
-- [ ] **Step 3: Write minimal implementation**
-
-```ts
-// src/billing/scanQuota.ts
-// The free tier's monthly AI-scan allowance. Stored in the existing app_meta key/value table
-// rather than a new column, because the whole value is one small JSON blob read once per scan.
-//
-// The reset is deliberately read-time: a stored month that no longer matches "now" reads as a
-// fresh zero. That means no scheduled job, no app-open hook, and no way for the rollover to be
-// missed because the app was closed at midnight on the 1st.
-import { getMeta, setMeta } from '../db/metaRepo';
-
-export const SCAN_QUOTA_KEY = 'scan_quota';
-export const FREE_MONTHLY_SCANS = 20;
-
-export interface ScanQuota {
-  /** 'YYYY-MM' in device-local time. */
-  month: string;
-  used: number;
-}
-
-export function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-export function parseScanQuota(raw: string | null, now: Date): ScanQuota {
-  const month = monthKey(now);
-  if (!raw) return { month, used: 0 };
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      typeof (parsed as ScanQuota).month !== 'string' ||
-      typeof (parsed as ScanQuota).used !== 'number'
-    ) {
-      return { month, used: 0 };
-    }
-    const stored = parsed as ScanQuota;
-    if (stored.month !== month) return { month, used: 0 };
-    return { month, used: Math.max(0, Math.floor(stored.used)) };
-  } catch {
-    return { month, used: 0 };
-  }
-}
-
-export async function readScanQuota(now: Date = new Date()): Promise<ScanQuota> {
-  return parseScanQuota(await getMeta(SCAN_QUOTA_KEY), now);
-}
-
-export function scansRemaining(q: ScanQuota, limit: number = FREE_MONTHLY_SCANS): number {
-  return Math.max(0, limit - q.used);
-}
-
-/** Call ONLY after a scan has successfully produced usable output. A failed vision call must
- *  not cost the user a scan: charging someone for an outage is how a free tier earns one-star
- *  reviews. See the spec, §7. */
-export async function recordScan(now: Date = new Date()): Promise<ScanQuota> {
-  const current = await readScanQuota(now);
-  const next: ScanQuota = { month: current.month, used: current.used + 1 };
-  await setMeta(SCAN_QUOTA_KEY, JSON.stringify(next));
-  return next;
-}
-```
-
-- [ ] **Step 4: Run tests and typecheck**
-
-Run: `npm test -- __tests__/scanQuota.test.ts && npm run typecheck`
-Expected: PASS, 10 tests. Typecheck clean.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/billing/scanQuota.ts __tests__/scanQuota.test.ts
-git commit -m "feat(billing): monthly AI scan quota with read-time rollover"
+git add worker src/billing/scanQuota.ts src/billing/scanProxy.ts __tests__/scanQuota.test.ts __tests__/scanProxy.test.ts
+git commit -m "feat(ai): secure multitenant proxy with daily and monthly quota"
 ```
 
 ---
@@ -449,7 +351,7 @@ git commit -m "feat(billing): entitlement cache with 7-day offline grace"
 Append to `__tests__/screenNav.test.ts`, inside the existing `describe('backTargetFor', ...)` block:
 
 ```ts
-  // The paywall is reachable from six different gates plus onboarding, so a fixed back target
+  // The paywall is reachable from several explicit gates and Pro-card CTAs, so a fixed back target
   // would strand the user somewhere they never came from. It follows the same origin pattern
   // as `export` and `owed`.
   it('returns the paywall to wherever it was opened from', () => {
@@ -481,7 +383,7 @@ In `src/lib/screenNav.ts`, add `| 'paywall'` to the `Screen` union after `'widge
 Add to `ScreenOrigins`:
 
 ```ts
-  /** Where the paywall was triggered from. Six gates plus onboarding can open it, so a fixed
+  /** Where the paywall was triggered from. Several gates and opt-in card CTAs can open it, so a fixed
    *  back target would strand the user on a screen they never visited. */
   paywallOrigin?: Screen;
 ```
@@ -535,8 +437,6 @@ Add to the `Translations` interface:
   proAnnual: string;
   proAnnualPerMonth: string;
   proAnnualSave: string;
-  proLifetime: string;
-  proLifetimeNote: string;
   proStartTrial: string;
   proRestore: string;
   proRestoreNothing: string;
@@ -549,7 +449,6 @@ Add to the `Translations` interface:
   gateScanQuota: string;
   gateTaxExport: string;
   gateReportExport: string;
-  gateAdvancedImport: string;
   gateMultiCurrency: string;
   gateNetWorthHistory: string;
   gateWidgetCustom: string;
@@ -568,6 +467,8 @@ Add to the `Translations` interface:
   // Scan counter
   scansLeft: string;
   scansNone: string;
+  scansDailyLeft: string;
+  scansDailyNone: string;
 ```
 
 - [ ] **Step 3: Add the English strings**
@@ -577,26 +478,23 @@ Append to `src/i18n/translations/en.ts`. No em dashes anywhere. The disclosure s
 ```ts
   // Paywall
   proTitle: 'Pip Pro',
-  proSubtitle: 'Still no account. Still on your phone.',
-  proMonthly: 'RM9.90 / month',
-  proAnnual: 'RM67 / year',
-  proAnnualPerMonth: 'RM5.58 a month, billed yearly',
+  proSubtitle: 'No Pip account. Your financial records stay on your phone.',
+  proMonthly: '{price} / month',
+  proAnnual: '{price} / year',
+  proAnnualPerMonth: '{price} a month, billed yearly',
   proAnnualSave: 'Save 44%',
-  proLifetime: 'Founding supporter, RM199 once',
-  proLifetimeNote: 'One-time purchase, unlocks Pro for the lifetime of the app. AI scanning depends on a third-party service.',
   proStartTrial: 'Start 14 days free',
   proRestore: 'Restore purchases',
   proRestoreNothing: 'Nothing to restore on this account yet.',
   proManage: 'Manage subscription',
   proActive: 'Pip Pro is active',
   proTrialActive: 'Free trial, {days} days left',
-  proDisclosure: 'Free for 14 days, then RM67 a year. Your first charge is on {date}. Renews automatically until you cancel. Cancel any time in Settings, under Pip Pro.',
+  proDisclosure: 'Free for {days} days, then {price} a year. Your first charge is on {date}. Renews automatically until you cancel. Cancel any time in Settings, under Pip Pro.',
   proStoreUnreachable: "Can't reach the store right now. Please try again in a moment.",
   // Gate headlines
-  gateScanQuota: "That's your 20 scans for the month. Pip's eyes need a rest. Or do they.",
+  gateScanQuota: "You've reached today's or this month's free scan allowance. Pro scanning is unlimited.",
   gateTaxExport: 'Tax season, sorted. Export your audit pack with Pro.',
-  gateReportExport: 'PDF and Excel reports are a Pro thing. CSV stays free, always.',
-  gateAdvancedImport: 'Bring everything across at once with Pro.',
+  gateReportExport: 'Preview it here, then export any financial report with Pro.',
   gateMultiCurrency: 'Track every currency you actually use, with Pro.',
   gateNetWorthHistory: 'See where your net worth has been, not just where it is.',
   gateWidgetCustom: 'Dress Pip up properly. The full customizer is Pro.',
@@ -604,17 +502,19 @@ Append to `src/i18n/translations/en.ts`. No em dashes anywhere. The disclosure s
   compareFree: 'Free',
   comparePro: 'Pro',
   compareScans: 'AI scans',
-  compareScansFree: '20 a month',
+  compareScansFree: '20 a month, up to 3 a day',
   compareScansPro: 'Unlimited',
   compareTax: 'Tax relief',
   compareTaxFree: 'Track and tag',
   compareTaxPro: 'Track, tag and export',
   compareReports: 'Reports',
-  compareReportsFree: 'CSV and JSON',
-  compareReportsPro: 'PDF, Excel, CSV, JSON',
+  compareReportsFree: 'Preview',
+  compareReportsPro: 'All export formats',
   // Scan counter
   scansLeft: '{n} of {total} scans left this month',
   scansNone: 'No scans left this month',
+  scansDailyLeft: '{n} free scans left today',
+  scansDailyNone: 'No free scans left today',
 ```
 
 - [ ] **Step 4: Add the Simplified Chinese strings**
@@ -624,26 +524,23 @@ Append to `src/i18n/translations/zh.ts`, in the same key order:
 ```ts
   // 付费墙
   proTitle: 'Pip Pro',
-  proSubtitle: '依然无需账号，依然只存在你的手机里。',
-  proMonthly: 'RM9.90 / 月',
-  proAnnual: 'RM67 / 年',
-  proAnnualPerMonth: '每月 RM5.58，按年收费',
+  proSubtitle: '无需 Pip 账号。你的财务记录保留在手机上。',
+  proMonthly: '{price} / 月',
+  proAnnual: '{price} / 年',
+  proAnnualPerMonth: '每月 {price}，按年收费',
   proAnnualSave: '省 44%',
-  proLifetime: '创始支持者，一次性 RM199',
-  proLifetimeNote: '一次性购买，在本应用的生命周期内解锁 Pro。AI 扫描依赖第三方服务。',
   proStartTrial: '免费试用 14 天',
   proRestore: '恢复购买',
   proRestoreNothing: '此账号暂时没有可恢复的购买。',
   proManage: '管理订阅',
   proActive: 'Pip Pro 已启用',
   proTrialActive: '免费试用，还剩 {days} 天',
-  proDisclosure: '免费试用 14 天，之后每年 RM67。首次扣款日期为 {date}。到期自动续订，直到你取消。你可以随时在「设置」的 Pip Pro 中取消。',
+  proDisclosure: '免费试用 {days} 天，之后每年 {price}。首次扣款日期为 {date}。到期自动续订，直到你取消。你可以随时在「设置」的 Pip Pro 中取消。',
   proStoreUnreachable: '暂时无法连接商店，请稍后再试。',
   // 功能限制标题
-  gateScanQuota: '这个月的 20 次扫描用完了。Pip 的眼睛需要休息一下。也许吧。',
+  gateScanQuota: '你已用完今日或本月的免费扫描次数。Pro 扫描无次数限制。',
   gateTaxExport: '报税不慌。用 Pro 导出你的税务凭证包。',
-  gateReportExport: 'PDF 和 Excel 报表属于 Pro。CSV 永远免费。',
-  gateAdvancedImport: '用 Pro 一次性导入你的全部记录。',
+  gateReportExport: '可免费预览，使用 Pro 导出任何财务报表。',
   gateMultiCurrency: '用 Pro 追踪你真正在用的每一种货币。',
   gateNetWorthHistory: '不只看现在的净资产，还能看它走过的路。',
   gateWidgetCustom: '好好打扮一下 Pip。完整自定义属于 Pro。',
@@ -651,17 +548,19 @@ Append to `src/i18n/translations/zh.ts`, in the same key order:
   compareFree: '免费',
   comparePro: 'Pro',
   compareScans: 'AI 扫描',
-  compareScansFree: '每月 20 次',
+  compareScansFree: '每月 20 次，每天最多 3 次',
   compareScansPro: '无限次',
   compareTax: '税务减免',
   compareTaxFree: '记录与标记',
   compareTaxPro: '记录、标记与导出',
   compareReports: '报表',
-  compareReportsFree: 'CSV 和 JSON',
-  compareReportsPro: 'PDF、Excel、CSV、JSON',
+  compareReportsFree: '预览',
+  compareReportsPro: '所有导出格式',
   // 扫描次数
   scansLeft: '本月还剩 {n} / {total} 次扫描',
   scansNone: '本月扫描次数已用完',
+  scansDailyLeft: '今天还剩 {n} 次免费扫描',
+  scansDailyNone: '今天的免费扫描次数已用完',
 ```
 
 - [ ] **Step 5: Run the parity test and typecheck**
@@ -682,7 +581,7 @@ git commit -m "feat(i18n): paywall and upsell strings in en and zh"
 
 **Files:**
 - Create: `src/billing/purchases.ts`
-- Modify: `app.json`, `package.json`
+- Modify: `package.json`
 - Test: `__tests__/purchases.test.ts`
 
 **Interfaces:**
@@ -695,11 +594,8 @@ git commit -m "feat(i18n): paywall and upsell strings in en and zh"
 npx expo install react-native-purchases
 ```
 
-Add to the `plugins` array in `app.json`, after `"expo-web-browser"`:
-
-```json
-      "react-native-purchases",
-```
+No Expo config-plugin entry is added for `react-native-purchases`. Rebuild the
+development client after installation because this is a native dependency.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -860,8 +756,8 @@ Expected: PASS, 8 tests. Typecheck clean.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/billing/purchases.ts __tests__/purchases.test.ts app.json package.json package-lock.json .env.example
-git commit -m "feat(billing): RevenueCat SDK wrapper and Expo config plugin"
+git add src/billing/purchases.ts __tests__/purchases.test.ts package.json package-lock.json .env.example
+git commit -m "feat(billing): RevenueCat SDK wrapper"
 ```
 
 ---
@@ -874,8 +770,20 @@ git commit -m "feat(billing): RevenueCat SDK wrapper and Expo config plugin"
 - Test: `__tests__/entitlementResolve.test.ts`
 
 **Interfaces:**
-- Consumes: `fetchTier`, `configurePurchases` from `src/billing/purchases`; `readCachedTier`, `writeCachedTier`, `Tier` from `src/billing/entitlementCache`; `readScanQuota`, `recordScan`, `scansRemaining`, `FREE_MONTHLY_SCANS` from `src/billing/scanQuota`
-- Produces: `resolveTier(fetch: () => Promise<Tier>, cached: () => Promise<Tier>): Promise<Tier>`, `EntitlementProvider`, `useEntitlement(): EntitlementState`
+- Consumes: `fetchTier`, `configurePurchases` from `src/billing/purchases`; `readCachedTier`, `writeCachedTier`, `Tier` from `src/billing/entitlementCache`; Worker allowance responses from `src/billing/scanProxy`
+- Produces: `resolveTier(fetch, cached, onLive)`, `EntitlementProvider`, `useEntitlement(): EntitlementState`. `onLive` runs only after a successful live lookup so a cached fallback can never refresh its own grace timestamp.
+
+Quota is not entitlement state and must not be authorized from SQLite. The
+provider exposes the most recently returned Worker allowance for display only.
+Starting a scan always calls `scanProxy`; its atomic response is authoritative.
+Pro responses report infinite client-side limits and never invoke Free quota
+rejection logic.
+
+Register RevenueCat's customer-info update listener and refresh on app resume;
+remove the listener on provider unmount. Cache timestamps are written only from
+a successful live response, never after falling back to cached Pro. Tests must
+cover renewal/cancellation updates, resume refresh and a week of repeated
+offline launches without extending the original seven-day grace window.
 
 `EntitlementState` shape, relied on by Tasks 7 through 11:
 
@@ -886,8 +794,12 @@ export interface EntitlementState {
   scansUsed: number;
   scansLimit: number;
   scansRemaining: number;
+  dailyScansUsed: number;
+  dailyScansLimit: number;
+  dailyScansRemaining: number;
   canScan: boolean;
-  recordSuccessfulScan: () => Promise<void>;
+  quotaBlockedBy: 'daily' | 'monthly' | null;
+  refreshAllowance: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 ```
@@ -948,7 +860,8 @@ Expected: FAIL, "Cannot find module '../src/billing/entitlement'"
 ```tsx
 // src/billing/entitlement.tsx
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { FREE_MONTHLY_SCANS, readScanQuota, recordScan, scansRemaining } from './scanQuota';
+import { FREE_DAILY_SCANS, FREE_MONTHLY_SCANS, type ScanAllowance } from './scanQuota';
+import { fetchAllowance } from './scanProxy';
 import { readCachedTier, writeCachedTier, type Tier } from './entitlementCache';
 import { configurePurchases, fetchTier } from './purchases';
 
@@ -956,10 +869,13 @@ import { configurePurchases, fetchTier } from './purchases';
  *  cancelled or lapsed subscription downgrades immediately rather than lingering for a week. */
 export async function resolveTier(
   fetch: () => Promise<Tier>,
-  cached: () => Promise<Tier>
+  cached: () => Promise<Tier>,
+  onLive: (tier: Tier) => Promise<void> = async () => {}
 ): Promise<Tier> {
   try {
-    return await fetch();
+    const tier = await fetch();
+    await onLive(tier);
+    return tier;
   } catch {
     return await cached();
   }
@@ -971,8 +887,12 @@ export interface EntitlementState {
   scansUsed: number;
   scansLimit: number;
   scansRemaining: number;
+  dailyScansUsed: number;
+  dailyScansLimit: number;
+  dailyScansRemaining: number;
   canScan: boolean;
-  recordSuccessfulScan: () => Promise<void>;
+  quotaBlockedBy: 'daily' | 'monthly' | null;
+  refreshAllowance: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -982,8 +902,12 @@ const FALLBACK: EntitlementState = {
   scansUsed: 0,
   scansLimit: FREE_MONTHLY_SCANS,
   scansRemaining: FREE_MONTHLY_SCANS,
+  dailyScansUsed: 0,
+  dailyScansLimit: FREE_DAILY_SCANS,
+  dailyScansRemaining: FREE_DAILY_SCANS,
   canScan: true,
-  recordSuccessfulScan: async () => {},
+  quotaBlockedBy: null,
+  refreshAllowance: async () => {},
   refresh: async () => {},
 };
 
@@ -991,13 +915,15 @@ const Ctx = createContext<EntitlementState>(FALLBACK);
 
 export function EntitlementProvider({ children }: { children: React.ReactNode }) {
   const [tier, setTier] = useState<Tier>('free');
-  const [used, setUsed] = useState(0);
+  const [allowance, setAllowance] = useState<ScanAllowance | null>(null);
 
   const refresh = useCallback(async () => {
-    const next = await resolveTier(fetchTier, readCachedTier);
+    const next = await resolveTier(fetchTier, readCachedTier, writeCachedTier);
     setTier(next);
-    await writeCachedTier(next);
-    setUsed((await readScanQuota()).used);
+  }, []);
+
+  const refreshAllowance = useCallback(async () => {
+    setAllowance(await fetchAllowance());
   }, []);
 
   useEffect(() => {
@@ -1007,28 +933,29 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     })();
   }, [refresh]);
 
-  const recordSuccessfulScan = useCallback(async () => {
-    if (tier === 'pro') return;
-    setUsed((await recordScan()).used);
-  }, [tier]);
-
   const value = useMemo<EntitlementState>(() => {
     const isPro = tier === 'pro';
     const limit = isPro ? Number.POSITIVE_INFINITY : FREE_MONTHLY_SCANS;
-    const remaining = isPro
-      ? Number.POSITIVE_INFINITY
-      : scansRemaining({ month: '', used }, FREE_MONTHLY_SCANS);
+    const dailyLimit = isPro ? Number.POSITIVE_INFINITY : FREE_DAILY_SCANS;
+    const monthUsed = isPro ? 0 : allowance?.monthUsed ?? 0;
+    const dayUsed = isPro ? 0 : allowance?.dayUsed ?? 0;
+    const remaining = isPro ? Number.POSITIVE_INFINITY : Math.max(0, limit - monthUsed);
+    const dailyRemaining = isPro ? Number.POSITIVE_INFINITY : Math.max(0, dailyLimit - dayUsed);
     return {
       tier,
       isPro,
-      scansUsed: used,
+      scansUsed: monthUsed,
       scansLimit: limit,
       scansRemaining: remaining,
-      canScan: isPro || remaining > 0,
-      recordSuccessfulScan,
+      dailyScansUsed: dayUsed,
+      dailyScansLimit: dailyLimit,
+      dailyScansRemaining: dailyRemaining,
+      canScan: isPro || (remaining > 0 && dailyRemaining > 0),
+      quotaBlockedBy: isPro ? null : allowance?.blockedBy ?? null,
+      refreshAllowance,
       refresh,
     };
-  }, [tier, used, recordSuccessfulScan, refresh]);
+  }, [tier, allowance, refreshAllowance, refresh]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -1071,7 +998,8 @@ git commit -m "feat(billing): entitlement provider with cache fallback"
 
 **Interfaces:**
 - Consumes: `useEntitlement` from `src/billing/entitlement`
-- Produces: `ScanQuotaBadge` (props: `{ remaining: number; total: number; t: Translations }`), `scanBadgeLabel(remaining: number, total: number, t: Translations): string`
+- Produces: `ScanQuotaBadge` with daily and monthly remainder; the badge displays
+  whichever boundary is closer and remains hidden for Pro
 
 The badge is the single most important ambient surface in the app. Per the spec §9.3, a visible countdown does the conversion work through loss aversion without any sales language. Hide it entirely for Pro users; a badge reading "unlimited" is clutter.
 
@@ -1083,14 +1011,19 @@ import { en } from '../src/i18n/translations/en';
 import { scanBadgeLabel } from '../src/components/ScanQuotaBadge';
 
 describe('scanBadgeLabel', () => {
-  it('interpolates the remaining and total counts', () => {
-    expect(scanBadgeLabel(14, 20, en)).toBe('14 of 20 scans left this month');
+  it('shows the daily boundary when it is closer', () => {
+    expect(scanBadgeLabel({ monthRemaining: 14, monthTotal: 20, dayRemaining: 2, dayTotal: 3 }, en))
+      .toBe('2 free scans left today');
   });
 
-  // "0 of 20 scans left" reads like a bug rather than a limit, so the exhausted state gets
-  // its own sentence.
-  it('uses the dedicated exhausted string at zero', () => {
-    expect(scanBadgeLabel(0, 20, en)).toBe('No scans left this month');
+  it('uses the daily exhausted string when today is exhausted', () => {
+    expect(scanBadgeLabel({ monthRemaining: 14, monthTotal: 20, dayRemaining: 0, dayTotal: 3 }, en))
+      .toBe('No free scans left today');
+  });
+
+  it('uses the monthly exhausted string when the month is exhausted', () => {
+    expect(scanBadgeLabel({ monthRemaining: 0, monthTotal: 20, dayRemaining: 3, dayTotal: 3 }, en))
+      .toBe('No scans left this month');
   });
 });
 ```
@@ -1108,23 +1041,34 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { Translations } from '../i18n/types';
 
-export function scanBadgeLabel(remaining: number, total: number, t: Translations): string {
-  if (remaining <= 0) return t.scansNone;
-  return t.scansLeft.replace('{n}', String(remaining)).replace('{total}', String(total));
+type BadgeQuota = {
+  monthRemaining: number;
+  monthTotal: number;
+  dayRemaining: number;
+  dayTotal: number;
+};
+
+export function scanBadgeLabel(q: BadgeQuota, t: Translations): string {
+  if (q.monthRemaining <= 0) return t.scansNone;
+  if (q.dayRemaining <= 0) return t.scansDailyNone;
+  if (q.dayRemaining < q.monthRemaining) {
+    return t.scansDailyLeft.replace('{n}', String(q.dayRemaining));
+  }
+  return t.scansLeft
+    .replace('{n}', String(q.monthRemaining))
+    .replace('{total}', String(q.monthTotal));
 }
 
 export function ScanQuotaBadge({
-  remaining,
-  total,
+  quota,
   t,
 }: {
-  remaining: number;
-  total: number;
+  quota: BadgeQuota;
   t: Translations;
 }) {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.text}>{scanBadgeLabel(remaining, total, t)}</Text>
+      <Text style={styles.text}>{scanBadgeLabel(quota, t)}</Text>
     </View>
   );
 }
@@ -1142,10 +1086,18 @@ Colour the text with the existing theme's secondary text token rather than an op
 In each of `ScanKindScreen.tsx`, `ReceiptScanScreen.tsx`, `ExtractScreen.tsx` and `BalanceScanScreen.tsx`:
 
 ```tsx
-const { isPro, canScan, scansRemaining, scansLimit, recordSuccessfulScan } = useEntitlement();
+const {
+  isPro,
+  canScan,
+  scansRemaining,
+  scansLimit,
+  dailyScansRemaining,
+  dailyScansLimit,
+  quotaBlockedBy,
+} = useEntitlement();
 ```
 
-Render `<ScanQuotaBadge remaining={scansRemaining} total={scansLimit} t={t} />` only when `!isPro`.
+Render the badge only when `!isPro`, passing both daily and monthly values.
 
 Before starting a scan:
 
@@ -1158,13 +1110,12 @@ if (!canScan) {
 }
 ```
 
-After a scan returns usable extracted output, and only then:
-
-```tsx
-await recordSuccessfulScan();
-```
-
-Place this call on the success path only. A thrown or unparseable response must not reach it, per spec §7.
+The screen must call `scanProxy` rather than a provider directly. Apply the
+allowance returned by the Worker after success. Never increment locally. A
+thrown, rejected or unparseable response consumes no committed quota. If the
+Worker rejects by `daily` or `monthly`, update the badge and open the
+`scan_quota` paywall. A Pro response must never be rejected by these quota
+boundaries.
 
 - [ ] **Step 5: Run the full suite, typecheck and contrast audit**
 
@@ -1180,10 +1131,10 @@ git commit -m "feat(billing): scan quota badge and gate on the four scan entry p
 
 ---
 
-### Task 8: The six Pro-only gates
+### Task 8: Pro-only gates and explicitly free paths
 
 **Files:**
-- Modify: `src/screens/TaxScreen.tsx:157`, `:196`; `src/screens/ExportScreen.tsx`; `src/screens/AdvancedImportScreen.tsx`; `src/screens/CurrencySettingsScreen.tsx`; `src/screens/NetWorthHistoryScreen.tsx`; `src/screens/WidgetCustomizerScreen.tsx`
+- Modify: `src/screens/TaxScreen.tsx:157`, `:196`; `src/screens/ExportScreen.tsx`; `src/screens/CurrencySettingsScreen.tsx`; `src/screens/NetWorthHistoryScreen.tsx`; `src/screens/WidgetCustomizerScreen.tsx`
 - Test: `__tests__/proGates.test.ts`
 
 **Interfaces:**
@@ -1193,7 +1144,10 @@ git commit -m "feat(billing): scan quota badge and gate on the four scan entry p
 Read the spec §8 gate table before starting. Two boundaries are easy to get wrong and both matter:
 
 - On `TaxScreen`, **only** the two export calls are gated. Tagging, cap validation and the receipt evidence archive stay free, because `store-description.md:27` markets tax relief tracking on a free listing.
-- On `ExportScreen`, **only** `generateExcelWorkbook` and `generatePrintablePDFHtml` are gated. `generateCSV` and `generateAdvancedImportJSON` stay free, because locking users out of their own data contradicts the privacy pillar.
+- On `ExportScreen`, preview and format selection stay free, but **every final
+  financial export action** is gated, including PDF, Excel, CSV and JSON.
+- Advanced Import is completely free. Full backup/restore and all social-image
+  sharing paths are also free and must not reuse the report-export gate.
 - `NetWorthScreen.tsx` and everything in `src/prices/` are **never** gated.
 
 - [ ] **Step 1: Write the failing test**
@@ -1242,7 +1196,6 @@ export const GATE_TRIGGERS = [
   'scan_quota',
   'tax_export',
   'report_export',
-  'advanced_import',
   'multi_currency',
   'networth_history',
   'widget_custom',
@@ -1260,8 +1213,6 @@ export function gateHeadline(trigger: GateTrigger, t: Translations): string {
       return t.gateTaxExport;
     case 'report_export':
       return t.gateReportExport;
-    case 'advanced_import':
-      return t.gateAdvancedImport;
     case 'multi_currency':
       return t.gateMultiCurrency;
     case 'networth_history':
@@ -1274,14 +1225,17 @@ export function gateHeadline(trigger: GateTrigger, t: Translations): string {
 
 - [ ] **Step 4: Wire each gate**
 
-For the five whole-screen gates (`AdvancedImportScreen`, `CurrencySettingsScreen`, `NetWorthHistoryScreen`, `WidgetCustomizerScreen`, plus the two export actions), guard at the point of navigation or action rather than rendering a locked screen. In the handler that would open the screen or run the export:
+For the whole-screen gates (`CurrencySettingsScreen`, `NetWorthHistoryScreen`
+and `WidgetCustomizerScreen`), guard at navigation. For tax and financial
+exports, guard only when the user taps the final Export action, after they have
+been allowed to inspect the preview and choose a format.
 
 ```tsx
 const { isPro } = useEntitlement();
 // ...
 if (!isPro) {
   setPaywallOrigin(screen);
-  setPaywallTrigger('advanced_import'); // the matching GateTrigger for this site
+  setPaywallTrigger('multi_currency'); // the matching GateTrigger for this site
   setScreen('paywall');
   return;
 }
@@ -1289,7 +1243,9 @@ if (!isPro) {
 
 In `TaxScreen.tsx`, place the guard immediately before the `buildAuditPackPdf` call at line 157 and the `buildEvidenceZip` call at line 196, using trigger `'tax_export'`. Leave every other handler on that screen untouched.
 
-In `ExportScreen.tsx`, guard only the branches calling `generateExcelWorkbook` and `generatePrintablePDFHtml`, using trigger `'report_export'`.
+In `ExportScreen.tsx`, place one shared guard immediately before dispatching
+any financial export generator or share/save operation, using trigger
+`'report_export'`. Do not gate navigation to the screen or preview generation.
 
 - [ ] **Step 5: Run the full suite, typecheck and contrast audit**
 
@@ -1298,13 +1254,17 @@ Expected: PASS on all three.
 
 - [ ] **Step 6: Manually verify the free paths still work**
 
-Confirm by reading the diff that these remain reachable without entitlement: tax tagging and the receipt archive, CSV export, JSON export, `NetWorthScreen`, and every call into `src/prices/`.
+Confirm by tests and diff inspection that these remain reachable without
+entitlement: Advanced Import, full backup and restore, monthly recap images,
+split-bill receipt sharing, other social images, tax tagging and the receipt
+archive, `NetWorthScreen`, and every call into `src/prices/`. Confirm that no
+financial or tax export format completes for a Free user.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add src/billing/gates.ts __tests__/proGates.test.ts src/screens/
-git commit -m "feat(billing): six Pro gates with per-trigger headlines"
+git commit -m "feat(billing): Pro export gates and verified free data paths"
 ```
 
 ---
@@ -1322,7 +1282,15 @@ git commit -m "feat(billing): six Pro gates with per-trigger headlines"
 
 **The disclosure block is a Play policy requirement, not copy.** Per spec §11.1, the paywall itself must show price, billing frequency, first charge date, trial terms and how to cancel, at the point of purchase and not behind a link. Getting this wrong risks rejection, and a rejection inside the submission window ends the Shipaton entry.
 
-The screen must fit one viewport without scrolling, and must have a genuinely visible close control. A small, low-contrast dismiss target is a deceptive-flow policy violation as well as bad design.
+Keep the primary choice and CTA above the fold on common devices, but allow
+scrolling for large text, translated copy and small screens. The close control
+must remain genuinely visible and have at least a 44 by 44 point target.
+
+All displayed prices, billing periods, trial eligibility and first-charge terms
+must come from the selected RevenueCat/Play package. The RM strings below are
+copy examples for Malaysian test fixtures, not production literals. If the
+account is ineligible for the annual trial, the CTA and disclosure must describe
+an immediate paid subscription rather than promising 14 free days.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1487,19 +1455,9 @@ export function PaywallScreen({
         </Pressable>
       )}
 
-      {offering?.lifetime && (
-        <Pressable
-          disabled={busy}
-          onPress={() => void onBuy(offering.lifetime as PurchasesPackage)}
-        >
-          <Text style={styles.lifetime}>{t.proLifetime}</Text>
-        </Pressable>
-      )}
-
       {!offering && <Text style={styles.note}>{t.proStoreUnreachable}</Text>}
 
       <Text style={styles.disclosure}>{disclosureText(charge, t, locale)}</Text>
-      {offering?.lifetime && <Text style={styles.disclosure}>{t.proLifetimeNote}</Text>}
 
       <Pressable onPress={() => void onRestore()} disabled={busy}>
         <Text style={styles.restore}>{t.proRestore}</Text>
@@ -1534,7 +1492,6 @@ const styles = StyleSheet.create({
   planPrice: { fontSize: 18, fontWeight: '600' },
   planNote: { fontSize: 14 },
   planSave: { fontSize: 13, fontWeight: '600' },
-  lifetime: { fontSize: 14, textAlign: 'center', paddingVertical: 12 },
   note: { fontSize: 14 },
   disclosure: { fontSize: 12, lineHeight: 17 },
   restore: { fontSize: 14, textAlign: 'center', paddingVertical: 12 },
@@ -1855,20 +1812,21 @@ git commit -m "feat(billing): weekly in-character upsell line on the dashboard"
 
 ---
 
-### Task 12: Contextual prompts and the post-dismissal offer
+### Task 12: Small contextual Pro cards
 
 **Files:**
 - Create: `src/billing/moments.ts`
-- Modify: `src/screens/onboarding/` (wizard completion), `src/screens/ExtractScreen.tsx`, `src/screens/DashboardScreen.tsx`, `src/screens/PaywallScreen.tsx`
+- Modify: `src/screens/ExtractScreen.tsx`, `src/screens/DashboardScreen.tsx`
 - Test: `__tests__/upsellMoments.test.ts`
 
 **Interfaces:**
 - Consumes: `getMeta`, `setMeta` from `src/db/metaRepo`
-- Produces: `MOMENT_KEYS`, `UpsellMoment` (`'onboarding_done' | 'first_scan' | 'streak_7' | 'relief_threshold'`), `hasFired(seen: string[], moment: UpsellMoment): boolean`, `markFired(seen: string[], moment: UpsellMoment): string[]`, `reliefThresholdCrossed(totalMyr: number): boolean`
+- Produces: `MOMENT_KEYS`, `UpsellMoment` (`'first_scan' | 'streak_7' | 'relief_threshold'`), `hasFired(seen: string[], moment: UpsellMoment): boolean`, `markFired(seen: string[], moment: UpsellMoment): string[]`, `reliefThresholdCrossed(totalMyr: number): boolean`
 
-This implements spec §9.2 and the post-dismissal offer in §10. Each moment fires **once, ever**. A prompt that reappears on every 7-day streak stops being a celebration and becomes nagging, which is exactly the failure mode §9.4 exists to prevent.
-
-The post-dismissal offer shows only to users who closed the paywall without converting, and adds 10-15% ARPU. It is the lowest-value item in this plan: if the 23 September date is at risk, cut Step 5 and ship everything else.
+This implements spec §9.2. Each approved moment fires **once, ever** and
+reveals a small dismissible `PipUpsellCard`. It never navigates automatically.
+Only an explicit CTA on the card opens the paywall. There is no onboarding
+paywall, onboarding card or post-dismissal offer.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1926,8 +1884,7 @@ Expected: FAIL, "Cannot find module '../src/billing/moments'"
 ```ts
 // src/billing/moments.ts
 // One-shot upgrade prompts tied to moments where the user has just succeeded at something.
-// Research is consistent that offers land best at a peak, and that between 78% and 90% of all
-// trial starts happen on day zero, which is why onboarding completion is on this list.
+// Cards are limited to approved post-success moments. Onboarding is excluded.
 //
 // Every moment fires once and never again. That is the whole reason this file exists: without
 // it, "prompt on a 7-day streak" would fire every seventh day forever.
@@ -1936,7 +1893,7 @@ import { getMeta, setMeta } from '../db/metaRepo';
 export const MOMENT_KEYS = 'upsell_moments';
 export const RELIEF_THRESHOLD_MYR = 1000;
 
-export type UpsellMoment = 'onboarding_done' | 'first_scan' | 'streak_7' | 'relief_threshold';
+export type UpsellMoment = 'first_scan' | 'streak_7' | 'relief_threshold';
 
 export function hasFired(seen: string[], moment: UpsellMoment): boolean {
   return seen.includes(moment);
@@ -1969,28 +1926,24 @@ export async function fireOnce(moment: UpsellMoment): Promise<boolean> {
 }
 ```
 
-- [ ] **Step 4: Wire the four moments**
+- [ ] **Step 4: Wire the three small-card moments**
 
-At each site, call `fireOnce` and route to the paywall only when it returns `true`. Skip entirely when `isPro`.
+At each site, call `fireOnce` and reveal a local `PipUpsellCard` only when it
+returns `true`. Skip entirely when `isPro`. The card has Dismiss and View Pro
+actions; View Pro alone sets the origin/trigger and navigates to the paywall.
 
 ```tsx
-if (!isPro && (await fireOnce('first_scan'))) {
-  setPaywallOrigin(screen);
-  setPaywallTrigger('scan_quota');
-  setScreen('paywall');
-}
+if (!isPro && (await fireOnce('first_scan'))) setProCardMoment('first_scan');
 ```
 
-- `'onboarding_done'`: at the end of the setup wizard in `src/screens/onboarding/`, after the final step commits. This is the single highest-leverage placement in the app.
-- `'first_scan'`: in `ExtractScreen.tsx`, immediately after the first scan produces usable output. Fire it **after** `recordSuccessfulScan()`, so the peak moment has actually landed.
+- `'first_scan'`: in `ExtractScreen.tsx`, immediately after the first scan produces usable output and the Worker returns committed quota state.
 - `'streak_7'`: on `DashboardScreen.tsx`, when the streak value from `src/lib/streak.ts` first reaches 7.
 - `'relief_threshold'`: on `DashboardScreen.tsx`, when year-to-date tagged relief first satisfies `reliefThresholdCrossed`.
 
-- [ ] **Step 5: Add the post-dismissal offer**
+- [ ] **Step 5: Prove onboarding stays clean**
 
-In `PaywallScreen.tsx`, when `onClose` fires and the user has not converted, record the dismissal and show a single time-limited follow-up on their next dashboard visit. Reuse `PipUpsellCard` rather than building a second component.
-
-**Cut this step first if the schedule slips.** Everything above it is worth more.
+Add or extend an onboarding navigation test proving completion routes directly
+to the app with neither `PaywallScreen` nor `PipUpsellCard` mounted.
 
 - [ ] **Step 6: Run the full suite, typecheck and contrast audit**
 
@@ -2001,7 +1954,7 @@ Expected: PASS on all three. `__tests__/onboardingWizard.test.ts` and `__tests__
 
 ```bash
 git add src/billing/moments.ts __tests__/upsellMoments.test.ts src/screens/
-git commit -m "feat(billing): one-shot contextual upgrade prompts at success moments"
+git commit -m "feat(billing): opt-in Pro cards at success moments"
 ```
 
 ---
@@ -2111,19 +2064,23 @@ Subscription `pip_pro` with two base plans:
 - `monthly`, RM9.90, monthly billing, no offer
 - `annual`, RM67, yearly billing, with a **14-day free trial offer**
 
-One-time product `pip_pro_lifetime` at RM199.
-
 - [ ] **Step 2: Verify the Malaysian price points and tax treatment**
 
-Confirm RM9.90, RM67 and RM199 are all accepted price points for Malaysia, and check whether the listed price is SST-inclusive. Both are open items in the spec §17.
+Confirm RM9.90 and RM67 are accepted price points for Malaysia, and check
+whether the listed price is SST-inclusive. Production UI renders the localized
+Play/RevenueCat price rather than these literals.
 
 - [ ] **Step 3: Configure RevenueCat**
 
-Create entitlement `pro`. Attach all three products. Create the `default` offering with the annual package first, then monthly, then lifetime.
+Create entitlement `pro`. Attach the monthly and annual base plans. Create the
+`default` offering with annual first and monthly second. Do not create or attach
+a lifetime product.
 
-- [ ] **Step 4: Hide lifetime from active subscribers**
+- [ ] **Step 4: Verify offering and trial eligibility states**
 
-Per spec §11.3, lifetime is a non-consumable and will double-charge a user who already has a subscription. Confirm the paywall does not render the lifetime option when `isPro` is true and the active entitlement came from a subscription.
+Test annual trial-eligible, annual trial-ineligible, monthly, offline offerings
+and localized-price states. The CTA and disclosure must match the actual package
+selected and must never promise a trial to an ineligible account.
 
 - [ ] **Step 5: Generate a judge promo code**
 
@@ -2133,9 +2090,15 @@ Shipaton requires either a free trial or a promo code for judges. The 14-day tri
 
 - [ ] **Step 1: Write and host a privacy policy**
 
-Google Play requires one for any app handling financial data. None exists in the repo. It must accurately describe the on-device model: no accounts, no server storage, screenshots sent once for extraction and not retained, anonymous crash reports only, and the exact transmission surface documented in `src/lib/diagnostics.ts` and `src/lib/diagnosticsScrub.ts`.
+Google Play requires one for any app handling financial data. None exists in the
+repo. It must accurately describe the local-data model and minimal Worker:
+anonymous installation/quota metadata is stored, screenshots are proxied once
+for extraction and are not retained, financial records are not stored on the
+Worker, and provider/diagnostic transmissions are named accurately.
 
-It must now also cover the RevenueCat SDK, which sends an anonymous app user ID off-device. That is a new external transmission and the README's privacy section will need updating to stay accurate.
+It must also cover RevenueCat's anonymous app user ID, Play Integrity and each
+AI provider. Confirm the selected provider tier does not use financial scans for
+model improvement without an explicit, reviewed user disclosure.
 
 - [ ] **Step 2: Link it from Play Console and from Settings**
 
@@ -2182,4 +2145,7 @@ Suggested split against a 23 September ship date:
 | 12 to 13 | Tasks 11, 12, 13 | Task 17 device testing |
 | 14 | Buffer and release | Submit |
 
-**If the date slips**, cut in this order: Task 12 Step 5 (the post-dismissal offer), then Task 12 entirely, then Task 11 (the ambient mascot line). Tasks 1 through 10 and Task 13 are the minimum shippable paywall, and Track B is not cuttable at all.
+**If the date slips**, cut Task 11's ambient mascot line first, then the
+non-blocking success-moment cards in Task 12. Do not cut the secure proxy and
+server quota, entitlement handling, paid-export gates, explicitly free paths,
+purchase compliance, privacy work or release verification.

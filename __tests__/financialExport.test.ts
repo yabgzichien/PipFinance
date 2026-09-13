@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import {
   buildReportPeriod,
   buildFinancialReportBundle,
@@ -9,6 +9,7 @@ import {
   csvToHtmlTable,
   generateHTMLReport,
   generatePrintablePDFHtml,
+  generateSpendingSummaryPDFHtml,
   generateAdvancedImportJSON,
   generateEwalletCSV,
   generateEwalletPreviewHtml,
@@ -88,7 +89,7 @@ describe('generateExcelWorkbook', () => {
   const period = buildReportPeriod('monthly', '2026-06');
   const bundle = buildFinancialReportBundle(txns, mockCategories, accounts, entries, period, 'Test Borrower');
 
-  it('generates a valid .xlsx binary array with all 4 sheets', () => {
+  it('generates one analysis workbook with predictable, purpose-based sheets', () => {
     const bytes = generateExcelWorkbook(bundle);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(500);
@@ -96,28 +97,148 @@ describe('generateExcelWorkbook', () => {
     // Read back workbook
     const wb = XLSX.read(bytes, { type: 'array' });
     expect(wb.SheetNames).toEqual([
+      'Overview',
       'Income Statement',
       'Balance Sheet',
-      'Transaction Ledger',
-      'Trends & Statistics',
+      'Transactions',
+      'Categories',
+      'Accounts',
+      'Monthly Trends',
+      'E-Wallets',
     ]);
 
-    // Check Income Statement Sheet content
-    const isCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Income Statement']);
-    expect(isCsv).toContain('FINANCIAL REPORT: INCOME STATEMENT');
-    expect(isCsv).toContain('Monthly Salary');
-    expect(isCsv).toContain('5000');
-    expect(isCsv).toContain('TOTAL EXPENSES');
-    expect(isCsv).toContain('1000');
+    const overviewCsv = XLSX.utils.sheet_to_csv(wb.Sheets.Overview);
+    expect(overviewCsv).toContain('PERSONAL FINANCE ANALYSIS');
+    expect(overviewCsv).toMatch(/Recorded spending,("1,000\.00"|1000)/);
+    expect(overviewCsv).toContain('FINANCIAL HEALTH & RESILIENCE INDICATORS');
+    expect(overviewCsv).toContain('Expense-to-Income Ratio');
+    expect(overviewCsv).toContain('Estimated Liquid Runway (Months)');
 
-    // Check Balance Sheet
+    const isCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Income Statement']);
+    expect(isCsv).toContain('STATEMENT OF PROFIT & LOSS');
+    expect(isCsv).toMatch(/TOTAL REVENUE \/ INFLOWS,("5,000\.00"|5000)/);
+    expect(isCsv).toMatch(/TOTAL EXPENSES,("1,000\.00"|1000)/);
+    // Verify dynamic formulas exist in worksheet cells
+    const isSheet = wb.Sheets['Income Statement'];
+    const hasFormula = Object.values(isSheet).some((c: any) => c && typeof c === 'object' && typeof c.f === 'string');
+    expect(hasFormula).toBe(true);
+
     const bsCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Balance Sheet']);
+    expect(bsCsv).toContain('STATEMENT OF FINANCIAL POSITION');
     expect(bsCsv).toContain('TOTAL ASSETS');
     expect(bsCsv).toContain('TOTAL NET WORTH');
+    const bsSheet = wb.Sheets['Balance Sheet'];
+    const hasBsFormula = Object.values(bsSheet).some((c: any) => c && typeof c === 'object' && typeof c.f === 'string');
+    expect(hasBsFormula).toBe(true);
 
-    // Check Ledger
-    const ledgerCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Transaction Ledger']);
-    expect(ledgerCsv).toContain('RapidKL LRT');
+    const transactionsCsv = XLSX.utils.sheet_to_csv(wb.Sheets.Transactions);
+    expect(transactionsCsv).toContain('RapidKL LRT');
+    expect(transactionsCsv).toContain('Jaya Grocer');
+
+    const categoriesCsv = XLSX.utils.sheet_to_csv(wb.Sheets.Categories);
+    expect(categoriesCsv).toContain('Food & Groceries,Expense,700');
+    expect(categoriesCsv).toContain('Pareto classification');
+
+    const accountsCsv = XLSX.utils.sheet_to_csv(wb.Sheets.Accounts);
+    expect(accountsCsv).toContain('CIMB Bank');
+
+    const trendsCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Monthly Trends']);
+    expect(trendsCsv).toContain('Month,Income,Spending,Net saved,Savings rate,Net worth');
+
+    // Stable sheet structure: users can build formulas even when no e-wallet rows exist.
+    const ewalletCsv = XLSX.utils.sheet_to_csv(wb.Sheets['E-Wallets']);
+    expect(ewalletCsv).toContain('Date,E-Wallet provider,Type,Category,Merchant');
+  });
+
+  it('generates structured worksheets with custom column widths, merges, formulas, and Pareto analysis', () => {
+    const bytes = generateExcelWorkbook(bundle);
+    const wb = XLSX.read(bytes, { type: 'array', cellFormula: true, cellStyles: true });
+
+    // Verify Overview merges and headers
+    const overviewSheet = wb.Sheets.Overview;
+    expect(overviewSheet['!merges']).toBeDefined();
+    expect(overviewSheet['!merges']!.length).toBeGreaterThanOrEqual(4);
+    expect(overviewSheet['!cols']).toBeDefined();
+    expect(overviewSheet['!cols']!.length).toBe(5);
+
+    // Verify Income Statement formulas
+    const isSheet = wb.Sheets['Income Statement'];
+    const isCells = Object.values(isSheet) as any[];
+    const formulas = isCells.filter((c) => c && typeof c === 'object' && c.f).map((c) => c.f);
+    expect(formulas.some((f: string) => f.startsWith('SUM(B8:'))).toBe(true);
+
+    // Verify Balance Sheet formulas and balance check
+    const bsSheet = wb.Sheets['Balance Sheet'];
+    const bsCells = Object.values(bsSheet) as any[];
+    const bsFormulas = bsCells.filter((c) => c && typeof c === 'object' && c.f).map((c) => c.f);
+    expect(bsFormulas.some((f: string) => f.includes('BALANCED'))).toBe(true);
+
+    // Verify Pareto Analysis in Categories
+    const catCsv = XLSX.utils.sheet_to_csv(wb.Sheets.Categories);
+    expect(catCsv).toContain('Core 80% Spend');
+    expect(catCsv).toContain('Cumulative share');
+
+    // Verify Monthly Trends contains totals and averages
+    const trendsCsv = XLSX.utils.sheet_to_csv(wb.Sheets['Monthly Trends']);
+    expect(trendsCsv).toContain('TOTAL / CUMULATIVE');
+    expect(trendsCsv).toContain('MONTHLY AVERAGE');
+  });
+});
+
+describe('generateSpendingSummaryPDFHtml', () => {
+  const txns = [
+    makeTxn({ id: 'rent', merchantRaw: 'Home Rental', amount: 1200, categoryId: 'housing', date: '2026-06-01' }),
+    makeTxn({ id: 'grocer-1', merchantRaw: 'Jaya Grocer', amount: 420, categoryId: 'food', date: '2026-06-03' }),
+    makeTxn({ id: 'grocer-2', merchantRaw: 'Jaya Grocer', amount: 180, categoryId: 'food', date: '2026-06-12' }),
+    makeTxn({ id: 'train', merchantRaw: 'RapidKL', amount: 90, categoryId: 'transport', date: '2026-06-08' }),
+    makeTxn({ id: 'coffee', merchantRaw: 'Kopitiam', amount: 25, categoryId: 'food', date: '2026-06-14' }),
+    makeTxn({ id: 'snack', merchantRaw: 'Corner Shop', amount: 8, categoryId: 'food', date: '2026-06-15' }),
+    makeTxn({ id: 'salary', merchantRaw: 'Employer', amount: 5000, type: 'income', categoryId: 'salary', date: '2026-06-01' }),
+    makeTxn({ id: 'transfer', merchantRaw: 'Move to savings', amount: 9999, type: 'transfer', categoryId: null, date: '2026-06-02' }),
+  ];
+  const period = buildReportPeriod('monthly', '2026-06');
+  const bundle = buildFinancialReportBundle(txns, mockCategories, [], [], period, 'Nurul');
+
+  it('answers where the money went without accounting statements or a full ledger', () => {
+    const html = generateSpendingSummaryPDFHtml(bundle);
+
+    expect(html).toContain('Where your money went');
+    expect(html).toContain('Recorded spending');
+    expect(html).toContain('RM 1,923.00');
+    expect(html).toContain('Food &amp; Groceries');
+    expect(html).toContain('Top merchants');
+    expect(html).toContain('Jaya Grocer');
+    expect(html).toContain('RM 600.00');
+    expect(html).toContain('Largest purchases');
+
+    expect(html).not.toContain('Balance Sheet');
+    expect(html).not.toContain('Net Worth');
+    expect(html).not.toContain('Revenue');
+    expect(html).not.toContain('Itemized Transaction Ledger');
+    expect(html).not.toContain('Employer');
+    expect(html).not.toContain('Move to savings');
+    expect(html).not.toContain('Corner Shop');
+  });
+
+  it('escapes merchant names in the readable report', () => {
+    const unsafe = buildFinancialReportBundle(
+      [makeTxn({ merchantRaw: '<script>alert("x")</script>', amount: 42, categoryId: 'food' })],
+      mockCategories,
+      [],
+      [],
+      period,
+      'Nurul',
+    );
+    const html = generateSpendingSummaryPDFHtml(unsafe);
+    expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert("x")</script>');
+  });
+
+  it('includes proper container and page margins for printable/web view', () => {
+    const html = generateSpendingSummaryPDFHtml(bundle);
+    expect(html).toContain('class="report-page"');
+    expect(html).toContain('margin: 16mm 18mm;');
+    expect(html).toContain('padding: 32px 20px;');
   });
 });
 
@@ -575,6 +696,14 @@ describe('generatePrintablePDFHtml', () => {
     expect(pdfHtml).toContain('II. Balance Sheet (Statement of Financial Position)');
     expect(pdfHtml).toContain('III. Key Financial Statistics &amp; Regularity');
     expect(pdfHtml).toContain('IV. Itemized Transaction Ledger');
+    expect(pdfHtml).toContain('class="report-page"');
+    expect(pdfHtml).toContain('margin: 16mm 18mm;');
+    expect(pdfHtml).toContain('Balanced ✓');
+
+    const zhHtml = generatePrintablePDFHtml(bundle, 'zh');
+    expect(zhHtml).toContain('财务状况与经营成果报表');
+    expect(zhHtml).toContain('资产负债表基准日');
+    expect(zhHtml).toContain('对账平衡 ✓');
   });
 });
 
@@ -724,11 +853,11 @@ describe('E-Wallet detection and statement export', () => {
     expect(html).toContain('Go eWallet');
   });
 
-  it('appends E-Wallet History sheet to Excel workbook when e-wallet txns are present', () => {
+  it('places e-wallet activity in the workbook’s stable E-Wallets sheet', () => {
     const bytes = generateExcelWorkbook(bundle);
     const wb = XLSX.read(bytes, { type: 'array' });
-    expect(wb.SheetNames).toContain('E-Wallet History');
-    const ewCsv = XLSX.utils.sheet_to_csv(wb.Sheets['E-Wallet History']);
+    expect(wb.SheetNames).toContain('E-Wallets');
+    const ewCsv = XLSX.utils.sheet_to_csv(wb.Sheets['E-Wallets']);
     expect(ewCsv).toContain("Touch 'n Go eWallet");
     expect(ewCsv).toContain('GrabPay');
   });
@@ -795,4 +924,3 @@ describe('Receipts Archive and Preview generation', () => {
     expect(html).toContain('Popular Bookstore');
   });
 });
-

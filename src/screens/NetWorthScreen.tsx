@@ -2,9 +2,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddAccountModal } from '../components/AddAccountModal';
+import { AddDebtModal } from '../components/AddDebtModal';
+import { SettleSheet } from '../components/SettleSheet';
 import { Icon, type IconName } from '../components/Icon';
 import { CalcBadge } from '../components/CalcBadge';
 import { InstitutionBadge } from '../components/InstitutionBadge';
@@ -15,7 +17,7 @@ import { BalanceScanScreen } from './BalanceScanScreen';
 import { ScanBalanceButton } from '../components/ScanBalanceButton';
 import { TickerSearchModal } from '../components/TickerSearchModal';
 import { InfoButton } from '../components/InfoButton';
-import { BtnLabel, Card, Eyebrow, PrimaryButton, type ValueMode } from '../components/ui';
+import { Amount, Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, Title, type ValueMode } from '../components/ui';
 import { refreshFxRates } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
 import { shortDate } from '../lib/dates';
@@ -27,8 +29,13 @@ import { rateFor, ratesFromCache, isStale, staleLabel } from '../lib/fx';
 import { matchInstitution } from '../lib/institutions';
 import { tap } from '../lib/haptics';
 import { confirmAction } from '../lib/platformAlert';
+import { shareSplitMessage } from '../lib/shareText';
+import { buildBillReminder } from '../lib/splitMessage';
+import type { OpenShare } from '../lib/split';
 import {
   CLASS_BY_ID,
+  RECEIVABLE_CLS,
+  accountValueAsOf,
   classesFor,
   groupByClass,
   netWorth,
@@ -37,16 +44,17 @@ import {
   toMyrValues,
   type ClassGroup,
 } from '../lib/networth';
+import { netWorthFreshness, rankClassMovers, type ClassMover } from '../lib/netWorthPresentation';
 import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { groupHoldings, holdingProfit, isHolding, subFromType, toQuantityUnitPrice, typeFromSub, type HoldingGroup, type TickerResult } from '../lib/prices';
 import { todayISO } from '../lib/duplicates';
 import { searchInvestments } from '../prices';
-import type { Account, PriceQuote } from '../lib/types';
+import type { Account, BalanceEntry, PriceQuote } from '../lib/types';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
-import { numFont, platformShadow, radius, shadowCard, shadowToggle, uiFont } from '../theme';
+import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
 
 const RED2 = '#c5402f';
 function timeOf(iso: string | null): string {
@@ -102,19 +110,30 @@ function lastMonths(n: number): string[] {
   return out;
 }
 
-export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
+export function NetWorthScreen({
+  onOpenHistory,
+  onOpenOwed,
+}: {
+  onBack: () => void;
+  onOpenHistory: () => void;
+  onOpenOwed?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, isZh } = useLanguage();
-  const { accounts, balanceEntries, accountValues, prices, pricesAsOf, refreshPrices } = useAppData();
+  const { accounts, balanceEntries, accountValues, prices, pricesAsOf, refreshPrices, openShares, deleteDirectDebt, settleShare } = useAppData();
   const [adding, setAdding] = useState(false);
+  const [addingDebt, setAddingDebt] = useState(false);
+  const [settlingDebt, setSettlingDebt] = useState<OpenShare | null>(null);
   const [presetCoin, setPresetCoin] = useState<TickerResult | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [groupSymbol, setGroupSymbol] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [profitMode, setProfitMode] = useState<ValueMode>('amount');
+  const profitMode: ValueMode = 'amount';
+  const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
+  const [showBalanceReview, setShowBalanceReview] = useState(false);
   // Cached FX rates (code → MYR rate) and each rate's own cache timestamp (code → asOf), for
   // converting native account balances into MYR and showing a staleness hint. Loaded once on
   // mount; empty until then, so a MYR-only user's screen renders exactly as before this load
@@ -155,6 +174,10 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
     () => nativeAccountTotalsByCurrency(accounts, accountValues),
     [accounts, accountValues]
   );
+  const nativeBreakdown = useMemo(() => {
+    const visible = Object.fromEntries(Object.entries(nativeTotals).filter(([, value]) => value !== 0));
+    return Object.keys(visible).length > 1 ? formatCurrencyBreakdown(visible) : '';
+  }, [nativeTotals]);
 
   // Native balances (accountValues) converted to MYR for every total/grouping; an account
   // with no cached rate is excluded rather than counted at parity (see toMyrValues).
@@ -168,6 +191,37 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
     () => netWorthSeries(accounts, balanceEntries, lastMonths(6), rates).map((p) => p.net),
     [accounts, balanceEntries, rates]
   );
+  const monthKeys = useMemo(() => lastMonths(6), []);
+  const previousValues = useMemo(() => {
+    const previousMonthEnd = `${monthKeys[monthKeys.length - 2]}-31`;
+    const native: Record<string, number> = {};
+    for (const account of accounts) {
+      native[account.id] = accountValueAsOf(
+        balanceEntries.filter((entry) => entry.accountId === account.id),
+        previousMonthEnd,
+      );
+    }
+    return toMyrValues(accounts, native, rates).valueById;
+  }, [accounts, balanceEntries, monthKeys, rates]);
+  const movers = useMemo(
+    () => rankClassMovers(accounts, myrValues, previousValues).slice(0, 3),
+    [accounts, myrValues, previousValues],
+  );
+  const freshness = useMemo(
+    () => netWorthFreshness(accounts, balanceEntries, todayISO()),
+    [accounts, balanceEntries],
+  );
+  const staleAccounts = useMemo(
+    () => freshness.staleAccountIds
+      .map((id) => accounts.find((account) => account.id === id))
+      .filter((account): account is Account => !!account),
+    [accounts, freshness.staleAccountIds],
+  );
+  const recordedMonths = useMemo(
+    () => new Set(balanceEntries.map((entry) => entry.asOf.slice(0, 7))).size,
+    [balanceEntries],
+  );
+  const hasTrend = recordedMonths >= 2;
   const editing = editingId ? accounts.find((a) => a.id === editingId) ?? null : null;
   const groupLots = useMemo(
     () => (groupSymbol ? accounts.filter((a) => isHolding(a) && a.symbol === groupSymbol) : []),
@@ -181,6 +235,56 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   );
   const delta = series.length >= 2 ? nw.net - series[series.length - 2] : null;
   const prevMonth = monthShorts[monthShorts.length - 2] ?? '';
+  const isEstimate = freshness.staleAccountIds.length > 0 || unconvertible.length > 0;
+
+  const openDebts = useMemo(() => {
+    return (openShares ?? []).filter((s) => s.status === 'open' && s.outstanding > 0);
+  }, [openShares]);
+
+  const debtPeopleCount = useMemo(() => {
+    return new Set(openDebts.map((d) => d.personName.trim().toLowerCase())).size;
+  }, [openDebts]);
+
+  const handleShareDebt = async (debt: OpenShare) => {
+    tap();
+    const desc = debt.remark?.trim() || (debt.merchant && debt.merchant !== 'A shared bill' ? debt.merchant : (isZh ? '分摊账单' : 'Shared bill'));
+    const message = buildBillReminder({
+      personName: debt.personName,
+      currency: debt.currency ?? 'MYR',
+      total: debt.outstanding,
+      bills: [{
+        shareId: debt.shareId,
+        merchant: desc,
+        billDate: debt.billDate,
+        outstanding: debt.outstanding,
+        paid: debt.paid,
+        remark: debt.remark,
+      }],
+      isZh,
+    }, debt.shareId);
+    await shareSplitMessage(message || '');
+  };
+
+  const handleDeleteDebt = (debt: OpenShare) => {
+    confirmAction(
+      isZh ? '删除借款记录？' : 'Remove debt record?',
+      isZh
+        ? `确认移除 ${debt.personName} 欠您的 ${fmtMoney(debt.outstanding, debt.currency ?? 'MYR')}？`
+        : `Remove ${debt.personName}’s debt of ${fmtMoney(debt.outstanding, debt.currency ?? 'MYR')}?`,
+      isZh ? '移除' : 'Remove',
+      async () => {
+        tap();
+        await deleteDirectDebt(debt.shareId);
+      }
+    );
+  };
+
+  const toggleClass = (cls: string) => {
+    tap();
+    setExpandedClasses((current) => current.includes(cls)
+      ? current.filter((item) => item !== cls)
+      : [...current, cls]);
+  };
 
   // Safe to branch here  all hooks above have run unconditionally.
   if (scanning) {
@@ -189,95 +293,149 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
-      {/* Nav */}
       <View style={[styles.nav, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={onBack} style={[styles.navBtn, { backgroundColor: colorTheme.surface }]} hitSlop={6}>
-          <Icon name="chevronLeft" size={18} color={colorTheme.ink2} />
-        </Pressable>
-        <Text style={[styles.navTitle, { color: colorTheme.ink }]}>{t('netWorthTitle')}</Text>
-        {/* invisible spacer keeps the title centered opposite the back button */}
-        <View style={{ width: 36 }} />
+        <Title>{t('netWorthTitle')}</Title>
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 28 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           hasHoldings ? <RefreshControl refreshing={refreshing} onRefresh={doRefresh} tintColor={theme.accent} /> : undefined
         }
       >
-        <HeroCard
-          nw={nw}
-          series={series}
-          months={monthShorts}
-          delta={delta}
-          prevMonth={prevMonth}
-          mode={profitMode}
-          setMode={setProfitMode}
-          onOpenHistory={onOpenHistory}
-          dc={dc}
-          breakdown={formatCurrencyBreakdown(nativeTotals)}
-        />
-        <ScanRow onScan={() => setScanning(true)} onAdd={() => { setPresetCoin(null); setAdding(true); }} />
-
-        {empty && (
-          <Card style={{ padding: 22, alignItems: 'center', margin: 16 }}>
-            <Icon name="scale" size={40} color={theme.accent} />
-            <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
-              {isZh ? '追踪您的资产与负债' : 'Track what you own and owe'}
-            </Text>
-            <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-              {isZh ? '添加现金、投资和负债，随时查看您的净资产变化。' : 'Add cash, investments, and loans to see your net worth grow over time.'}
-            </Text>
-          </Card>
-        )}
-
-        {/* Assets */}
-        {groups.assets.length > 0 && <GroupHeader label={t('assets')} total={nw.assets} color={theme.accent} dc={dc} />}
-        {groups.assets.map((g) => (
-          <AssetClassCard
-            key={g.cls}
-            g={g}
-            accountValues={accountValues}
-            prices={prices}
-            pricesAsOf={pricesAsOf}
-            profitMode={profitMode}
-            refreshing={refreshing}
-            onRefresh={doRefresh}
-            onTapManual={setEditingId}
-            onTapGroup={setGroupSymbol}
-            unconvertible={unconvertible}
-            fxAsOf={fxAsOf}
-            dc={dc}
+        {empty ? (
+          <EmptyNetWorth
+            onAdd={() => { setPresetCoin(null); setAdding(true); }}
+            onScan={() => setScanning(true)}
           />
-        ))}
+        ) : (
+          <>
+            <SummaryBlock
+              net={nw.net}
+              delta={hasTrend ? delta : null}
+              prevMonth={prevMonth}
+              isEstimate={isEstimate}
+              breakdown={nativeBreakdown}
+              dc={dc}
+            />
 
-        {/* Liabilities */}
-        {groups.liabilities.length > 0 && <GroupHeader label={t('liabilities')} total={nw.liabilities} color={colorTheme.red} dc={dc} />}
-        {groups.liabilities.length > 0 && (
-          <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
-            {flattenLiabs(groups.liabilities).map((row, i, arr) => (
-              <LiabilityRowD
-                key={row.account.id}
-                name={row.account.name}
-                cls={formatClassLabel(row.account.cls, isZh, row.clsLabel)}
-                nativeValue={accountValues[row.account.id] ?? 0}
-                myrValue={row.value}
-                currency={row.account.currency}
-                unconvertible={unconvertible.includes(row.account.id)}
-                fxAsOf={fxAsOf}
-                dc={dc}
-                customIcon={row.account.icon}
-                isLast={i === arr.length - 1}
-                onPress={() => setEditingId(row.account.id)}
+            {freshness.staleAccountIds.length > 0 && (
+              <BalanceReview
+                accounts={staleAccounts}
+                entries={balanceEntries}
+                expanded={showBalanceReview}
+                onToggle={() => setShowBalanceReview((shown) => !shown)}
+                onEdit={setEditingId}
               />
-            ))}
-          </View>
+            )}
+
+            <TrendSection
+              values={series}
+              months={monthShorts}
+              hasTrend={hasTrend}
+              onOpenHistory={onOpenHistory}
+            />
+
+            {hasTrend && movers.length > 0 && (
+              <MoversSection movers={movers} prevMonth={prevMonth} dc={dc} />
+            )}
+
+            <AccountTotals assets={nw.assets} liabilities={nw.liabilities} dc={dc} />
+            <View style={[styles.accountGroups, { backgroundColor: colorTheme.surface }]}>
+              {[...groups.assets, ...groups.liabilities].map((g, groupIndex) => {
+                const expanded = expandedClasses.includes(g.cls);
+                const localizedLabel = formatClassLabel(g.cls, isZh, g.label);
+                const staleCount = g.accounts.filter(({ account }) => freshness.staleAccountIds.includes(account.id)).length;
+                return (
+                  <View key={g.cls}>
+                    <AccountClassSummary
+                      group={g}
+                      label={localizedLabel}
+                      staleCount={staleCount}
+                      expanded={expanded}
+                      showDivider={groupIndex > 0}
+                      dc={dc}
+                      onPress={() => toggleClass(g.cls)}
+                      debtsCount={g.cls === RECEIVABLE_CLS ? debtPeopleCount : undefined}
+                    />
+                    {expanded && g.kind === 'asset' && (
+                      g.cls === RECEIVABLE_CLS ? (
+                        <ReceivableClassCard
+                          openDebts={openDebts}
+                          receivableAccount={g.accounts[0]?.account}
+                          onSettle={(debt) => setSettlingDebt(debt)}
+                          onDelete={handleDeleteDebt}
+                          onShare={handleShareDebt}
+                          onAddDebt={() => setAddingDebt(true)}
+                          onOpenOwed={onOpenOwed}
+                          onEditAccount={(accountId) => setEditingId(accountId)}
+                          dc={dc}
+                        />
+                      ) : (
+                        <AssetClassCard
+                          g={g}
+                          accountValues={accountValues}
+                          prices={prices}
+                          pricesAsOf={pricesAsOf}
+                          profitMode={profitMode}
+                          refreshing={refreshing}
+                          onRefresh={doRefresh}
+                          onTapManual={setEditingId}
+                          onTapGroup={setGroupSymbol}
+                          unconvertible={unconvertible}
+                          fxAsOf={fxAsOf}
+                          dc={dc}
+                        />
+                      )
+                    )}
+                    {expanded && g.kind === 'liability' && (
+                      <View style={[styles.accountDetails, { backgroundColor: colorTheme.surface2 }]}>
+                        {g.accounts.map(({ account, value }, index) => (
+                          <LiabilityRowD
+                            key={account.id}
+                            name={account.name}
+                            cls={localizedLabel}
+                            nativeValue={accountValues[account.id] ?? 0}
+                            myrValue={value}
+                            currency={account.currency}
+                            unconvertible={unconvertible.includes(account.id)}
+                            fxAsOf={fxAsOf}
+                            dc={dc}
+                            customIcon={account.icon}
+                            isLast={index === g.accounts.length - 1}
+                            onPress={() => setEditingId(account.id)}
+                          />
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            <AccountActions
+              onScan={() => setScanning(true)}
+              onAdd={() => { setPresetCoin(null); setAdding(true); }}
+            />
+          </>
         )}
       </ScrollView>
 
       <AddAccountModal visible={adding} preset={presetCoin} onClose={() => { setAdding(false); setPresetCoin(null); }} />
-      <AccountSheet account={editing} dc={dc} onClose={() => setEditingId(null)} />
+      <AddDebtModal visible={addingDebt} onClose={() => setAddingDebt(false)} />
+      <SettleSheet
+        share={settlingDebt}
+        accounts={accounts}
+        today={todayISO()}
+        onClose={() => setSettlingDebt(null)}
+        onSettle={async (amount, accountId) => {
+          if (!settlingDebt) return;
+          await settleShare(settlingDebt.shareId, amount, todayISO(), 'declared', null, accountId);
+          setSettlingDebt(null);
+        }}
+      />
+      <AccountSheet account={editing} dc={dc} onClose={() => setEditingId(null)} onOpenOwed={onOpenOwed} />
       <HoldingGroupSheet
         lots={groupLots}
         accountValues={accountValues}
@@ -292,209 +450,337 @@ export function NetWorthScreen({ onBack, onOpenHistory }: { onBack: () => void; 
   );
 }
 
-function HeroCard({
-  nw,
-  series,
-  months,
+function SummaryBlock({
+  net,
   delta,
   prevMonth,
-  mode,
-  setMode,
-  onOpenHistory,
-  dc,
+  isEstimate,
   breakdown,
+  dc,
 }: {
-  nw: { net: number; assets: number; liabilities: number };
-  series: number[];
-  months: string[];
+  net: number;
   delta: number | null;
   prevMonth: string;
-  mode: ValueMode;
-  setMode: (m: ValueMode) => void;
-  onOpenHistory: () => void;
-  dc: DisplayCurrency;
+  isEstimate: boolean;
   breakdown: string;
+  dc: DisplayCurrency;
 }) {
   const theme = useAccent();
+  const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
-  const deltaUp = (delta ?? 0) >= 0;
-  const prevNet = series.length >= 2 ? series[series.length - 2] : 0;
-  const pct = prevNet !== 0 ? (delta ?? 0) / Math.abs(prevNet) * 100 : 0;
-  const pctAbs = Math.abs(pct);
-  const deltaColor = deltaUp ? '#42e893' : '#ff8a7a';
-  const deltaValText = mode === 'percent'
-    ? `${pctAbs.toFixed(1)}%`
-    : fmtMoney(dc.convert(Math.abs(delta ?? 0)), dc.code);
-
+  const wentUp = (delta ?? 0) >= 0;
+  const comparison = delta == null
+    ? null
+    : isZh
+      ? `${fmtMoney(dc.convert(Math.abs(delta)), dc.code)} ${wentUp ? '高于' : '低于'} ${prevMonth}`
+      : `${fmtMoney(dc.convert(Math.abs(delta)), dc.code)} ${wentUp ? 'higher' : 'lower'} than ${prevMonth}`;
   return (
-    <Pressable onPress={onOpenHistory} style={styles.hero} accessibilityRole="button" accessibilityLabel="View net worth history">
-      {/* gradient fill */}
-      <Svg width="100%" height="100%" style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
-        <Defs>
-          <LinearGradient id="nwHero" x1="0" y1="0" x2="0.7" y2="1">
-            <Stop offset="0" stopColor="#25845e" />
-            <Stop offset="0.52" stopColor="#1b6b48" />
-            <Stop offset="1" stopColor="#0e3d27" />
-          </LinearGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#nwHero)" />
-      </Svg>
-      <View style={[styles.heroCircle, { pointerEvents: 'none' }]} />
+    <View style={styles.summary}>
+      <Body color={colorTheme.ink2}>{isEstimate ? (isZh ? '预估净资产' : 'Estimated net worth') : (isZh ? '净资产' : 'Net worth')}</Body>
+      <Display
+        numeric
+        style={styles.summaryValue}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.72}
+      >
+        {net < 0 ? '−' : ''}{fmtMoney(dc.convert(Math.abs(net)), dc.code)}
+      </Display>
+      {comparison && (
+        <View style={styles.summaryDelta}>
+          <Label color={wentUp ? theme.accent : colorTheme.red}>{comparison}</Label>
+        </View>
+      )}
+      {breakdown ? <Caption color={colorTheme.ink2} style={styles.currencyBreakdown}>{breakdown}</Caption> : null}
+    </View>
+  );
+}
 
-      <View style={styles.heroHead}>
-        <Text style={styles.heroLabel}>{isZh ? '净资产 · 6个月' : 'Net Worth · 6-month'}</Text>
-        <View style={styles.heroToggle}>
-          {(['amount', 'percent'] as ValueMode[]).map((m) => {
-            const on = mode === m;
+function latestBalanceDate(entries: BalanceEntry[], accountId: string): string | null {
+  const dates = entries.filter((entry) => entry.accountId === accountId).map((entry) => entry.asOf).sort();
+  return dates[dates.length - 1] ?? null;
+}
+
+function BalanceReview({
+  accounts,
+  entries,
+  expanded,
+  onToggle,
+  onEdit,
+}: {
+  accounts: Account[];
+  entries: BalanceEntry[];
+  expanded: boolean;
+  onToggle: () => void;
+  onEdit: (id: string) => void;
+}) {
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  return (
+    <View style={[styles.reviewBlock, { backgroundColor: colorTheme.amberTint }]}>
+      <Pressable
+        onPress={onToggle}
+        style={styles.reviewSummary}
+        accessibilityRole="button"
+        accessibilityLabel={isZh ? '查看需更新的余额' : 'Review outdated balances'}
+        accessibilityState={{ expanded }}
+      >
+        <View style={[styles.reviewDot, { backgroundColor: colorTheme.amber }]} />
+        <View style={styles.reviewCopy}>
+          <Label>{isZh ? '部分余额可能已过期' : 'Some balances may be outdated'}</Label>
+          <Caption color={colorTheme.ink2} style={styles.reviewMeta}>
+            {isZh ? `${accounts.length} 个账户需要更新` : `${accounts.length} account${accounts.length === 1 ? ' needs' : 's need'} updating`}
+          </Caption>
+        </View>
+        <Label color={colorTheme.amber}>{isZh ? '查看' : 'Review'}</Label>
+        <Icon name={expanded ? 'chevronUp' : 'chevronDown'} size={15} color={colorTheme.amber} />
+      </Pressable>
+      {expanded && (
+        <View style={[styles.reviewList, { borderTopColor: colorTheme.line }]}>
+          {accounts.map((account) => {
+            const asOf = latestBalanceDate(entries, account.id);
             return (
-              <Pressable key={m} onPress={() => setMode(m)} style={[styles.heroToggleBtn, on && styles.heroToggleBtnOn]}>
-                <Text style={[styles.heroToggleText, on && [styles.heroToggleTextOn, { color: theme.accentInk }]]}>{m === 'amount' ? currencyPrefix(dc.code) : '%'}</Text>
-              </Pressable>
+              <View key={account.id} style={styles.reviewAccount}>
+                <View style={styles.reviewCopy}>
+                  <Body weight={700} numberOfLines={1}>{account.name}</Body>
+                  <Caption color={colorTheme.ink2} style={styles.reviewMeta}>
+                    {asOf ? (isZh ? `上次更新 ${shortDate(asOf)}` : `Last updated ${shortDate(asOf)}`) : (isZh ? '尚未记录余额' : 'No balance recorded')}
+                  </Caption>
+                </View>
+                <Pressable
+                  onPress={() => onEdit(account.id)}
+                  style={[styles.updateButton, { backgroundColor: colorTheme.surface }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${isZh ? '更新' : 'Update'} ${account.name}`}
+                >
+                  <Label>{isZh ? '更新' : 'Update'}</Label>
+                </Pressable>
+              </View>
             );
           })}
         </View>
-      </View>
-
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 9 }}>
-        <Text style={styles.heroSign}>{nw.net < 0 ? '−' : ''}</Text>
-        <Text style={styles.heroNum}>{fmtMoney(dc.convert(Math.abs(nw.net)), dc.code)}</Text>
-      </View>
-
-      {delta !== null && (
-        <View style={styles.deltaChip}>
-          <Svg width={10} height={10} viewBox="0 0 12 12" fill="none">
-            <Path
-              d={deltaUp ? 'M6 10V2M6 2L3 5M6 2L9 5' : 'M6 2v8M6 10L3 7M6 10L9 7'}
-              stroke={deltaColor}
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-          <Text style={[styles.deltaText, { color: deltaColor }]}>
-            {deltaUp ? '+' : '−'}{deltaValText} {isZh ? `比 ${prevMonth}` : `vs ${prevMonth}`}
-          </Text>
-        </View>
       )}
+    </View>
+  );
+}
 
-      <View style={styles.heroTiles}>
-        <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>{isZh ? '总资产' : 'Total assets'}</Text>
-          <Text style={[styles.heroTileVal, { color: '#42e893' }]}>{fmtMoney(dc.convert(nw.assets), dc.code)}</Text>
-        </View>
-        <View style={styles.heroTile}>
-          <Text style={styles.heroTileLabel}>{isZh ? '总负债' : 'Total liabilities'}</Text>
-          <Text style={[styles.heroTileVal, { color: '#ff8a80' }]}>{fmtMoney(dc.convert(nw.liabilities), dc.code)}</Text>
-        </View>
+function TrendSection({
+  values,
+  months,
+  hasTrend,
+  onOpenHistory,
+}: {
+  values: number[];
+  months: string[];
+  hasTrend: boolean;
+  onOpenHistory: () => void;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Body weight={700} style={styles.sectionTitle}>{isZh ? '六个月趋势' : 'Your 6-month trend'}</Body>
+        <Pressable onPress={onOpenHistory} hitSlop={8} accessibilityRole="button" accessibilityLabel={isZh ? '查看净资产历史' : 'View net worth history'}>
+          <Label color={theme.accent}>{isZh ? '历史记录' : 'View history'}</Label>
+        </Pressable>
       </View>
-
-      {breakdown.length > 0 && (
-        <Text style={styles.heroBreakdown}>{breakdown}</Text>
-      )}
-
-      {series.length >= 2 && (
-        <>
-          <HeroSparkline values={series} />
-          <View style={{ flexDirection: 'row', marginTop: 5 }}>
-            {months.map((m, i) => (
-              <Text key={i} style={styles.heroMonth}>{m}</Text>
-            ))}
+      {hasTrend ? (
+        <View style={[styles.trendSurface, { backgroundColor: colorTheme.surface2 }]}>
+          <JournalTrendChart values={values} lineColor={theme.accent} />
+          <View style={styles.trendMonths}>
+            {months.map((month, index) => <Caption key={`${month}-${index}`} color={colorTheme.ink2} style={styles.trendMonth}>{month}</Caption>)}
           </View>
-        </>
+        </View>
+      ) : (
+        <View style={[styles.trendEmpty, { borderColor: colorTheme.line }]}>
+          <Body color={colorTheme.ink2}>{isZh ? '再记录一个月的余额即可查看趋势。' : 'Record another monthly balance to see your trend.'}</Body>
+        </View>
       )}
+    </View>
+  );
+}
+
+function JournalTrendChart({ values, lineColor }: { values: number[]; lineColor: string }) {
+  const [layoutWidth, setLayoutWidth] = useState(0);
+  const height = 76;
+  const verticalPadding = 10;
+  if (values.length < 2) return null;
+  const width = layoutWidth || 320;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  const points: [number, number][] = values.map((value, index) => [
+    ((index + 0.5) / values.length) * width,
+    range === 0 ? height / 2 : verticalPadding + (1 - (value - min) / range) * (height - verticalPadding * 2),
+  ]);
+  const line = points.map(([x, y], index) => `${index ? 'L' : 'M'} ${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const first = points[0];
+  const last = points[points.length - 1];
+  const area = `${line} L ${last[0].toFixed(1)} ${height} L ${first[0].toFixed(1)} ${height} Z`;
+  return (
+    <View
+      style={styles.trendChart}
+      onLayout={(event) => {
+        const nextWidth = event.nativeEvent.layout.width;
+        if (nextWidth > 0 && nextWidth !== layoutWidth) setLayoutWidth(nextWidth);
+      }}
+    >
+      <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="journalTrend" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={lineColor} stopOpacity={0.24} />
+            <Stop offset="1" stopColor={lineColor} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Path d={area} fill="url(#journalTrend)" />
+        <Path d={line} fill="none" stroke={lineColor} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        <Circle cx={last[0]} cy={last[1]} r={4} fill={lineColor} />
+      </Svg>
+    </View>
+  );
+}
+
+function MoversSection({ movers, prevMonth, dc }: { movers: ClassMover[]; prevMonth: string; dc: DisplayCurrency }) {
+  const colorTheme = useThemeColors();
+  const theme = useAccent();
+  const { isZh } = useLanguage();
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Body weight={700} style={styles.sectionTitle}>{isZh ? '变化原因' : 'What changed'}</Body>
+        <Caption color={colorTheme.ink2}>{isZh ? `自 ${prevMonth}` : `Since ${prevMonth}`}</Caption>
+      </View>
+      <View style={[styles.moversList, { borderTopColor: colorTheme.line }]}>
+        {movers.map((mover, index) => {
+          const up = mover.delta >= 0;
+          return (
+            <View key={mover.cls} style={[styles.moverRow, index > 0 && { borderTopColor: colorTheme.line, borderTopWidth: 1 }]}>
+              <Body>{formatClassLabel(mover.cls, isZh, mover.label)}</Body>
+              <Label numeric color={up ? theme.accent : colorTheme.red}>
+                {up ? '+' : '−'}{fmtMoney(dc.convert(Math.abs(mover.delta)), dc.code)}
+              </Label>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function AccountTotals({ assets, liabilities, dc }: { assets: number; liabilities: number; dc: DisplayCurrency }) {
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  return (
+    <View style={styles.section}>
+      <Body weight={700} style={styles.sectionTitle}>{isZh ? '账户' : 'Accounts'}</Body>
+      <View style={[styles.totalsRow, { borderBottomColor: colorTheme.line }]}>
+        <View style={styles.totalItem}>
+          <Caption color={colorTheme.ink2}>{isZh ? '资产' : 'Assets'}</Caption>
+          <Amount value={assets} currency={dc.code} size={16} />
+        </View>
+        <View style={[styles.totalItem, styles.totalItemEnd, { borderLeftColor: colorTheme.line }]}>
+          <Caption color={colorTheme.ink2}>{isZh ? '负债' : 'Liabilities'}</Caption>
+          <Amount value={liabilities} currency={dc.code} size={16} color={liabilities > 0 ? colorTheme.red : colorTheme.ink} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function AccountClassSummary({
+  group,
+  label,
+  staleCount,
+  expanded,
+  showDivider,
+  dc,
+  onPress,
+  debtsCount,
+}: {
+  group: ClassGroup;
+  label: string;
+  staleCount: number;
+  expanded: boolean;
+  showDivider: boolean;
+  dc: DisplayCurrency;
+  onPress: () => void;
+  debtsCount?: number;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+  const icon = (CLASS_BY_ID[group.cls]?.icon ?? 'wallet') as IconName;
+  const isReceivable = group.cls === RECEIVABLE_CLS;
+  const count = isReceivable && debtsCount !== undefined ? debtsCount : group.accounts.length;
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.classSummary, showDivider && { borderTopColor: colorTheme.line, borderTopWidth: 1 }]}
+      accessibilityRole="button"
+      accessibilityLabel={isZh
+        ? `${expanded ? '收起' : '展开'}${label}账户`
+        : `${expanded ? 'Collapse' : 'Expand'} ${label} accounts`}
+      accessibilityState={{ expanded }}
+    >
+      <View style={[styles.classSummaryIcon, { backgroundColor: group.kind === 'liability' ? colorTheme.redTint : theme.accentTint }]}>
+        <Icon name={icon} size={17} color={group.kind === 'liability' ? colorTheme.red : theme.accent} />
+      </View>
+      <View style={styles.classSummaryCopy}>
+        <Body weight={700}>{label}</Body>
+        <Caption color={staleCount > 0 ? colorTheme.amber : colorTheme.ink2} style={styles.classSummaryMeta}>
+          {staleCount > 0
+            ? (isZh ? `${staleCount} 个需更新` : `${staleCount} need${staleCount === 1 ? 's' : ''} update`)
+            : isReceivable
+              ? (isZh ? `${count} 位欠款人` : `${count} ${count === 1 ? 'person' : 'people'}`)
+              : (isZh ? `${count} 个账户` : `${count} account${count === 1 ? '' : 's'}`)}
+        </Caption>
+      </View>
+      <Amount
+        value={group.kind === 'liability' ? -group.total : group.total}
+        currency={dc.code}
+        size={14}
+        color={group.kind === 'liability' && group.total > 0 ? colorTheme.red : colorTheme.ink}
+      />
+      <Icon name={expanded ? 'chevronUp' : 'chevronDown'} size={16} color={colorTheme.ink3} />
     </Pressable>
   );
 }
 
-function HeroSparkline({ values }: { values: number[] }) {
-  const [layoutWidth, setLayoutWidth] = useState(0);
-  const H = 50;
-  const pdY = 6;
-  if (values.length < 2) return null;
-
-  const W = layoutWidth || 320;
-  const mn = Math.min(...values);
-  const mx = Math.max(...values);
-  const rng = mx - mn;
-  const n = values.length;
-
-  const pts: [number, number][] = values.map((v, i) => {
-    const x = ((i + 0.5) / n) * W;
-    const y = rng === 0 ? H / 2 : pdY + (1 - (v - mn) / rng) * (H - pdY * 2);
-    return [x, y];
-  });
-
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
-  const last = pts[pts.length - 1];
-  const first = pts[0];
-  const area = `${line} L ${last[0].toFixed(1)} ${H} L ${first[0].toFixed(1)} ${H} Z`;
-
-  return (
-    <View
-      style={{ width: '100%', height: H }}
-      onLayout={(e) => {
-        const w = e.nativeEvent.layout.width;
-        if (w > 0 && w !== layoutWidth) setLayoutWidth(w);
-      }}
-    >
-      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: H }}>
-        <Defs>
-          <LinearGradient id="nwSpk" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#ffffff" stopOpacity={0.35} />
-            <Stop offset="1" stopColor="#ffffff" stopOpacity={0.0} />
-          </LinearGradient>
-        </Defs>
-        <Path d={area} fill="url(#nwSpk)" />
-        <Path d={line} fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-        <Circle cx={last[0]} cy={last[1]} r={4} fill="white" />
-      </Svg>
-    </View>
-  );
-}
-
-// ── Scan / add row ──────────────────────────────────────────────────────────
-function ScanRow({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
+function AccountActions({ onScan, onAdd }: { onScan: () => void; onAdd: () => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
-  const { t } = useLanguage();
+  const { isZh } = useLanguage();
   return (
-    <View style={styles.scanRow}>
-      <Pressable
-        onPress={onScan}
-        style={[styles.scanBanner, { backgroundColor: theme.accentInk, ...platformShadow(theme.accent, 0.3, 14, { width: 0, height: 4 }, 3) }]}
-      >
-        <View style={styles.scanIcon}>
-          <Icon name="scan" size={16} color="#fff" />
-        </View>
-        <View>
-          <Text style={styles.scanTitle}>{t('scanBalance')}</Text>
-          <Text style={styles.scanSub}>{t('scanBalanceSub')}</Text>
-        </View>
+    <View style={styles.accountActions}>
+      <Pressable onPress={onScan} style={styles.tertiaryAction} accessibilityRole="button">
+        <Icon name="scan" size={16} color={colorTheme.ink2} />
+        <Label color={colorTheme.ink2}>{isZh ? '扫描余额' : 'Scan balances'}</Label>
       </Pressable>
-      <Pressable onPress={onAdd} style={[styles.addBtn, { borderColor: colorTheme.line, backgroundColor: colorTheme.surface }]}>
-        <Icon name="plus" size={18} color={theme.accent} stroke={2.4} />
+      <Pressable onPress={onAdd} style={[styles.addAccountAction, { backgroundColor: theme.accentTint }]} accessibilityRole="button">
+        <Icon name="plus" size={16} color={theme.accent} />
+        <Label color={theme.onTint}>{isZh ? '添加账户' : 'Add account'}</Label>
       </Pressable>
     </View>
   );
 }
 
-// ── Group / class labels ────────────────────────────────────────────────────
-function GroupHeader({ label, total, color, dc }: { label: string; total: number; color: string; dc: DisplayCurrency }) {
+function EmptyNetWorth({ onAdd, onScan }: { onAdd: () => void; onScan: () => void }) {
+  const theme = useAccent();
   const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
   return (
-    <View style={styles.groupHead}>
-      <Text style={[styles.groupLabel, { color: colorTheme.ink2 }]}>{label}</Text>
-      <Text style={[styles.groupTotal, { color }]}>{fmtMoney(dc.convert(total), dc.code)}</Text>
-    </View>
-  );
-}
-
-function ClassChip({ label, sub }: { label: string; sub: string }) {
-  const colorTheme = useThemeColors();
-  return (
-    <View style={styles.classChipRow}>
-      <Text style={[styles.classChipLabel, { color: colorTheme.ink2 }]}>{label}</Text>
-      <Text style={[styles.classChipSub, { color: colorTheme.ink2 }]}>{sub}</Text>
+    <View style={styles.emptyState}>
+      <View style={[styles.emptyIcon, { backgroundColor: theme.accentTint }]}><Icon name="scale" size={24} color={theme.accent} /></View>
+      <Title>{isZh ? '建立您的财务全景' : 'Build your financial picture'}</Title>
+      <Body color={colorTheme.ink2} style={styles.emptyBody}>
+        {isZh ? '添加您拥有和所欠的账户，Pip 会显示净资产如何变化。' : 'Add what you own and owe. Pip will show how your position changes over time.'}
+      </Body>
+      <PrimaryButton onPress={onAdd} height={52}><BtnLabel>{isZh ? '添加第一个账户' : 'Add your first account'}</BtnLabel></PrimaryButton>
+      <Pressable onPress={onScan} style={styles.emptyScan} accessibilityRole="button">
+        <Label color={colorTheme.ink2}>{isZh ? '或扫描余额' : 'Or scan a balance'}</Label>
+      </Pressable>
     </View>
   );
 }
@@ -516,6 +802,163 @@ function PriceStamp({ asOf, refreshing, onRefresh }: { asOf: string | null; refr
           <Text style={[styles.refreshText, { color: theme.accent }]}>{isZh ? '↻ 刷新' : '↻ Refresh'}</Text>
         )}
       </Pressable>
+    </View>
+  );
+}
+
+// ── Receivable class card (people who owe you) ───────────────────────────
+function ReceivableClassCard({
+  openDebts,
+  receivableAccount,
+  onSettle,
+  onDelete,
+  onShare,
+  onAddDebt,
+  onOpenOwed,
+  onEditAccount,
+  dc,
+}: {
+  openDebts: OpenShare[];
+  receivableAccount?: Account;
+  onSettle: (debt: OpenShare) => void;
+  onDelete: (debt: OpenShare) => void;
+  onShare: (debt: OpenShare) => void;
+  onAddDebt: () => void;
+  onOpenOwed?: () => void;
+  onEditAccount?: (accountId: string) => void;
+  dc: DisplayCurrency;
+}) {
+  const theme = useAccent();
+  const colorTheme = useThemeColors();
+  const { isZh } = useLanguage();
+
+  return (
+    <View style={[styles.classCard, { backgroundColor: colorTheme.surface2, paddingHorizontal: 12, paddingVertical: 12 }]}>
+      {openDebts.length === 0 ? (
+        <View style={[styles.debtEmptyCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, marginVertical: 4 }]}>
+          <Icon name="gift" size={24} color={colorTheme.ink3} />
+          <Text style={[styles.debtEmptyText, { color: colorTheme.ink2 }]}>
+            {isZh ? '目前没人欠您钱。' : 'Nobody owes you anything right now.'}
+          </Text>
+        </View>
+      ) : (
+        <View style={{ gap: 8 }}>
+          {openDebts.map((debt) => {
+            const desc = debt.remark?.trim() || (debt.merchant && debt.merchant !== 'A shared bill' ? debt.merchant : isZh ? '借款 / 分摊' : 'Owed');
+            const when = shortDate(debt.billDate);
+            return (
+              <View
+                key={debt.shareId}
+                style={[
+                  styles.receivableDebtCard,
+                  { backgroundColor: colorTheme.surface, borderColor: colorTheme.line },
+                ]}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View style={[styles.debtAvatar, { backgroundColor: theme.accentSoft }]}>
+                    <Text style={[styles.debtAvatarText, { color: theme.onTint }]}>
+                      {debt.personName.slice(0, 1).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.debtPersonName, { color: colorTheme.ink }]} numberOfLines={1}>
+                      {debt.personName}
+                    </Text>
+                    <Text style={[styles.debtPersonSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
+                      {desc}{when ? ` · ${when}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={[styles.debtAmountText, { color: theme.accent }]}>
+                    {fmtMoney(dc.convert(debt.outstanding), dc.code)}
+                  </Text>
+                </View>
+
+                {/* Actions row: Share, Settle, Delete */}
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colorTheme.line2 }}>
+                  <Pressable
+                    onPress={() => onShare(debt)}
+                    hitSlop={6}
+                    accessibilityLabel={isZh ? `分享/提醒 ${debt.personName}` : `Share / remind ${debt.personName}`}
+                    style={[styles.debtActionChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  >
+                    <Icon name="share" size={12} color={colorTheme.ink2} />
+                    <Text style={[styles.debtActionChipText, { color: colorTheme.ink2 }]}>
+                      {isZh ? '分享提醒' : 'Share'}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => onSettle(debt)}
+                    hitSlop={6}
+                    accessibilityLabel={isZh ? `结算 ${debt.personName} 的还款` : `Settle repayment from ${debt.personName}`}
+                    style={[styles.debtActionChip, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}
+                  >
+                    <Icon name="check" size={12} color={theme.accent} stroke={2.4} />
+                    <Text style={[styles.debtActionChipText, { color: theme.onTint, fontFamily: uiFont(700) }]}>
+                      {isZh ? '还款' : 'Settle'}
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => onDelete(debt)}
+                    hitSlop={8}
+                    accessibilityLabel={isZh ? `删除 ${debt.personName} 的欠款记录` : `Delete debt from ${debt.personName}`}
+                    style={[styles.debtActionChip, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}
+                  >
+                    <Icon name="trash" size={12} color={colorTheme.red} />
+                    <Text style={[styles.debtActionChipText, { color: colorTheme.red }]}>
+                      {isZh ? '删除' : 'Delete'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      {/* Footer controls: Add Person, View in Owed, Account Settings */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 6 }}>
+        <Pressable
+          onPress={onAddDebt}
+          hitSlop={6}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 }}
+        >
+          <Icon name="plus" size={14} color={theme.accent} stroke={2.4} />
+          <Text style={{ fontSize: 13, fontFamily: uiFont(700), color: theme.accent }}>
+            {isZh ? '添加欠款人' : 'Add someone'}
+          </Text>
+        </Pressable>
+
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          {onOpenOwed && (
+            <Pressable
+              onPress={onOpenOwed}
+              hitSlop={6}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+            >
+              <Text style={{ fontSize: 12.5, fontFamily: uiFont(600), color: colorTheme.ink2 }}>
+                {isZh ? '借款管理' : 'View in Owed'}
+              </Text>
+              <Icon name="chevronRight" size={13} color={colorTheme.ink3} />
+            </Pressable>
+          )}
+
+          {receivableAccount && onEditAccount && (
+            <Pressable
+              onPress={() => onEditAccount(receivableAccount.id)}
+              hitSlop={6}
+              accessibilityLabel={isZh ? '账户设置' : 'Account settings'}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+            >
+              <Icon name="wallet" size={13} color={colorTheme.ink3} />
+              <Text style={{ fontSize: 12.5, fontFamily: uiFont(600), color: colorTheme.ink3 }}>
+                {isZh ? '设置' : 'Settings'}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
     </View>
   );
 }
@@ -557,9 +1000,7 @@ function AssetClassCard({
   const icon = (CLASS_BY_ID[g.cls]?.icon ?? 'wallet') as IconName;
   const localizedLabel = formatClassLabel(g.cls, isZh, g.label);
   return (
-    <>
-      <ClassChip label={hasH ? `${localizedLabel} · ${isZh ? '实时行情' : 'Live prices'}` : localizedLabel} sub={fmtMoney(dc.convert(g.total), dc.code)} />
-      <View style={[styles.classCard, { backgroundColor: colorTheme.surface }]}>
+      <View style={[styles.classCard, { backgroundColor: colorTheme.surface2 }]}>
         {hasH && <PriceStamp asOf={pricesAsOf} refreshing={refreshing} onRefresh={onRefresh} />}
         {hGroups.map((grp, i) => {
           const profit = grp.cost != null && grp.cost > 0 ? holdingProfit(grp.value, grp.cost) : null;
@@ -589,7 +1030,6 @@ function AssetClassCard({
           />
         ))}
       </View>
-    </>
   );
 }
 
@@ -979,12 +1419,38 @@ function HoldingGroupSheet({
 }
 
 /** Manage one account: update balance, rename, reclassify, convert to live holding, view history, delete. */
-function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: DisplayCurrency; onClose: () => void }) {
+function AccountSheet({
+  account,
+  dc,
+  onClose,
+  onOpenOwed,
+}: {
+  account: Account | null;
+  dc: DisplayCurrency;
+  onClose: () => void;
+  onOpenOwed?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
-  const { balanceEntries, accountValues, prices, setBalance, updateAccount, deleteAccount, updateHoldingQuantity, setHoldingCost, refreshPrices } = useAppData();
+  const {
+    accounts,
+    balanceEntries,
+    accountValues,
+    prices,
+    setBalance,
+    updateAccount,
+    deleteAccount,
+    updateHoldingQuantity,
+    setHoldingCost,
+    refreshPrices,
+    openShares,
+    people,
+    addDirectDebt,
+    deleteDirectDebt,
+    settleShare,
+  } = useAppData();
   const [name, setName] = useState('');
   const [cls, setCls] = useState('cash');
   const [valueText, setValueText] = useState('');
@@ -996,6 +1462,77 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
   const [holdingCoin, setHoldingCoin] = useState<TickerResult | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [settlingDebt, setSettlingDebt] = useState<OpenShare | null>(null);
+
+  const handleShareDebt = async (debt: OpenShare) => {
+    tap();
+    const desc = debt.remark?.trim() || (debt.merchant && debt.merchant !== 'A shared bill' ? debt.merchant : (isZh ? '分摊账单' : 'Shared bill'));
+    const message = buildBillReminder({
+      personName: debt.personName,
+      currency: debt.currency ?? 'MYR',
+      total: debt.outstanding,
+      bills: [{
+        shareId: debt.shareId,
+        merchant: desc,
+        billDate: debt.billDate,
+        outstanding: debt.outstanding,
+        paid: debt.paid,
+        remark: debt.remark,
+      }],
+      isZh,
+    }, debt.shareId);
+    await shareSplitMessage(message || '');
+  };
+
+  // Debts state for 'receivable' (Owed to me) accounts
+  const isReceivable = account?.cls === RECEIVABLE_CLS;
+  const [debtPersonName, setDebtPersonName] = useState('');
+  const [debtAmountText, setDebtAmountText] = useState('');
+  const [debtNote, setDebtNote] = useState('');
+  const [isAddingDebt, setIsAddingDebt] = useState(false);
+
+  const openDebts = useMemo(() => {
+    if (!isReceivable) return [];
+    return openShares.filter((s) => s.status === 'open' && s.outstanding > 0);
+  }, [isReceivable, openShares]);
+
+  const totalOwed = useMemo(() => {
+    return openDebts.reduce((sum, s) => sum + s.outstanding, 0);
+  }, [openDebts]);
+
+  const suggestedPeople = useMemo(() => {
+    return people.slice().sort((a, b) => a.name.localeCompare(b.name));
+  }, [people]);
+
+  const handleAddDebt = async () => {
+    const trimmed = debtPersonName.trim();
+    const amount = parseFloat(debtAmountText.replace(/[^0-9.]/g, ''));
+    if (!trimmed || !Number.isFinite(amount) || amount <= 0) return;
+    setIsAddingDebt(true);
+    try {
+      tap();
+      await addDirectDebt(trimmed, Math.round(amount * 100) / 100, debtNote.trim() || null);
+      setDebtPersonName('');
+      setDebtAmountText('');
+      setDebtNote('');
+    } finally {
+      setIsAddingDebt(false);
+    }
+  };
+
+  const handleRemoveDebt = (shareId: string, personName: string, amount: number) => {
+    confirmAction(
+      isZh ? '删除借款记录？' : 'Remove debt record?',
+      isZh
+        ? `确认移除 ${personName} 欠您的 ${fmtMoney(amount, 'MYR')}？`
+        : `Remove ${personName}’s debt of ${fmtMoney(amount, 'MYR')}?`,
+      isZh ? '移除' : 'Remove',
+      async () => {
+        tap();
+        await deleteDirectDebt(shareId);
+      }
+    );
+  };
 
   const holding = account ? isHolding(account) : false;
   const valueDecimals = decimalsFor(account?.currency ?? BASE_CURRENCY);
@@ -1085,6 +1622,10 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
       setHoldingCoin(null);
       setSearchOpen(false);
       setShowHistory(false);
+      setDebtPersonName('');
+      setDebtAmountText('');
+      setDebtNote('');
+      setIsAddingDebt(false);
     }
   }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1175,7 +1716,16 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
       return;
     }
 
-    // 3. Regular manual account update
+    // 3. Receivable ("Owed to me") account update: balance is derived from debts; name never changes, only icon persists
+    if (isReceivable) {
+      if (customIcon !== account.icon) {
+        await updateAccount(account.id, { name: 'Owed to me', cls: account.cls, icon: customIcon });
+      }
+      onClose();
+      return;
+    }
+
+    // 4. Regular manual account update
     if (newName !== account.name || cls !== account.cls || customIcon !== account.icon || parsedRate !== account.interestRate || parsedCost !== account.cost) {
       await updateAccount(account.id, { name: newName, cls, icon: customIcon, interestRate: parsedRate, cost: parsedCost });
     }
@@ -1255,82 +1805,279 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
             <>
               <View style={styles.labelRow}>
                 <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>
-                  {account.cls === 'illiquid' || cls === 'illiquid'
+                  {isReceivable
                     ? isZh
-                      ? '当前市值'
-                      : 'Market value'
-                    : account.kind === 'asset'
+                      ? '待收回总额'
+                      : 'Total owed to you'
+                    : account.cls === 'illiquid' || cls === 'illiquid'
                       ? isZh
-                        ? '当前金额'
-                        : 'Current value'
-                      : isZh
-                        ? '待还金额'
-                        : 'Outstanding amount'}
+                        ? '当前市值'
+                        : 'Market value'
+                      : account.kind === 'asset'
+                        ? isZh
+                          ? '当前金额'
+                          : 'Current value'
+                        : isZh
+                          ? '待还金额'
+                          : 'Outstanding amount'}
                 </Text>
-                <ScanBalanceButton onResult={(n) => setValueText(String(n))} />
+                {!isReceivable && <ScanBalanceButton onResult={(n) => setValueText(String(n))} />}
               </View>
-              <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
-                <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
-                <Animated.View
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    opacity: mergeOpacity,
-                    transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
-                  }}
-                >
-                  <TextInput
-                    value={valueText}
-                    onChangeText={(t) => setValueText(cleanCalcInput(t, valueDecimals > 0))}
-                    onSubmitEditing={handleMergeValue}
-                    keyboardType="numbers-and-punctuation"
-                    selectTextOnFocus
-                    style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
-                  />
-                </Animated.View>
-                {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
-                  <CalcBadge
-                    result={valueCalc.result}
-                    decimals={valueDecimals}
-                    onApply={handleMergeValue}
-                  />
-                )}
-              </View>
-              {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
-                <Text style={[styles.calcHint, { color: theme.accent }]}>
-                  = {account.currency} {valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals)}
-                </Text>
+
+              {isReceivable ? (
+                <>
+                  <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                    <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
+                    <Text style={[styles.amountInput, { color: colorTheme.ink, paddingVertical: 12 }]}>
+                      {totalOwed.toFixed(2)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.hint, { color: colorTheme.ink2 }]}>
+                    {isZh ? '此金额由下方借款人记录自动累计。' : 'Total calculated from people who owe you below.'}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                    <Text style={[styles.rm, { color: colorTheme.ink2 }]}>{currencyPrefix(account.currency)}</Text>
+                    <Animated.View
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        opacity: mergeOpacity,
+                        transform: [{ scaleX: mergeScaleX }, { scaleY: mergeScaleY }],
+                      }}
+                    >
+                      <TextInput
+                        value={valueText}
+                        onChangeText={(t) => setValueText(cleanCalcInput(t, valueDecimals > 0))}
+                        onSubmitEditing={handleMergeValue}
+                        keyboardType="numbers-and-punctuation"
+                        selectTextOnFocus
+                        style={[styles.amountInput, { color: isMergingValue ? theme.accent : colorTheme.ink }]}
+                      />
+                    </Animated.View>
+                    {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                      <CalcBadge
+                        result={valueCalc.result}
+                        decimals={valueDecimals}
+                        onApply={handleMergeValue}
+                      />
+                    )}
+                  </View>
+                  {valueCalc.isExpression && valueCalc.result != null && valueCalc.result > 0 && (
+                    <Text style={[styles.calcHint, { color: theme.accent }]}>
+                      = {account.currency} {valueDecimals === 0 ? String(Math.round(valueCalc.result)) : valueCalc.result.toFixed(valueDecimals)}
+                    </Text>
+                  )}
+                  <Text style={[styles.hint, { color: colorTheme.ink2 }]}>{isZh ? '保存新金额将记录为今天的最新余额。' : 'Saving a new value records it as of today.'}</Text>
+                </>
               )}
-              <Text style={[styles.hint, { color: colorTheme.ink2 }]}>{isZh ? '保存新金额将记录为今天的最新余额。' : 'Saving a new value records it as of today.'}</Text>
 
               <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>
                 {account.cls === 'illiquid' || cls === 'illiquid' ? (isZh ? '资产名称' : 'Asset name') : (isZh ? '账户名称' : 'Account')}
               </Text>
-              <InstitutionField
-                value={name}
-                onChangeText={setName}
-                onPick={(inst) => {
-                  if (inst.kind === 'auto') {
-                    if (account.kind === 'liability') setCls('car');
-                    else setCls('illiquid');
-                  } else if (account.kind === 'asset') {
-                    setCls('cash');
-                  }
-                }}
-              />
+              {isReceivable ? (
+                <View style={[styles.textInput, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line, justifyContent: 'center' }]}>
+                  <Text style={{ fontFamily: uiFont(600), fontSize: 15, color: colorTheme.ink2 }}>
+                    Owed to me
+                  </Text>
+                </View>
+              ) : (
+                <InstitutionField
+                  value={name}
+                  onChangeText={setName}
+                  onPick={(inst) => {
+                    if (inst.kind === 'auto') {
+                      if (account.kind === 'liability') setCls('car');
+                      else setCls('illiquid');
+                    } else if (account.kind === 'asset') {
+                      setCls('cash');
+                    }
+                  }}
+                />
+              )}
 
-              <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '分类' : 'Type'}</Text>
-              <View style={styles.classGrid}>
-                {classesFor(account.kind).map((c) => {
-                  const on = cls === c.id;
-                  return (
-                    <Pressable key={c.id} onPress={() => setCls(c.id)} style={[styles.classChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && [styles.classChipOn, { borderColor: theme.accent, backgroundColor: theme.accentTint }]]}>
-                      <Icon name={c.icon as IconName} size={15} color={on ? theme.accent : colorTheme.ink3} />
-                      <Text style={[styles.classChipText, { color: colorTheme.ink2 }, on && { color: theme.onTint }]}>{c.label}</Text>
+              {!isReceivable && (
+                <>
+                  <Text style={[styles.fieldLabel, { marginTop: 18, color: colorTheme.ink2 }]}>{isZh ? '分类' : 'Type'}</Text>
+                  <View style={styles.classGrid}>
+                    {classesFor(account.kind).map((c) => {
+                      const on = cls === c.id;
+                      return (
+                        <Pressable key={c.id} onPress={() => setCls(c.id)} style={[styles.classChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }, on && [styles.classChipOn, { borderColor: theme.accent, backgroundColor: theme.accentTint }]]}>
+                          <Icon name={c.icon as IconName} size={15} color={on ? theme.accent : colorTheme.ink3} />
+                          <Text style={[styles.classChipText, { color: colorTheme.ink2 }, on && { color: theme.onTint }]}>{c.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
+              {isReceivable && (
+                <View style={{ marginTop: 22 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <Text style={[styles.fieldLabel, { color: colorTheme.ink2, marginTop: 0 }]}>
+                      {isZh ? '欠款人与借款记录' : 'Who owes you'}
+                      {openDebts.length > 0 ? ` (${openDebts.length})` : ''}
+                    </Text>
+                    {onOpenOwed && (
+                      <Pressable
+                        onPress={() => {
+                          onClose();
+                          onOpenOwed();
+                        }}
+                        hitSlop={8}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      >
+                        <Text style={{ fontSize: 13, fontFamily: uiFont(700), color: theme.accent }}>
+                          {isZh ? '前往借款管理' : 'View in Owed'}
+                        </Text>
+                        <Icon name="chevronRight" size={13} color={theme.accent} />
+                      </Pressable>
+                    )}
+                  </View>
+
+                  {openDebts.length === 0 ? (
+                    <View style={[styles.debtEmptyCard, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+                      <Icon name="gift" size={24} color={colorTheme.ink3} />
+                      <Text style={[styles.debtEmptyText, { color: colorTheme.ink2 }]}>
+                        {isZh ? '目前没人欠您钱。在下方添加谁欠您款项。' : 'Nobody owes you anything right now. Add someone below.'}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={[styles.debtListCard, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                      {openDebts.map((debt, i) => (
+                        <View
+                          key={debt.shareId}
+                          style={[
+                            styles.debtRow,
+                            i > 0 && [styles.debtRowBorder, { borderTopColor: colorTheme.line2 }],
+                          ]}
+                        >
+                          <View style={[styles.debtAvatar, { backgroundColor: theme.accentSoft }]}>
+                            <Text style={[styles.debtAvatarText, { color: theme.onTint }]}>
+                              {debt.personName.slice(0, 1).toUpperCase()}
+                            </Text>
+                          </View>
+                          <View style={{ flex: 1, minWidth: 0 }}>
+                            <Text style={[styles.debtPersonName, { color: colorTheme.ink }]} numberOfLines={1}>
+                              {debt.personName}
+                            </Text>
+                            <Text style={[styles.debtPersonSub, { color: colorTheme.ink2 }]} numberOfLines={1}>
+                              {debt.remark?.trim() || (debt.merchant && debt.merchant !== 'A shared bill' ? debt.merchant : isZh ? '借款 / 分摊' : 'Owed')}
+                            </Text>
+                          </View>
+                          <Text style={[styles.debtAmountText, { color: theme.accent }]}>
+                            {fmtMoney(debt.outstanding, debt.currency || 'MYR')}
+                          </Text>
+                          <Pressable
+                            onPress={() => handleShareDebt(debt)}
+                            hitSlop={6}
+                            style={{ padding: 6, marginLeft: 2 }}
+                            accessibilityLabel={isZh ? `分享/提醒 ${debt.personName}` : `Share / remind ${debt.personName}`}
+                          >
+                            <Icon name="share" size={15} color={colorTheme.ink2} />
+                          </Pressable>
+                          <Pressable
+                            onPress={() => setSettlingDebt(debt)}
+                            hitSlop={6}
+                            style={{ padding: 6, marginLeft: 2 }}
+                            accessibilityLabel={isZh ? `结算 ${debt.personName} 还款` : `Settle repayment from ${debt.personName}`}
+                          >
+                            <Icon name="check" size={16} color={theme.accent} stroke={2.4} />
+                          </Pressable>
+                          <Pressable
+                            onPress={() => handleRemoveDebt(debt.shareId, debt.personName, debt.outstanding)}
+                            hitSlop={8}
+                            style={{ padding: 6, marginLeft: 2 }}
+                            accessibilityLabel={isZh ? `删除 ${debt.personName} 欠款` : `Delete debt from ${debt.personName}`}
+                          >
+                            <Icon name="trash" size={15} color={colorTheme.red} />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Inline Add Person Form */}
+                  <View style={[styles.addDebtBox, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2, marginTop: 14 }]}>
+                    <Text style={[styles.addDebtTitle, { color: colorTheme.ink }]}>
+                      {isZh ? '+ 添加欠款人' : '+ Add someone who owes you'}
+                    </Text>
+
+                    <Text style={[styles.addDebtLabel, { color: colorTheme.ink2 }]}>
+                      {isZh ? '姓名' : 'Name'}
+                    </Text>
+                    <TextInput
+                      value={debtPersonName}
+                      onChangeText={setDebtPersonName}
+                      placeholder={isZh ? '例如: Fong Yan Yan' : 'e.g. Fong Yan Yan'}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.addDebtInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+                    />
+
+                    {/* Suggested existing people chips */}
+                    {suggestedPeople.length > 0 && !debtPersonName && (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          {suggestedPeople.slice(0, 5).map((p) => (
+                            <Pressable
+                              key={p.id}
+                              onPress={() => setDebtPersonName(p.name)}
+                              style={[styles.personChip, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}
+                            >
+                              <Text style={[styles.personChipText, { color: colorTheme.ink2 }]}>{p.name}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    )}
+
+                    <Text style={[styles.addDebtLabel, { color: colorTheme.ink2, marginTop: 10 }]}>
+                      {isZh ? '欠款金额' : 'Amount owed'}
+                    </Text>
+                    <View style={[styles.amountRow, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, height: 44 }]}>
+                      <Text style={[styles.rm, { color: colorTheme.ink2 }]}>RM</Text>
+                      <TextInput
+                        value={debtAmountText}
+                        onChangeText={setDebtAmountText}
+                        keyboardType="decimal-pad"
+                        placeholder="0.00"
+                        placeholderTextColor={colorTheme.ink3}
+                        style={[styles.amountInput, { color: colorTheme.ink, fontSize: 18 }]}
+                      />
+                    </View>
+
+                    <Text style={[styles.addDebtLabel, { color: colorTheme.ink2, marginTop: 10 }]}>
+                      {isZh ? '原因 / 备注 (选填)' : 'Reason / note (optional)'}
+                    </Text>
+                    <TextInput
+                      value={debtNote}
+                      onChangeText={setDebtNote}
+                      placeholder={isZh ? '例如: 晚餐分摊、借款' : 'e.g. Dinner, personal loan'}
+                      placeholderTextColor={colorTheme.ink3}
+                      style={[styles.addDebtInput, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line, color: colorTheme.ink }]}
+                    />
+
+                    <Pressable
+                      onPress={handleAddDebt}
+                      disabled={isAddingDebt || !debtPersonName.trim() || !parseFloat(debtAmountText)}
+                      style={[
+                        styles.addDebtBtn,
+                        { backgroundColor: theme.accent },
+                        (!debtPersonName.trim() || !parseFloat(debtAmountText)) && { opacity: 0.5 },
+                      ]}
+                    >
+                      <Icon name="plus" size={15} color="#fff" stroke={2.4} />
+                      <Text style={styles.addDebtBtnText}>
+                        {isZh ? '添加欠款' : 'Add to Owed'}
+                      </Text>
                     </Pressable>
-                  );
-                })}
-              </View>
+                  </View>
+                </View>
+              )}
 
               {(account.cls === 'illiquid' || cls === 'illiquid') && (
                 <>
@@ -1596,10 +2343,12 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
               <BtnLabel>{isZh ? '保存' : 'Save'}</BtnLabel>
             </PrimaryButton>
           </View>
-          <Pressable onPress={confirmDelete} style={styles.deleteBtn} hitSlop={6}>
-            <Icon name="trash" size={17} color="#b3261e" />
-            <Text style={styles.deleteText}>{isZh ? '删除账户' : 'Delete account'}</Text>
-          </Pressable>
+          {!isReceivable && (
+            <Pressable onPress={confirmDelete} style={styles.deleteBtn} hitSlop={6}>
+              <Icon name="trash" size={17} color="#b3261e" />
+              <Text style={styles.deleteText}>{isZh ? '删除账户' : 'Delete account'}</Text>
+            </Pressable>
+          )}
         </ScrollView>
       </View>
       </KeyboardAvoidingView>
@@ -1616,6 +2365,18 @@ function AccountSheet({ account, dc, onClose }: { account: Account | null; dc: D
         }}
         onClose={() => setSearchOpen(false)}
       />
+
+      <SettleSheet
+        share={settlingDebt}
+        accounts={accounts}
+        today={todayISO()}
+        onClose={() => setSettlingDebt(null)}
+        onSettle={async (amount, accountId) => {
+          if (!settlingDebt) return;
+          await settleShare(settlingDebt.shareId, amount, todayISO(), 'declared', null, accountId);
+          setSettlingDebt(null);
+        }}
+      />
     </Modal>
   );
 }
@@ -1628,47 +2389,49 @@ const styles = StyleSheet.create({
   profitLine: { fontFamily: uiFont(600), fontSize: 13, marginTop: 12 },
 
   /* nav */
-  nav: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingBottom: 10 },
-  navBtn: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
-  navTitle: { flex: 1, textAlign: 'center', fontFamily: uiFont(700), fontSize: 16 },
+  nav: { paddingHorizontal: spacing.lg, paddingBottom: spacing.base },
 
-  /* hero */
-  hero: { margin: 16, marginTop: 0, borderRadius: 26, padding: 20, overflow: 'hidden', backgroundColor: '#1b6b48', position: 'relative' },
-  heroCircle: { position: 'absolute', top: -48, right: -48, width: 160, height: 160, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
-  heroHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  heroLabel: { fontFamily: uiFont(600), fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: 'rgba(255,255,255,0.52)' },
-  heroToggle: { flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 20, padding: 2, gap: 2, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  heroToggleBtn: { paddingHorizontal: 14, paddingVertical: 4, borderRadius: 16 },
-  heroToggleBtnOn: { backgroundColor: '#fff' },
-  heroToggleText: { fontFamily: uiFont(700), fontSize: 11, color: 'rgba(255,255,255,0.6)' },
-  heroToggleTextOn: {},
-  heroSign: { fontFamily: numFont(700), fontSize: 34, color: '#fff', marginRight: 2 },
-  heroNum: { fontFamily: numFont(700), fontSize: 46, color: '#fff' },
-  deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 15 },
-  deltaText: { fontFamily: numFont(700), fontSize: 11.5, color: '#42e893' },
-  heroTiles: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  heroTile: { flex: 1, backgroundColor: 'rgba(0,0,0,0.16)', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  heroTileLabel: { fontFamily: uiFont(500), fontSize: 11, color: 'rgba(255,255,255,0.45)', marginBottom: 3 },
-  heroTileVal: { fontFamily: numFont(700), fontSize: 16 },
-  heroBreakdown: { color: '#ffffff', fontSize: 13, fontFamily: uiFont(700), fontWeight: '700', marginBottom: 9 },
-  heroMonth: { flex: 1, textAlign: 'center', fontFamily: uiFont(500), fontSize: 11, color: 'rgba(255,255,255,0.3)' },
+  /* net-worth journal */
+  summary: { marginHorizontal: spacing.lg, paddingTop: spacing.sm, marginBottom: spacing.lg },
+  summaryValue: { marginTop: spacing.xs },
+  summaryDelta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  currencyBreakdown: { marginTop: spacing.sm },
+  reviewBlock: { marginHorizontal: spacing.base, borderRadius: radius.sm, marginBottom: spacing.lg, overflow: 'hidden' },
+  reviewSummary: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
+  reviewDot: { width: spacing.sm, height: spacing.sm, borderRadius: spacing.xs },
+  reviewCopy: { flex: 1, minWidth: 0 },
+  reviewMeta: { marginTop: spacing.xs },
+  reviewList: { borderTopWidth: 1, paddingHorizontal: spacing.base },
+  reviewAccount: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  updateButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.base, borderRadius: radius.sm },
+  section: { marginHorizontal: spacing.lg, marginBottom: spacing.lg },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginBottom: spacing.md },
+  sectionTitle: { flex: 1 },
+  trendSurface: { borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  trendChart: { width: '100%', height: 76 },
+  trendMonths: { flexDirection: 'row', marginTop: spacing.xs },
+  trendMonth: { flex: 1, textAlign: 'center' },
+  trendEmpty: { minHeight: 76, borderTopWidth: 1, borderBottomWidth: 1, justifyContent: 'center', paddingVertical: spacing.base },
+  moversList: { borderTopWidth: 1 },
+  moverRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  totalsRow: { flexDirection: 'row', marginTop: spacing.md, paddingBottom: spacing.base, borderBottomWidth: 1 },
+  totalItem: { flex: 1, gap: spacing.xs },
+  totalItemEnd: { borderLeftWidth: 1, paddingLeft: spacing.base },
+  accountGroups: { marginHorizontal: spacing.base, borderRadius: radius.sm, overflow: 'hidden' },
+  classSummary: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.base, paddingVertical: spacing.md },
+  classSummaryIcon: { width: 36, height: 36, borderRadius: spacing.md, alignItems: 'center', justifyContent: 'center' },
+  classSummaryCopy: { flex: 1, minWidth: 0 },
+  classSummaryMeta: { marginTop: spacing.xs },
+  accountDetails: { overflow: 'hidden' },
+  accountActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm, marginHorizontal: spacing.base, marginTop: spacing.md },
+  tertiaryAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md },
+  addAccountAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.base, borderRadius: radius.sm },
+  emptyState: { marginHorizontal: spacing.lg, paddingTop: spacing.xl, alignItems: 'center' },
+  emptyIcon: { width: 48, height: 48, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.base },
+  emptyBody: { textAlign: 'center', marginTop: spacing.sm, marginBottom: spacing.lg },
+  emptyScan: { minHeight: 44, justifyContent: 'center', marginTop: spacing.sm },
 
-  /* scan row */
-  scanRow: { flexDirection: 'row', gap: 9, marginHorizontal: 16, marginBottom: 4 },
-  scanBanner: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 16, padding: 10, paddingRight: 14 },
-  scanIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
-  scanTitle: { fontFamily: uiFont(700), fontSize: 13, color: '#fff' },
-  scanSub: { fontFamily: uiFont(500), fontSize: 11, color: 'rgba(255,255,255,0.85)', marginTop: 1 },
-  addBtn: { width: 50, height: 50, borderRadius: 14, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-
-  /* group + class labels */
-  groupHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 },
-  groupLabel: { fontFamily: uiFont(700), fontSize: 12, letterSpacing: 0.4 },
-  groupTotal: { fontFamily: numFont(700), fontSize: 13 },
-  classChipRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 4 },
-  classChipLabel: { fontFamily: uiFont(700), fontSize: 11, letterSpacing: 1, textTransform: 'uppercase' },
-  classChipSub: { fontFamily: numFont(600), fontSize: 11 },
-  classCard: { borderRadius: 18, marginHorizontal: 16, marginTop: 4, overflow: 'hidden', ...shadowCard },
+  classCard: { overflow: 'hidden' },
 
   /* price stamp */
   priceStamp: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 18, paddingVertical: 8, borderBottomWidth: 1 },
@@ -1840,5 +2603,121 @@ const styles = StyleSheet.create({
     fontFamily: uiFont(500),
     fontSize: 11.5,
     marginTop: 1,
+  },
+  debtEmptyCard: {
+    padding: 18,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    gap: 8,
+  },
+  debtEmptyText: {
+    fontFamily: uiFont(500),
+    fontSize: 12.5,
+    textAlign: 'center',
+  },
+  debtListCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  debtRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  debtRowBorder: {
+    borderTopWidth: 1,
+  },
+  debtAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  debtAvatarText: {
+    fontFamily: uiFont(700),
+    fontSize: 13,
+  },
+  debtPersonName: {
+    fontFamily: uiFont(700),
+    fontSize: 14,
+  },
+  debtPersonSub: {
+    fontFamily: uiFont(500),
+    fontSize: 11.5,
+    marginTop: 1,
+  },
+  debtAmountText: {
+    fontFamily: numFont(700),
+    fontSize: 15,
+  },
+  addDebtBox: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: 14,
+  },
+  addDebtTitle: {
+    fontFamily: uiFont(700),
+    fontSize: 13.5,
+    marginBottom: 10,
+  },
+  addDebtLabel: {
+    fontFamily: uiFont(600),
+    fontSize: 11.5,
+    marginBottom: 4,
+  },
+  addDebtInput: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontFamily: uiFont(500),
+    fontSize: 13.5,
+  },
+  personChip: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  personChipText: {
+    fontFamily: uiFont(600),
+    fontSize: 11.5,
+  },
+  addDebtBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: radius.sm,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  addDebtBtnText: {
+    fontFamily: uiFont(700),
+    fontSize: 13,
+    color: '#fff',
+  },
+  receivableDebtCard: {
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: 12,
+  },
+  debtActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  debtActionChipText: {
+    fontSize: 12,
+    fontFamily: uiFont(600),
   },
 });

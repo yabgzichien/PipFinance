@@ -155,9 +155,9 @@ describe('streak layout (fire selected)', () => {
   it('scales the fire icon and count with button size notch when fire is selected', () => {
     const notch1 = composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 1 }), 9, DOTS).svg;
     const notch5 = composeWidgetPreview(cfg({ slot1: 'streak', slot2: 'none', buttonNotch: 5 }), 9, DOTS).svg;
-    expect(notch1).toContain('scale(0.24)');
-    expect(notch5).toContain('scale(0.44)');
-    expect(notch1).toContain('font-size="15"');
-    expect(notch5).toContain('font-size="22"');
+    expect(notch1).toContain('scale(0.18)');
+    expect(notch5).toContain('scale(0.3)');
+    expect(notch1).toContain('font-size="12"');
+    expect(notch5).toContain('font-size="16"');
   });
 });

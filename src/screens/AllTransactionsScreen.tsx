@@ -1,17 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, SectionList, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditTransactionModal } from '../components/EditTransactionModal';
 import { TripPickerModal } from '../components/TripPickerModal';
 import { Icon } from '../components/Icon';
 import { TransactionFilterModal } from '../components/TransactionFilterModal';
-import { Amount, Card, CatBadge, Eyebrow, IconButton, TopBar } from '../components/ui';
+import { Amount, Card, CatBadge, IconButton, TopBar } from '../components/ui';
 import { BrandBadge } from '../components/BrandBadge';
 import { matchBrand } from '../components/BrandLogo';
 import { txnMonthKey } from '../lib/budget';
 import { isValidIsoDate, monthLabel, shortDate } from '../lib/dates';
-import { fmt, fmtMoney, formatCurrencyBreakdown } from '../lib/format';
-import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
+import { fmtMoney } from '../lib/format';
 import { confirmAction } from '../lib/platformAlert';
 import { outstanding } from '../lib/split';
 import { expenseIdsFromSelection, reassignedFromOtherTrips, type Trip } from '../lib/trips';
@@ -22,7 +21,7 @@ import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
-import { radius, shadowCard, uiFont, type StructuralColors } from '../theme';
+import { radius, shadowCard, shadowToggle, uiFont, type StructuralColors } from '../theme';
 import { TripGlyph } from '../components/TripBadge';
 
 /** The date used to sort/bucket a transaction: its own date, else when it was logged. */
@@ -47,6 +46,8 @@ interface OwedInfo {
   owed: number;
   gross: number;
 }
+
+export type TxnTypeFilter = 'all' | 'expense' | 'income';
 
 /**
  * One ledger row. Split out and memoised because the list is virtualised now: re-rendering the
@@ -221,6 +222,7 @@ export function AllTransactionsScreen({
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<TxnTypeFilter>('all');
 
   /** txnId -> what is still owed on that bill, so a small row can explain itself. */
   const owedByTxn = useMemo(() => {
@@ -265,40 +267,78 @@ export function AllTransactionsScreen({
   const advancedActive = monthFilter.size > 0 || catFilter.size > 0 || !!validFrom || !!validTo;
 
   const shown = useMemo(() => {
-    let list = filtered ? transactions.filter((t) => (t.categoryId ?? 'other') === filterCategoryId) : transactions;
-    if (monthFilter.size > 0) list = list.filter((t) => { const mk = txnMonthKey(t); return !!mk && monthFilter.has(mk); });
-    if (catFilter.size > 0) list = list.filter((t) => catFilter.has(t.categoryId ?? 'other'));
-    if (validFrom) list = list.filter((t) => txnDateOnly(t) >= validFrom);
-    if (validTo) list = list.filter((t) => txnDateOnly(t) <= validTo);
     const q = query.trim().toLowerCase();
-    if (q) {
-      list = list.filter((t) => {
+    const hasMonthFilter = monthFilter.size > 0;
+    const hasCatFilter = catFilter.size > 0;
+
+    return transactions.filter((t) => {
+      if (typeFilter === 'expense' && t.type !== 'expense') return false;
+      if (typeFilter === 'income' && t.type !== 'income') return false;
+      if (filtered && (t.categoryId ?? 'other') !== filterCategoryId) return false;
+      if (hasMonthFilter) {
+        const mk = txnMonthKey(t);
+        if (!mk || !monthFilter.has(mk)) return false;
+      }
+      if (hasCatFilter && !catFilter.has(t.categoryId ?? 'other')) return false;
+      if (validFrom || validTo) {
+        const d = txnDateOnly(t);
+        if (validFrom && d < validFrom) return false;
+        if (validTo && d > validTo) return false;
+      }
+      if (q) {
         const cat = catById[t.categoryId ?? 'other'] ?? fallback;
         const trip = t.tripId ? tripById.get(t.tripId) : null;
-        return (
+        const matches =
           (t.merchantRaw ?? '').toLowerCase().includes(q) ||
           (t.remark ?? '').toLowerCase().includes(q) ||
           cat.label.toLowerCase().includes(q) ||
-          (trip?.name ?? '').toLowerCase().includes(q)
-        );
-      });
-    }
-    return list;
-  }, [transactions, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, query, catById, tripById]);
+          (trip?.name ?? '').toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [transactions, typeFilter, filterCategoryId, filtered, monthFilter, catFilter, validFrom, validTo, query, catById, tripById]);
 
   /** `shown`, sorted newest-first and bucketed into month sections for the sectioned list. */
   const sections = useMemo<Section[]>(() => {
     const groups = new Map<string, Transaction[]>();
     for (const t of shown) {
       const mk = txnMonthKey(t) ?? '';
-      if (!groups.has(mk)) groups.set(mk, []);
-      groups.get(mk)!.push(t);
+      let arr = groups.get(mk);
+      if (!arr) {
+        arr = [];
+        groups.set(mk, arr);
+      }
+      arr.push(t);
     }
-    for (const list of groups.values()) list.sort((a, b) => txnDateOnly(b).localeCompare(txnDateOnly(a)));
-    const keys = [...groups.keys()].sort((a, b) => (a && b ? b.localeCompare(a) : a ? -1 : 1));
+    for (const list of groups.values()) {
+      list.sort((a, b) => {
+        const dateA = a.date ?? a.createdAt;
+        const dateB = b.date ?? b.createdAt;
+        if (dateB !== dateA) return dateB > dateA ? 1 : -1;
+        return b.createdAt > a.createdAt ? 1 : b.createdAt < a.createdAt ? -1 : 0;
+      });
+    }
+    const keys = [...groups.keys()].sort((a, b) => (a && b ? (b > a ? 1 : b < a ? -1 : 0) : a ? -1 : 1));
     // `key` is the section's React key, so the undated bucket needs a real one, not ''.
     return keys.map((k) => ({ key: k || 'no-date', label: k ? formatMonthLabel(k, true) : (isZh ? '无日期' : 'No date'), data: groups.get(k)! }));
   }, [shown, formatMonthLabel, isZh]);
+
+  const INITIAL_VISIBLE_SECTIONS = 6;
+  const [visibleSectionCount, setVisibleSectionCount] = useState(INITIAL_VISIBLE_SECTIONS);
+
+  useEffect(() => {
+    setVisibleSectionCount(INITIAL_VISIBLE_SECTIONS);
+  }, [shown]);
+
+  const displayedSections = useMemo(() => {
+    if (sections.length <= visibleSectionCount) return sections;
+    return sections.slice(0, visibleSectionCount);
+  }, [sections, visibleSectionCount]);
+
+  const handleEndReached = useCallback(() => {
+    setVisibleSectionCount((prev) => (prev < sections.length ? prev + 6 : prev));
+  }, [sections.length]);
 
   const toggleMonth = (m: string) =>
     setMonthFilter((prev) => { const next = new Set(prev); next.has(m) ? next.delete(m) : next.add(m); return next; });
@@ -312,19 +352,10 @@ export function AllTransactionsScreen({
   };
 
   const dc = useDisplayCurrency();
-  const totalSpent = useMemo(
-    () => transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + dc.convertTxn(t), 0),
-    [transactions, dc]
-  );
-  const totalIncome = useMemo(
-    () => transactions.filter((t) => t.type === 'income').reduce((s, t) => s + dc.convertTxn(t), 0),
-    [transactions, dc]
-  );
   const filterTotal = useMemo(
-    () => shown.reduce((s, t) => s + dc.convertTxn(t), 0),
-    [shown, dc]
+    () => (filtered ? shown.reduce((s, t) => s + dc.convertTxn(t), 0) : 0),
+    [filtered, shown, dc]
   );
-  const nativeTotals = useMemo(() => nativeTransactionTotalsByCurrency(shown), [shown]);
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -451,26 +482,45 @@ export function AllTransactionsScreen({
         </Pressable>
       )}
 
+      {!selectMode && (
+        <View style={[styles.typeFilterTabs, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line2 }]}>
+          {(['all', 'expense', 'income'] as const).map((filter) => {
+            const active = typeFilter === filter;
+            const label =
+              filter === 'all'
+                ? (isZh ? '全部' : 'All')
+                : filter === 'expense'
+                ? (isZh ? '支出' : 'Expenses')
+                : (isZh ? '收入' : 'Income');
+            return (
+              <Pressable
+                key={filter}
+                onPress={() => setTypeFilter(filter)}
+                style={[
+                  styles.typeFilterTab,
+                  active && [styles.typeFilterTabActive, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }],
+                ]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={label}
+              >
+                <Text
+                  style={[
+                    styles.typeFilterTabText,
+                    { color: colorTheme.ink2 },
+                    active && [styles.typeFilterTabTextActive, { color: colorTheme.ink }],
+                  ]}
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       {shown.length > 0 && (
         <>
-          {!filtered && !advancedActive && !query.trim() && (
-            <>
-              <View style={styles.summary}>
-                <Card style={styles.summaryCard}>
-                  <Eyebrow>{isZh ? '支出' : 'Spent'}</Eyebrow>
-                  <Amount value={totalSpent} currency={dc.code} size={20} weight={700} />
-                </Card>
-                <Card style={styles.summaryCard}>
-                  <Eyebrow>{isZh ? '收入' : 'Received'}</Eyebrow>
-                  <Amount value={totalIncome} currency={dc.code} size={20} weight={700} color={theme.accent} />
-                </Card>
-              </View>
-              {Object.keys(nativeTotals).length > 1 && (
-                <Text style={[styles.breakdownText, { color: colorTheme.ink }]}>{formatCurrencyBreakdown(nativeTotals)}</Text>
-              )}
-            </>
-          )}
-
           {owedTotal > 0 && !selectMode && (
             <Pressable onPress={onOpenOwed} style={[styles.owedBanner, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }]}>
               <Icon name="gift" size={18} color={theme.accent} />
@@ -562,7 +612,7 @@ export function AllTransactionsScreen({
       {/* Windowed, so opening this screen with two years of imported history mounts the rows
           you can see rather than all of them. */}
       <SectionList
-        sections={sections}
+        sections={displayedSections}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         renderSectionHeader={renderSectionHeader}
@@ -572,19 +622,22 @@ export function AllTransactionsScreen({
         ListEmptyComponent={
           <Card style={{ padding: 26, alignItems: 'center' }}>
             <Text style={[styles.emptyTitle, { color: colorTheme.ink }]}>
-              {filtered || advancedActive || query.trim() ? (isZh ? '没有匹配的交易' : 'No matching transactions') : (isZh ? '暂无交易记录' : 'No transactions yet')}
+              {filtered || advancedActive || query.trim() || typeFilter !== 'all' ? (isZh ? '没有匹配的交易' : 'No matching transactions') : (isZh ? '暂无交易记录' : 'No transactions yet')}
             </Text>
             <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
-              {filtered || advancedActive || query.trim() ? (isZh ? '尝试清除筛选条件或搜索词。' : 'Try clearing a filter or the search.') : (isZh ? '点击“记账”开始添加收支。' : 'Tap Add to scan a receipt or a statement.')}
+              {filtered || advancedActive || query.trim() || typeFilter !== 'all' ? (isZh ? '尝试清除筛选条件或搜索词。' : 'Try clearing a filter or the search.') : (isZh ? '点击“记账”开始添加收支。' : 'Tap Add to scan a receipt or a statement.')}
             </Text>
           </Card>
         }
         extraData={selected}
         contentContainerStyle={{ padding: 18, paddingBottom: insets.bottom + 30 }}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={12}
-        maxToRenderPerBatch={12}
-        windowSize={7}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
+        onEndReached={handleEndReached}
+        onEndReachedThreshold={0.5}
         keyboardShouldPersistTaps="handled"
       />
 
@@ -639,9 +692,32 @@ const styles = StyleSheet.create({
   filterText: { flex: 1, fontFamily: uiFont(600), fontSize: 13.5 },
   clearPill: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 999 },
   clearText: { fontFamily: uiFont(600), fontSize: 12 },
-  summary: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  summaryCard: { flex: 1, padding: 16, gap: 8 },
-  breakdownText: { fontSize: 13, fontFamily: uiFont(700), fontWeight: '700', marginTop: -6, marginBottom: 12, marginHorizontal: 2 },
+  typeFilterTabs: {
+    flexDirection: 'row',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    padding: 3,
+    marginBottom: 14,
+  },
+  typeFilterTab: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  typeFilterTabActive: {
+    ...shadowToggle,
+  },
+  typeFilterTabText: {
+    fontFamily: uiFont(600),
+    fontSize: 13.5,
+  },
+  typeFilterTabTextActive: {
+    fontFamily: uiFont(700),
+  },
   countLine: { fontFamily: uiFont(500), fontSize: 12.5, marginBottom: 10, marginLeft: 2 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 12 },
   // The `Card` that used to wrap each month's rows, redrawn per row so the list can window.

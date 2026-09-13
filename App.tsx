@@ -846,7 +846,16 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           }}
         />
       )}
-      {screen === 'networth' && <NetWorthScreen onBack={goBack} onOpenHistory={() => setScreen('netWorthHistory')} />}
+      {screen === 'networth' && (
+        <NetWorthScreen
+          onBack={goBack}
+          onOpenHistory={() => setScreen('netWorthHistory')}
+          onOpenOwed={() => {
+            setOwedOrigin('networth');
+            setScreen('owed');
+          }}
+        />
+      )}
       {screen === 'netWorthHistory' && <NetWorthHistoryScreen onBack={goBack} />}
       {screen === 'breakdown' && (
         <BreakdownScreen

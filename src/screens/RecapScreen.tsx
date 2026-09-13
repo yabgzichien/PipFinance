@@ -24,6 +24,7 @@ import { useNow } from '../state/useNow';
 import { useReducedMotion } from '../state/useReducedMotion';
 import { useLanguage } from '../i18n';
 import { radius, spacing } from '../theme';
+import { ReviewCheckInToast } from '../components/ReviewCheckInToast';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
@@ -118,6 +119,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <ReviewCheckInToast />
       <View style={[styles.nav, { paddingTop: insets.top + spacing.sm }]}>
         <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel={isZh ? '返回' : 'Back'} style={({ pressed }) => [styles.iconButton, pressed && { backgroundColor: colors.surface }]}>
           <Icon name="chevronLeft" size={24} color={colors.ink} />

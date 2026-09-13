@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { PipWearsHat } from '../components/Pip';
-import { ScanProgressBar } from '../components/ScanProgressBar';
 import { BubbleText, PipSays } from '../components/ui';
 import { getLLM } from '../llm';
 import { getActiveCurrencies } from '../db/currencyRepo';
@@ -11,16 +10,17 @@ import { currentMonthKey } from '../lib/budget';
 import { BASE_CURRENCY, deriveNative } from '../lib/currency';
 import { resolveSuggestion, shouldPreserveMerchantMemory } from '../lib/categorySuggestion';
 import { guessCategoryByKeyword } from '../lib/categoryKeywords';
+import { predictMerchantCategory } from '../lib/merchantClassifier';
+import { matchSourceCategory } from '../lib/import';
 import { todayISO } from '../lib/duplicates';
 import { rateFor, ratesFromCache } from '../lib/fx';
 import { defaultLinkEffect } from '../lib/networth';
 import { notify } from '../lib/platformAlert';
 import { type ScannedReceipt } from '../lib/parseReceipt';
 import { resolveQuickAdd, resolveQuickAddWithoutAmount } from '../lib/quickAdd';
-import { isNumberOnlyInput, parseQuickText, type QuickDraft } from '../lib/quickParse';
+import { type QuickDraft } from '../lib/quickParse';
 import { prevMonthKey } from '../lib/recap';
-import { getScanProgress } from '../lib/scanningNarration';
-import { autoFillStats, type AutoFillStats } from '../lib/recommend';
+import { autoFillStats, suggestForMerchant, type AutoFillStats } from '../lib/recommend';
 import { merchantKey } from '../lib/normalize';
 import { workingsFromReceipt } from '../lib/splitMessage';
 import { DROP, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type Transaction, type TxnSource, type TxnType } from '../lib/types';
@@ -40,23 +40,11 @@ type Phase =
   | 'attach'
   | 'kind'
   | 'extract'
-  | 'guessing'
-  | 'quickparse'
   | 'categorize'
   | 'manual'
   | 'receipt'
   | 'split'
   | 'saved';
-
-const GUESS_TIMEOUT_MS = 12000;
-
-/** Bounds an in-flight promise so a hung request can't strand the user indefinitely. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Category guess timed out.')), ms)),
-  ]);
-}
 
 export type AddFlowPhase = Phase;
 
@@ -104,7 +92,7 @@ function AddFlowPhases({
 }: AddFlowProps) {
   const { commitCategorized, recordBalanceLink, settleShare, accounts, memory, entryCategories, catById, applyReliefDetection, markTaskDone, trips, setTransactionsTrip } = useAppData();
   const colorTheme = useThemeColors();
-  const { t } = useLanguage();
+  const { t, isZh } = useLanguage();
 
   const [phase, setPhase] = useState<Phase>(
     initialPhase ?? (tutorialMode === 'manual' || initialType ? 'manual' : 'attach')
@@ -145,17 +133,23 @@ function AddFlowPhases({
   const [autoFill, setAutoFill] = useState<{ current: AutoFillStats; lastMonth: AutoFillStats } | null>(null);
   // The real extraction round-trip, carried from ExtractScreen to the Saved screen's "Read in
   // Ns" payoff line (docs/ui-engagement-plan.md Step 2). Null for any path that never ran a
-  // live extraction (manual entry, receipt scan, a cached re-review).
   const [extractElapsedMs, setExtractElapsedMs] = useState<number | null>(null);
+
+  /** Prefetched category suggestions resolved in the background while reviewing ExtractScreen. */
+  const prefetchPromiseRef = useRef<Promise<{
+    suggestions: Map<string, CategorySuggestion | null>;
+    learned: Map<string, CategorySuggestion | null>;
+  }> | null>(null);
+  const prefetchedRef = useRef<{
+    suggestions: Map<string, CategorySuggestion | null>;
+    learned: Map<string, CategorySuggestion | null>;
+  } | null>(null);
 
   const tripName = initialTripId ? trips.find((tr) => tr.id === initialTripId)?.name ?? null : null;
 
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickError, setQuickError] = useState<string | null>(null);
   const [quickPrefill, setQuickPrefill] = useState<QuickDraft | null>(null);
-  // Live seconds counter behind the 'quickparse' progress bar, same clock ExtractScreen uses
-  // for its scanning progress — quick add has no real percentage to report either.
-  const [quickElapsedSecs, setQuickElapsedSecs] = useState(0);
   // A quick-add batch was typed, not read off a screenshot, so it must not be saved as
   // 'extracted' — that would mislabel typed rows in the data-confidence weighting.
   const [batchSource, setBatchSource] = useState<TxnSource>('extracted');
@@ -163,13 +157,6 @@ function AddFlowPhases({
   useEffect(() => {
     getLLM().then((llm) => setHasKey(llm.can('extract')));
   }, []);
-
-  useEffect(() => {
-    if (phase !== 'quickparse') return;
-    setQuickElapsedSecs(0);
-    const id = setInterval(() => setQuickElapsedSecs((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [phase]);
 
   // Named so hardware/gesture back can call the exact same transition as each phase's own back
   // button below — the two must never disagree about where back goes.
@@ -239,6 +226,8 @@ function AddFlowPhases({
     setReceiptSuggestion(null);
     setCachedReceipt(null);
     setBatchSource('extracted');
+    prefetchPromiseRef.current = null;
+    prefetchedRef.current = null;
     setPhase('kind');
   };
 
@@ -246,64 +235,29 @@ function AddFlowPhases({
     setQuickError(null);
 
     const active = await getActiveCurrencies();
-
-    // Fast-path: When the user inputs only numbers / currencies (e.g. "25", "RM 50", "$10"),
-    // resolve immediately offline without full-screen loading or directing to an LLM.
-    if (isNumberOnlyInput(text, active)) {
-      const local = parseQuickText(text, { activeCurrencies: active, today: todayISO() });
-      if (local.drafts.length === 1) {
-        void markTaskDone('quickAdd');
-        setQuickPrefill(local.drafts[0]);
-        setReceiptResult(null);
-        setPhase('manual');
-        return;
-      } else if (local.drafts.length > 1) {
-        void markTaskDone('quickAdd');
-        setExtracted(
-          local.drafts.map((d) => ({
-            merchant: d.label,
-            amount: d.amount,
-            type: d.type,
-            date: d.date ?? todayISO(),
-            method: null,
-            remark: null,
-            currency: BASE_CURRENCY,
-            fxRate: null,
-          }))
-        );
-        setSuggestions(local.drafts.map(() => null));
-        setLearnedThisScan(local.drafts.map(() => null));
-        setLinkId(null);
-        setBatchSource('manual');
-        setExtractElapsedMs(null);
-        setPhase('categorize');
-        return;
-      }
-    }
-
-    setQuickBusy(true);
-    setPhase('quickparse');
-
-    const llm = await getLLM();
-    const drafts = await resolveQuickAdd(text, {
+    const deps = {
       memory,
       categories: entryCategories,
       activeCurrencies: active,
       today: todayISO(),
-      llm,
-    });
+    };
 
-    setQuickBusy(false);
+    // When the user inputs text without any numbers / amounts (e.g. clicking suggestions
+    // like "Laundry", "Coffee", or typing a merchant label without entering a number),
+    // resolve immediately offline to ManualEntryScreen with auto-selected category.
+    if (!/\d/.test(text)) {
+      const fallbackDraft = await resolveQuickAddWithoutAmount(text, deps);
+      void markTaskDone('quickAdd');
+      setQuickPrefill(fallbackDraft);
+      setReceiptResult(null);
+      setPhase('manual');
+      return;
+    }
+
+    const drafts = await resolveQuickAdd(text, deps);
 
     if (drafts.length === 0) {
-      const fallbackDraft = await resolveQuickAddWithoutAmount(text, {
-        memory,
-        categories: entryCategories,
-        activeCurrencies: active,
-        today: todayISO(),
-        llm,
-      });
-
+      const fallbackDraft = await resolveQuickAddWithoutAmount(text, deps);
       void markTaskDone('quickAdd');
       setQuickPrefill(fallbackDraft);
       setReceiptResult(null);
@@ -322,8 +276,6 @@ function AddFlowPhases({
 
     // Batch path: CategorizeScreen hardcodes an RM prefix, so a foreign amount would be
     // mislabelled. Force base currency and say so rather than lie about the denomination.
-    // Surfaced with notify, not the field's inline error: this navigates straight to
-    // CategorizeScreen, so AttachScreen unmounts and an inline message would never be read.
     if (drafts.some((d) => d.currency && d.currency !== BASE_CURRENCY)) {
       notify(t('quickAddForeignBatchTitle'), t('quickAddForeignBatch'));
     }
@@ -340,11 +292,43 @@ function AddFlowPhases({
       }))
     );
     setSuggestions(drafts.map((d) => (d.categoryId ? { categoryId: d.categoryId, source: d.categorySource ?? 'guess' } : null)));
-    setLearnedThisScan(drafts.map(() => null));
+    setLearnedThisScan(drafts.map((d) => (d.categorySource === 'learned' ? { categoryId: d.categoryId!, source: 'learned' } : null)));
     setLinkId(null);
     setBatchSource('manual');
     setExtractElapsedMs(null);
     setPhase('categorize');
+  };
+
+  const prefetchCategorySuggestions = (items: ExtractedTxn[]) => {
+    const learnedMap = new Map<string, CategorySuggestion | null>();
+    const suggestionsMap = new Map<string, CategorySuggestion | null>();
+
+    items.forEach((it) => {
+      const key = merchantKey(it.merchant);
+      const cacheKey = `${it.type}:${key}`;
+      if (!suggestionsMap.has(cacheKey)) {
+        const keywordGuess = guessCategoryByKeyword(it.merchant, it.type, entryCategories);
+        const classifiedGuess = !keywordGuess ? (predictMerchantCategory(it.merchant, it.type, entryCategories)?.categoryId ?? null) : null;
+        const suggestion = resolveSuggestion(key, memory, entryCategories, keywordGuess || classifiedGuess);
+        const cat = suggestion ? catById[suggestion.categoryId] : undefined;
+        let valid = cat && cat.kind === it.type ? suggestion : null;
+        if (!valid && it.categoryHint) {
+          const hintedId = matchSourceCategory(it.categoryHint, entryCategories, it.type);
+          if (hintedId) {
+            valid = { categoryId: hintedId, source: 'guess' };
+          }
+        }
+        learnedMap.set(cacheKey, valid?.source === 'learned' ? valid : null);
+        if (valid) {
+          suggestionsMap.set(cacheKey, valid);
+        }
+      }
+    });
+
+    const res = { suggestions: suggestionsMap, learned: learnedMap };
+    prefetchedRef.current = res;
+    prefetchPromiseRef.current = Promise.resolve(res);
+    return res;
   };
 
   const onExtracted = async (items: ExtractedTxn[], accountId: string | null, elapsedMs: number | null) => {
@@ -352,79 +336,36 @@ function AddFlowPhases({
     setLinkId(accountId);
     setExtractElapsedMs(elapsedMs);
 
-    const learned: (CategorySuggestion | null)[] = items.map((it) => {
-      const key = merchantKey(it.merchant);
-      const keywordGuess = guessCategoryByKeyword(it.merchant, it.type, entryCategories);
-      const suggestion = resolveSuggestion(key, memory, entryCategories, keywordGuess);
-      const cat = suggestion ? catById[suggestion.categoryId] : undefined;
-      // only pre-fill if the learned category matches this item's kind
-      return cat && cat.kind === it.type ? suggestion : null;
+    let prefetched = prefetchedRef.current;
+    if (!prefetched) {
+      prefetched = prefetchCategorySuggestions(items);
+    }
+
+    const learnedForItems = items.map((it) => {
+      const cacheKey = `${it.type}:${merchantKey(it.merchant)}`;
+      return prefetched?.learned.get(cacheKey) ?? null;
     });
-    setLearnedThisScan(learned);
+    setLearnedThisScan(learnedForItems);
 
-    const missing = learned.map((s, i) => (s ? -1 : i)).filter((i) => i !== -1);
-    if (missing.length === 0) {
-      setSuggestions(learned);
-      setPhase('categorize');
-      return;
-    }
-
-    setPhase('guessing');
-    const llm = await getLLM();
-    if (!llm.can('guessCategories')) {
-      setSuggestions(learned);
-      setPhase('categorize');
-      return;
-    }
-
-    try {
-      const guessed = await withTimeout(
-        llm.guessCategories({
-          items: missing.map((i) => ({ index: i, merchant: items[i].merchant, amount: items[i].amount, method: items[i].method, kind: items[i].type })),
-          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-        }),
-        GUESS_TIMEOUT_MS
-      );
-      setSuggestions(
-        learned.map((suggestion, i) =>
-          suggestion ?? resolveSuggestion(merchantKey(items[i].merchant), {}, entryCategories, guessed[i] ?? null)
-        )
-      );
-    } catch {
-      // Enhancement-only: any failure (network, timeout, bad reply) just falls
-      // back to today's behavior  no suggestion for that merchant.
-      setSuggestions(learned);
-    }
+    const suggestionsForItems = items.map((it) => {
+      const cacheKey = `${it.type}:${merchantKey(it.merchant)}`;
+      return prefetched?.suggestions.get(cacheKey) ?? null;
+    });
+    setSuggestions(suggestionsForItems);
     setPhase('categorize');
   };
 
-  // Mirrors onExtracted's layering for a single scanned receipt: memory match first, then a
-  // local keyword guess, then an LLM guess if the app has a key for it. Best-effort throughout —
-  // any miss just leaves the category blank for the user to pick, same as today.
-  const categorizeReceipt = async (merchant: string | null, amount: number) => {
+  // Layering for a single scanned receipt: memory match first, then a local keyword guess,
+  // then on-device Naive Bayes classifier.
+  const categorizeReceipt = async (merchant: string | null, _amount: number) => {
     setReceiptSuggestion(null);
     if (!merchant) return;
     const key = merchantKey(merchant);
     const keywordGuess = guessCategoryByKeyword(merchant, 'expense', entryCategories);
-    const local = resolveSuggestion(key, memory, entryCategories, keywordGuess);
+    const classifiedGuess = !keywordGuess ? (predictMerchantCategory(merchant, 'expense', entryCategories)?.categoryId ?? null) : null;
+    const local = resolveSuggestion(key, memory, entryCategories, keywordGuess || classifiedGuess);
     if (local) {
       setReceiptSuggestion(local);
-      return;
-    }
-    const llm = await getLLM();
-    if (!llm.can('guessCategories')) return;
-    try {
-      const guessed = await withTimeout(
-        llm.guessCategories({
-          items: [{ index: 0, merchant, amount, method: null, kind: 'expense' }],
-          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-        }),
-        GUESS_TIMEOUT_MS
-      );
-      const remote = resolveSuggestion(key, {}, entryCategories, guessed[0] ?? null);
-      if (remote) setReceiptSuggestion(remote);
-    } catch {
-      // Enhancement-only: leave the category blank on any failure.
     }
   };
 
@@ -489,7 +430,10 @@ function AddFlowPhases({
       }
       // Repayments the user confirmed: settled against the receivable, never written as income.
       for (const s of settlements) {
-        if (s) await settleShare(s.shareId, s.amount, s.paidOn, 'matched', s.merchant, linkId);
+        if (!s) continue;
+        for (const alloc of s.allocations) {
+          await settleShare(alloc.shareId, alloc.amount, s.paidOn, 'matched', s.merchant, linkId, s.merchant);
+        }
       }
 
       // The auto-fill competence signal (docs/ui-engagement-plan.md Step 5): how much of this
@@ -577,29 +521,6 @@ function AddFlowPhases({
       />
     );
   }
-  if (phase === 'guessing') {
-    return (
-      <View style={{ flex: 1, backgroundColor: colorTheme.bg, justifyContent: 'center', paddingHorizontal: 18 }}>
-        <PipSays expr="think">
-          <BubbleText>Thinking about your new merchants… this can take a few seconds.</BubbleText>
-        </PipSays>
-      </View>
-    );
-  }
-  if (phase === 'quickparse') {
-    return (
-      <View style={{ flex: 1, backgroundColor: colorTheme.bg, justifyContent: 'center', paddingHorizontal: 18 }}>
-        <PipSays expr="think">
-          <BubbleText>{t('quickAddThinking')}</BubbleText>
-        </PipSays>
-        <ScanProgressBar
-          progress={getScanProgress(quickElapsedSecs)}
-          label={t('quickAddProgress')}
-          style={{ marginTop: 16 }}
-        />
-      </View>
-    );
-  }
   if (phase === 'receipt') {
     return (
       <ReceiptScanScreen
@@ -673,6 +594,7 @@ function AddFlowPhases({
         linkId={linkId}
         onBack={backToKind}
         onDone={onExtracted}
+        onItemsExtracted={prefetchCategorySuggestions}
       />
     );
   }

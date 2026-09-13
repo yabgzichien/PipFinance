@@ -5,13 +5,14 @@ import { AddCategorySheet } from '../components/AddCategorySheet';
 import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { SplitSheet } from '../components/SplitSheet';
-import { Amount, B, BtnLabel, BubbleText, Card, CategoryChip, PipSays, PrimaryButton, ProgressTrack, TopBar } from '../components/ui';
+import { Amount, B, BtnLabel, BubbleText, Card, CategoryChip, PipSays, PrimaryButton, ProgressTrack, SecondaryButton, TopBar } from '../components/ui';
 import { applyDateEdit, fullDateWithWeekday, ISO_DATE_RE, isValidIsoDate, shortDate } from '../lib/dates';
 import { findDuplicate, todayISO } from '../lib/duplicates';
 import { currencyPrefix, fmtMoney } from '../lib/format';
 import { BASE_CURRENCY } from '../lib/currency';
 import { CLASS_BY_ID } from '../lib/networth';
-import { suggestSettlement } from '../lib/split';
+import { confirmAction } from '../lib/platformAlert';
+import { suggestMultiSettlement, type MultiSettlementMatch } from '../lib/split';
 import { DROP, type Category, type CategorySuggestion, type ExtractedTxn, type SplitDraft, type TxnType } from '../lib/types';
 import type { IconName } from '../components/Icon';
 import { useAccent, useAccentAlert } from '../state/accent';
@@ -23,11 +24,12 @@ import { numFont, shadowToggle, uiFont } from '../theme';
 /**
  * An inbound row the user confirmed is a friend paying them back. It is deliberately NOT saved
  * as a transaction: being repaid is a receivable turning into cash, not income, so the row is
- * dropped from the batch and this settles the share instead.
+ * dropped from the batch (or reduced to excess) and this settles the share(s) instead.
  */
 export interface PendingSettlement {
-  shareId: string;
-  amount: number;
+  allocations: { shareId: string; amount: number }[];
+  totalSettled: number;
+  excess: number;
   paidOn: string;
   merchant: string;
   personName: string;
@@ -55,7 +57,7 @@ export function CategorizeScreen({
   ) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, openShares } = useAppData();
+  const { transactions, accounts, openShares, knownBankLabels } = useAppData();
   const { t, tCat, isZh } = useLanguage();
   // The ledger as it stood when this batch opened. Deliberately frozen: `commitCategorized`
   // writes the batch on the last Finish tap, the store's `transactions` then updates while this
@@ -75,7 +77,22 @@ export function CategorizeScreen({
   // Editable working copy (amount can be changed inline).
   const [items, setItems] = useState<ExtractedTxn[]>(() => extracted.map((e) => ({ ...e })));
   // Every item is a step now  income included (so it can be dropped / dup-warned).
-  const stepIndices = useMemo(() => items.map((_, i) => i), [items]);
+  // Statement providers commonly return newest-first. Review in ledger order instead, keeping
+  // an item's original index as the tie-breaker so assignments and split drafts stay aligned.
+  const stepIndices = useMemo(
+    () =>
+      items
+        .map((_, i) => i)
+        .sort((a, b) => {
+          const dateA = items[a].date;
+          const dateB = items[b].date;
+          if (dateA && dateB && dateA !== dateB) return dateA.localeCompare(dateB);
+          if (dateA && !dateB) return -1;
+          if (!dateA && dateB) return 1;
+          return a - b;
+        }),
+    [items]
+  );
 
   const [assignments, setAssignments] = useState<(string | null)[]>(() =>
     extracted.map((item, i) => {
@@ -92,6 +109,8 @@ export function CategorizeScreen({
   const [settlements, setSettlements] = useState<(PendingSettlement | null)[]>(() => extracted.map(() => null));
   /** Inbound rows the user has told us are NOT a repayment, so we stop asking. */
   const [notRepayment, setNotRepayment] = useState<Record<number, boolean>>({});
+  /** Expansion state for multi-debt allocation breakdown. */
+  const [expandedSettlement, setExpandedSettlement] = useState<Record<number, boolean>>({});
 
   const fade = useRef(new Animated.Value(1)).current;
   const slide = useRef(new Animated.Value(0)).current;
@@ -111,7 +130,6 @@ export function CategorizeScreen({
   const activeGrid = isIncome ? incomeGrid : expenseGrid;
   const suggestionCat = suggestion ? categories.find((c) => c.id === suggestion) : undefined;
   const isLast = safeStep === stepIndices.length - 1;
-  const confirming = !!sel && sel === suggestion;
 
   const dup = item ? findDuplicate(ledgerAtOpen, { merchant: item.merchant, amount: item.amount, date: item.date }, today) : null;
   const showBanner = !!dup && !acked[originalIndex];
@@ -127,8 +145,8 @@ export function CategorizeScreen({
   // holding the screen. Recomputed per step rather than up front so an amount edit re-matches.
   const settlementHit = useMemo(() => {
     if (!item || item.type !== 'income' || showBanner || notRepayment[originalIndex]) return null;
-    return suggestSettlement(openShares, { merchant: item.merchant, amount: item.amount, date: item.date }, today);
-  }, [item, showBanner, notRepayment, originalIndex, openShares, today]);
+    return suggestMultiSettlement(openShares, { merchant: item.merchant, amount: item.amount, date: item.date }, today, knownBankLabels);
+  }, [item, showBanner, notRepayment, originalIndex, openShares, today, knownBankLabels]);
   const showSettlement = !!settlementHit;
 
   useEffect(() => {
@@ -192,14 +210,40 @@ export function CategorizeScreen({
     });
   };
 
+  const promptSaveAll = () => {
+    const unassignedIdx = stepIndices.find((i) => assignments[i] === null);
+    if (unassignedIdx !== undefined) {
+      setStep(stepIndices.indexOf(unassignedIdx));
+      return;
+    }
+    confirmAction(
+      isZh ? '保存全部记录？' : 'Save all transactions?',
+      isZh
+        ? `确认将这 ${keptCount} 笔交易全部保存到账本吗？`
+        : `Save all ${keptCount} transactions to your ledger now?`,
+      isZh ? '保存全部' : 'Save all',
+      () => onComplete(assignments, items, splitDrafts, settlements),
+      undefined,
+      isZh ? '返回查看' : 'Review first'
+    );
+  };
+
   // The overrides matter on the LAST step: state updates have not landed by the time this
   // finishes the batch, so whatever the caller just decided has to be handed over directly.
   const advanceOrFinish = (
     nextAssignments: (string | null)[],
     nextSettlements: (PendingSettlement | null)[] = settlements
   ) => {
-    if (isLast) onComplete(nextAssignments, items, splitDrafts, nextSettlements);
-    else setStep((s) => s + 1);
+    if (isLast) {
+      const unassignedIdx = stepIndices.find((i) => nextAssignments[i] === null);
+      if (unassignedIdx !== undefined) {
+        setStep(stepIndices.indexOf(unassignedIdx));
+        return;
+      }
+      onComplete(nextAssignments, items, splitDrafts, nextSettlements);
+    } else {
+      setStep((s) => s + 1);
+    }
   };
 
   const dropCurrent = () => {
@@ -222,32 +266,53 @@ export function CategorizeScreen({
   };
 
   /**
-   * Confirm an inbound row is a repayment. The row is dropped from the batch (no income
-   * transaction is written) and the share is settled after the commit instead.
+   * Confirm an inbound row is a repayment.
+   * If the transfer covers or partially covers debts without excess, the row is dropped
+   * from the batch and the share(s) are settled after commit.
+   * If there is excess (e.g. sent RM200 for RM150 owed), debts are settled and the remaining
+   * excess is retained in the batch relabelled to 'Excess' for normal income categorization.
    */
   const acceptSettlement = () => {
     if (!settlementHit) return;
     const nextSettlements = [...settlements];
     nextSettlements[originalIndex] = {
-      shareId: settlementHit.share.shareId,
-      amount: settlementHit.amount,
+      allocations: settlementHit.allocations.map((a) => ({
+        shareId: a.share.shareId,
+        amount: a.amount,
+      })),
+      totalSettled: settlementHit.settledTotal,
+      excess: settlementHit.excess,
       paidOn: item!.date ?? today,
       merchant: item!.merchant,
-      personName: settlementHit.share.personName,
+      personName: settlementHit.personName,
     };
     setSettlements(nextSettlements);
 
-    const nextAssignments = [...assignments];
-    nextAssignments[originalIndex] = DROP;
-    setAssignments(nextAssignments);
-    advanceOrFinish(nextAssignments, nextSettlements);
+    if (settlementHit.excess > 0) {
+      // User decision: "Just name it excess"
+      setItems((prev) => {
+        const next = [...prev];
+        next[originalIndex] = {
+          ...next[originalIndex],
+          merchant: 'Excess',
+          amount: settlementHit.excess,
+        };
+        return next;
+      });
+      setNotRepayment((m) => ({ ...m, [originalIndex]: true }));
+    } else {
+      const nextAssignments = [...assignments];
+      nextAssignments[originalIndex] = DROP;
+      setAssignments(nextAssignments);
+      advanceOrFinish(nextAssignments, nextSettlements);
+    }
   };
 
   const addAnyway = () => setAcked((a) => ({ ...a, [originalIndex]: true }));
 
   const go = (dir: number) => {
     if (dir > 0 && isLast) {
-      onComplete(assignments, items, splitDrafts, settlements);
+      advanceOrFinish(assignments);
       return;
     }
     if (dir < 0 && safeStep === 0) {
@@ -279,7 +344,7 @@ export function CategorizeScreen({
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: 18, paddingBottom: 150 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: 24 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Animated.View style={{ opacity: fade, transform: [{ translateX: slide }] }}>
           <PipSays expr={showBanner ? 'curious' : isIncome ? 'happy' : suggestion ? 'idle' : 'curious'}>
             {showBanner ? (
@@ -340,7 +405,7 @@ export function CategorizeScreen({
                 <Text style={[styles.focusSub, { color: colorTheme.ink2 }]}>{item!.method}</Text>
               ) : null}
               <DateEditor value={item!.date} onChange={setDate} />
-              <RemarkEditor value={item!.remark ?? null} onChange={setRemark} />
+              <RemarkEditor itemKey={originalIndex} value={item!.remark ?? null} onChange={setRemark} />
             </View>
             <AmountEditor value={item!.amount} currency={item!.currency ?? BASE_CURRENCY} income={isIncome} onChange={setAmount} />
           </Card>
@@ -405,16 +470,69 @@ export function CategorizeScreen({
               <View style={styles.bannerHead}>
                 <Icon name="gift" size={18} color={theme.accentInk} stroke={2} />
                 <Text style={[styles.bannerTitle, { color: theme.onTint }]}>
-                  {settlementHit!.partial ? (isZh ? '部分还款？' : 'Part of a repayment?') : (isZh ? '还款给您？' : 'Paying you back?')}
+                  {(() => {
+                    const isMulti = settlementHit!.allocations.length > 1;
+                    if (settlementHit!.excess > 0) {
+                      return isZh ? '还款（超出债务金额）' : 'Repayment with excess';
+                    }
+                    if (settlementHit!.partial) {
+                      return isZh ? '部分还款？' : 'Part of a repayment?';
+                    }
+                    if (isMulti) {
+                      return isZh ? '多笔还款合并？' : 'Multiple bills repayment?';
+                    }
+                    return isZh ? '还款给您？' : 'Paying you back?';
+                  })()}
                 </Text>
               </View>
               <Text style={[styles.bannerText, { color: colorTheme.ink }]}>
-                {isZh ? (
-                  <>这看起来像是 <B>{settlementHit!.share.personName}</B> 偿还关于 <B>{settlementHit!.share.merchant}</B> 的账单（待收 {fmtMoney(settlementHit!.share.outstanding, settlementHit!.share.currency ?? BASE_CURRENCY)}）。{'\n'}这将抵消待收债务，不计入收入。</>
-                ) : (
-                  <>This looks like <B>{settlementHit!.share.personName}</B> settling {settlementHit!.partial ? 'part of ' : ''}what they owe you for <B>{settlementHit!.share.merchant}</B> ({fmtMoney(settlementHit!.share.outstanding, settlementHit!.share.currency ?? BASE_CURRENCY)} outstanding).{'\n'}It clears the debt instead of counting as income.</>
-                )}
+                {(() => {
+                  const isMulti = settlementHit!.allocations.length > 1;
+                  const firstShare = settlementHit!.allocations[0].share;
+                  const person = settlementHit!.personName;
+                  if (isMulti) {
+                    return isZh ? (
+                      <>这看起来像是 <B>{person}</B> 一并偿还 <B>{settlementHit!.allocations.length}</B> 笔账单（共 {fmtMoney(settlementHit!.settledTotal, itemCurrency)}）。{settlementHit!.excess > 0 ? `\n其中 ${fmtMoney(settlementHit!.settledTotal, itemCurrency)} 抵消待收债务，剩余 ${fmtMoney(settlementHit!.excess, itemCurrency)} 将作为普通收入由您分类。` : '\n这将抵消待收债务，不计入收入。'}</>
+                    ) : (
+                      <>This looks like <B>{person}</B> settling <B>{settlementHit!.allocations.length}</B> bills ({fmtMoney(settlementHit!.settledTotal, itemCurrency)} total).{settlementHit!.excess > 0 ? `\n${fmtMoney(settlementHit!.settledTotal, itemCurrency)} clears the debt. The remaining ${fmtMoney(settlementHit!.excess, itemCurrency)} will stay as income to categorize.` : '\nIt clears the debt instead of counting as income.'}</>
+                    );
+                  }
+                  return isZh ? (
+                    <>这看起来像是 <B>{person}</B> 偿还关于 <B>{firstShare.merchant}</B> 的账单（待收 {fmtMoney(firstShare.outstanding, firstShare.currency ?? BASE_CURRENCY)}）。{settlementHit!.excess > 0 ? `\n其中 ${fmtMoney(settlementHit!.settledTotal, itemCurrency)} 抵消待收债务，剩余 ${fmtMoney(settlementHit!.excess, itemCurrency)} 将作为普通收入由您分类。` : '\n这将抵消待收债务，不计入收入。'}</>
+                  ) : (
+                    <>This looks like <B>{person}</B> settling {settlementHit!.partial ? 'part of ' : ''}what they owe you for <B>{firstShare.merchant}</B> ({fmtMoney(firstShare.outstanding, firstShare.currency ?? BASE_CURRENCY)} outstanding).{settlementHit!.excess > 0 ? `\n${fmtMoney(settlementHit!.settledTotal, itemCurrency)} clears the debt. The remaining ${fmtMoney(settlementHit!.excess, itemCurrency)} will stay as income to categorize.` : '\nIt clears the debt instead of counting as income.'}</>
+                  );
+                })()}
               </Text>
+              {settlementHit!.allocations.length > 1 && (
+                <>
+                  <Pressable
+                    onPress={() => setExpandedSettlement((prev) => ({ ...prev, [originalIndex]: !prev[originalIndex] }))}
+                    style={styles.allocToggle}
+                  >
+                    <Text style={[styles.allocToggleText, { color: theme.accentInk }]}>
+                      {expandedSettlement[originalIndex]
+                        ? (isZh ? '收起明细' : 'Hide bill breakdown')
+                        : (isZh ? `查看明细（${settlementHit!.allocations.length} 笔账单）` : `View breakdown (${settlementHit!.allocations.length} bills)`)}
+                    </Text>
+                    <Icon name={expandedSettlement[originalIndex] ? 'chevronUp' : 'chevronDown'} size={14} color={theme.accentInk} />
+                  </Pressable>
+                  {expandedSettlement[originalIndex] && (
+                    <View style={[styles.allocList, { backgroundColor: colorTheme.surface, borderColor: colorTheme.line }]}>
+                      {settlementHit!.allocations.map((a, idx) => (
+                        <View key={a.share.shareId || idx} style={styles.allocRow}>
+                          <Text style={[styles.allocMerchant, { color: colorTheme.ink }]} numberOfLines={1}>
+                            {a.share.merchant}
+                          </Text>
+                          <Text style={[styles.allocAmount, { color: colorTheme.ink2 }]}>
+                            {fmtMoney(a.amount, itemCurrency)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
               <View style={styles.bannerBtns}>
                 <View style={{ flex: 1 }}>
                   <PrimaryButton onPress={acceptSettlement} height={48}>
@@ -476,25 +594,41 @@ export function CategorizeScreen({
 
       {!showBanner && !showSettlement && (
         <View
+          testID="categorize-actions"
           style={[
             styles.footer,
-            { paddingBottom: insets.bottom + 16, backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 },
+            { paddingBottom: insets.bottom + 8, backgroundColor: colorTheme.bg, borderTopColor: colorTheme.line2 },
           ]}
         >
           <Pressable onPress={dropCurrent} style={styles.dropLink} hitSlop={6}>
             <Icon name="x" size={14} color={colorTheme.ink3} />
             <Text style={[styles.dropLinkText, { color: colorTheme.ink2 }]}>{isZh ? '跳过此项，不记入' : 'Don’t record this one'}</Text>
           </Pressable>
-          <PrimaryButton onPress={() => go(1)} disabled={!sel || sel === DROP}>
+
+          {!isLast && stepIndices.length > 1 && (
+            <View style={styles.secondaryBtnWrap}>
+              <SecondaryButton
+                onPress={promptSaveAll}
+                disabled={!sel || keptCount === 0}
+                height={38}
+              >
+                <Icon name="check" size={14} color={theme.accent} stroke={2.4} />
+                <BtnLabel color={theme.accent} style={styles.secondaryBtnLabel}>
+                  {isZh ? `保存全部 · ${keptCount} 项` : `Save all · ${keptCount} items`}
+                </BtnLabel>
+              </SecondaryButton>
+            </View>
+          )}
+
+          <PrimaryButton
+            onPress={() => go(1)}
+            disabled={!sel || sel === DROP || (isLast && keptCount === 0)}
+            height={48}
+          >
             {isLast ? (
               <>
                 <BtnLabel>{isZh ? `完成 · 保存 ${keptCount} 项` : `Finish · ${keptCount} saved`}</BtnLabel>
                 <Icon name="check" size={19} color="#fff" stroke={2.4} />
-              </>
-            ) : confirming && suggestionCat ? (
-              <>
-                <BtnLabel>{isZh ? `确认 ${tCat(suggestionCat)}` : `Confirm ${suggestionCat.label}`}</BtnLabel>
-                <Icon name="arrowRight" size={19} color="#fff" />
               </>
             ) : (
               <>
@@ -625,7 +759,7 @@ function DateEditor({ value, onChange }: { value: string | null; onChange: (d: s
 
 /** Tap to add or edit a short free-text remark (mirrors DateEditor). Never extracted from the
  *  screenshot; purely something the user types during review. */
-function RemarkEditor({ value, onChange }: { value: string | null; onChange: (r: string | null) => void }) {
+function RemarkEditor({ itemKey, value, onChange }: { itemKey: number; value: string | null; onChange: (r: string | null) => void }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const [editing, setEditing] = useState(false);
@@ -634,6 +768,13 @@ function RemarkEditor({ value, onChange }: { value: string | null; onChange: (r:
   useEffect(() => {
     if (!editing) setText(value ?? '');
   }, [value, editing]);
+
+  // A focused TextInput survives the parent screen changing step. Reset both its local draft and
+  // editing state so a note typed for one transaction can never appear on the next transaction.
+  useEffect(() => {
+    setText(value ?? '');
+    setEditing(false);
+  }, [itemKey]);
 
   const commit = () => {
     const trimmed = text.trim();
@@ -757,18 +898,22 @@ const styles = StyleSheet.create({
   bannerHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   bannerTitle: { fontFamily: uiFont(700), fontSize: 14.5 },
   bannerText: { fontFamily: uiFont(500), fontSize: 14, lineHeight: 20, marginBottom: 14 },
+  allocToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: -6, marginBottom: 12 },
+  allocToggleText: { fontFamily: uiFont(600), fontSize: 13 },
+  allocList: { marginBottom: 14, padding: 10, borderRadius: 12, borderWidth: 1 },
+  allocRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  allocMerchant: { fontFamily: uiFont(500), fontSize: 13, flex: 1, marginRight: 8 },
+  allocAmount: { fontFamily: numFont(600), fontSize: 13 },
   bannerBtns: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   ghostBtn: { paddingHorizontal: 16, paddingVertical: 12 },
   ghostText: { fontFamily: uiFont(700), fontSize: 14.5 },
   footer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     paddingHorizontal: 18,
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: 1,
   },
-  dropLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, marginBottom: 2 },
-  dropLinkText: { fontFamily: uiFont(600), fontSize: 13.5 },
+  dropLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 5, marginBottom: 3 },
+  dropLinkText: { fontFamily: uiFont(600), fontSize: 12.5 },
+  secondaryBtnWrap: { marginBottom: 6 },
+  secondaryBtnLabel: { fontSize: 13 },
 });

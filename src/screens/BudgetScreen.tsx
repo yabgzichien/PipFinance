@@ -17,6 +17,7 @@ import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
 import { spacing } from '../theme';
 import { BudgetWizard } from './BudgetWizard';
+import { ReviewCheckInToast } from '../components/ReviewCheckInToast';
 
 const STATUS_COLOR = { ok: '#1f8a5b', warn: '#d98a00', over: '#c5402f' } as const;
 
@@ -69,6 +70,7 @@ export function BudgetScreen({ onBack, onOpenRecap = () => {} }: { onBack: () =>
 
   return (
     <View style={[styles.root, { backgroundColor: colorTheme.bg }]}>
+      <ReviewCheckInToast />
       <View style={{ paddingTop: insets.top + spacing.xs }}>
         <TopBar
           title={t('budgetTitle')}

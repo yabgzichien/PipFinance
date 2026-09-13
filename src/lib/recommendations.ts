@@ -3,6 +3,7 @@
 // Remembers new entries, extracts clean labels, ranks by frequency/probability.
 // Zero LLMs: runs locally, instantaneously, and offline.
 
+import { damerauLevenshtein } from './categoryKeywords';
 import { DESTINATIONS, matchDestination, type DestinationKey } from './destinations';
 import type { Transaction } from './types';
 import type { Trip } from './trips';
@@ -93,9 +94,14 @@ async function safeSetMeta(key: string, value: string): Promise<void> {
 export function extractLabelFromQuickAdd(text: string): string {
   if (!text) return '';
   let cleaned = text
-    .replace(/(?:^|\b|\d)(RM|MYR|USD|SGD|EUR|GBP|CNY|JPY|AUD|CAD)(?:\b|\d|$)/gi, ' ')
-    .replace(/[$€£¥]/g, ' ')
-    .replace(/[0-9]+([.,][0-9]+)?/g, ' ')
+    .replace(/(?:^|\b|\d)(RM|MYR|USD|SGD|SDG|EUR|GBP|CNY|RMB|JPY|AUD|CAD|TWD|HKD|KRW|THB|IDR|PHP|VND|BND|INR)(?:\b|\d|$)/gi, ' ')
+    .replace(/[$€£¥￥₩฿₹₫₱₸]/g, ' ')
+    .replace(/[0-9]+([.,][0-9]+)?/g, ' ');
+
+  // Strip Chinese currency suffixes/prefixes attached to numbers or standalone
+  cleaned = cleaned.replace(/(新币|坡币|马币|令吉|人民币|块钱|美金|美元|日元|日币|韩元|韩币|泰铢|台币|新台币|港币|港元|欧元|英镑|澳币|澳元|加币|加元|纽币|新西兰元|法郎|瑞士法郎|元|块)/g, ' ');
+
+  cleaned = cleaned
     .trim()
     .replace(/\s+/g, ' ');
 
@@ -330,7 +336,22 @@ export function getQuickAddRecommendations(
   for (const item of frequencyMap.values()) {
     const lower = item.display.toLowerCase();
     if (trimmed) {
-      if (!lower.includes(q) || lower === q) continue;
+      if (lower === q) continue; // Omit exact match when user has already completed typing
+      const matchesSubstring = lower.includes(q);
+      let matchesFuzzy = false;
+      if (!matchesSubstring && q.length >= 3) {
+        const words = lower.split(/\s+/);
+        for (const w of words) {
+          const maxDist = Math.min(q.length, w.length) >= 7 ? 2 : 1;
+          if (Math.abs(w.length - q.length) <= maxDist) {
+            if (damerauLevenshtein(q, w, maxDist) <= maxDist) {
+              matchesFuzzy = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!matchesSubstring && !matchesFuzzy) continue;
     }
     candidates.push(item);
   }

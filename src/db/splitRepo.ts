@@ -4,6 +4,8 @@
 // withTransactionAsync for anything multi-row).
 import { genId, getDb } from './db';
 import { applyPayment } from '../lib/split';
+import { merchantKey } from '../lib/normalize';
+import { todayISO } from '../lib/duplicates';
 import type {
   PaymentEvidence,
   Person,
@@ -48,6 +50,7 @@ interface PaymentRow {
   evidence: string;
   matched_merchant: string | null;
   account_id: string | null;
+  bank_label?: string | null;
   created_at: string;
 }
 
@@ -87,6 +90,7 @@ function toPayment(r: PaymentRow): SplitPayment {
     evidence: r.evidence as PaymentEvidence,
     matchedMerchant: r.matched_merchant,
     accountId: r.account_id,
+    bankLabel: r.bank_label ?? null,
     createdAt: r.created_at,
   };
 }
@@ -224,6 +228,104 @@ export async function deleteSplitsForTxns(txnIds: string[]): Promise<void> {
   });
 }
 
+/**
+ * Record a direct debt where a person owes money to the user (e.g. personal loan, IOU).
+ * Creates a linked person (if not found), a zero-amount transaction (so own spending is 0),
+ * a split row, and an open share.
+ */
+export async function addDirectDebt(
+  personName: string,
+  amount: number,
+  note?: string | null,
+  date?: string | null
+): Promise<{ shareId: string; personId: string; splitId: string; txnId: string }> {
+  const db = await getDb();
+  const person = await findOrCreatePerson(personName);
+  const now = new Date().toISOString();
+  const txnId = genId();
+  const splitId = genId();
+  const shareId = genId();
+  const trimmedNote = note?.trim() || null;
+  const description = trimmedNote || `Owed by ${person.name}`;
+  const txnDate = date || todayISO();
+
+  await db.withTransactionAsync(async () => {
+    // 1. Transaction row with amount = 0 so it does not count as spending, but carries bill context
+    await db.runAsync(
+      `INSERT INTO transactions
+         (id, merchant_raw, merchant_key, amount, currency, type, txn_date, category_id, created_at, source, remark, receipt_uri, native_amount, fx_rate, trip_id)
+       VALUES (?, ?, ?, ?, 'MYR', 'expense', ?, NULL, ?, 'manual', ?, NULL, ?, NULL, NULL)`,
+      txnId,
+      description,
+      merchantKey(description),
+      0,
+      txnDate,
+      now,
+      trimmedNote,
+      0
+    );
+
+    // 2. Split row with gross = amount, own_share = 0
+    await db.runAsync(
+      `INSERT INTO splits (id, txn_id, gross, own_share, method, created_at, currency, fx_rate)
+       VALUES (?, ?, ?, ?, 'exact', ?, 'MYR', NULL)`,
+      splitId,
+      txnId,
+      amount,
+      0,
+      now
+    );
+
+    // 3. Split share row
+    await db.runAsync(
+      `INSERT INTO split_shares (id, split_id, person_id, owed, paid, status, written_off_txn_id, created_at)
+       VALUES (?, ?, ?, ?, ?, 'open', NULL, ?)`,
+      shareId,
+      splitId,
+      person.id,
+      amount,
+      0,
+      now
+    );
+  });
+
+  return { shareId, personId: person.id, splitId, txnId };
+}
+
+/**
+ * Delete a direct debt share, removing its split and zero-amount parent transaction.
+ */
+export async function deleteDirectDebt(shareId: string): Promise<void> {
+  const db = await getDb();
+  const share = await db.getFirstAsync<{ split_id: string }>(
+    'SELECT split_id FROM split_shares WHERE id = ? LIMIT 1',
+    shareId
+  );
+  if (!share) return;
+  const split = await db.getFirstAsync<{ id: string; txn_id: string }>(
+    'SELECT id, txn_id FROM splits WHERE id = ? LIMIT 1',
+    share.split_id
+  );
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM split_payments WHERE share_id = ?', shareId);
+    await db.runAsync('DELETE FROM split_shares WHERE id = ?', shareId);
+    if (split) {
+      const otherShares = await db.getAllAsync(
+        'SELECT id FROM split_shares WHERE split_id = ?',
+        split.id
+      );
+      if (otherShares.length === 0) {
+        await db.runAsync('DELETE FROM splits WHERE id = ?', split.id);
+        // Only delete the transaction if it was created for this direct debt (amount = 0)
+        await db.runAsync(
+          'DELETE FROM transactions WHERE id = ? AND amount = 0',
+          split.txn_id
+        );
+      }
+    }
+  });
+}
+
 /* --- Settlement ---------------------------------------------------------- */
 
 /**
@@ -238,7 +340,8 @@ export async function recordPayment(
   paidOn: string,
   evidence: PaymentEvidence,
   matchedMerchant: string | null,
-  accountId: string | null
+  accountId: string | null,
+  bankLabel: string | null = null
 ): Promise<{ paid: number; status: ShareStatus; applied: number } | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<ShareRow>('SELECT * FROM split_shares WHERE id = ? LIMIT 1', shareId);
@@ -257,8 +360,8 @@ export async function recordPayment(
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
     await db.runAsync(
-      `INSERT INTO split_payments (id, share_id, amount, paid_on, evidence, matched_merchant, account_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO split_payments (id, share_id, amount, paid_on, evidence, matched_merchant, account_id, created_at, bank_label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       genId(),
       shareId,
       applied,
@@ -266,7 +369,8 @@ export async function recordPayment(
       evidence,
       matchedMerchant,
       accountId,
-      now
+      now,
+      bankLabel
     );
     await db.runAsync('UPDATE split_shares SET paid = ?, status = ? WHERE id = ?', next.paid, next.status, shareId);
   });
@@ -385,4 +489,24 @@ export async function importParsedSplit(
       }
     }
   });
+}
+
+/**
+ * All known bank transfer labels associated with each person through confirmed repayment matches.
+ * Returns a map of personId -> distinct bankLabel[]
+ */
+export async function getAllKnownBankLabels(): Promise<Record<string, string[]>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ person_id: string; bank_label: string }>(
+    `SELECT DISTINCT s.person_id, p.bank_label
+     FROM split_payments p
+     JOIN split_shares s ON s.id = p.share_id
+     WHERE p.bank_label IS NOT NULL AND p.bank_label != ''`
+  );
+  const result: Record<string, string[]> = {};
+  for (const r of rows) {
+    if (!result[r.person_id]) result[r.person_id] = [];
+    result[r.person_id].push(r.bank_label);
+  }
+  return result;
 }

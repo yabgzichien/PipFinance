@@ -59,7 +59,7 @@ describe('RecapEntry', () => {
     const onDismiss = jest.fn();
     const onOpenStory = jest.fn();
 
-    let tree: Renderer.ReactTestRenderer;
+    let tree: any;
     Renderer.act(() => {
       tree = Renderer.create(
         <RecapEntry

@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import type { Transaction } from '../lib/types';
 import { syncStreakWidget } from './syncStreakWidget';
 import { syncQuickRecordWidget } from './syncQuickRecordWidget';
+import type { CheckInMap } from '../db/checkinRepo';
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -16,10 +17,10 @@ function wait(ms: number): Promise<void> {
  * Firing these back-to-back (as before) reliably created that race on every
  * transaction change; spacing them out avoids it.
  */
-export async function syncAllWidgets(txns?: Transaction[]): Promise<void> {
+export async function syncAllWidgets(txns?: Transaction[], checkIns?: CheckInMap): Promise<void> {
   if (Platform.OS !== 'android') return;
 
-  await syncStreakWidget(txns).catch(() => {});
+  await syncStreakWidget(txns, checkIns).catch(() => {});
   await wait(300);
   await syncQuickRecordWidget(txns).catch(() => {});
 }

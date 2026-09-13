@@ -83,3 +83,40 @@ describe('GeminiProvider.extractDocument', () => {
     await expect(GeminiProvider.extractDocument!(docInput)).rejects.toMatchObject({ code: 'bad_response' });
   });
 });
+
+describe('GeminiProvider.guessCategories', () => {
+  const cats = [
+    { id: 'food', label: 'Food', kind: 'expense' as const },
+    { id: 'transport', label: 'Transport', kind: 'expense' as const },
+  ];
+  const items = [
+    { index: 0, merchant: 'Grab', amount: 15, method: null, kind: 'expense' as const },
+    { index: 1, merchant: 'Subway', amount: 20, method: null, kind: 'expense' as const },
+  ];
+
+  it('parses category guess response correctly', async () => {
+    mockFetchOnce({
+      json: reply(JSON.stringify({ '0': 'transport', '1': 'food' })),
+    });
+    const res = await GeminiProvider.guessCategories!({
+      apiKey: 'AIza_test',
+      model: 'gemini-3.1-flash-lite',
+      items,
+      categories: cats,
+    });
+    expect(res).toEqual({ 0: 'transport', 1: 'food' });
+  });
+
+  it('maps invalid JSON to bad_response error', async () => {
+    mockFetchOnce({ json: reply('not-json') });
+    await expect(
+      GeminiProvider.guessCategories!({
+        apiKey: 'AIza_test',
+        model: 'gemini-3.1-flash-lite',
+        items,
+        categories: cats,
+      })
+    ).rejects.toMatchObject({ code: 'bad_response' });
+  });
+});
+

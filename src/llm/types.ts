@@ -49,6 +49,7 @@ export interface ExtractInput {
   model: string;
   imageBase64: string;
   mimeType: string;
+  categories?: CategoryOption[];
 }
 
 export interface TestInput {

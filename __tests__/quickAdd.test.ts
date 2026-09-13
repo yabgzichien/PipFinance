@@ -1,10 +1,11 @@
-import { resolveQuickAdd, resolveQuickAddWithoutAmount, type QuickAddDeps, type QuickAddLLM } from '../src/lib/quickAdd';
+import { resolveQuickAdd, resolveQuickAddWithoutAmount, type QuickAddDeps } from '../src/lib/quickAdd';
 import { merchantKey } from '../src/lib/normalize';
 import type { Category, MemoryMap } from '../src/lib/types';
 
 const categories: Category[] = [
   { id: 'food', label: 'Food', icon: 'gift', hue: 20, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
   { id: 'transport', label: 'Transport', icon: 'gift', hue: 40, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
+  { id: 'other', label: 'Other Expenses', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
   { id: 'salary', label: 'Salary', icon: 'wallet', hue: 140, kind: 'income', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null },
 ];
 
@@ -14,21 +15,18 @@ function deps(over: Partial<QuickAddDeps> = {}): QuickAddDeps {
     categories,
     activeCurrencies: ['MYR'],
     today: '2026-08-28',
-    llm: null,
     ...over,
   };
 }
 
-const fakeLLM = (impl: QuickAddLLM['quickAdd']): QuickAddLLM => ({ can: () => true, quickAdd: impl });
-
 describe('resolveQuickAdd — local only', () => {
-  it('returns a local draft with no category when nothing — memory, keyword or LLM — has an answer', async () => {
+  it('returns a local draft with no category when nothing — memory, keyword or classifier — has an answer', async () => {
     const out = await resolveQuickAdd('mystery 9.2', deps());
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ label: 'mystery', amount: 9.2, categoryId: null });
   });
 
-  it('falls back to a keyword guess when memory is empty and there is no LLM', async () => {
+  it('falls back to a keyword guess when memory is empty', async () => {
     const out = await resolveQuickAdd('lunch 9.2', deps());
     expect(out[0]).toMatchObject({ label: 'lunch', amount: 9.2, categoryId: 'food' });
   });
@@ -36,11 +34,13 @@ describe('resolveQuickAdd — local only', () => {
   it('fills the category from learned memory without any LLM', async () => {
     const out = await resolveQuickAdd('mystery 9.2', deps({ memory: { mystery: 'food' } as MemoryMap }));
     expect(out[0].categoryId).toBe('food');
+    expect(out[0].categorySource).toBe('learned');
   });
 
   it('prefers learned memory over a keyword guess when both would apply', async () => {
     const out = await resolveQuickAdd('lunch 9.2', deps({ memory: { lunch: 'transport' } as MemoryMap }));
     expect(out[0].categoryId).toBe('transport');
+    expect(out[0].categorySource).toBe('learned');
   });
 
   it('falls back to the keyword guess when a memory hit contradicts the draft type', async () => {
@@ -61,142 +61,93 @@ describe('resolveQuickAdd — local only', () => {
     });
   });
 
+  it('classifies various currencies and typos correctly (sdg, cny, rmb, 元, 新币, symbols)', async () => {
+    // CNY with code and aliases
+    const outCny = await resolveQuickAdd('dinner 50cny', deps());
+    expect(outCny[0]).toMatchObject({ label: 'dinner', amount: 50, currency: 'CNY', categoryId: 'food' });
+
+    const outRmb = await resolveQuickAdd('lunch 50rmb', deps());
+    expect(outRmb[0]).toMatchObject({ label: 'lunch', amount: 50, currency: 'CNY', categoryId: 'food' });
+
+    const outYuan = await resolveQuickAdd('lunch 50元', deps());
+    expect(outYuan[0]).toMatchObject({ label: 'lunch', amount: 50, currency: 'CNY', categoryId: 'food' });
+
+    // SGD with Chinese word
+    const outSing = await resolveQuickAdd('lunch 30新币', deps());
+    expect(outSing[0]).toMatchObject({ label: 'lunch', amount: 30, currency: 'SGD', categoryId: 'food' });
+
+    // EUR symbol prefix
+    const outEur = await resolveQuickAdd('€20 museum', deps());
+    expect(outEur[0]).toMatchObject({ label: 'museum', amount: 20, currency: 'EUR' });
+
+    // GBP symbol prefix
+    const outGbp = await resolveQuickAdd('£15 tea', deps());
+    expect(outGbp[0]).toMatchObject({ label: 'tea', amount: 15, currency: 'GBP', categoryId: 'food' });
+
+    // JPY suffix
+    const outJpy = await resolveQuickAdd('ramen 1500jpy', deps());
+    expect(outJpy[0]).toMatchObject({ label: 'ramen', amount: 1500, currency: 'JPY' });
+  });
+
+  it('handles typos in labels with amounts (e.g. luch 15, diner 25, brekfast 12)', async () => {
+    const outLuch = await resolveQuickAdd('luch 15', deps());
+    expect(outLuch[0]).toMatchObject({ label: 'luch', amount: 15, categoryId: 'food' });
+
+    const outDiner = await resolveQuickAdd('diner 25', deps());
+    expect(outDiner[0]).toMatchObject({ label: 'diner', amount: 25, categoryId: 'food' });
+
+    const outBrek = await resolveQuickAdd('brekfast 12', deps());
+    expect(outBrek[0]).toMatchObject({ label: 'brekfast', amount: 12, categoryId: 'food' });
+  });
+
   it('returns nothing for text with no amount', async () => {
     expect(await resolveQuickAdd('lunch', deps())).toEqual([]);
   });
 });
 
-describe('resolveQuickAdd — when the LLM is consulted', () => {
-  it('is NOT called when the parse was confident and memory covered every draft', async () => {
-    const quickAdd = jest.fn();
-    await resolveQuickAdd('lunch 9.2', deps({ memory: { lunch: 'food' } as MemoryMap, llm: fakeLLM(quickAdd) }));
-    expect(quickAdd).not.toHaveBeenCalled();
+describe('resolveQuickAdd — on-device Naive Bayes model', () => {
+  it('uses the on-device statistical classifier when keyword dictionary and memory miss', async () => {
+    // "strbucks" (typo) is not in keyword dictionary or memory, but Naive Bayes classifier identifies it as food
+    const out = await resolveQuickAdd('strbucks 25', deps());
+    expect(out).toHaveLength(1);
+    expect(out[0].label).toBe('strbucks');
+    expect(out[0].amount).toBe(25);
+    expect(out[0].categoryId).toBe('food');
+    expect(out[0].categorySource).toBe('guess');
   });
 
-  it('IS called when a draft has no category', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'mystery', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(quickAdd) }));
-    expect(quickAdd).toHaveBeenCalled();
+  it('prioritizes learned memory over on-device classifier predictions', async () => {
+    const memory = { [merchantKey('strbucks')]: 'transport' } as MemoryMap;
+    const out = await resolveQuickAdd('strbucks 25', deps({ memory }));
+    expect(out[0].categoryId).toBe('transport');
+    expect(out[0].categorySource).toBe('learned');
+  });
+
+  it('does not require or consult any LLM provider', async () => {
+    const dummyLLM = {
+      can: jest.fn(() => true),
+      quickAdd: jest.fn(),
+    };
+    const out = await resolveQuickAdd('strbucks 25', deps({ llm: dummyLLM }));
+    expect(dummyLLM.quickAdd).not.toHaveBeenCalled();
     expect(out[0].categoryId).toBe('food');
   });
 
-  it('IS called when the parse was not confident, even if memory covered everything', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    await resolveQuickAdd('lunch 9.2 and 4', deps({ memory: { lunch: 'food' } as MemoryMap, llm: fakeLLM(quickAdd) }));
-    expect(quickAdd).toHaveBeenCalled();
+  it('categorizes multi-segment entries offline with deterministic and ML rules', async () => {
+    const out = await resolveQuickAdd('lunch 12, strbucks 25', deps());
+    expect(out).toHaveLength(2);
+    expect(out[0].label).toBe('lunch');
+    expect(out[0].categoryId).toBe('food');
+    expect(out[1].label).toBe('strbucks');
+    expect(out[1].categoryId).toBe('food');
   });
 
-  it('is not called when the provider reports the capability unavailable', async () => {
-    const quickAdd = jest.fn();
-    await resolveQuickAdd('lunch 9.2', deps({ llm: { can: () => false, quickAdd } }));
-    expect(quickAdd).not.toHaveBeenCalled();
-  });
-});
-
-describe('resolveQuickAdd — memory outranks the model', () => {
-  it('overrides the model category with a learned one', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'transport' },
-      { label: 'mystery', amount: 4, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    const out = await resolveQuickAdd('lunch 9.2, mystery 4', deps({ memory: { lunch: 'food' } as MemoryMap, llm: fakeLLM(quickAdd) }));
-    expect(out[0].categoryId).toBe('food');      // memory won
-    expect(out[1].categoryId).toBe('food');      // model filled the gap
-  });
-});
-
-describe('resolveQuickAdd — the label the user typed is the label that gets learned', () => {
-  it('keeps the typed label when the local parse was confident, even if the model renames it', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'Dim Sum', amount: 45, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    const out = await resolveQuickAdd('dimsum 45', deps({ llm: fakeLLM(quickAdd) }));
-    expect(out[0].label).toBe('dimsum');       // pinned, not 'Dim Sum'
-    expect(out[0].categoryId).toBe('food');    // the model's real contribution survives
-  });
-
-  it('keeps every other field the model returned', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'Grab', amount: 12, type: 'income', date: '2026-08-27', currency: 'MYR', categoryId: 'salary' },
-    ]);
-    const out = await resolveQuickAdd('grabride 12', deps({ llm: fakeLLM(quickAdd) }));
-    expect(out[0]).toEqual({
-      label: 'grabride',
-      amount: 12,
-      type: 'income',
-      date: '2026-08-27',
-      currency: 'MYR',
-      categoryId: 'salary',
-    });
-  });
-
-  it('does NOT pin when the local parse was not confident — the model cleaned up a mess', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'Grab', amount: 12, type: 'expense', date: null, currency: null, categoryId: 'transport' },
-    ]);
-    const out = await resolveQuickAdd('split the grab ride, my half was 12', deps({ llm: fakeLLM(quickAdd) }));
-    expect(out[0].label).toBe('Grab');
-  });
-
-  it('does NOT pin when the model returned a different number of items', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'Lunch', amount: 9.2, type: 'expense', date: null, currency: null, categoryId: 'food' },
-      { label: 'Tip', amount: 1, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    // "mystery" has no keyword hit and no memory, so this still needs the LLM.
-    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(quickAdd) }));
-    expect(out.map((d) => d.label)).toEqual(['Lunch', 'Tip']);
-  });
-
-  it('does not direct to LLM when input is only a number', async () => {
-    const quickAdd = jest.fn().mockResolvedValue([
-      { label: 'Cash withdrawal', amount: 50, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    const out = await resolveQuickAdd('50', deps({ llm: fakeLLM(quickAdd) }));
-    expect(quickAdd).not.toHaveBeenCalled();
+  it('resolves number-only input offline with amount and no category', async () => {
+    const out = await resolveQuickAdd('50', deps());
+    expect(out).toHaveLength(1);
     expect(out[0].amount).toBe(50);
     expect(out[0].label).toBe('');
-  });
-
-  // The whole point of the pin: the round trip has to close, or every repeat of the same
-  // phrase pays for another LLM call forever.
-  it('closes the loop — the second identical entry never reaches the LLM', async () => {
-    const firstCall = jest.fn().mockResolvedValue([
-      { label: 'Dim Sum', amount: 45, type: 'expense', date: null, currency: null, categoryId: 'food' },
-    ]);
-    const first = await resolveQuickAdd('dimsum 45', deps({ llm: fakeLLM(firstCall) }));
-    expect(firstCall).toHaveBeenCalledTimes(1);
-
-    // What commitCategorized would write: merchantKey(label) -> categoryId.
-    const learned = { [merchantKey(first[0].label)]: first[0].categoryId! } as MemoryMap;
-
-    const secondCall = jest.fn();
-    const second = await resolveQuickAdd('dimsum 45', deps({ memory: learned, llm: fakeLLM(secondCall) }));
-    expect(secondCall).not.toHaveBeenCalled();
-    expect(second[0].categoryId).toBe('food');
-  });
-});
-
-describe('resolveQuickAdd — failure is always soft', () => {
-  it('falls back to the local result when the LLM rejects', async () => {
-    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(() => Promise.reject(new Error('offline'))) }));
-    expect(out).toHaveLength(1);
-    expect(out[0].amount).toBe(9.2);
     expect(out[0].categoryId).toBeNull();
-  });
-
-  it('falls back to the local result when the LLM hangs past the timeout', async () => {
-    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(() => new Promise(() => {})) }), 10);
-    expect(out[0].amount).toBe(9.2);
-  });
-
-  it('falls back to the local result when the LLM returns nothing usable', async () => {
-    const out = await resolveQuickAdd('mystery 9.2', deps({ llm: fakeLLM(async () => []) }));
-    expect(out[0].amount).toBe(9.2);
   });
 });
 
@@ -250,15 +201,18 @@ describe('resolveQuickAddWithoutAmount — entry with no amount auto-selects cat
     expect(draft.categoryId).not.toBeNull();
   });
 
-  it('uses LLM category guess when memory and keywords miss', async () => {
-    const guessFn = jest.fn().mockResolvedValue(['food']);
-    const mockLLM: QuickAddLLM = {
-      can: (c) => c === 'guessCategories',
-      quickAdd: async () => [],
-      guessCategories: guessFn,
-    };
-    const draft = await resolveQuickAddWithoutAmount('laksa', deps({ llm: mockLLM }));
+  it('uses Tier 3 on-device statistical classifier when memory and keywords miss', async () => {
+    // "strbucks" (typo) is not in memory or keyword dictionary, but classifier identifies it as food
+    const draft = await resolveQuickAddWithoutAmount('strbucks', deps());
     expect(draft.categoryId).toBe('food');
+    expect(draft.categorySource).toBe('guess');
+  });
+
+  it('falls back to default category without requiring any LLM when all predictors miss', async () => {
+    // Use an unrecognized nonsense word that will miss memory, keywords, and classifier
+    const draft = await resolveQuickAddWithoutAmount('qwertyuiopasdf', deps());
+    expect(draft.categoryId).toBe('other');
+    expect(draft.categorySource).toBe('guess');
   });
 });
 

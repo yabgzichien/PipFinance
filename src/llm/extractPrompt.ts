@@ -2,10 +2,53 @@
 // Prompts for pulling structured transactions out of a document (PDF, image, or
 // flattened CSV/XLSX/DOCX text). Shared by document-capable providers.
 
+import type { CategoryOption } from './categoryGuessPrompt';
+
 export const DOC_SYSTEM_PROMPT =
   'You are a precise data extractor for a personal expenses app. You read a ' +
   'bank statement, an exported transaction file, or a screenshot and return ONLY ' +
   'JSON. Never add prose, explanations, or markdown fences.';
+
+export function buildDocUserPrompt(categories?: CategoryOption[]): string {
+  if (!categories || categories.length === 0) {
+    return DOC_USER_PROMPT;
+  }
+  const categoryLines = categories.map((c) => `- ${c.id} (${c.kind}): ${c.label}`).join('\n');
+  return `Extract every transaction in the attached document.
+
+Categories:
+${categoryLines}
+
+Return a JSON object exactly in this shape:
+{
+  "transactions": [
+    {
+      "merchant": "string  the payee / description / narration as shown",
+      "amount": number  positive value, no currency symbol,
+      "currency": "3-letter ISO code read from the symbol or text shown, e.g. \"MYR\", \"CNY\", \"SGD\"  use \"MYR\" if none is shown",
+      "direction": "out" for money leaving the account (spending), "in" for money received,
+      "date": "YYYY-MM-DD if derivable, otherwise null",
+      "category": "the best-fitting category id from the Categories list above, or the label from the source document, otherwise null",
+      "method": "optional sub-label, otherwise null"
+    }
+  ]
+}
+
+Rules:
+- One object per transaction. Do not merge, split, or invent rows.
+- amount is always positive; use "direction" for spend vs received.
+- For "category": pick the single best-fitting category id from the Categories list above for the merchant / description. If the document carries an explicit category label, prefer that if it matches. Never invent a category id that is not in the provided list. If unsure, use null.
+- For tabular data, infer which columns are date, description, amount, and (debit/credit) direction.
+- ALSO record interest credited and any bank fees or service charges, even when they
+  appear only in an account summary rather than the transaction list. Treat interest
+  as income ("in") and fees/charges as expense ("out"). Use the per-account or
+  per-pocket amounts; never add a combined "Total" row.
+- Skip pure balance rows (opening balance, closing balance), headers, and "Total"/subtotal rows.
+- If a summary item such as interest has no explicit date, use the statement's end
+  date (the "to" date of the statement period).
+- If you cannot read a field, use null (never guess amounts or dates).
+- Output JSON only.`;
+}
 
 export const DOC_USER_PROMPT = `Extract every transaction in the attached document.
 

@@ -105,7 +105,7 @@ export function EditTransactionModal({ txn, onClose }: { txn: Transaction | null
   }, [accounts]);
 
   const visibleAccounts = useMemo(
-    () => visibleChoices(paymentAccounts, fromAccountId, MAX_ACCOUNT_CHIPS),
+    () => visibleChoices(paymentAccounts, fromAccountId, MAX_OPTIONAL_CHIPS),
     [paymentAccounts, fromAccountId]
   );
 

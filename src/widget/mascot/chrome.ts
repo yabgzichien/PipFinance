@@ -78,21 +78,25 @@ export function dotsRowSvg(dots: boolean[], color: string): string {
 
 /** Expanded streak icon sizes across button notches (notch 5 is the max 44dp size). */
 export const EXPANDED_STREAK_ICON_SIZES: Record<Notch, number> = {
-  1: 24,
-  2: 29,
-  3: 34,
-  4: 39,
-  5: 44,
+  1: 18,
+  2: 21,
+  3: 24,
+  4: 27,
+  5: 30,
 };
 
 /** Expanded streak count font sizes across button notches. */
 export const EXPANDED_STREAK_FONT_SIZES: Record<Notch, number> = {
-  1: 15,
-  2: 17,
-  3: 19,
-  4: 21,
-  5: 22,
+  1: 12,
+  2: 13,
+  3: 14,
+  4: 15,
+  5: 16,
 };
+
+/** A three-digit run such as 205 fits beside the largest expanded fire without squeezing the
+ * seven-day row below it. This must stay within the 68dp streak column. */
+export const EXPANDED_STREAK_COUNT_WIDTH = 32;
 
 /** Expanded-layout streak count typography, shared so preview and widget agree. */
 export const STREAK_COUNT_FONT_SIZE = EXPANDED_STREAK_FONT_SIZES[5];

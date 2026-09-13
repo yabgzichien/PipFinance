@@ -110,7 +110,7 @@ export function AppAlertModal() {
                 <Pressable
                   onPress={handleConfirm}
                   disabled={busy}
-                  style={({ pressed }) => [styles.btn, styles.btnDanger, { backgroundColor: colorTheme.red }, (pressed || busy) && { opacity: 0.9 }]}
+                  style={({ pressed }) => [styles.btn, styles.btnDanger, { backgroundColor: destructive ? colorTheme.red : theme.accentInk }, (pressed || busy) && { opacity: 0.9 }]}
                   accessibilityRole="button"
                 >
                   {busyAction === 'confirm' ? <ActivityIndicator size="small" color={colors.onAccent} /> : <Text style={styles.btnDangerText}>{request.confirmLabel}</Text>}

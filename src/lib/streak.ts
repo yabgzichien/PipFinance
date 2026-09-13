@@ -37,15 +37,48 @@ export function localDayNumber(at: Date): number {
   return Math.floor(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()) / 86_400_000);
 }
 
+export type CheckInInput = Record<string, string> | string[] | Set<string>;
+export type DayActivityKind = 'spend' | 'checkin' | 'none';
+
+export interface WeekRingResult {
+  days: boolean[];
+  kinds: DayActivityKind[];
+  todayIndex: number;
+}
+
+export function checkInToStreakInputs(checkIns?: CheckInInput | null): StreakInput[] {
+  if (!checkIns) return [];
+  const dates: string[] = [];
+  if (Array.isArray(checkIns)) {
+    dates.push(...checkIns);
+  } else if (checkIns instanceof Set) {
+    dates.push(...checkIns);
+  } else {
+    dates.push(...Object.keys(checkIns));
+  }
+  return dates.map((d) => ({
+    date: d,
+    createdAt: `${d}T12:00:00.000Z`,
+    source: checkIns && typeof checkIns === 'object' && !(checkIns instanceof Set) && !Array.isArray(checkIns) ? (checkIns as Record<string, string>)[d] : 'no_spend',
+  }));
+}
+
 /**
  * Every distinct day the user logged on, most recent first, ignoring anything dated after
  * `today` (a mistyped year should not invent activity that has not happened yet).
  */
-function activeDays(txns: StreakInput[], today: number): number[] {
+function activeDays(txns: StreakInput[], today: number, checkIns?: CheckInInput): number[] {
   const days = new Set<number>();
   for (const tx of txns) {
     const d = utcDayNumber(tx.date) ?? utcDayNumber(tx.createdAt);
     if (d !== null && d <= today) days.add(d);
+  }
+  if (checkIns) {
+    const checkInputs = checkInToStreakInputs(checkIns);
+    for (const c of checkInputs) {
+      const d = utcDayNumber(c.date);
+      if (d !== null && d <= today) days.add(d);
+    }
   }
   return [...days].sort((a, b) => b - a);
 }
@@ -55,9 +88,9 @@ function activeDays(txns: StreakInput[], today: number): number[] {
  * have. Any source counts, manual included: this answers "when did they last touch the app's
  * ledger", which is what the reminder scheduler needs to decide whether to nudge.
  */
-export function lastActiveDay(txns: StreakInput[], now: Date = new Date()): number | null {
+export function lastActiveDay(txns: StreakInput[], now: Date = new Date(), checkIns?: CheckInInput): number | null {
   const today = localDayNumber(now);
-  const sorted = activeDays(txns, today);
+  const sorted = activeDays(txns, today, checkIns);
   return sorted.length === 0 ? null : sorted[0];
 }
 
@@ -84,15 +117,15 @@ function runLength(sortedDaysDesc: number[], maxGap: number): number {
  * active day is within `graceDays + 1` of the previous one. Returns 0 if the most recent
  * activity is already older than that window (the streak has lapsed).
  */
-export function computeStreak(txns: StreakInput[], now: Date = new Date(), graceDays = 1): number {
+export function computeStreak(txns: StreakInput[], now: Date = new Date(), graceDays = 1, checkIns?: CheckInInput): number {
   const maxGap = graceDays + 1;
   const today = localDayNumber(now);
 
-  const last = lastActiveDay(txns, now);
+  const last = lastActiveDay(txns, now, checkIns);
   if (last === null) return 0;
   if (today - last > maxGap) return 0; // lapsed
 
-  const sorted = activeDays(txns, today); // most recent first
+  const sorted = activeDays(txns, today, checkIns); // most recent first
   return runLength(sorted, maxGap);
 }
 
@@ -142,12 +175,13 @@ export function computeStreakWithFreeze(
   txns: StreakInput[],
   freeze: StreakFreezeState,
   now: Date = new Date(),
-  graceDays = 1
+  graceDays = 1,
+  checkIns?: CheckInInput
 ): { streak: number; freezeSpent: boolean } {
   const maxGap = graceDays + 1;
   const today = localDayNumber(now);
 
-  const last = lastActiveDay(txns, now);
+  const last = lastActiveDay(txns, now, checkIns);
   if (last === null) return { streak: 0, freezeSpent: false };
 
   const gap = today - last;
@@ -155,7 +189,7 @@ export function computeStreakWithFreeze(
   const canBridge = gap === maxGap + 1 && (freeze.available || alreadyBridged);
   if (gap > maxGap && !canBridge) return { streak: 0, freezeSpent: false };
 
-  const sorted = activeDays(txns, today);
+  const sorted = activeDays(txns, today, checkIns);
   const streak = runLength(sorted, maxGap);
   return { streak, freezeSpent: canBridge && !alreadyBridged };
 }
@@ -173,14 +207,14 @@ export function isStreakGraduated(streak: number): boolean {
 /** UTC day number the current run began on, or null if there is no active run right now. Used
  *  to build the "Logging since <month>" marker once a streak has graduated  the day itself
  *  isn't shown, only the month, so a mid-month graduation doesn't read as falsely precise. */
-export function streakStartDay(txns: StreakInput[], now: Date = new Date(), graceDays = 1): number | null {
+export function streakStartDay(txns: StreakInput[], now: Date = new Date(), graceDays = 1, checkIns?: CheckInInput): number | null {
   const maxGap = graceDays + 1;
   const today = localDayNumber(now);
 
-  const last = lastActiveDay(txns, now);
+  const last = lastActiveDay(txns, now, checkIns);
   if (last === null || today - last > maxGap) return null;
 
-  const sorted = activeDays(txns, today);
+  const sorted = activeDays(txns, today, checkIns);
   let prev = sorted[0];
   let start = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
@@ -206,51 +240,103 @@ export function computeStreakPaused(
   txns: StreakInput[],
   pausedSinceDay: number | null,
   now: Date = new Date(),
-  graceDays = 1
+  graceDays = 1,
+  checkIns?: CheckInInput
 ): number {
-  if (pausedSinceDay === null) return computeStreak(txns, now, graceDays);
+  if (pausedSinceDay === null) return computeStreak(txns, now, graceDays, checkIns);
   // LOCAL noon on the pause day, so this round-trips back through `localDayNumber` to exactly
   // `pausedSinceDay` in every timezone (UTC noon would land on the next calendar day anywhere
   // past UTC+12), and so the DST edge (a 23 or 25-hour local day) can't shift it either.
   const anchor = new Date(pausedSinceDay * 86_400_000);
   const frozenNow = new Date(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate(), 12);
-  return computeStreak(txns, frozenNow, graceDays);
+  return computeStreak(txns, frozenNow, graceDays, checkIns);
 }
 
 /** Monday-first 7-day window containing `now`, local calendar (matches `compute7DayDots`'
  *  local Y-M-D reasoning, not the UTC day numbers the rest of this file uses  a week ring is a
  *  calendar concept a user recognises, not an activity-gap one). Days after today in the window
  *  are `false` (nothing to show yet, not a miss). */
-export function computeWeekRing(txns: StreakInput[], now: Date = new Date()): { days: boolean[]; todayIndex: number } {
-  const active = new Set<string>();
+export function computeWeekRing(
+  txns: StreakInput[],
+  now: Date = new Date(),
+  checkIns?: CheckInInput
+): WeekRingResult {
+  const spendDates = new Set<string>();
   for (const t of txns) {
+    if (t.source === 'no_spend' || t.source === 'review') continue;
     const k = t.date ?? (t.createdAt ? t.createdAt.slice(0, 10) : null);
-    if (k) active.add(k);
+    if (k) spendDates.add(k);
   }
+
+  const checkInDates = new Set<string>();
+  if (checkIns) {
+    if (Array.isArray(checkIns)) {
+      for (const d of checkIns) checkInDates.add(d);
+    } else if (checkIns instanceof Set) {
+      for (const d of checkIns) checkInDates.add(d);
+    } else {
+      for (const k of Object.keys(checkIns)) checkInDates.add(k);
+    }
+  }
+  for (const t of txns) {
+    if (t.source === 'no_spend' || t.source === 'review') {
+      const k = t.date ?? (t.createdAt ? t.createdAt.slice(0, 10) : null);
+      if (k) checkInDates.add(k);
+    }
+  }
+
   // getDay(): Sun=0..Sat=6. Convert to Mon=0..Sun=6 so the ring reads as a normal week.
   const todayIndex = (now.getDay() + 6) % 7;
+  const kinds: DayActivityKind[] = [];
   const days = [...Array(7)].map((_, i) => {
-    if (i > todayIndex) return false;
+    if (i > todayIndex) {
+      kinds.push('none');
+      return false;
+    }
     const d = new Date(now);
     d.setDate(d.getDate() - (todayIndex - i));
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
-    return active.has(`${y}-${m}-${day}`);
+    const key = `${y}-${m}-${day}`;
+
+    if (spendDates.has(key)) {
+      kinds.push('spend');
+      return true;
+    }
+    if (checkInDates.has(key)) {
+      kinds.push('checkin');
+      return true;
+    }
+    kinds.push('none');
+    return false;
   });
-  return { days, todayIndex };
+  return { days, kinds, todayIndex };
 }
 
 /**
  * 7-day activity tracker (e.g. for the Dashboard streak card and home screen widget).
  * Returns an array of 7 booleans [day-6, day-5, ..., today] indicating whether any transaction
- * was logged on each of the last 7 days.
+ * or check-in was logged on each of the last 7 days.
  */
-export function compute7DayDots(txns: StreakInput[], now: Date = new Date()): boolean[] {
+export function compute7DayDots(
+  txns: StreakInput[],
+  now: Date = new Date(),
+  checkIns?: CheckInInput
+): boolean[] {
   const active = new Set<string>();
   for (const t of txns) {
     const k = t.date ?? (t.createdAt ? t.createdAt.slice(0, 10) : null);
     if (k) active.add(k);
+  }
+  if (checkIns) {
+    if (Array.isArray(checkIns)) {
+      for (const d of checkIns) active.add(d);
+    } else if (checkIns instanceof Set) {
+      for (const d of checkIns) active.add(d);
+    } else {
+      for (const k of Object.keys(checkIns)) active.add(k);
+    }
   }
   return [...Array(7)].map((_, i) => {
     const d = new Date(now);

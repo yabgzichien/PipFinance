@@ -9,12 +9,10 @@ import { Card, Eyebrow, TopBar } from '../components/ui';
 import { WidgetCustomizerBadge } from '../components/WidgetCustomizerBadge';
 import { getActiveCurrencies } from '../db/currencyRepo';
 import { clearMemory } from '../db/memoryRepo';
-import { getProvider, llmErrorMessage } from '../llm';
 import { isMultiCurrency } from '../lib/currency';
 import { fmtMoney } from '../lib/format';
 import { confirmAction, notify } from '../lib/platformAlert';
 import { filterSettings } from '../lib/settingsSearch';
-import { configFor, loadSettings, type LLMSettings, type ProviderRole } from '../settings/settingsStore';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
 import * as sound from '../lib/sound';
 import { ensurePermission } from '../notifications';
@@ -26,8 +24,6 @@ import { useLanguage } from '../i18n';
 import { radius, uiFont } from '../theme';
 import { motionSettingLabel, MOTION_SETTINGS } from '../theme/motion';
 
-type TestState = { status: 'idle' | 'busy' | 'ok' | 'fail'; message?: string };
-
 export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenCategories, onOpenCommitments, onOpenTax, onOpenCurrencySettings, onOpenBackup, onOpenWidgetCustomizer, onResetToOnboarding, taxRequestableCount = 0 }: { onBack: () => void; onAdvancedImport?: () => void; onOpenExport?: () => void; onOpenCategories?: () => void; onOpenCommitments?: () => void; onOpenTax?: () => void; onOpenCurrencySettings?: () => void; onOpenBackup?: () => void; onOpenWidgetCustomizer?: () => void; onResetToOnboarding?: () => void; taxRequestableCount?: number }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
@@ -35,12 +31,10 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const dc = useDisplayCurrency();
   const { t, formatCadence, formatMotion, isZh } = useLanguage();
   const { memory, coverage, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
-  const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    loadSettings().then(setSettings);
     getActiveCurrencies().then(setActiveCurrencies);
   }, []);
 
@@ -81,14 +75,6 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     );
   };
 
-  if (!settings) {
-    return (
-      <View style={[styles.root, { backgroundColor: colorTheme.bg, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={theme.accent} />
-      </View>
-    );
-  }
-
   const { matchingKeys, isSearching, matchingSections } = filterSettings(search, {
     data_currencies: activeCurrencies,
   });
@@ -108,10 +94,6 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
       matchingKeys.has('reminder_owed') ||
       matchingKeys.has('reminder_commitments'));
 
-  const hasVisibleAiCard =
-    __DEV__ &&
-    (matchingKeys.has('ai_groq') || matchingKeys.has('ai_gemini'));
-
   const hasVisibleDataCard =
     (Boolean(onOpenCommitments) && matchingKeys.has('data_commitments')) ||
     (Boolean(onOpenTax) && matchingKeys.has('data_tax')) ||
@@ -129,7 +111,6 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const hasAnyVisibleSetting =
     hasVisibleAppearanceCard ||
     hasVisibleRemindersCard ||
-    hasVisibleAiCard ||
     (matchingSections.has('learning') && matchingKeys.has('learning')) ||
     (matchingSections.has('budget') && matchingKeys.has('budget')) ||
     hasVisibleDataCard ||
@@ -276,36 +257,6 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                   <Text style={[styles.providerName, { color: colorTheme.ink, marginBottom: 12 }]}>{t('recurringBillsReminder')}</Text>
                   <CommitmentReminderPicker />
                 </Card>
-              )}
-            </View>
-          </>
-        )}
-
-        {/* Provider/API-key rows are a dev-ops concern, not a judge-facing one (UI/UX
-            P3.18): visible locally (__DEV__), stripped from the shipped judge build. */}
-        {__DEV__ && matchingSections.has('ai') && hasVisibleAiCard && (
-          <>
-            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>AI providers</Eyebrow>
-            <View style={{ gap: 14 }}>
-              {matchingKeys.has('ai_groq') && (
-                <ProviderCard
-                  settings={settings}
-                  role="general"
-                  icon="sparkles"
-                  name="Groq · primary"
-                  model={settings.groqModel}
-                  apiKey={settings.groqKey}
-                />
-              )}
-              {matchingKeys.has('ai_gemini') && (
-                <ProviderCard
-                  settings={settings}
-                  role="docs"
-                  icon="receipt"
-                  name="Gemini · fallback"
-                  model={settings.geminiModel}
-                  apiKey={settings.geminiKey}
-                />
               )}
             </View>
           </>
@@ -922,101 +873,6 @@ function AccentColorPicker() {
   );
 }
 
-/** One fixed provider: shows its pinned model and a connection test (key is never displayed). */
-function ProviderCard({
-  settings,
-  role,
-  icon,
-  name,
-  model,
-  apiKey,
-}: {
-  settings: LLMSettings;
-  role: ProviderRole;
-  icon: IconName;
-  name: string;
-  model: string;
-  apiKey: string;
-}) {
-  const theme = useAccent();
-  const colorTheme = useThemeColors();
-  const [test, setTest] = useState<TestState>({ status: 'idle' });
-
-  const runTest = async () => {
-    const cfg = configFor(settings, role);
-    const keys = cfg.apiKey.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
-    if (keys.length === 0) {
-      setTest({ status: 'fail', message: 'No API key is configured.' });
-      return;
-    }
-    setTest({ status: 'busy' });
-    try {
-      let ok = false;
-      let lastErr: unknown;
-      for (const k of keys) {
-        try {
-          await getProvider(cfg.provider).test({ apiKey: k, model: cfg.model.trim() });
-          ok = true;
-          break;
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      if (ok) {
-        setTest({ status: 'ok', message: `Connected to ${getProvider(cfg.provider).label}.` });
-      } else {
-        throw lastErr;
-      }
-    } catch (e) {
-      setTest({ status: 'fail', message: `${getProvider(cfg.provider).label}: ${llmErrorMessage(e)}` });
-    }
-  };
-
-  return (
-    <Card style={{ padding: 16, gap: 14 }}>
-      <View style={styles.providerRow}>
-        <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
-          <Icon name={icon} size={16} color={theme.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.providerName, { color: colorTheme.ink }]}>{name}</Text>
-        </View>
-      </View>
-
-      <ReadonlyField label="Model">
-        <Text style={[styles.fieldValue, { color: colorTheme.ink }]}>{model}</Text>
-      </ReadonlyField>
-
-      <Pressable
-        onPress={runTest}
-        style={({ pressed }) => [styles.testBtn, { backgroundColor: theme.accentTint, borderColor: theme.accentSoft }, pressed && { opacity: 0.9 }]}
-      >
-        {test.status === 'busy' ? (
-          <ActivityIndicator color={theme.accent} size="small" />
-        ) : (
-          <>
-            <Icon name="check" size={16} color={theme.accent} stroke={2.4} />
-            <Text style={[styles.testBtnText, { color: theme.accent }]}>Test connection</Text>
-          </>
-        )}
-      </Pressable>
-
-      {test.status === 'ok' && <Text style={[styles.result, { color: theme.accentInk }]}>✓ {test.message}</Text>}
-      {test.status === 'fail' && <Text style={[styles.result, { color: '#b3261e' }]}>{test.message}</Text>}
-    </Card>
-  );
-}
-
-function ReadonlyField({ label, children }: { label: string; children: React.ReactNode }) {
-  const colorTheme = useThemeColors();
-  return (
-    <View style={{ gap: 7 }}>
-      <Text style={[styles.fieldLabel, { color: colorTheme.ink2 }]}>{label}</Text>
-      <View style={[styles.fieldBox, { backgroundColor: colorTheme.surface2, borderColor: colorTheme.line }]}>{children}</View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
   dangerCard: { borderColor: 'rgba(179,38,30,0.28)', backgroundColor: 'rgba(179,38,30,0.03)' },
@@ -1031,25 +887,6 @@ const styles = StyleSheet.create({
   },
   providerName: { fontFamily: uiFont(700), fontSize: 15 },
   providerSub: { fontFamily: uiFont(500), fontSize: 12.5, marginTop: 1 },
-  fieldLabel: { fontFamily: uiFont(600), fontSize: 12.5 },
-  fieldBox: {
-    borderWidth: 1,
-    borderRadius: radius.sm,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-  },
-  fieldValue: { fontFamily: uiFont(500), fontSize: 14 },
-  testBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 46,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  testBtnText: { fontFamily: uiFont(600), fontSize: 14.5 },
-  result: { fontFamily: uiFont(600), fontSize: 13, lineHeight: 18 },
   migrateRow: { padding: 16, borderRadius: radius.md, borderWidth: 1 },
   resetBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8 },
   resetText: { fontFamily: uiFont(600), fontSize: 13.5 },

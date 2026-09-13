@@ -36,6 +36,7 @@ import { useLanguage } from '../i18n';
 import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
 import {
   AccountChipIcon,
+  AccountPickerModal,
   ChoiceChip,
   MAX_ACCOUNT_CHIPS,
   MAX_OPTIONAL_CHIPS,
@@ -210,7 +211,7 @@ export function ManualEntryScreen({
   const [fromAccountId, setFromAccountId] = useState<string | null>(defaultAcctId);
   const [toAccountId, setToAccountId] = useState<string | null>(null);
 
-  const visibleAccounts = useMemo(() => visibleChoices(paymentAccounts, fromAccountId, MAX_ACCOUNT_CHIPS), [paymentAccounts, fromAccountId]);
+  const visibleAccounts = useMemo(() => visibleChoices(paymentAccounts, fromAccountId, MAX_OPTIONAL_CHIPS), [paymentAccounts, fromAccountId]);
 
   // The two optional rows inside More details are capped tighter than "Pay from": each also
   // carries a "None" chip and a "More" chip, so four options is what still reads as a row
@@ -285,7 +286,7 @@ export function ManualEntryScreen({
   const toAccount = toAccountId ? accounts.find((a) => a.id === toAccountId) ?? null : null;
   const toConvertible =
     !toAccount || toAccount.currency === currency || toAccount.currency === BASE_CURRENCY || rateFor(rates, toAccount.currency) != null;
-  const canSave = amount > 0 && !!cat && !!validDate && !!fromAccountId && rate != null && fromConvertible && toConvertible;
+  const canSave = amount > 0 && !!cat && !!validDate && rate != null && fromConvertible && toConvertible;
 
   useEffect(() => {
     onAmountValidChange?.(amount > 0);
@@ -312,14 +313,23 @@ export function ManualEntryScreen({
     setCatTouched(true);
   };
 
-  // Seed the required account selection once accounts are known, creating a
+  // Seed the default account selection once accounts are known, creating a
   // default "Cash" account if the user has none yet.
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (!fromAccountId) {
-      if (defaultAcctId) setFromAccountId(defaultAcctId);
-      else ensureDefaultAccount().then((id) => setFromAccountId(id));
+    if (seededRef.current) return;
+    if (defaultAcctId) {
+      setFromAccountId(defaultAcctId);
+      seededRef.current = true;
+    } else {
+      ensureDefaultAccount().then((id) => {
+        if (!seededRef.current) {
+          setFromAccountId(id);
+          seededRef.current = true;
+        }
+      });
     }
-  }, [defaultAcctId, fromAccountId, ensureDefaultAccount]);
+  }, [defaultAcctId, ensureDefaultAccount]);
 
   // A split whose gross no longer matches the amount field is stale (the user changed the bill
   // after splitting it), so it is dropped rather than silently applied to a different number.
@@ -482,9 +492,17 @@ export function ManualEntryScreen({
 
         <TourAnchor id="tour_account_field" activeId={activeTourAnchor}>
           <Eyebrow style={{ marginTop: 18, marginBottom: 8 }}>
-            {type === 'expense' ? (isZh ? '扣款账户' : 'Pay from') : (isZh ? '存入账户' : 'Deposit into')}
+            {type === 'expense' ? (isZh ? '扣款账户（选填）' : 'Pay from (optional)') : (isZh ? '存入账户（选填）' : 'Deposit into (optional)')}
           </Eyebrow>
           <View style={styles.accountChips}>
+            <ChoiceChip
+              label={isZh ? '无' : 'None'}
+              on={!fromAccountId}
+              onPress={() => {
+                tap();
+                setFromAccountId(null);
+              }}
+            />
             {visibleAccounts.map((a) => (
               <ChoiceChip
                 key={a.id}
@@ -492,7 +510,7 @@ export function ManualEntryScreen({
                 on={fromAccountId === a.id}
                 onPress={() => {
                   tap();
-                  setFromAccountId(a.id);
+                  setFromAccountId(fromAccountId === a.id ? null : a.id);
                 }}
               >
                 <AccountChipIcon account={a} on={fromAccountId === a.id} />
@@ -762,86 +780,20 @@ export function ManualEntryScreen({
         }}
       />
 
-      {/* The liability row's overflow, and the one place a loan can be created mid-entry. */}
-      <Modal
+      <AccountPickerModal
         visible={liabilityPickerOpen}
-        transparent
-        animationType="fade"
+        title={isZh ? '选择抵扣负债账户' : 'Select liability account'}
+        accounts={liabilityAccounts}
+        selectedId={toAccountId}
+        allowNone
+        onSelect={setToAccountId}
+        onClose={() => setLiabilityPickerOpen(false)}
         onDismiss={onLiabilityPickerDismissed}
-        onRequestClose={() => setLiabilityPickerOpen(false)}
-      >
-        <Pressable style={styles.menuBackdrop} onPress={() => setLiabilityPickerOpen(false)} />
-        <View style={styles.menuWrap} pointerEvents="box-none">
-          <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
-            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>
-              {isZh ? '选择抵扣负债账户' : 'Select liability account'}
-            </Text>
-            <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
-              <Pressable
-                onPress={() => {
-                  tap();
-                  setToAccountId(null);
-                  setLiabilityPickerOpen(false);
-                }}
-                style={[styles.accountMenuItem, !toAccountId && { backgroundColor: theme.accentTint }]}
-              >
-                <View style={{ width: 16 }} />
-                <Text
-                  style={[
-                    styles.accountMenuText,
-                    { color: colorTheme.ink },
-                    !toAccountId && { color: theme.onTint, fontFamily: uiFont(700) },
-                  ]}
-                >
-                  {isZh ? '无' : 'None'}
-                </Text>
-                {!toAccountId && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
-              </Pressable>
-              {liabilityAccounts.map((a) => {
-                const on = toAccountId === a.id;
-                return (
-                  <Pressable
-                    key={a.id}
-                    onPress={() => {
-                      tap();
-                      setToAccountId(a.id);
-                      setLiabilityPickerOpen(false);
-                    }}
-                    style={[styles.accountMenuItem, on && { backgroundColor: theme.accentTint }]}
-                  >
-                    <AccountChipIcon account={a} on={on} />
-                    <Text
-                      style={[
-                        styles.accountMenuText,
-                        { color: colorTheme.ink },
-                        on && { color: theme.onTint, fontFamily: uiFont(700) },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {a.name}
-                    </Text>
-                    {on && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
-            <Pressable
-              onPress={() => {
-                // Same iOS ordering constraint as the payment picker — see useModalHandoff.
-                setLiabilityPickerOpen(false);
-                requestLiabilitySheet(() => setAddingLiability(true));
-              }}
-              style={styles.accountMenuItem}
-            >
-              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.accountMenuText, { color: theme.accent, fontFamily: uiFont(600) }]}>
-                {isZh ? '创建新负债账户' : 'Create new liability account'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+        onCreateNew={() => {
+          requestLiabilitySheet(() => setAddingLiability(true));
+        }}
+        createNewText={isZh ? '创建新负债账户' : 'Create new liability account'}
+      />
 
       {/* Opens straight on the Liabilities tab: reaching it from this row has already answered
           which side of the balance sheet the new account sits on. */}
@@ -856,77 +808,19 @@ export function ManualEntryScreen({
       />
 
       {/* Full account picker modal when user taps "More" */}
-      <Modal
+      <AccountPickerModal
         visible={accountPickerOpen}
-        transparent
-        animationType="fade"
+        title={type === 'expense' ? (isZh ? '选择扣款账户' : 'Select payment account') : (isZh ? '选择存入账户' : 'Select deposit account')}
+        accounts={paymentAccounts}
+        selectedId={fromAccountId}
+        allowNone
+        onSelect={setFromAccountId}
+        onClose={() => setAccountPickerOpen(false)}
         onDismiss={onAccountPickerDismissed}
-        onRequestClose={() => setAccountPickerOpen(false)}
-      >
-        <Pressable style={styles.menuBackdrop} onPress={() => setAccountPickerOpen(false)} />
-        <View style={styles.menuWrap} pointerEvents="box-none">
-          <View style={[styles.menu, { backgroundColor: colorTheme.bg, borderColor: colorTheme.line2 }]}>
-            <Text style={[styles.menuTitle, { color: colorTheme.ink2 }]}>
-              {type === 'expense' ? (isZh ? '选择扣款账户' : 'Select payment account') : (isZh ? '选择存入账户' : 'Select deposit account')}
-            </Text>
-            <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled">
-              {paymentAccounts.map((a) => {
-                const on = fromAccountId === a.id;
-                const brand = matchBrand(a.name);
-                return (
-                  <Pressable
-                    key={a.id}
-                    onPress={() => {
-                      tap();
-                      setFromAccountId(a.id);
-                      setAccountPickerOpen(false);
-                    }}
-                    style={[styles.accountMenuItem, on && { backgroundColor: theme.accentTint }]}
-                  >
-                    {brand ? (
-                      <BrandLogo brand={brand} size={18} />
-                    ) : a.icon ? (
-                      <Image source={{ uri: a.icon }} style={{ width: 18, height: 18, borderRadius: 4 }} />
-                    ) : (
-                      <Icon
-                        name={(CLASS_BY_ID[a.cls]?.icon ?? 'wallet') as IconName}
-                        size={16}
-                        color={on ? theme.accent : colorTheme.ink2}
-                      />
-                    )}
-                    <Text
-                      style={[
-                        styles.accountMenuText,
-                        { color: colorTheme.ink },
-                        on && { color: theme.onTint, fontFamily: uiFont(700) },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {a.name}
-                    </Text>
-                    {on && <Icon name="check" size={16} color={theme.accent} stroke={2.4} />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            <View style={[styles.menuDivider, { backgroundColor: colorTheme.line2 }]} />
-            <Pressable
-              onPress={() => {
-                // The sheet only opens once this picker has actually finished dismissing —
-                // see useModalHandoff for why opening it here directly never showed on iOS.
-                setAccountPickerOpen(false);
-                requestAccountSheet(() => setAddingAccount(true));
-              }}
-              style={styles.accountMenuItem}
-            >
-              <Icon name="plus" size={16} color={theme.accent} stroke={2.2} />
-              <Text style={[styles.accountMenuText, { color: theme.accent, fontFamily: uiFont(600) }]}>
-                {isZh ? '创建新账户' : 'Create new account'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+        onCreateNew={() => {
+          requestAccountSheet(() => setAddingAccount(true));
+        }}
+      />
 
       <SplitSheet
         visible={splitting}

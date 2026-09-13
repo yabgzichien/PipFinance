@@ -80,20 +80,94 @@ const STARTER_KEYWORDS: Record<string, string[]> = {
     'tenaga nasional', 'syabas', 'air selangor', 'indah water', 'iwk', 'sada', 'sesb', 'sarawak energy',
     '电费', '水费', '煤气费', '水电',
   ],
+  other: [
+    'laundry', 'dobi', 'dry clean', 'dry cleaning', 'laundromat', 'coin laundry',
+    'postage', 'courier', 'parcel', 'stationery', 'printing', 'print', 'photocopy',
+    'barber', 'haircut', 'salon',
+    '洗衣', '干洗', '洗衣房', '自助洗衣', '快递', '邮费', '理发', '剪发', '文具', '打印',
+  ],
 };
 
 const OPTIONAL_KEYWORDS_BY_ID = new Map(
   OPTIONAL_CATEGORIES.map((c) => [c.id, [...c.aliases.en, ...c.aliases.zh]])
 );
 
-/** Matches a keyword as a whole word/phrase for ASCII, and as a substring for CJK, which has no
- *  word boundaries. Mirrors quickParse's INCOME_MATCHERS. */
-function keywordMatches(keyword: string, haystack: string): boolean {
-  if (/^[a-z0-9 ]+$/i.test(keyword)) {
-    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
-    return new RegExp(`\\b${escaped}\\b`, 'i').test(haystack);
+/**
+ * Fast Damerau-Levenshtein distance calculation between two strings.
+ * Includes early-termination cutoff when distance exceeds maxDist.
+ * Handles insertions, deletions, substitutions, and adjacent transpositions.
+ */
+export function damerauLevenshtein(a: string, b: string, maxDist: number = 2): number {
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > maxDist) return maxDist + 1;
+  if (a === b) return 0;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+
+  const d: number[][] = [];
+  for (let i = 0; i <= la; i++) {
+    d[i] = [];
+    d[i][0] = i;
   }
-  return haystack.includes(keyword);
+  for (let j = 0; j <= lb; j++) {
+    d[0][j] = j;
+  }
+
+  for (let i = 1; i <= la; i++) {
+    let minRow = d[i][0];
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1, // deletion
+        d[i][j - 1] + 1, // insertion
+        d[i - 1][j - 1] + cost // substitution
+      );
+      // Adjacent transposition
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + cost);
+      }
+      if (d[i][j] < minRow) minRow = d[i][j];
+    }
+    if (minRow > maxDist) return maxDist + 1;
+  }
+
+  return d[la][lb];
+}
+
+/** Matches a keyword as a whole word/phrase for ASCII (including single-character typos),
+ *  and as a substring for CJK, which has no word boundaries. Mirrors quickParse's INCOME_MATCHERS. */
+function keywordMatches(keyword: string, haystack: string): boolean {
+  if (!/^[a-z0-9 ]+$/i.test(keyword)) {
+    return haystack.includes(keyword);
+  }
+
+  // Exact word/phrase boundary match
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+  if (new RegExp(`\\b${escaped}\\b`, 'i').test(haystack)) {
+    return true;
+  }
+
+  // Typo resilience for single-word keywords of length >= 4
+  // E.g. "luch" -> "lunch", "diner" -> "dinner", "brekfast" -> "breakfast", "coffe" -> "coffee", "petro" -> "petrol"
+  if (!keyword.includes(' ') && keyword.length >= 4) {
+    const haystackWords = haystack
+      .replace(/[^a-z0-9]/gi, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3);
+
+    const maxDist = keyword.length >= 7 ? 2 : 1;
+
+    for (const hw of haystackWords) {
+      if (Math.abs(hw.length - keyword.length) <= maxDist) {
+        if (damerauLevenshtein(hw, keyword, maxDist) <= maxDist) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 /**

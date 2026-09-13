@@ -96,7 +96,7 @@ export function AttachScreen({
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         base64: true,
-        quality: 0.7,
+        quality: 0.55,
       });
       handleResult(res);
     } finally {
@@ -126,7 +126,7 @@ export function AttachScreen({
         notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相机以拍摄小票。' : 'Allow camera access to snap a receipt.');
         return;
       }
-      const res = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
+      const res = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.55 });
       handleResult(res);
     } finally {
       setBusy(false);

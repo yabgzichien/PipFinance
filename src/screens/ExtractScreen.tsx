@@ -1,11 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AccountLinkField } from '../components/AccountLinkField';
+import {
+  AccountChipIcon,
+  AccountPickerModal,
+  ChoiceChip,
+  MAX_OPTIONAL_CHIPS,
+  MoreChip,
+  getAccountPriority,
+} from '../components/AccountChips';
+import { AddAccountModal } from '../components/AddAccountModal';
 import { Icon } from '../components/Icon';
 import { Amount, B, BtnLabel, BubbleText, Card, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { fmtMoney } from '../lib/format';
 import { BASE_CURRENCY } from '../lib/currency';
+import { visibleChoices } from '../lib/chipRow';
+import { tap } from '../lib/haptics';
+import { useModalHandoff } from '../lib/modalHandoff';
 import { suggestForMerchant } from '../lib/recommend';
 import type { ExtractedTxn } from '../lib/types';
 import { getLLM, llmErrorMessage } from '../llm';
@@ -34,6 +45,7 @@ export function ExtractScreen({
   linkId: initialLinkId = null,
   onBack,
   onDone,
+  onItemsExtracted,
 }: {
   image: PickedImage;
   cachedItems?: ExtractedTxn[];
@@ -43,37 +55,56 @@ export function ExtractScreen({
    *  reviewing cached results (there's nothing to have timed). The Saved screen's "Read in
    *  Ns" line only renders when this is a real measurement. */
   onDone: (items: ExtractedTxn[], linkId: string | null, elapsedMs: number | null) => void;
+  /** Notifies the parent as soon as transactions are extracted or loaded, so background
+   *  category guessing can begin while the user is still reviewing the rows. */
+  onItemsExtracted?: (items: ExtractedTxn[]) => void;
 }) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh, tCat } = useLanguage();
-  const { memory, catById, accounts, ensureDefaultAccount } = useAppData();
+  const { memory, catById, accounts, entryCategories } = useAppData();
   const [phase, setPhase] = useState<Phase>(cachedItems ? 'result' : 'scanning');
   const [items, setItems] = useState<ExtractedTxn[]>(cachedItems ?? []);
-  // The batch is always tied to an account. Default to a cash account (prefer an
-  // existing one), keeping any selection carried back from the categorize step.
-  const defaultAcctId = useMemo(() => {
-    const act = accounts.filter((a) => !a.archived);
-    return (act.find((a) => a.cls === 'cash') ?? act[0])?.id ?? null;
-  }, [accounts]);
-  const [linkId, setLinkId] = useState<string | null>(initialLinkId ?? defaultAcctId);
   const [error, setError] = useState('');
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
-  // Live seconds counter while reading  narrates real elapsed time rather than a fabricated
-  // progress bar (docs/ui-engagement-plan.md Step 2 Act 1). Purely a text tick, not a transform
-  // loop, so it isn't gated on reduced motion the way the scanline below is.
   const [readingSecs, setReadingSecs] = useState(0);
   const reducedMotion = useReducedMotion();
   const [viewingPhoto, setViewingPhoto] = useState(false);
+  // Liquid asset accounts prioritized by cash, banks, e-wallets
+  const paymentAccounts = useMemo(() => {
+    const active = accounts.filter((a) => !a.archived);
+    const assets = active.filter((a) => a.kind === 'asset' && a.cls !== 'receivable' && a.cls !== 'illiquid');
+    const list = assets.length > 0 ? assets : active.filter((a) => a.cls !== 'receivable');
+    return [...list].sort((a, b) => {
+      const pA = getAccountPriority(a);
+      const pB = getAccountPriority(b);
+      if (pA !== pB) return pA - pB;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+  }, [accounts]);
 
-  // Seed the required account once accounts are known, creating a "Cash" one if none exist.
-  useEffect(() => {
-    if (linkId) return;
-    if (defaultAcctId) setLinkId(defaultAcctId);
-    else ensureDefaultAccount().then(setLinkId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultAcctId]);
+  const [linkId, setLinkId] = useState<string | null>(initialLinkId ?? null);
+  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [addingAccount, setAddingAccount] = useState(false);
+  const { request: requestAccountSheet, onDismiss: onAccountPickerDismissed } = useModalHandoff();
+
+  const visibleAccounts = useMemo(
+    () => visibleChoices(paymentAccounts, linkId, MAX_OPTIONAL_CHIPS),
+    [paymentAccounts, linkId]
+  );
+
+  const accountLabel = useMemo(() => {
+    const hasIncome = items.some((it) => it.type === 'income');
+    const hasExpense = items.some((it) => it.type === 'expense');
+    if (hasExpense && !hasIncome) {
+      return isZh ? '扣款账户（选填）' : 'Pay from (optional)';
+    }
+    if (hasIncome && !hasExpense) {
+      return isZh ? '存入账户（选填）' : 'Deposit into (optional)';
+    }
+    return isZh ? '账户（选填）' : 'Account (optional)';
+  }, [items, isZh]);
 
   const scan = useRef(new Animated.Value(0)).current;
 
@@ -101,7 +132,10 @@ export function ExtractScreen({
 
   // run extraction once on mount (skip when reviewing cached results)
   useEffect(() => {
-    if (cachedItems) return;
+    if (cachedItems) {
+      onItemsExtracted?.(cachedItems);
+      return;
+    }
     let alive = true;
     const start = Date.now();
     (async () => {
@@ -110,13 +144,13 @@ export function ExtractScreen({
         const rows = await llm.extract({
           imageBase64: image.base64,
           mimeType: image.mime,
+          categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
         });
         if (!alive) return;
         setElapsedMs(Date.now() - start);
         setItems(rows);
-        // 'found' narrates the real result for a fixed beat before the full list renders,
-        // rather than jump-cutting straight from spinner to review screen.
-        setPhase('found');
+        onItemsExtracted?.(rows);
+        setPhase('result');
       } catch (e) {
         if (!alive) return;
         setError(llmErrorMessage(e));
@@ -126,13 +160,12 @@ export function ExtractScreen({
     return () => {
       alive = false;
     };
-  }, [image]);
+  }, [image, cachedItems, onItemsExtracted, entryCategories]);
 
   useEffect(() => {
     if (phase !== 'found') return;
-    const id = setTimeout(() => setPhase('result'), reducedMotion ? 0 : FOUND_HOLD_MS);
-    return () => clearTimeout(id);
-  }, [phase, reducedMotion]);
+    setPhase('result');
+  }, [phase]);
 
   const withSuggestions = useMemo(
     () =>
@@ -249,7 +282,34 @@ export function ExtractScreen({
 
         {phase === 'result' && items.length > 0 && (
           <View style={{ paddingHorizontal: 18, paddingTop: 20 }}>
-            <AccountLinkField accounts={accounts} selectedId={linkId} onSelect={setLinkId} required />
+            <Eyebrow style={{ marginBottom: 8 }}>{accountLabel}</Eyebrow>
+            <View style={styles.accountChips}>
+              <ChoiceChip
+                label={isZh ? '无' : 'None'}
+                on={!linkId}
+                onPress={() => {
+                  tap();
+                  setLinkId(null);
+                }}
+              />
+              {visibleAccounts.map((a) => (
+                <ChoiceChip
+                  key={a.id}
+                  label={a.name}
+                  on={linkId === a.id}
+                  onPress={() => {
+                    tap();
+                    setLinkId(linkId === a.id ? null : a.id);
+                  }}
+                >
+                  <AccountChipIcon account={a} on={linkId === a.id} />
+                </ChoiceChip>
+              ))}
+              <MoreChip
+                onPress={() => setAccountPickerOpen(true)}
+                accessibilityLabel={isZh ? '选择其他账户' : 'More accounts'}
+              />
+            </View>
           </View>
         )}
 
@@ -307,6 +367,29 @@ export function ExtractScreen({
         )}
       </View>
 
+      <AccountPickerModal
+        visible={accountPickerOpen}
+        title={accountLabel}
+        accounts={paymentAccounts}
+        selectedId={linkId}
+        allowNone
+        onSelect={setLinkId}
+        onClose={() => setAccountPickerOpen(false)}
+        onDismiss={onAccountPickerDismissed}
+        onCreateNew={() => {
+          requestAccountSheet(() => setAddingAccount(true));
+        }}
+      />
+
+      <AddAccountModal
+        visible={addingAccount}
+        onClose={() => setAddingAccount(false)}
+        onCreated={(id) => {
+          setLinkId(id);
+          setAddingAccount(false);
+        }}
+      />
+
       <Modal visible={viewingPhoto} transparent animationType="fade" onRequestClose={() => setViewingPhoto(false)}>
         <Pressable style={styles.viewerBackdrop} onPress={() => setViewingPhoto(false)}>
           <Image source={{ uri: image.uri }} style={styles.viewerImage} resizeMode="contain" />
@@ -321,6 +404,7 @@ export function ExtractScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  accountChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   preview: { overflow: 'hidden', padding: 0 },
   previewImg: { width: '100%', height: PREVIEW_H },
   viewerBackdrop: { flex: 1, backgroundColor: 'rgba(10,14,12,0.92)', alignItems: 'center', justifyContent: 'center' },
