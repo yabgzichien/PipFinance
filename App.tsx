@@ -51,7 +51,10 @@ import { ColorSchemeProvider, useColorSchemeMode, useThemeColors } from './src/s
 import { GlossaryProvider, useGlossary } from './src/state/glossary';
 import { LanguageProvider, useLanguage } from './src/i18n';
 import { AppDataProvider, useAppData } from './src/state/store';
-import { EntitlementProvider } from './src/billing/entitlement';
+import { EntitlementProvider, useEntitlement } from './src/billing/entitlement';
+import type { GateTrigger } from './src/billing/gates';
+import { PaywallProvider } from './src/billing/paywallContext';
+import { PaywallScreen } from './src/screens/PaywallScreen';
 import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
@@ -220,9 +223,10 @@ const MANUAL_TOUR_SUB_STEPS: TourStepKey[] = [
 
 function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const { ready, onboardingComplete, taxRequestableCount, tutorialComplete, dismissTutorial } = useAppData();
+  const { isPro } = useEntitlement();
   const accentTheme = useAccent();
   const theme = useThemeColors();
-  const { t } = useLanguage();
+  const { t, language, translations } = useLanguage();
   useWebFocusRing(accentTheme.accent);
   // Global rather than per-screen: the reminder ladder has to be re-armed whenever the app is
   // opened or a transaction is saved, and neither is tied to any one screen. No-ops on web.
@@ -232,6 +236,16 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [screen, setScreen] = useState<Screen>('home');
   // Owed is reachable from both Home and Activity, so back has to return where it came from.
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
+  const [paywallOrigin, setPaywallOrigin] = useState<Screen>('home');
+  const [paywallTrigger, setPaywallTrigger] = useState<GateTrigger>('scan_quota');
+
+  const openPaywall = React.useCallback((trigger: GateTrigger, origin?: Screen) => {
+    setPaywallOrigin(origin ?? screen);
+    setPaywallTrigger(trigger);
+    setScreen('paywall');
+  }, [screen]);
+
+  const paywallContextValue = React.useMemo(() => ({ openPaywall }), [openPaywall]);
   const [txnFilter, setTxnFilter] = useState<string | null>(null);
   const [categoryDetailId, setCategoryDetailId] = useState<string | null>(null);
   // Recap remounts after calendar/export/trip navigation; retain the month being reviewed.
@@ -578,6 +592,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       exportOrigin,
       commitmentsOrigin,
       currencyOrigin,
+      paywallOrigin,
       addOrigin,
       tripDetailOrigin,
     });
@@ -675,50 +690,55 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   }
 
   return (
-    <View style={[styles.fill, { backgroundColor: theme.bg }]}>
-      <View style={styles.fill}>
-      {screen === 'home' && (
-        <DashboardScreen
-          onScan={handleOpenAdd}
-          activeTourAnchor={activeAnchorId}
-          onGuideExploreTask={(task) => setGuidedExploreTaskId(task.id)}
-          onOpenAll={() => {
-            setTxnFilter(null);
-            setScreen('transactions');
-          }}
-          onOpenBreakdown={() => setScreen('breakdown')}
-          onOpenBudget={() => setScreen('budget')}
-          onOpenCategory={(id) => {
-            setCategoryDetailId(id);
-            setScreen('categoryDetail');
-          }}
-          onOpenRecap={(month, openStory) => {
-            setRecapStoryRequested(!!openStory);
-            setRecapMonth(month);
-            setScreen('recap');
-          }}
-          onOpenNetWorth={() => setScreen('networth')}
-          onOpenTrip={(id) => openTrip('home', id)}
-          onOpenOwed={() => {
-            setOwedOrigin('home');
-            setScreen('owed');
-          }}
-          onOpenCommitments={() => {
-            setCommitmentsOrigin('home');
-            setScreen('commitments');
-          }}
-          onOpenCalendar={() => {
-            setCalendarOrigin('home');
-            setCalendarMonth(undefined);
-            setScreen('calendar');
-          }}
-          onOpenCurrencySettings={() => {
-            setCurrencyOrigin('home');
-            setScreen('currencySettings');
-          }}
-          onOpenExport={() => openExport('home')}
-        />
-      )}
+    <PaywallProvider value={paywallContextValue}>
+      <View style={[styles.fill, { backgroundColor: theme.bg }]}>
+        <View style={styles.fill}>
+        {screen === 'home' && (
+          <DashboardScreen
+            onScan={handleOpenAdd}
+            activeTourAnchor={activeAnchorId}
+            onGuideExploreTask={(task) => setGuidedExploreTaskId(task.id)}
+            onOpenAll={() => {
+              setTxnFilter(null);
+              setScreen('transactions');
+            }}
+            onOpenBreakdown={() => setScreen('breakdown')}
+            onOpenBudget={() => setScreen('budget')}
+            onOpenCategory={(id) => {
+              setCategoryDetailId(id);
+              setScreen('categoryDetail');
+            }}
+            onOpenRecap={(month, openStory) => {
+              setRecapStoryRequested(openStory ?? false);
+              setRecapMonth(month);
+              setScreen('recap');
+            }}
+            onOpenNetWorth={() => setScreen('networth')}
+            onOpenTrip={(id) => openTrip('home', id)}
+            onOpenOwed={() => {
+              setOwedOrigin('home');
+              setScreen('owed');
+            }}
+            onOpenCommitments={() => {
+              setCommitmentsOrigin('home');
+              setScreen('commitments');
+            }}
+            onOpenCalendar={() => {
+              setCalendarOrigin('home');
+              setCalendarMonth(undefined);
+              setScreen('calendar');
+            }}
+            onOpenCurrencySettings={() => {
+              if (!isPro) {
+                openPaywall('multi_currency', 'home');
+                return;
+              }
+              setCurrencyOrigin('home');
+              setScreen('currencySettings');
+            }}
+            onOpenExport={() => openExport('home')}
+          />
+        )}
       {screen === 'add' && (
         <AddFlow
           key={addTripId ? `add:trip:${addTripId}` : addInitialType ? `add:${addInitialType}` : 'add:default'}
@@ -757,11 +777,21 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           }}
           onOpenTax={() => setScreen('tax')}
           onOpenCurrencySettings={() => {
+            if (!isPro) {
+              openPaywall('multi_currency', 'settings');
+              return;
+            }
             setCurrencyOrigin('settings');
             setScreen('currencySettings');
           }}
           onOpenBackup={() => setScreen('backup')}
-          onOpenWidgetCustomizer={() => setScreen('widgetCustomizer')}
+          onOpenWidgetCustomizer={() => {
+            if (!isPro) {
+              openPaywall('widget_custom', 'settings');
+              return;
+            }
+            setScreen('widgetCustomizer');
+          }}
           taxRequestableCount={taxRequestableCount}
           onResetToOnboarding={() => setScreen('home')}
         />
@@ -852,7 +882,13 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       {screen === 'networth' && (
         <NetWorthScreen
           onBack={goBack}
-          onOpenHistory={() => setScreen('netWorthHistory')}
+          onOpenHistory={() => {
+            if (!isPro) {
+              openPaywall('networth_history', 'networth');
+              return;
+            }
+            setScreen('netWorthHistory');
+          }}
           onOpenOwed={() => {
             setOwedOrigin('networth');
             setScreen('owed');
@@ -860,6 +896,14 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
         />
       )}
       {screen === 'netWorthHistory' && <NetWorthHistoryScreen onBack={goBack} />}
+      {screen === 'paywall' && (
+        <PaywallScreen
+          trigger={paywallTrigger}
+          onClose={() => setScreen(paywallOrigin)}
+          t={translations}
+          locale={language === 'zh' ? 'zh-CN' : 'en-MY'}
+        />
+      )}
       {screen === 'breakdown' && (
         <BreakdownScreen
           onBack={goBack}
@@ -888,6 +932,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       <GlossaryModal />
       <AppAlertModal />
     </View>
+    </PaywallProvider>
   );
 }
 
