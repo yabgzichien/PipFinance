@@ -41,13 +41,15 @@ function getPlayer(): AudioPlayer | null {
   try {
     // mixWithOthers so a podcast or a playlist keeps running underneath the chime, and
     // playsInSilentMode false so the iOS silent switch means silent, with no in-app override.
-    void setAudioModeAsync({
-      playsInSilentMode: false,
-      shouldPlayInBackground: false,
-      interruptionMode: 'mixWithOthers',
-    }).catch(() => {
-      // A refused audio-session config still leaves the chime playable at system defaults.
-    });
+    if (Platform.OS !== 'web') {
+      void setAudioModeAsync({
+        playsInSilentMode: false,
+        shouldPlayInBackground: false,
+        interruptionMode: 'mixWithOthers',
+      }).catch(() => {
+        // A refused audio-session config still leaves the chime playable at system defaults.
+      });
+    }
     player = createAudioPlayer(require('../../assets/sounds/saved.wav'));
     player.volume = VOLUME;
   } catch {
@@ -60,13 +62,15 @@ function getPlayer(): AudioPlayer | null {
 function getStoryPlayer(): AudioPlayer | null {
   if (storyPlayer || storyUnavailable) return storyPlayer;
   try {
-    void setAudioModeAsync({
-      playsInSilentMode: false,
-      shouldPlayInBackground: false,
-      interruptionMode: 'mixWithOthers',
-    }).catch(() => {
-      // System defaults are an acceptable fallback for this optional sting.
-    });
+    if (Platform.OS !== 'web') {
+      void setAudioModeAsync({
+        playsInSilentMode: false,
+        shouldPlayInBackground: false,
+        interruptionMode: 'mixWithOthers',
+      }).catch(() => {
+        // System defaults are an acceptable fallback for this optional sting.
+      });
+    }
     storyPlayer = createAudioPlayer(require('../../assets/sounds/monthly-story.wav'));
     storyPlayer.volume = STORY_VOLUME;
   } catch {
@@ -80,7 +84,7 @@ function getStoryPlayer(): AudioPlayer | null {
  *  the sound and the buzz read as one event (docs/ui-engagement-plan.md §1: reward the
  *  looking, never the state of the finances). */
 export function payoff(): void {
-  if (!enabled || Platform.OS === 'web') return;
+  if (!enabled) return;
   const active = getPlayer();
   if (!active) return;
   try {
@@ -98,7 +102,7 @@ export function payoff(): void {
 
 /** Starts the opening sting from its first beat. The story UI owns when this is called. */
 export function storyIntro(): void {
-  if (!enabled || Platform.OS === 'web') return;
+  if (!enabled) return;
   const startVersion = ++storyStartVersion;
   const active = getStoryPlayer();
   if (!active) return;
@@ -106,7 +110,7 @@ export function storyIntro(): void {
     void active
       .seekTo(0)
       .then(() => {
-        if (startVersion !== storyStartVersion || !enabled || Platform.OS === 'web') return;
+        if (startVersion !== storyStartVersion || !enabled) return;
         try {
           active.play();
         } catch {
@@ -124,7 +128,7 @@ export function storyIntro(): void {
 /** Holds the sting at its current position for the viewer's press-and-hold gesture. */
 export function pauseStoryIntro(): void {
   storyStartVersion += 1;
-  if (Platform.OS === 'web' || !storyPlayer) return;
+  if (!storyPlayer) return;
   try {
     storyPlayer.pause();
   } catch {
@@ -134,7 +138,7 @@ export function pauseStoryIntro(): void {
 
 /** Continues from the held position; deliberately does not seek or lazily create a player. */
 export function resumeStoryIntro(): void {
-  if (!enabled || Platform.OS === 'web' || !storyPlayer) return;
+  if (!enabled || !storyPlayer) return;
   try {
     storyPlayer.play();
   } catch {
@@ -144,7 +148,7 @@ export function resumeStoryIntro(): void {
 
 /** Ends story audio for navigation/close and leaves the existing player ready at the start. */
 export function stopStoryIntro(): void {
-  if (Platform.OS === 'web' || !storyPlayer) return;
+  if (!storyPlayer) return;
   pauseStoryIntro();
   try {
     void storyPlayer.seekTo(0).catch(() => {

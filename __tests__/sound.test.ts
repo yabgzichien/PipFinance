@@ -86,10 +86,11 @@ describe('payoff', () => {
     );
   });
 
-  it('stays silent on web, where the app ships no audio', () => {
+  it('plays payoff on web without setting native audio mode', () => {
     load('web').payoff();
-    expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
-    expect(mockPlay).not.toHaveBeenCalled();
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(expect.anything());
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    expect(mockSetAudioModeAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -250,13 +251,14 @@ describe('monthly story intro', () => {
     expect(mockPlay).not.toHaveBeenCalled();
   });
 
-  it('does not play or build the story player on web', () => {
+  it('plays the story intro on web without configuring native audio mode', async () => {
     const sound = load('web');
     sound.storyIntro();
-    sound.resumeStoryIntro();
+    await Promise.resolve();
 
-    expect(mockCreateAudioPlayer).not.toHaveBeenCalled();
-    expect(mockPlay).not.toHaveBeenCalled();
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(expect.anything());
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    expect(mockSetAudioModeAsync).not.toHaveBeenCalled();
   });
 
   it('silently gives up when the story player cannot be created', () => {
