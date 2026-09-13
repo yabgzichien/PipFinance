@@ -34,6 +34,11 @@ import { useAccent } from '../state/accent';
 import { useResolvedScheme, useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency, type DisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
+import { UPSELL_STATE_KEY, shouldShowUpsell, pickLine, type UpsellState } from '../billing/upsellCadence';
+import { PipUpsellCard, upsellLines } from '../components/PipUpsellCard';
+import { getMeta, setMeta } from '../db/metaRepo';
 import { shadowCard, spacing, uiFont } from '../theme';
 import { duration as motionDuration } from '../theme/motion';
 
@@ -134,6 +139,26 @@ export function DashboardScreen({
   } = useAppData();
   const taskStatus = useMemo(() => computeExploreTaskStatus(tasksDone), [tasksDone]);
   const [tasksSheetOpen, setTasksSheetOpen] = useState(false);
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
+  const [upsell, setUpsell] = useState<{ line: string; index: number } | null>(null);
+
+  useEffect(() => {
+    if (isPro) return;
+    void (async () => {
+      try {
+        const raw = await getMeta(UPSELL_STATE_KEY);
+        const state = raw ? (JSON.parse(raw) as UpsellState) : null;
+        if (!shouldShowUpsell(state, Date.now())) return;
+        const lines = upsellLines(t);
+        const index = pickLine(lines, state?.lastIndex ?? 0);
+        setUpsell({ line: lines[index], index });
+        await setMeta(UPSELL_STATE_KEY, JSON.stringify({ lastShownAt: Date.now(), lastIndex: index }));
+      } catch {
+        // Non-critical, ignore
+      }
+    })();
+  }, [isPro, t]);
 
   // A task completed elsewhere (e.g. exporting a report, or turning on a currency) surfaces its
   // one-shot toast here, the first time Home renders after it: pendingTaskCelebrations is a
@@ -379,6 +404,15 @@ export function DashboardScreen({
             </View>
           </View>
         </View>
+
+        {upsell && (
+          <PipUpsellCard
+            line={upsell.line}
+            t={t}
+            onDismiss={() => setUpsell(null)}
+            onPress={() => openPaywall('scan_quota', 'home')}
+          />
+        )}
 
         {empty ? (
           <EmptyState />
