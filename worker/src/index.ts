@@ -10,12 +10,13 @@ import {
   FREE_MONTHLY_LIMIT,
   type D1Database,
 } from './quota';
-import { callGeminiVision, callGroqVision } from './providers';
+import { callGeminiVision, callGroqVision, callOpenRouterVision } from './providers';
 
 export interface Env {
   DB: D1Database;
   GROQ_API_KEY?: string;
   GEMINI_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
   SALT?: string;
 }
 
@@ -123,24 +124,50 @@ export default {
         );
       }
 
-      // 2. Call provider securely
+      // 2. Call provider securely with cascade (Gemini -> Groq -> OpenRouter)
       let extractedItems: any[] = [];
-      try {
-        if (env.GROQ_API_KEY) {
-          extractedItems = await callGroqVision(env.GROQ_API_KEY, imageBase64, mimeType, categories || []);
-        } else if (env.GEMINI_API_KEY) {
+      let providerSucceeded = false;
+      let lastErr: any = null;
+
+      if (env.GEMINI_API_KEY) {
+        try {
           extractedItems = await callGeminiVision(env.GEMINI_API_KEY, imageBase64, mimeType, categories || []);
-        } else {
+          providerSucceeded = true;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+
+      if (!providerSucceeded && env.GROQ_API_KEY) {
+        try {
+          extractedItems = await callGroqVision(env.GROQ_API_KEY, imageBase64, mimeType, categories || []);
+          providerSucceeded = true;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+
+      if (!providerSucceeded && env.OPENROUTER_API_KEY) {
+        try {
+          extractedItems = await callOpenRouterVision(env.OPENROUTER_API_KEY, imageBase64, mimeType, categories || []);
+          providerSucceeded = true;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+
+      if (!providerSucceeded) {
+        if (!env.GEMINI_API_KEY && !env.GROQ_API_KEY && !env.OPENROUTER_API_KEY) {
           // Simulation/fallback for development if keys aren't provisioned yet
           extractedItems = [];
+        } else {
+          // Rollback quota on provider failure - user is not charged for failed scans
+          await rollbackReservation(env.DB, idempotencyKey);
+          return new Response(JSON.stringify({ ok: false, error: 'Provider execution failed' }), {
+            status: 502,
+            headers,
+          });
         }
-      } catch (err) {
-        // Rollback quota on provider failure - user is not charged for failed scans
-        await rollbackReservation(env.DB, idempotencyKey);
-        return new Response(JSON.stringify({ ok: false, error: 'Provider execution failed' }), {
-          status: 502,
-          headers,
-        });
       }
 
       // 3. Commit quota slot

@@ -5,5 +5,5 @@ compatibility_date = "2026-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "pip-quota-db"
-database_id = "local-pip-quota-db"
+database_id = "91d3c17c-e87c-4e41-aab0-1be5e0e79c06"
 migrations_dir = "migrations"

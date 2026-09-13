@@ -117,6 +117,69 @@ export async function callGeminiVision(
   return parseTransactionRows(parsed);
 }
 
+export async function callOpenRouterVision(
+  apiKeysRaw: string,
+  base64: string,
+  mime: string,
+  categories: ProviderCategory[],
+  model: string = 'google/gemini-2.0-flash-001'
+): Promise<ExtractedTxnRow[]> {
+  const keys = apiKeysRaw.split(',').map((k) => k.trim()).filter(Boolean);
+  let lastError: any = null;
+
+  for (const apiKey of keys) {
+    try {
+      const url = 'https://openrouter.ai/api/v1/chat/completions';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://pipfinance.app',
+          'X-Title': 'Pip Finance',
+        },
+        body: JSON.stringify({
+          model: model || 'google/gemini-2.0-flash-001',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: buildPrompt(categories) },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:${mime};base64,${base64}`,
+                  },
+                },
+              ],
+            },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.1,
+        }),
+      });
+
+      if (!response.ok) {
+        lastError = new Error(`OpenRouter API error: ${response.status}`);
+        continue;
+      }
+
+      const json: any = await response.json();
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        lastError = new Error('Empty OpenRouter response');
+        continue;
+      }
+      const parsed = JSON.parse(content);
+      return parseTransactionRows(parsed);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw lastError || new Error('All OpenRouter keys failed');
+}
+
 export function parseTransactionRows(data: any): ExtractedTxnRow[] {
   const list = Array.isArray(data) ? data : data?.transactions || data?.items || [];
   if (!Array.isArray(list)) return [];
