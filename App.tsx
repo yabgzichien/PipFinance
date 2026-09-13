@@ -51,6 +51,7 @@ import { ColorSchemeProvider, useColorSchemeMode, useThemeColors } from './src/s
 import { GlossaryProvider, useGlossary } from './src/state/glossary';
 import { LanguageProvider, useLanguage } from './src/i18n';
 import { AppDataProvider, useAppData } from './src/state/store';
+import { EntitlementProvider } from './src/billing/entitlement';
 import { useBackHandler, useExitConfirm } from './src/state/useBackHandler';
 import { useNow } from './src/state/useNow';
 import { useReminderSync } from './src/state/useReminderSync';
@@ -97,17 +98,19 @@ export default function App() {
       <PhoneFrame>
         <SafeAreaProvider>
           <AppDataProvider>
-            <AccentProvider>
-              <LanguageProvider>
-                <GlossaryProvider>
-                  <AlertHostProvider>
-                    <ErrorBoundary>
-                      <Root fontsLoaded={fontsLoaded} />
-                    </ErrorBoundary>
-                  </AlertHostProvider>
-                </GlossaryProvider>
-              </LanguageProvider>
-            </AccentProvider>
+            <EntitlementProvider>
+              <AccentProvider>
+                <LanguageProvider>
+                  <GlossaryProvider>
+                    <AlertHostProvider>
+                      <ErrorBoundary>
+                        <Root fontsLoaded={fontsLoaded} />
+                      </ErrorBoundary>
+                    </AlertHostProvider>
+                  </GlossaryProvider>
+                </LanguageProvider>
+              </AccentProvider>
+            </EntitlementProvider>
           </AppDataProvider>
           <ThemedStatusBar />
         </SafeAreaProvider>
