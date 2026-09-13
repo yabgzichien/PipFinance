@@ -1,6 +1,7 @@
 // src/lib/settingsSearch.ts
 
 export type SettingSectionKey =
+  | 'subscription'
   | 'appearance'
   | 'reminders'
   | 'learning'
@@ -9,6 +10,7 @@ export type SettingSectionKey =
   | 'danger';
 
 export type SettingItemKey =
+  | 'subscription'
   | 'theme'
   | 'language'
   | 'accent'
@@ -44,6 +46,31 @@ export interface SettingDefinition {
 }
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
+  {
+    key: 'subscription',
+    section: 'subscription',
+    sectionTitleEn: 'Pip Pro',
+    sectionTitleZh: 'Pip Pro',
+    titleEn: 'Pip Pro',
+    titleZh: 'Pip Pro',
+    keywords: [
+      'pro',
+      'subscription',
+      'upgrade',
+      'pip pro',
+      'restore',
+      'manage',
+      'cancel',
+      'membership',
+      'vip',
+      'premium',
+      '会员',
+      '订阅',
+      '恢复购买',
+      '取消订阅',
+      '高级版',
+    ],
+  },
   {
     key: 'theme',
     section: 'appearance',

@@ -12,6 +12,10 @@ import { clearMemory } from '../db/memoryRepo';
 import { isMultiCurrency } from '../lib/currency';
 import { fmtMoney } from '../lib/format';
 import { confirmAction, notify } from '../lib/platformAlert';
+import RevenueCatUI from 'react-native-purchases-ui';
+import { useEntitlement } from '../billing/entitlement';
+import { restore } from '../billing/purchases';
+import { usePaywall } from '../billing/paywallContext';
 import { filterSettings } from '../lib/settingsSearch';
 import { cadenceLabel, REMINDER_CADENCES } from '../lib/reminders';
 import * as sound from '../lib/sound';
@@ -33,6 +37,32 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
   const { memory, coverage, refreshAll, expectedIncome, allocations, hasBudget, resetBudget, resetAllData, resetToOnboarding, resetTutorial } = useAppData();
   const [activeCurrencies, setActiveCurrencies] = useState<string[]>(['MYR']);
   const [search, setSearch] = useState('');
+  const { isPro, refresh } = useEntitlement();
+  const { openPaywall } = usePaywall();
+
+  const onRestore = async () => {
+    try {
+      const tier = await restore();
+      await refresh();
+      if (tier === 'free') {
+        notify(t('proRestoreNothing'));
+      }
+    } catch {
+      notify(t('proStoreUnreachable'));
+    }
+  };
+
+  const onManage = async () => {
+    try {
+      if (Platform.OS === 'web') {
+        notify(t('proManage'), 'Manage your subscription in the Google Play Store.');
+        return;
+      }
+      await RevenueCatUI.presentCustomerCenter();
+    } catch {
+      notify(t('proStoreUnreachable'));
+    }
+  };
 
   useEffect(() => {
     getActiveCurrencies().then(setActiveCurrencies);
@@ -105,10 +135,13 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
     matchingKeys.has('data_tutorial') ||
     matchingKeys.has('data_diagnostics');
 
+  const hasVisibleSubscriptionCard = matchingKeys.has('subscription');
+
   const hasVisibleDangerCard =
     matchingKeys.has('danger_reset_all') || matchingKeys.has('danger_reset_setup');
 
   const hasAnyVisibleSetting =
+    hasVisibleSubscriptionCard ||
     hasVisibleAppearanceCard ||
     hasVisibleRemindersCard ||
     (matchingSections.has('learning') && matchingKeys.has('learning')) ||
@@ -305,6 +338,85 @@ export function SettingsScreen({ onBack, onAdvancedImport, onOpenExport, onOpenC
                 </Pressable>
               </View>
             </Card>
+          </>
+        )}
+
+        {matchingSections.has('subscription') && hasVisibleSubscriptionCard && (
+          <>
+            <Eyebrow style={{ marginTop: 26, marginBottom: 10 }}>{t('proTitle')}</Eyebrow>
+            <View style={{ gap: 12 }}>
+              {isPro ? (
+                <>
+                  <View
+                    style={[
+                      styles.providerRow,
+                      styles.migrateRow,
+                      { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                    ]}
+                  >
+                    <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                      <Icon name="sparkles" size={16} color={theme.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('proActive')}</Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={() => void onManage()}
+                    style={({ pressed }) => [
+                      styles.providerRow,
+                      styles.migrateRow,
+                      { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}
+                  >
+                    <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                      <Icon name="sliders" size={16} color={theme.accent} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('proManage')}</Text>
+                    </View>
+                    <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  onPress={() => openPaywall('scan_quota', 'settings')}
+                  style={({ pressed }) => [
+                    styles.providerRow,
+                    styles.migrateRow,
+                    { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                    { opacity: pressed ? 0.9 : 1 },
+                  ]}
+                >
+                  <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                    <Icon name="sparkles" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('proTitle')}</Text>
+                    <Text style={[styles.providerSub, { color: colorTheme.ink2 }]}>{t('proSubtitle')}</Text>
+                  </View>
+                  <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => void onRestore()}
+                style={({ pressed }) => [
+                  styles.providerRow,
+                  styles.migrateRow,
+                  { backgroundColor: colorTheme.surface, borderColor: colorTheme.line2 },
+                  { opacity: pressed ? 0.9 : 1 },
+                ]}
+              >
+                <View style={[styles.providerBadge, { backgroundColor: theme.accentTint }]}>
+                  <Icon name="return" size={16} color={theme.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.providerName, { color: colorTheme.ink }]}>{t('proRestore')}</Text>
+                </View>
+                <Icon name="chevronRight" size={18} color={colorTheme.ink3} />
+              </Pressable>
+            </View>
           </>
         )}
 
