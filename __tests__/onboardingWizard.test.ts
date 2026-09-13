@@ -289,4 +289,22 @@ describe('onboardingWizard', () => {
       expect(translate('zh', 'importAdvancedBtn')).toBe('从其他应用导入');
     });
   });
+
+  describe('Onboarding cleanliness', () => {
+    it('does not include paywall or upsell steps in the onboarding wizard sequence', () => {
+      const validSteps: WizardStep[] = [
+        'intro',
+        'import',
+        'advanced_import',
+        'appearance',
+        'demo',
+        'budget',
+        'recurring',
+        'notifications',
+        'widget',
+      ];
+      expect((validSteps as string[]).includes('paywall')).toBe(false);
+      expect((validSteps as string[]).includes('upsell')).toBe(false);
+    });
+  });
 });

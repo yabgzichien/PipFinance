@@ -27,6 +27,8 @@ import { useEntitlement } from '../billing/entitlement';
 import { usePaywall } from '../billing/paywallContext';
 import { submitScan } from '../billing/scanProxy';
 import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
+import { PipUpsellCard } from '../components/PipUpsellCard';
+import { fireOnce, getMomentLine, type UpsellMoment } from '../billing/moments';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useReducedMotion } from '../state/useReducedMotion';
@@ -79,6 +81,7 @@ export function ExtractScreen({
     refreshAllowance,
   } = useEntitlement();
   const { openPaywall } = usePaywall();
+  const [proCardMoment, setProCardMoment] = useState<UpsellMoment | null>(null);
   const [phase, setPhase] = useState<Phase>(cachedItems ? 'result' : 'scanning');
   const [items, setItems] = useState<ExtractedTxn[]>(cachedItems ?? []);
   const [error, setError] = useState('');
@@ -202,6 +205,13 @@ export function ExtractScreen({
         setItems(rows);
         onItemsExtracted?.(rows);
         setPhase('result');
+        if (!isPro && rows.length > 0) {
+          void (async () => {
+            if (await fireOnce('first_scan')) {
+              if (alive) setProCardMoment('first_scan');
+            }
+          })();
+        }
       } catch (e) {
         if (!alive) return;
         setError(llmErrorMessage(e));
@@ -334,6 +344,15 @@ export function ExtractScreen({
             </PipSays>
           )}
         </View>
+
+        {proCardMoment === 'first_scan' && (
+          <PipUpsellCard
+            line={getMomentLine('first_scan', isZh)}
+            t={t}
+            onDismiss={() => setProCardMoment(null)}
+            onPress={() => openPaywall('scan_quota', 'add')}
+          />
+        )}
 
         {/* picked image preview with scanline, tappable to view full-screen */}
         <Pressable onPress={() => setViewingPhoto(true)} style={{ paddingHorizontal: 18, paddingTop: 18 }}>

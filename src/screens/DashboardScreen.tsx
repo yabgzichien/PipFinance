@@ -37,8 +37,10 @@ import { useLanguage } from '../i18n';
 import { useEntitlement } from '../billing/entitlement';
 import { usePaywall } from '../billing/paywallContext';
 import { UPSELL_STATE_KEY, shouldShowUpsell, pickLine, type UpsellState } from '../billing/upsellCadence';
+import { fireOnce, getMomentLine, reliefThresholdCrossed, type UpsellMoment } from '../billing/moments';
 import { PipUpsellCard, upsellLines } from '../components/PipUpsellCard';
 import { getMeta, setMeta } from '../db/metaRepo';
+import { listReliefTags } from '../db/reliefRepo';
 import { shadowCard, spacing, uiFont } from '../theme';
 import { duration as motionDuration } from '../theme/motion';
 
@@ -142,6 +144,8 @@ export function DashboardScreen({
   const { isPro } = useEntitlement();
   const { openPaywall } = usePaywall();
   const [upsell, setUpsell] = useState<{ line: string; index: number } | null>(null);
+  const [proCardMoment, setProCardMoment] = useState<UpsellMoment | null>(null);
+  const [reliefAmount, setReliefAmount] = useState<string>('1,000');
 
   useEffect(() => {
     if (isPro) return;
@@ -159,6 +163,40 @@ export function DashboardScreen({
       }
     })();
   }, [isPro, t]);
+
+  useEffect(() => {
+    if (isPro) return;
+    if (streak.count >= 7) {
+      void (async () => {
+        try {
+          if (await fireOnce('streak_7')) {
+            setProCardMoment('streak_7');
+          }
+        } catch {
+          // Non-critical, ignore
+        }
+      })();
+    }
+  }, [isPro, streak.count]);
+
+  useEffect(() => {
+    if (isPro) return;
+    void (async () => {
+      try {
+        const currentYear = new Date().getFullYear();
+        const tags = await listReliefTags(currentYear);
+        const total = tags.reduce((sum, tag) => sum + tag.amount, 0);
+        if (reliefThresholdCrossed(total)) {
+          if (await fireOnce('relief_threshold')) {
+            setReliefAmount(total.toLocaleString());
+            setProCardMoment('relief_threshold');
+          }
+        }
+      } catch {
+        // Non-critical, ignore
+      }
+    })();
+  }, [isPro]);
 
   // A task completed elsewhere (e.g. exporting a report, or turning on a currency) surfaces its
   // one-shot toast here, the first time Home renders after it: pendingTaskCelebrations is a
@@ -405,14 +443,29 @@ export function DashboardScreen({
           </View>
         </View>
 
-        {upsell && (
+        {proCardMoment ? (
+          <PipUpsellCard
+            line={getMomentLine(proCardMoment, isZh, { reliefAmount })}
+            t={t}
+            onDismiss={() => setProCardMoment(null)}
+            onPress={() => {
+              if (proCardMoment === 'streak_7') {
+                openPaywall('report_export', 'home');
+              } else if (proCardMoment === 'relief_threshold') {
+                openPaywall('tax_export', 'home');
+              } else {
+                openPaywall('scan_quota', 'home');
+              }
+            }}
+          />
+        ) : upsell ? (
           <PipUpsellCard
             line={upsell.line}
             t={t}
             onDismiss={() => setUpsell(null)}
             onPress={() => openPaywall('scan_quota', 'home')}
           />
-        )}
+        ) : null}
 
         {empty ? (
           <EmptyState />
