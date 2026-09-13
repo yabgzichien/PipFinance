@@ -59,6 +59,7 @@
     "react-native": "0.81.5",
     "react-native-android-widget": "^0.22.1",
     "react-native-document-scanner-plugin": "^2.0.4",
+    "react-native-purchases": "^10.9.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.12.1",
     "react-native-view-shot": "4.0.3",
