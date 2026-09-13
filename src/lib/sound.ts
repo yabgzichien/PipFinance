@@ -73,6 +73,7 @@ function getStoryPlayer(): AudioPlayer | null {
     }
     storyPlayer = createAudioPlayer(require('../../assets/sounds/monthly-story.wav'));
     storyPlayer.volume = STORY_VOLUME;
+    storyPlayer.loop = true;
   } catch {
     storyUnavailable = true;
     return null;

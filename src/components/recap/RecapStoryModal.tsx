@@ -91,17 +91,36 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
   }, [progress, autoplay, state.paused, state.completed, total]);
 
   useEffect(() => {
-    if (autoplay && !state.muted && scene.id === 'ritual' && playedCycle.current !== state.cycle) {
+    if (!autoplay || state.muted || state.completed) {
+      if (soundActive.current) {
+        soundActive.current = false;
+        if (!autoplay || state.completed) {
+          stopStoryIntro();
+        } else {
+          pauseStoryIntro();
+        }
+      }
+      return;
+    }
+
+    if (playedCycle.current !== state.cycle) {
       playedCycle.current = state.cycle;
       soundActive.current = true;
       storyIntro();
+    } else if (!soundActive.current) {
+      soundActive.current = true;
+      resumeStoryIntro();
     }
-    return () => { soundActive.current = false; stopStoryIntro(); };
-  }, [autoplay, state.muted, state.cycle, scene.id]);
+  }, [autoplay, state.muted, state.completed, state.cycle]);
+
+  useEffect(() => {
+    return () => {
+      soundActive.current = false;
+      stopStoryIntro();
+    };
+  }, []);
 
   function navigate(event: PlaybackEvent) {
-    soundActive.current = false;
-    stopStoryIntro();
     progress.stopAnimation();
     setRestart((value) => value + 1);
     dispatch(event);

@@ -1,6 +1,6 @@
 import type { MotionSetting } from '../theme/motion';
 
-export const STORY_DURATION_MS = 5000;
+export const STORY_DURATION_MS = 7500;
 
 export interface PlaybackState {
   index: number;

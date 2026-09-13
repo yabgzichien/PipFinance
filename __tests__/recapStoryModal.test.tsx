@@ -62,12 +62,12 @@ afterEach(() => {
   jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks();
 });
 
-it('advances at five seconds and stops after the last scene', () => {
+it('advances at 7.5 seconds and stops after the last scene', () => {
   const tree = render();
-  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(7499); expect(frame(tree).scene.id).toBe('ritual');
   advance(1); expect(frame(tree).scene.id).toBe('identity');
-  advance(5000); expect(frame(tree).scene.id).toBe('finale');
-  advance(5000); expect(tree.root.findByProps({ testID: 'story-progress' }).props.accessibilityValue.now).toBe(100);
+  advance(7500); expect(frame(tree).scene.id).toBe('finale');
+  advance(7500); expect(tree.root.findByProps({ testID: 'story-progress' }).props.accessibilityValue.now).toBe(100);
   advance(15000); expect(frame(tree).scene.id).toBe('finale');
 });
 
@@ -85,35 +85,36 @@ it('one threshold-crossing swipe navigates once, with its direction taking prece
   grant(0); release(80, 300); expect(frame(tree).scene.id).toBe('ritual');
 });
 
-it('holds the current progress and resumes only its remaining three seconds', () => {
+it('holds the current progress and resumes only its remaining duration', () => {
   const tree = render(); advance(2000); grant();
   const held = frame(tree).progress.__getValue();
-  expect(held).toBeCloseTo(0.4, 2);
+  expect(held).toBeCloseTo(2000 / 7500, 2);
   advance(8000); expect(frame(tree).progress.__getValue()).toBeCloseTo(held, 2);
   expect(frame(tree).scene.id).toBe('ritual');
-  release(); advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+  release(); advance(5499); expect(frame(tree).scene.id).toBe('ritual');
   advance(1); expect(frame(tree).scene.id).toBe('identity');
 });
 
 it('previous restarts a card including the clamped first card', () => {
   const tree = render(); advance(3000); press(tree, 'Previous');
-  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(7499); expect(frame(tree).scene.id).toBe('ritual');
   advance(1); expect(frame(tree).scene.id).toBe('identity');
   advance(2000); press(tree, 'Previous');
-  advance(4999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(7499); expect(frame(tree).scene.id).toBe('ritual');
   advance(1); expect(frame(tree).scene.id).toBe('identity');
 });
 
-it('plays once per cycle, pauses/resumes a held ritual, and stops for navigation or mute', () => {
+it('plays continuously across scenes, pauses/resumes on hold or mute, and restarts on replay', () => {
   const tree = render(); expect(sound.storyIntro).toHaveBeenCalledTimes(1);
   advance(500); grant(); expect(sound.pauseStoryIntro).toHaveBeenCalledTimes(1);
   advance(600); release(); expect(sound.resumeStoryIntro).toHaveBeenCalledTimes(1);
-  press(tree, 'Next'); expect(sound.stopStoryIntro).toHaveBeenCalled();
-  press(tree, 'Previous'); expect(sound.storyIntro).toHaveBeenCalledTimes(1);
+  press(tree, 'Next');
+  expect(sound.pauseStoryIntro).toHaveBeenCalledTimes(1);
+  press(tree, 'Previous');
+  expect(sound.pauseStoryIntro).toHaveBeenCalledTimes(1);
+  press(tree, 'Mute'); expect(sound.pauseStoryIntro).toHaveBeenCalledTimes(2);
+  press(tree, 'Unmute'); expect(sound.resumeStoryIntro).toHaveBeenCalledTimes(2);
   press(tree, 'Replay'); expect(sound.storyIntro).toHaveBeenCalledTimes(2);
-  press(tree, 'Mute'); expect(sound.stopStoryIntro).toHaveBeenCalled();
-  press(tree, 'Unmute'); expect(sound.storyIntro).toHaveBeenCalledTimes(2);
-  press(tree, 'Replay'); expect(sound.storyIntro).toHaveBeenCalledTimes(3);
 });
 
 it.each([['reduced', false], ['off', false], ['full', true]])('motion %s OS reduction %s uses manual navigation and no sound', (motion, reduced) => {
@@ -190,14 +191,14 @@ it('a visible pause control preserves its pause through a hold, and play continu
   expect(tree.root.findByProps({ testID: 'story-status' }).props.accessibilityLabel).toBe('Paused');
   grant(); advance(1000); release(); advance(6000);
   expect(frame(tree).scene.id).toBe('ritual');
-  press(tree, 'Play'); advance(3000);
+  press(tree, 'Play'); advance(5500);
   expect(frame(tree).scene.id).toBe('identity');
 });
 
 it('a cancelled hold resumes without navigation and duplicate swipe releases do not advance again', () => {
   const tree = render(); advance(2000); grant(); advance(1000);
   Renderer.act(() => gesture.onPanResponderTerminate());
-  advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+  advance(5499); expect(frame(tree).scene.id).toBe('ritual');
   advance(1); expect(frame(tree).scene.id).toBe('identity');
   grant(); release(-48); release(-80);
   expect(frame(tree).scene.id).toBe('finale');
@@ -211,7 +212,7 @@ it('turning motion off stops active audio and autoplay, with no new sound on re-
   advance(10000); expect(frame(tree).scene.id).toBe('ritual');
   mockMotion = 'full';
   Renderer.act(() => tree.update(<RecapStoryModal {...defaults} />));
-  advance(3000); expect(frame(tree).scene.id).toBe('identity');
+  advance(5500); expect(frame(tree).scene.id).toBe('identity');
   expect(sound.storyIntro).toHaveBeenCalledTimes(1);
 });
 
@@ -265,7 +266,7 @@ it.each(['held release', 'termination', 'tap', 'swipe'] as const)(
       expect(create).toHaveBeenCalledTimes(1);
       if (action === 'held release' || action === 'termination') {
         expect(sound.resumeStoryIntro).toHaveBeenCalledTimes(1);
-        advance(2999); expect(frame(tree).scene.id).toBe('ritual');
+        advance(5499); expect(frame(tree).scene.id).toBe('ritual');
         advance(1); expect(frame(tree).scene.id).toBe('identity');
       } else {
         expect(sound.resumeStoryIntro).not.toHaveBeenCalled();

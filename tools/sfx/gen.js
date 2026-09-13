@@ -51,13 +51,126 @@ const DEFAULT_VOICE = 'triad';
  *             noise?: NoiseHit[] }} Voice
  */
 
+/**
+ * Synthesizes a relaxing, original, non-copyrighted 12-second lo-fi progression.
+ * Designed to loop cleanly in expo-audio during Pip's Monthly Wrapped story.
+ * @returns {Voice}
+ */
+function createStoryMelodyVoice() {
+  /** @type {Note[]} */
+  const notes = [];
+  /** @type {NoiseHit[]} */
+  const noise = [];
+
+  // 1. Chords (Fmaj7 -> G6 -> Em7 -> Am7)
+  const chords = [
+    { at: 0.0, freqs: [174.61, 220.0, 261.63, 329.63] }, // F3, A3, C4, E4
+    { at: 3.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G3, B3, D4, G4
+    { at: 6.0, freqs: [164.81, 196.0, 246.94, 293.66] }, // E3, G3, B3, D4
+    { at: 9.0, freqs: [220.0, 261.63, 329.63, 392.0] },  // A3, C4, E4, G4
+  ];
+  for (const chord of chords) {
+    for (const freq of chord.freqs) {
+      notes.push({
+        freq,
+        at: chord.at,
+        gain: 0.28,
+        decaySec: 2.7,
+        attackSec: 0.03,
+        partials: [
+          { ratio: 2, gain: 0.15, decayScale: 0.6 },
+          { ratio: 3, gain: 0.05, decayScale: 0.4 },
+        ],
+      });
+    }
+  }
+
+  // 2. Warm sub-bass fundamentals
+  const bassNotes = [
+    { freq: 87.31, at: 0.0, decaySec: 2.6, gain: 0.5 },
+    { freq: 130.81, at: 1.5, decaySec: 1.3, gain: 0.3 },
+    { freq: 98.0, at: 3.0, decaySec: 2.6, gain: 0.5 },
+    { freq: 146.83, at: 4.5, decaySec: 1.3, gain: 0.3 },
+    { freq: 82.41, at: 6.0, decaySec: 2.6, gain: 0.5 },
+    { freq: 123.47, at: 7.5, decaySec: 1.3, gain: 0.3 },
+    { freq: 110.0, at: 9.0, decaySec: 2.6, gain: 0.5 },
+    { freq: 164.81, at: 10.5, decaySec: 1.3, gain: 0.3 },
+  ];
+  for (const b of bassNotes) {
+    notes.push({
+      freq: b.freq,
+      at: b.at,
+      gain: b.gain,
+      decaySec: b.decaySec,
+      attackSec: 0.02,
+      partials: [{ ratio: 2, gain: 0.08, decayScale: 0.5 }],
+    });
+  }
+
+  // 3. Acoustic marimba / kalimba bell lead
+  const melody = [
+    // Bar 1 (Fmaj7)
+    { freq: 523.25, at: 0.0, gain: 0.45 },
+    { freq: 659.25, at: 0.75, gain: 0.48 },
+    { freq: 783.99, at: 1.5, gain: 0.5 },
+    { freq: 880.0, at: 2.25, gain: 0.48 },
+    // Bar 2 (G6)
+    { freq: 987.77, at: 3.0, gain: 0.5 },
+    { freq: 783.99, at: 3.75, gain: 0.46 },
+    { freq: 587.33, at: 4.5, gain: 0.44 },
+    { freq: 659.25, at: 5.25, gain: 0.42 },
+    // Bar 3 (Em7)
+    { freq: 783.99, at: 6.0, gain: 0.48 },
+    { freq: 659.25, at: 6.75, gain: 0.44 },
+    { freq: 523.25, at: 7.5, gain: 0.42 },
+    { freq: 587.33, at: 8.25, gain: 0.44 },
+    // Bar 4 (Am7 resolving for loop)
+    { freq: 659.25, at: 9.0, gain: 0.46 },
+    { freq: 587.33, at: 9.75, gain: 0.42 },
+    { freq: 523.25, at: 10.5, gain: 0.4 },
+    { freq: 493.88, at: 11.25, gain: 0.38 },
+  ];
+  for (const m of melody) {
+    notes.push({
+      freq: m.freq,
+      at: m.at,
+      gain: m.gain,
+      decaySec: 0.46,
+      attackSec: 0.005,
+      partials: [
+        { ratio: 4, gain: 0.12, decayScale: 0.35 },
+        { ratio: 2, gain: 0.08, decayScale: 0.5 },
+      ],
+    });
+  }
+
+  // 4. Soft lo-fi texture (whisper shakers & gentle kick hits)
+  for (let t = 0; t < 12.0; t += 0.375) {
+    noise.push({ freq: 2400, at: t, gain: 0.04, decaySec: 0.02 });
+  }
+  for (let t = 0; t < 12.0; t += 1.5) {
+    notes.push({ freq: 85, at: t, gain: 0.15, decaySec: 0.08, attackSec: 0.005, dropSemis: -6 });
+  }
+
+  return {
+    label: 'Story Soundtrack — cozy non-copyrighted lo-fi marimba & Rhodes progression for Pip stories.',
+    durationSec: 12.0,
+    peak: 0.65,
+    releaseSec: 0.08,
+    lowpassHz: 3400,
+    lowpassPoles: 2,
+    noise,
+    notes,
+  };
+}
+
 /** @type {Record<string, Voice>} */
 const VOICES = {
   /**
-   * Four compact, inharmonic bell strikes make a jaunty heel-toe rhythm without quoting a
-   * melody. Each strike gets its own filtered contact burst; the final tail fades safely
-   * inside the two-second container.
+   * Continuous, non-copyrighted lo-fi soundtrack for the monthly story experience.
+   * Procedurally synthesized with acoustic marimba plucks, warm Rhodes chords, and gentle bass.
    */
+  storyMelody: createStoryMelodyVoice(),
   cowbell: {
     label: 'Cowbell — four warm, inharmonic taps for the monthly story opening.',
     durationSec: 2.0,
@@ -488,6 +601,6 @@ if (argv.includes('--all')) {
   const dir = flag('--out') ?? path.join(__dirname, 'preview');
   for (const name of Object.keys(VOICES)) write(name, path.join(dir, `${name}.wav`));
 } else {
-  if (argv.includes('--story')) write('cowbell', STORY_SHIPPED);
+  if (argv.includes('--story')) write('storyMelody', STORY_SHIPPED);
   else write(flag('--voice') ?? DEFAULT_VOICE, flag('--out') ?? SHIPPED);
 }

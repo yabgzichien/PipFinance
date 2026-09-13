@@ -133,6 +133,7 @@ describe('monthly story intro', () => {
 
     expect(mockCreateAudioPlayer).toHaveBeenCalledWith(storyAsset);
     expect(mockCreateAudioPlayer.mock.results[0].value.volume).toBe(0.5);
+    expect(mockCreateAudioPlayer.mock.results[0].value.loop).toBe(true);
     expect(mockSeekTo).toHaveBeenCalledWith(0);
     await Promise.resolve();
     expect(mockPlay).toHaveBeenCalledTimes(1);

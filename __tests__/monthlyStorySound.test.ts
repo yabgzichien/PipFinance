@@ -24,10 +24,10 @@ describe('monthly-story.wav', () => {
     expect(wav.readUInt32LE(40)).toBe(wav.length - HEADER_BYTES);
   });
 
-  it('lasts between 1.9 and 2.1 seconds', () => {
+  it('lasts between 11.9 and 12.1 seconds for loopable playback', () => {
     const seconds = (wav.length - HEADER_BYTES) / 2 / 44100;
-    expect(seconds).toBeGreaterThanOrEqual(1.9);
-    expect(seconds).toBeLessThanOrEqual(2.1);
+    expect(seconds).toBeGreaterThanOrEqual(11.9);
+    expect(seconds).toBeLessThanOrEqual(12.1);
   });
 
   it('contains audible audio with no more than 70% peak amplitude', () => {
