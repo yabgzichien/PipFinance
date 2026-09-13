@@ -1,5 +1,5 @@
 import React from 'react';
-import Renderer from 'react-test-renderer';
+const Renderer = require('react-test-renderer');
 import { RecapEntry } from '../src/components/recap/RecapEntry';
 import { DancingCow } from '../src/components/recap/DancingCow';
 import * as store from '../src/state/store';
@@ -34,9 +34,9 @@ function makeTxn(overrides: Partial<Transaction> = {}): Transaction {
   };
 }
 
-function press(tree: Renderer.ReactTestRenderer, label: string) {
+function press(tree: any, label: string) {
   const buttons = tree.root.findAll(
-    (n) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === label || n.props.children === label)
+    (n: any) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === label || n.props.children === label)
   );
   if (buttons.length === 0) {
     throw new Error(`Button with label "${label}" not found`);
@@ -76,9 +76,9 @@ describe('RecapEntry', () => {
     expect(tree!.root.findAllByType(DancingCow).length).toBe(1);
 
     // Check copy
-    const textNodes = tree!.root.findAll((n) => typeof n.props.children === 'string');
-    const texts = textNodes.map((n) => n.props.children);
-    expect(texts.some((t) => t.includes('Your monthly story is ready'))).toBe(true);
+    const textNodes = tree!.root.findAll((n: any) => typeof n.props.children === 'string');
+    const texts = textNodes.map((n: any) => n.props.children);
+    expect(texts.some((t: any) => t.includes('Your monthly story is ready'))).toBe(true);
 
     // Does not auto open
     expect(onOpenStory).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe('RecapEntry', () => {
   });
 
   it('hides when day is outside window or when month is already handled', () => {
-    let treeDay8: Renderer.ReactTestRenderer;
+    let treeDay8: any;
     Renderer.act(() => {
       treeDay8 = Renderer.create(
         <RecapEntry
@@ -98,7 +98,7 @@ describe('RecapEntry', () => {
     });
     expect(treeDay8!.toJSON()).toBeNull();
 
-    let treeHandled: Renderer.ReactTestRenderer;
+    let treeHandled: any;
     Renderer.act(() => {
       treeHandled = Renderer.create(
         <RecapEntry
@@ -112,7 +112,7 @@ describe('RecapEntry', () => {
   });
 
   it('hides when previous month has no eligible data', () => {
-    let treeEmpty: Renderer.ReactTestRenderer;
+    let treeEmpty: any;
     Renderer.act(() => {
       treeEmpty = Renderer.create(
         <RecapEntry
@@ -124,7 +124,7 @@ describe('RecapEntry', () => {
     });
     expect(treeEmpty!.toJSON()).toBeNull();
 
-    let treeTransfersOnly: Renderer.ReactTestRenderer;
+    let treeTransfersOnly: any;
     Renderer.act(() => {
       treeTransfersOnly = Renderer.create(
         <RecapEntry
@@ -141,7 +141,7 @@ describe('RecapEntry', () => {
     const onDismiss = jest.fn();
     const onOpenStory = jest.fn();
 
-    let tree: Renderer.ReactTestRenderer;
+    let tree: any;
     Renderer.act(() => {
       tree = Renderer.create(
         <RecapEntry
@@ -155,7 +155,7 @@ describe('RecapEntry', () => {
     });
 
     const dismissButton = tree!.root.findAll(
-      (n) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === 'Not now' || n.props.testID === 'recap-entry-dismiss')
+      (n: any) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === 'Not now' || n.props.testID === 'recap-entry-dismiss')
     )[0];
     await Renderer.act(async () => {
       await dismissButton.props.onPress();
@@ -170,7 +170,7 @@ describe('RecapEntry', () => {
     const onDismiss = jest.fn();
     const onOpenStory = jest.fn();
 
-    let tree: Renderer.ReactTestRenderer;
+    let tree: any;
     Renderer.act(() => {
       tree = Renderer.create(
         <RecapEntry
@@ -184,7 +184,7 @@ describe('RecapEntry', () => {
     });
 
     const openButton = tree!.root.findAll(
-      (n) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === 'View your month' || n.props.testID === 'recap-entry-open')
+      (n: any) => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === 'View your month' || n.props.testID === 'recap-entry-open')
     )[0];
     await Renderer.act(async () => {
       await openButton.props.onPress();

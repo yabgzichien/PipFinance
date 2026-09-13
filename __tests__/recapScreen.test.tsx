@@ -1,6 +1,12 @@
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: jest.fn(),
+  setAudioModeAsync: jest.fn(),
+}));
+
 import React from 'react';
 import { RecapScreen } from '../src/screens/RecapScreen';
-import { RecapEntry } from '../src/components/recap/RecapEntry';
+import { RecapStoryModal } from '../src/components/recap/RecapStoryModal';
+import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
 import type { Transaction } from '../src/lib/types';
 
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -22,6 +28,9 @@ const mockState = {
   transactions: [] as Transaction[], catById: { dining: { id: 'dining', label: 'Dining', icon: 'utensils', hue: 20, kind: 'expense' } },
   snapshots: {}, accounts: [], balanceEntries: [], memory: {}, trips: [],
   coverage: { daysCovered: 0, windowDays: 90 }, markTaskDone: jest.fn(),
+  widgetMascotConfig: DEFAULT_WIDGET_MASCOT_CONFIG,
+  motionSetting: 'full' as const,
+  soundEnabled: true,
 };
 jest.mock('../src/state/store', () => ({ useAppData: () => mockState }));
 const TestRenderer = require('react-test-renderer');
@@ -139,16 +148,82 @@ it('uses the selected historical month for calendar, export, and navigation rest
   expect(onMonthChange).toHaveBeenCalledWith('2026-09');
 });
 
-it('opens the completed month from Home and hides the entry when only this month has data', () => {
-  const onOpen = jest.fn();
-  const now = new Date(2026, 8, 9);
-  let tree: any;
-  TestRenderer.act(() => {
-    tree = TestRenderer.create(<RecapEntry transactions={[expense({ date: '2026-08-12' })]} now={now} onOpen={onOpen} />);
-  });
-  trees.push(tree);
-  press(tree, 'View 2026-08 recap');
-  expect(onOpen).toHaveBeenCalledWith('2026-08');
-  TestRenderer.act(() => { tree.update(<RecapEntry transactions={[expense()]} now={now} onOpen={onOpen} />); });
-  expect(tree.toJSON()).toBeNull();
+it('shows View monthly story for eligible completed months and hides it for ineligible/current/future months', () => {
+  const storyButtons = (t: any) => t.root.findAll((n: any) => n.props.accessibilityLabel === 'View monthly story' && typeof n.type === 'string');
+  mockState.transactions = [expense({ date: '2026-08-10' })];
+  const tree = render({ initialMonth: '2026-08' });
+  expect(storyButtons(tree)).toHaveLength(1);
+
+  // Current month (2026-09) has no story button
+  const treeCurrent = render({ initialMonth: '2026-09' });
+  expect(storyButtons(treeCurrent)).toHaveLength(0);
+
+  // Empty or transfer-only month has no story button
+  mockState.transactions = [expense({ type: 'transfer', date: '2026-08-10' })];
+  const treeTransfer = render({ initialMonth: '2026-08' });
+  expect(storyButtons(treeTransfer)).toHaveLength(0);
+});
+
+it('opens sparse and full story models with the correct scene count', () => {
+  mockState.transactions = [expense({ date: '2026-08-10' })];
+  const treeSparse = render({ initialMonth: '2026-08' });
+  press(treeSparse, 'View monthly story');
+  const modalSparse = treeSparse.root.findByType(RecapStoryModal);
+  expect(modalSparse.props.visible).toBe(true);
+  expect(modalSparse.props.model.kind).toBe('sparse');
+  expect(modalSparse.props.model.scenes).toHaveLength(3);
+
+  mockState.transactions = [
+    expense({ date: '2026-08-01' }),
+    expense({ date: '2026-08-01' }),
+    expense({ date: '2026-08-02' }),
+    expense({ date: '2026-08-03' }),
+    expense({ date: '2026-08-03' }),
+  ];
+  const treeFull = render({ initialMonth: '2026-08' });
+  press(treeFull, 'View monthly story');
+  const modalFull = treeFull.root.findByType(RecapStoryModal);
+  expect(modalFull.props.visible).toBe(true);
+  expect(modalFull.props.model.kind).toBe('full');
+  expect(modalFull.props.model.scenes).toHaveLength(5);
+});
+
+it('initialStoryOpen opens exactly once and calls onInitialStoryHandled', () => {
+  const onInitialStoryHandled = jest.fn();
+  mockState.transactions = [expense({ date: '2026-08-10' })];
+  const tree = render({ initialMonth: '2026-08', initialStoryOpen: true, onInitialStoryHandled });
+  expect(onInitialStoryHandled).toHaveBeenCalledTimes(1);
+  const modal = tree.root.findByType(RecapStoryModal);
+  expect(modal.props.visible).toBe(true);
+
+  // When target month is ineligible, onInitialStoryHandled is still called without opening
+  const onHandledIneligible = jest.fn();
+  mockState.transactions = [];
+  const treeIneligible = render({ initialMonth: '2026-08', initialStoryOpen: true, onInitialStoryHandled: onHandledIneligible });
+  expect(onHandledIneligible).toHaveBeenCalledTimes(1);
+  expect(treeIneligible.root.findAllByType(RecapStoryModal).filter((m: any) => m.props.visible)).toHaveLength(0);
+});
+
+it('changing the selected recap month closes the old model and rebuilds the new eligible model', () => {
+  mockState.transactions = [
+    expense({ date: '2026-07-10' }),
+    expense({ date: '2026-08-01' }),
+    expense({ date: '2026-08-01' }),
+    expense({ date: '2026-08-02' }),
+    expense({ date: '2026-08-03' }),
+    expense({ date: '2026-08-03' }),
+  ];
+  const onMonthChange = jest.fn();
+  const tree = render({ initialMonth: '2026-08', onMonthChange });
+  press(tree, 'View monthly story');
+  expect(tree.root.findByType(RecapStoryModal).props.model.month).toBe('2026-08');
+  expect(tree.root.findByType(RecapStoryModal).props.model.kind).toBe('full');
+
+  press(tree, 'Select month');
+  press(tree, '2026-07');
+  expect(tree.root.findAllByType(RecapStoryModal).filter((m: any) => m.props.visible)).toHaveLength(0);
+
+  press(tree, 'View monthly story');
+  expect(tree.root.findByType(RecapStoryModal).props.model.month).toBe('2026-07');
+  expect(tree.root.findByType(RecapStoryModal).props.model.kind).toBe('sparse');
 });

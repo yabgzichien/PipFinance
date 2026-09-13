@@ -6,6 +6,9 @@ import { Pip } from '../components/Pip';
 import { TripMonthSection } from '../components/TripMonthSection';
 import { RecapTransactionsSheet } from '../components/recap/RecapTransactionsSheet';
 import { Body, CatBadge, Display, Label, Title } from '../components/ui';
+import { RecapStoryModal } from '../components/recap/RecapStoryModal';
+import { buildRecapStoryModel } from '../lib/recapStory';
+import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../widget/mascot/config';
 import { currentMonthKey, txnMonthKey } from '../lib/budget';
 import { fmtMoney, formatCurrencyBreakdown } from '../lib/format';
 import { nativeTransactionTotalsByCurrency } from '../lib/bookkeeping';
@@ -24,7 +27,7 @@ import { radius, spacing } from '../theme';
 
 const fallback: Category = { id: 'other', label: 'Other', icon: 'dots', hue: 220, kind: 'expense', isDefault: true, isHidden: false, templateKey: null, labelOverride: null, iconOverride: null, hueOverride: null };
 
-export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, onAdd, initialMonth, onMonthChange }: {
+export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, onAdd, initialMonth, onMonthChange, initialStoryOpen, onInitialStoryHandled }: {
   onBack: () => void;
   onOpenCalendar?: (month: string) => void;
   onOpenExport?: (month: string) => void;
@@ -32,6 +35,8 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
   onAdd?: () => void;
   initialMonth?: string;
   onMonthChange?: (month: string) => void;
+  initialStoryOpen?: boolean;
+  onInitialStoryHandled?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const accent = useAccent();
@@ -39,7 +44,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
   const { width, fontScale } = useWindowDimensions();
   const compact = width < 360 || fontScale > 1.25;
   const { t, tCat, formatMonthLabel, isZh } = useLanguage();
-  const { transactions, catById, snapshots, accounts, balanceEntries, memory, markTaskDone } = useAppData();
+  const { transactions, catById, snapshots, accounts, balanceEntries, memory, markTaskDone, widgetMascotConfig = DEFAULT_WIDGET_MASCOT_CONFIG } = useAppData();
   const now = useNow();
   const todayMonth = currentMonthKey(now);
   const reduced = useReducedMotion();
@@ -53,6 +58,23 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
   const [transactionCategory, setTransactionCategory] = useState<string | null | undefined>(undefined);
   const months = useMemo(() => availableMonths(transactions, Object.keys(snapshots), now), [transactions, snapshots, todayMonth]); // eslint-disable-line react-hooks/exhaustive-deps
   const month = months.includes(selected) ? selected : todayMonth;
+  const storyModel = useMemo(() => buildRecapStoryModel({ transactions, month, now }), [transactions, month, now]);
+  const [storyOpen, setStoryOpen] = useState(false);
+  const handledInitialStoryRef = useRef(false);
+
+  useEffect(() => {
+    if (!initialStoryOpen) {
+      handledInitialStoryRef.current = false;
+      return;
+    }
+    if (!handledInitialStoryRef.current) {
+      handledInitialStoryRef.current = true;
+      if (storyModel) {
+        setStoryOpen(true);
+      }
+      onInitialStoryHandled?.();
+    }
+  }, [initialStoryOpen, storyModel, onInitialStoryHandled]);
   const current = month === todayMonth;
   const future = month > todayMonth;
   const summary = useMemo(() => monthlyRecapSummary(transactions, month, dc.convertTxn), [transactions, month, dc.code, dc.rates]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -85,6 +107,7 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
   const chooseMonth = (next: string) => {
     haptics.tap();
     setSelected(next);
+    setStoryOpen(false);
     setPickerOpen(false);
     setAllCategories(false);
     setDetailsOpen(false);
@@ -265,10 +288,21 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
                 )}
               </>
             )}
-            {(onOpenCalendar || onOpenExport) && <View style={[styles.actions, { borderTopColor: colors.line }]}>
-              {onOpenCalendar && <ActionButton icon="calendar" label={isZh ? '日历' : 'Calendar'} accessibilityLabel={isZh ? '查看活动日历' : 'View activity calendar'} onPress={() => onOpenCalendar(month)} />}
-              {onOpenExport && <ActionButton icon="download" label={isZh ? '导出' : 'Export'} accessibilityLabel={isZh ? '导出报表' : 'Export statement'} onPress={() => onOpenExport(month)} />}
-            </View>}
+            {(!!storyModel || onOpenCalendar || onOpenExport) && (
+              <View style={[styles.actions, { borderTopColor: colors.line }]}>
+                {storyModel && (
+                  <ActionButton
+                    icon="sparkles"
+                    label={isZh ? '月度故事' : 'Monthly story'}
+                    accessibilityLabel={isZh ? '查看月度故事' : 'View monthly story'}
+                    onPress={() => setStoryOpen(true)}
+                    primary
+                  />
+                )}
+                {onOpenCalendar && <ActionButton icon="calendar" label={isZh ? '日历' : 'Calendar'} accessibilityLabel={isZh ? '查看活动日历' : 'View activity calendar'} onPress={() => onOpenCalendar(month)} />}
+                {onOpenExport && <ActionButton icon="download" label={isZh ? '导出' : 'Export'} accessibilityLabel={isZh ? '导出报表' : 'Export statement'} onPress={() => onOpenExport(month)} />}
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -290,17 +324,43 @@ export function RecapScreen({ onBack, onOpenCalendar, onOpenExport, onOpenTrip, 
           </View>
         </View>
       </Modal>
+      {storyModel && (
+        <RecapStoryModal
+          visible={storyOpen}
+          model={storyModel}
+          mascotConfig={widgetMascotConfig}
+          onClose={() => setStoryOpen(false)}
+        />
+      )}
       {transactionCategory !== undefined && <RecapTransactionsSheet month={month} categoryId={transactionCategory} transactions={transactions} categoryFor={categoryFor} onClose={() => setTransactionCategory(undefined)} />}
     </View>
   );
 }
 
-function ActionButton({ icon, label, accessibilityLabel, onPress }: { icon: IconName; label: string; accessibilityLabel: string; onPress: () => void }) {
+function ActionButton({ icon, label, accessibilityLabel, onPress, primary = false }: {
+  icon: IconName;
+  label: string;
+  accessibilityLabel: string;
+  onPress: () => void;
+  primary?: boolean;
+}) {
   const colors = useThemeColors();
-  return <Pressable onPress={() => { haptics.tap(); onPress(); }} accessibilityRole="button" accessibilityLabel={accessibilityLabel} style={({ pressed }) => [styles.actionButton, pressed && { backgroundColor: colors.surface2 }]}>
-    <Icon name={icon} size={18} color={colors.ink2} />
-    <Label weight={500} color={colors.ink2}>{label}</Label>
-  </Pressable>;
+  const accent = useAccent();
+  return (
+    <Pressable
+      onPress={() => { haptics.tap(); onPress(); }}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={({ pressed }) => [
+        styles.actionButton,
+        primary && { backgroundColor: accent.accentTint },
+        pressed && { backgroundColor: primary ? accent.accentSoft : colors.surface2 },
+      ]}
+    >
+      <Icon name={icon} size={18} color={primary ? accent.accent : colors.ink2} />
+      <Label weight={primary ? 700 : 500} color={primary ? accent.accent : colors.ink2}>{label}</Label>
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
