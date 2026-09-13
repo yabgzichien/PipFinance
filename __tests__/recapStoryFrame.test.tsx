@@ -175,3 +175,17 @@ it('combines localized position with meaningful summary and hides duplicate chil
   expect(root.props.accessibilityLabel).toContain('4 active weeks');
   expect(tree.root.findByProps({ testID: 'story-artwork' }).props.importantForAccessibility).toBe('no-hide-descendants');
 });
+
+it('renders December winter celebration theme colors and title when month is 2026-12', () => {
+  const tree = render(scenes[0], { month: '2026-12', monthLabel: 'December 2026' });
+  const root = tree.root.findByProps({ testID: 'recap-story-capture-frame' });
+  expect(StyleSheet.flatten(root.props.style).backgroundColor).toBe('#E0F2FE');
+  expect(copy(tree)).toContain('Christmas & Winter Joy');
+});
+
+it('renders February Chinese New Year celebration theme colors and title when month is 2026-02', () => {
+  const tree = render(scenes[0], { month: '2026-02', monthLabel: 'February 2026' });
+  const root = tree.root.findByProps({ testID: 'recap-story-capture-frame' });
+  expect(StyleSheet.flatten(root.props.style).backgroundColor).toBe('#FEE2E2');
+  expect(copy(tree)).toContain('Chinese New Year');
+});

@@ -126,7 +126,7 @@ describe('setSoundEnabled', () => {
 
 describe('monthly story intro', () => {
   it('lazily builds the story player at half volume, rewinds it, and plays the new asset', async () => {
-    const storyAsset = require('../assets/sounds/monthly-story.wav');
+    const storyAsset = require('../assets/sounds/stories/story-08.wav');
     const sound = load();
 
     sound.storyIntro();
@@ -137,6 +137,30 @@ describe('monthly story intro', () => {
     expect(mockSeekTo).toHaveBeenCalledWith(0);
     await Promise.resolve();
     expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads month-specific soundtrack asset based on YYYY-MM', async () => {
+    const decAsset = require('../assets/sounds/stories/story-12.wav');
+    const sound = load();
+
+    sound.storyIntro('2026-12');
+
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(decAsset);
+    await Promise.resolve();
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('switches soundtrack asset when month changes', async () => {
+    const decAsset = require('../assets/sounds/stories/story-12.wav');
+    const febAsset = require('../assets/sounds/stories/story-02.wav');
+    const sound = load();
+
+    sound.storyIntro('2026-12');
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(decAsset);
+
+    sound.storyIntro('2026-02');
+    expect(mockCreateAudioPlayer).toHaveBeenCalledWith(febAsset);
+    expect(mockCreateAudioPlayer).toHaveBeenCalledTimes(2);
   });
 
   it('does not play while the opening rewind is still pending', () => {

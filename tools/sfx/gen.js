@@ -35,6 +35,7 @@ const SAMPLE_RATE = 44100;
 const BIT_DEPTH = 16;
 const SHIPPED = path.join(__dirname, '..', '..', 'assets', 'sounds', 'saved.wav');
 const STORY_SHIPPED = path.join(__dirname, '..', '..', 'assets', 'sounds', 'monthly-story.wav');
+const STORIES_DIR = path.join(__dirname, '..', '..', 'assets', 'sounds', 'stories');
 
 /** The voice written to assets/sounds/saved.wav by a bare `node tools/sfx/gen.js`. */
 const DEFAULT_VOICE = 'triad';
@@ -51,25 +52,344 @@ const DEFAULT_VOICE = 'triad';
  *             noise?: NoiseHit[] }} Voice
  */
 
+function getMonthComposition(m) {
+  switch (m) {
+    case '01': // New Year Sparks
+      return {
+        label: 'Jan - New Year Sparks: celebration chimes & bells',
+        lowpassHz: 3600,
+        chords: [
+          { at: 0.0, freqs: [146.83, 220.0, 293.66, 369.99] }, // Dmaj7
+          { at: 3.0, freqs: [196.0, 246.94, 293.66, 369.99] },  // Gmaj7
+          { at: 6.0, freqs: [123.47, 185.0, 246.94, 293.66] },  // Bm7
+          { at: 9.0, freqs: [110.0, 220.0, 277.18, 329.63] },  // A7
+        ],
+        bass: [
+          { at: 0.0, freq: 73.42 }, { at: 1.5, freq: 110.0 },
+          { at: 3.0, freq: 98.0 }, { at: 4.5, freq: 146.83 },
+          { at: 6.0, freq: 123.47 }, { at: 7.5, freq: 92.5 },
+          { at: 9.0, freq: 110.0 }, { at: 10.5, freq: 82.41 },
+        ],
+        melody: [
+          { at: 0.0, freq: 739.99 }, { at: 0.75, freq: 880.0 }, { at: 1.5, freq: 987.77 }, { at: 2.25, freq: 1108.73 },
+          { at: 3.0, freq: 1174.66 }, { at: 3.75, freq: 987.77 }, { at: 4.5, freq: 880.0 }, { at: 5.25, freq: 739.99 },
+          { at: 6.0, freq: 659.25 }, { at: 6.75, freq: 739.99 }, { at: 7.5, freq: 880.0 }, { at: 8.25, freq: 1174.66 },
+          { at: 9.0, freq: 1108.73 }, { at: 9.75, freq: 987.77 }, { at: 10.5, freq: 880.0 }, { at: 11.25, freq: 739.99 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.18, decayScale: 0.6 }, { ratio: 3, gain: 0.08, decayScale: 0.4 }, { ratio: 4.5, gain: 0.04, decayScale: 0.3 }],
+        noiseFreq: 3600,
+      };
+
+    case '02': // Chinese New Year
+      return {
+        label: 'Feb - Chinese New Year: pentatonic bell chimes & gong rhythm',
+        lowpassHz: 3500,
+        chords: [
+          { at: 0.0, freqs: [130.81, 196.0, 261.63, 329.63] }, // C
+          { at: 3.0, freqs: [196.0, 261.63, 293.66, 392.0] },  // Gsus4
+          { at: 6.0, freqs: [220.0, 261.63, 329.63, 440.0] },  // Am7
+          { at: 9.0, freqs: [174.61, 261.63, 293.66, 349.23] }, // Fadd9
+        ],
+        bass: [
+          { at: 0.0, freq: 65.41 }, { at: 1.5, freq: 98.0 },
+          { at: 3.0, freq: 98.0 }, { at: 4.5, freq: 146.83 },
+          { at: 6.0, freq: 110.0 }, { at: 7.5, freq: 82.41 },
+          { at: 9.0, freq: 87.31 }, { at: 10.5, freq: 130.81 },
+        ],
+        gong: [0.0, 3.0, 6.0, 9.0],
+        melody: [
+          { at: 0.0, freq: 659.25 }, { at: 0.75, freq: 783.99 }, { at: 1.5, freq: 880.0 }, { at: 2.25, freq: 783.99 },
+          { at: 3.0, freq: 1046.5 }, { at: 3.75, freq: 880.0 }, { at: 4.5, freq: 783.99 }, { at: 5.25, freq: 659.25 },
+          { at: 6.0, freq: 587.33 }, { at: 6.75, freq: 659.25 }, { at: 7.5, freq: 783.99 }, { at: 8.25, freq: 880.0 },
+          { at: 9.0, freq: 783.99 }, { at: 9.75, freq: 659.25 }, { at: 10.5, freq: 587.33 }, { at: 11.25, freq: 523.25 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.16, decayScale: 0.5 }, { ratio: 3, gain: 0.06, decayScale: 0.3 }],
+        noiseFreq: 2200,
+      };
+
+    case '03': // Spring Awakening
+      return {
+        label: 'Mar - Spring Awakening: breezy marimba & woodwind arpeggios',
+        lowpassHz: 3400,
+        chords: [
+          { at: 0.0, freqs: [174.61, 246.94, 261.63, 329.63] }, // Fmaj7#11
+          { at: 3.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G6
+          { at: 6.0, freqs: [220.0, 246.94, 261.63, 329.63] }, // Am9
+          { at: 9.0, freqs: [130.81, 196.0, 246.94, 329.63] }, // Cmaj7
+        ],
+        bass: [
+          { at: 0.0, freq: 87.31 }, { at: 1.5, freq: 130.81 },
+          { at: 3.0, freq: 98.0 }, { at: 4.5, freq: 146.83 },
+          { at: 6.0, freq: 110.0 }, { at: 7.5, freq: 82.41 },
+          { at: 9.0, freq: 65.41 }, { at: 10.5, freq: 98.0 },
+        ],
+        melody: [
+          { at: 0.0, freq: 523.25 }, { at: 0.75, freq: 659.25 }, { at: 1.5, freq: 880.0 }, { at: 2.25, freq: 987.77 },
+          { at: 3.0, freq: 783.99 }, { at: 3.75, freq: 587.33 }, { at: 4.5, freq: 659.25 }, { at: 5.25, freq: 783.99 },
+          { at: 6.0, freq: 987.77 }, { at: 6.75, freq: 880.0 }, { at: 7.5, freq: 659.25 }, { at: 8.25, freq: 783.99 },
+          { at: 9.0, freq: 659.25 }, { at: 9.75, freq: 587.33 }, { at: 10.5, freq: 523.25 }, { at: 11.25, freq: 440.0 },
+        ],
+        melodyPartials: [{ ratio: 3, gain: 0.12, decayScale: 0.4 }, { ratio: 2, gain: 0.1, decayScale: 0.5 }],
+        noiseFreq: 2600,
+      };
+
+    case '04': // Pastel Sakura
+      return {
+        label: 'Apr - Pastel Sakura: romantic music box & soft chords',
+        lowpassHz: 3300,
+        chords: [
+          { at: 0.0, freqs: [155.56, 233.08, 293.66, 349.23] }, // Ebmaj7
+          { at: 3.0, freqs: [174.61, 207.65, 261.63, 311.13] }, // Fm7
+          { at: 6.0, freqs: [196.0, 233.08, 293.66, 349.23] },  // Gm7
+          { at: 9.0, freqs: [207.65, 261.63, 311.13, 392.0] },  // Abmaj7
+        ],
+        bass: [
+          { at: 0.0, freq: 77.78 }, { at: 1.5, freq: 116.54 },
+          { at: 3.0, freq: 87.31 }, { at: 4.5, freq: 130.81 },
+          { at: 6.0, freq: 98.0 }, { at: 7.5, freq: 146.83 },
+          { at: 9.0, freq: 103.83 }, { at: 10.5, freq: 77.78 },
+        ],
+        melody: [
+          { at: 0.0, freq: 783.99 }, { at: 0.75, freq: 932.33 }, { at: 1.5, freq: 1046.5 }, { at: 2.25, freq: 932.33 },
+          { at: 3.0, freq: 830.61 }, { at: 3.75, freq: 783.99 }, { at: 4.5, freq: 698.46 }, { at: 5.25, freq: 622.25 },
+          { at: 6.0, freq: 783.99 }, { at: 6.75, freq: 932.33 }, { at: 7.5, freq: 1174.66 }, { at: 8.25, freq: 1046.5 },
+          { at: 9.0, freq: 932.33 }, { at: 9.75, freq: 830.61 }, { at: 10.5, freq: 783.99 }, { at: 11.25, freq: 698.46 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.2, decayScale: 0.7 }, { ratio: 4, gain: 0.08, decayScale: 0.4 }],
+        noiseFreq: 3000,
+      };
+
+    case '05': // Golden Sun & Picnic
+      return {
+        label: 'May - Golden Sun & Picnic: cheerful kalimba & acoustic sunshine',
+        lowpassHz: 3500,
+        chords: [
+          { at: 0.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G
+          { at: 3.0, freqs: [130.81, 196.0, 246.94, 329.63] }, // Cmaj7
+          { at: 6.0, freqs: [164.81, 196.0, 246.94, 329.63] }, // Em7
+          { at: 9.0, freqs: [146.83, 220.0, 293.66, 369.99] }, // D7
+        ],
+        bass: [
+          { at: 0.0, freq: 98.0 }, { at: 1.5, freq: 146.83 },
+          { at: 3.0, freq: 65.41 }, { at: 4.5, freq: 98.0 },
+          { at: 6.0, freq: 82.41 }, { at: 7.5, freq: 123.47 },
+          { at: 9.0, freq: 73.42 }, { at: 10.5, freq: 110.0 },
+        ],
+        melody: [
+          { at: 0.0, freq: 493.88 }, { at: 0.75, freq: 587.33 }, { at: 1.5, freq: 783.99 }, { at: 2.25, freq: 880.0 },
+          { at: 3.0, freq: 987.77 }, { at: 3.75, freq: 880.0 }, { at: 4.5, freq: 783.99 }, { at: 5.25, freq: 659.25 },
+          { at: 6.0, freq: 783.99 }, { at: 6.75, freq: 987.77 }, { at: 7.5, freq: 1174.66 }, { at: 8.25, freq: 987.77 },
+          { at: 9.0, freq: 880.0 }, { at: 9.75, freq: 783.99 }, { at: 10.5, freq: 659.25 }, { at: 11.25, freq: 587.33 },
+        ],
+        melodyPartials: [{ ratio: 3, gain: 0.15, decayScale: 0.35 }, { ratio: 2, gain: 0.08, decayScale: 0.5 }],
+        noiseFreq: 2800,
+      };
+
+    case '06': // Dragon Boat Festival
+      return {
+        label: 'Jun - Dragon Boat Festival: bamboo drums & pentatonic wave plucks',
+        lowpassHz: 3400,
+        chords: [
+          { at: 0.0, freqs: [146.83, 220.0, 261.63, 293.66] }, // Dm
+          { at: 3.0, freqs: [174.61, 220.0, 261.63, 349.23] }, // F
+          { at: 6.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G
+          { at: 9.0, freqs: [220.0, 261.63, 329.63, 440.0] },  // Am
+        ],
+        bass: [
+          { at: 0.0, freq: 73.42 }, { at: 1.5, freq: 110.0 },
+          { at: 3.0, freq: 87.31 }, { at: 4.5, freq: 130.81 },
+          { at: 6.0, freq: 98.0 }, { at: 7.5, freq: 146.83 },
+          { at: 9.0, freq: 110.0 }, { at: 10.5, freq: 82.41 },
+        ],
+        bambooDrums: true,
+        melody: [
+          { at: 0.0, freq: 587.33 }, { at: 0.75, freq: 698.46 }, { at: 1.5, freq: 783.99 }, { at: 2.25, freq: 880.0 },
+          { at: 3.0, freq: 1046.5 }, { at: 3.75, freq: 880.0 }, { at: 4.5, freq: 783.99 }, { at: 5.25, freq: 698.46 },
+          { at: 6.0, freq: 783.99 }, { at: 6.75, freq: 880.0 }, { at: 7.5, freq: 1046.5 }, { at: 8.25, freq: 1174.66 },
+          { at: 9.0, freq: 1046.5 }, { at: 9.75, freq: 880.0 }, { at: 10.5, freq: 698.46 }, { at: 11.25, freq: 587.33 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.16, decayScale: 0.5 }, { ratio: 4, gain: 0.06, decayScale: 0.3 }],
+        noiseFreq: 2400,
+      };
+
+    case '07': // Midsummer Festival
+      return {
+        label: 'Jul - Midsummer Festival: tropical steel-pan & playful marimba',
+        lowpassHz: 3600,
+        chords: [
+          { at: 0.0, freqs: [233.08, 293.66, 349.23, 466.16] }, // Bb
+          { at: 3.0, freqs: [155.56, 233.08, 311.13, 392.0] },  // Eb
+          { at: 6.0, freqs: [174.61, 220.0, 261.63, 349.23] },  // F
+          { at: 9.0, freqs: [196.0, 233.08, 293.66, 392.0] },   // Gm
+        ],
+        bass: [
+          { at: 0.0, freq: 116.54 }, { at: 1.5, freq: 87.31 },
+          { at: 3.0, freq: 77.78 }, { at: 4.5, freq: 116.54 },
+          { at: 6.0, freq: 87.31 }, { at: 7.5, freq: 130.81 },
+          { at: 9.0, freq: 98.0 }, { at: 10.5, freq: 146.83 },
+        ],
+        melody: [
+          { at: 0.0, freq: 698.46 }, { at: 0.75, freq: 932.33 }, { at: 1.5, freq: 1174.66 }, { at: 2.25, freq: 1046.5 },
+          { at: 3.0, freq: 932.33 }, { at: 3.75, freq: 783.99 }, { at: 4.5, freq: 698.46 }, { at: 5.25, freq: 783.99 },
+          { at: 6.0, freq: 932.33 }, { at: 6.75, freq: 1046.5 }, { at: 7.5, freq: 1174.66 }, { at: 8.25, freq: 1396.91 },
+          { at: 9.0, freq: 1174.66 }, { at: 9.75, freq: 1046.5 }, { at: 10.5, freq: 932.33 }, { at: 11.25, freq: 698.46 },
+        ],
+        melodyPartials: [{ ratio: 1.58, gain: 0.2, decayScale: 0.4 }, { ratio: 2.3, gain: 0.1, decayScale: 0.3 }, { ratio: 3.1, gain: 0.05, decayScale: 0.2 }],
+        noiseFreq: 3100,
+      };
+
+    case '08': // Pip Anniversary
+    default:
+      return {
+        label: 'Aug - Pip Anniversary: cozy lo-fi Rhodes & marimba groove',
+        lowpassHz: 3400,
+        chords: [
+          { at: 0.0, freqs: [174.61, 220.0, 261.63, 329.63] }, // Fmaj7
+          { at: 3.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G6
+          { at: 6.0, freqs: [164.81, 196.0, 246.94, 293.66] }, // Em7
+          { at: 9.0, freqs: [220.0, 261.63, 329.63, 392.0] },  // Am7
+        ],
+        bass: [
+          { at: 0.0, freq: 87.31 }, { at: 1.5, freq: 130.81 },
+          { at: 3.0, freq: 98.0 }, { at: 4.5, freq: 146.83 },
+          { at: 6.0, freq: 82.41 }, { at: 7.5, freq: 123.47 },
+          { at: 9.0, freq: 110.0 }, { at: 10.5, freq: 164.81 },
+        ],
+        melody: [
+          { at: 0.0, freq: 523.25 }, { at: 0.75, freq: 659.25 }, { at: 1.5, freq: 783.99 }, { at: 2.25, freq: 880.0 },
+          { at: 3.0, freq: 987.77 }, { at: 3.75, freq: 783.99 }, { at: 4.5, freq: 587.33 }, { at: 5.25, freq: 659.25 },
+          { at: 6.0, freq: 783.99 }, { at: 6.75, freq: 659.25 }, { at: 7.5, freq: 523.25 }, { at: 8.25, freq: 587.33 },
+          { at: 9.0, freq: 659.25 }, { at: 9.75, freq: 587.33 }, { at: 10.5, freq: 523.25 }, { at: 11.25, freq: 493.88 },
+        ],
+        melodyPartials: [{ ratio: 4, gain: 0.12, decayScale: 0.35 }, { ratio: 2, gain: 0.08, decayScale: 0.5 }],
+        noiseFreq: 2400,
+      };
+
+    case '09': // Mid-Autumn Moon
+      return {
+        label: 'Sep - Mid-Autumn Moon: Guzheng & bamboo windchimes',
+        lowpassHz: 3300,
+        chords: [
+          { at: 0.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G
+          { at: 3.0, freqs: [164.81, 196.0, 246.94, 329.63] }, // Em7
+          { at: 6.0, freqs: [130.81, 196.0, 246.94, 329.63] }, // Cmaj7
+          { at: 9.0, freqs: [146.83, 220.0, 293.66, 369.99] }, // D7
+        ],
+        bass: [
+          { at: 0.0, freq: 98.0 }, { at: 1.5, freq: 146.83 },
+          { at: 3.0, freq: 82.41 }, { at: 4.5, freq: 123.47 },
+          { at: 6.0, freq: 65.41 }, { at: 7.5, freq: 98.0 },
+          { at: 9.0, freq: 73.42 }, { at: 10.5, freq: 110.0 },
+        ],
+        melody: [
+          { at: 0.0, freq: 587.33 }, { at: 0.75, freq: 659.25 }, { at: 1.5, freq: 783.99 }, { at: 2.25, freq: 987.77 },
+          { at: 3.0, freq: 1174.66 }, { at: 3.75, freq: 987.77 }, { at: 4.5, freq: 880.0 }, { at: 5.25, freq: 783.99 },
+          { at: 6.0, freq: 659.25 }, { at: 6.75, freq: 783.99 }, { at: 7.5, freq: 880.0 }, { at: 8.25, freq: 987.77 },
+          { at: 9.0, freq: 880.0 }, { at: 9.75, freq: 783.99 }, { at: 10.5, freq: 659.25 }, { at: 11.25, freq: 587.33 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.16, decayScale: 0.5 }, { ratio: 3, gain: 0.08, decayScale: 0.35 }],
+        noiseFreq: 3400,
+      };
+
+    case '10': // Halloween Twilight
+      return {
+        label: 'Oct - Halloween Twilight: playful spooky pizzicato & dancing music box',
+        lowpassHz: 3500,
+        chords: [
+          { at: 0.0, freqs: [146.83, 220.0, 293.66, 349.23] }, // Dm
+          { at: 3.0, freqs: [196.0, 233.08, 293.66, 392.0] },  // Gm
+          { at: 6.0, freqs: [233.08, 293.66, 349.23, 466.16] }, // Bb
+          { at: 9.0, freqs: [110.0, 220.0, 277.18, 329.63] },  // A7
+        ],
+        bass: [
+          { at: 0.0, freq: 73.42 }, { at: 1.5, freq: 110.0 },
+          { at: 3.0, freq: 98.0 }, { at: 4.5, freq: 146.83 },
+          { at: 6.0, freq: 116.54 }, { at: 7.5, freq: 87.31 },
+          { at: 9.0, freq: 110.0 }, { at: 10.5, freq: 82.41 },
+        ],
+        melody: [
+          { at: 0.0, freq: 587.33 }, { at: 0.75, freq: 698.46 }, { at: 1.5, freq: 880.0 }, { at: 2.25, freq: 932.33 },
+          { at: 3.0, freq: 783.99 }, { at: 3.75, freq: 932.33 }, { at: 4.5, freq: 1174.66 }, { at: 5.25, freq: 1108.73 },
+          { at: 6.0, freq: 1174.66 }, { at: 6.75, freq: 932.33 }, { at: 7.5, freq: 783.99 }, { at: 8.25, freq: 698.46 },
+          { at: 9.0, freq: 659.25 }, { at: 9.75, freq: 783.99 }, { at: 10.5, freq: 554.37 }, { at: 11.25, freq: 587.33 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.15, decayScale: 0.4 }, { ratio: 3, gain: 0.08, decayScale: 0.25 }],
+        melodyDecay: 0.28,
+        noiseFreq: 2600,
+      };
+
+    case '11': // Warm Hearth & Gratitude
+      return {
+        label: 'Nov - Warm Hearth & Gratitude: hearthside jazz piano & brush swing',
+        lowpassHz: 3200,
+        chords: [
+          { at: 0.0, freqs: [130.81, 196.0, 246.94, 293.66, 329.63] }, // Cmaj9
+          { at: 3.0, freqs: [146.83, 220.0, 261.63, 311.13, 349.23] }, // Dm9
+          { at: 6.0, freqs: [164.81, 196.0, 246.94, 293.66, 329.63] }, // Em7
+          { at: 9.0, freqs: [98.0, 196.0, 246.94, 329.63, 349.23] },   // G13
+        ],
+        bass: [
+          { at: 0.0, freq: 65.41 }, { at: 1.5, freq: 98.0 },
+          { at: 3.0, freq: 73.42 }, { at: 4.5, freq: 110.0 },
+          { at: 6.0, freq: 82.41 }, { at: 7.5, freq: 123.47 },
+          { at: 9.0, freq: 98.0 }, { at: 10.5, freq: 146.83 },
+        ],
+        melody: [
+          { at: 0.0, freq: 523.25 }, { at: 0.75, freq: 659.25 }, { at: 1.5, freq: 783.99 }, { at: 2.25, freq: 987.77 },
+          { at: 3.0, freq: 1174.66 }, { at: 3.75, freq: 880.0 }, { at: 4.5, freq: 1046.5 }, { at: 5.25, freq: 1318.51 },
+          { at: 6.0, freq: 987.77 }, { at: 6.75, freq: 783.99 }, { at: 7.5, freq: 659.25 }, { at: 8.25, freq: 1174.66 },
+          { at: 9.0, freq: 987.77 }, { at: 9.75, freq: 880.0 }, { at: 10.5, freq: 783.99 }, { at: 11.25, freq: 523.25 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.12, decayScale: 0.5 }, { ratio: 3, gain: 0.04, decayScale: 0.3 }],
+        noiseFreq: 2200,
+      };
+
+    case '12': // Christmas & Winter Joy
+      return {
+        label: 'Dec - Christmas & Winter Joy: sleigh bells & holiday music box',
+        lowpassHz: 3500,
+        chords: [
+          { at: 0.0, freqs: [130.81, 196.0, 261.63, 329.63] }, // C
+          { at: 3.0, freqs: [174.61, 220.0, 261.63, 329.63] }, // Fmaj7
+          { at: 6.0, freqs: [146.83, 220.0, 261.63, 349.23] }, // Dm7
+          { at: 9.0, freqs: [196.0, 246.94, 293.66, 349.23] }, // G7
+        ],
+        bass: [
+          { at: 0.0, freq: 65.41 }, { at: 1.5, freq: 98.0 },
+          { at: 3.0, freq: 87.31 }, { at: 4.5, freq: 130.81 },
+          { at: 6.0, freq: 73.42 }, { at: 7.5, freq: 110.0 },
+          { at: 9.0, freq: 98.0 }, { at: 10.5, freq: 146.83 },
+        ],
+        sleighBells: true,
+        melody: [
+          { at: 0.0, freq: 659.25 }, { at: 0.75, freq: 783.99 }, { at: 1.5, freq: 1046.5 }, { at: 2.25, freq: 987.77 },
+          { at: 3.0, freq: 880.0 }, { at: 3.75, freq: 698.46 }, { at: 4.5, freq: 587.33 }, { at: 5.25, freq: 698.46 },
+          { at: 6.0, freq: 783.99 }, { at: 6.75, freq: 987.77 }, { at: 7.5, freq: 1174.66 }, { at: 8.25, freq: 1046.5 },
+          { at: 9.0, freq: 987.77 }, { at: 9.75, freq: 880.0 }, { at: 10.5, freq: 783.99 }, { at: 11.25, freq: 659.25 },
+        ],
+        melodyPartials: [{ ratio: 2, gain: 0.18, decayScale: 0.6 }, { ratio: 4, gain: 0.08, decayScale: 0.35 }],
+        noiseFreq: 4800,
+      };
+  }
+}
+
 /**
- * Synthesizes a relaxing, original, non-copyrighted 12-second lo-fi progression.
+ * Synthesizes a relaxing, original, non-copyrighted 12-second lo-fi progression
+ * tailored for each calendar month celebration (01..12).
  * Designed to loop cleanly in expo-audio during Pip's Monthly Wrapped story.
+ * @param {string} month
  * @returns {Voice}
  */
-function createStoryMelodyVoice() {
+function createMonthlyStoryVoice(month) {
+  const m = String(month).padStart(2, '0');
+  const comp = getMonthComposition(m);
   /** @type {Note[]} */
   const notes = [];
   /** @type {NoiseHit[]} */
   const noise = [];
 
-  // 1. Chords (Fmaj7 -> G6 -> Em7 -> Am7)
-  const chords = [
-    { at: 0.0, freqs: [174.61, 220.0, 261.63, 329.63] }, // F3, A3, C4, E4
-    { at: 3.0, freqs: [196.0, 246.94, 293.66, 392.0] },  // G3, B3, D4, G4
-    { at: 6.0, freqs: [164.81, 196.0, 246.94, 293.66] }, // E3, G3, B3, D4
-    { at: 9.0, freqs: [220.0, 261.63, 329.63, 392.0] },  // A3, C4, E4, G4
-  ];
-  for (const chord of chords) {
+  // 1. Chords
+  for (const chord of comp.chords) {
     for (const freq of chord.freqs) {
       notes.push({
         freq,
@@ -85,83 +405,85 @@ function createStoryMelodyVoice() {
     }
   }
 
-  // 2. Warm sub-bass fundamentals
-  const bassNotes = [
-    { freq: 87.31, at: 0.0, decaySec: 2.6, gain: 0.5 },
-    { freq: 130.81, at: 1.5, decaySec: 1.3, gain: 0.3 },
-    { freq: 98.0, at: 3.0, decaySec: 2.6, gain: 0.5 },
-    { freq: 146.83, at: 4.5, decaySec: 1.3, gain: 0.3 },
-    { freq: 82.41, at: 6.0, decaySec: 2.6, gain: 0.5 },
-    { freq: 123.47, at: 7.5, decaySec: 1.3, gain: 0.3 },
-    { freq: 110.0, at: 9.0, decaySec: 2.6, gain: 0.5 },
-    { freq: 164.81, at: 10.5, decaySec: 1.3, gain: 0.3 },
-  ];
-  for (const b of bassNotes) {
+  // 2. Bass
+  for (const b of comp.bass) {
     notes.push({
       freq: b.freq,
       at: b.at,
-      gain: b.gain,
-      decaySec: b.decaySec,
+      gain: 0.48,
+      decaySec: 2.4,
       attackSec: 0.02,
       partials: [{ ratio: 2, gain: 0.08, decayScale: 0.5 }],
     });
   }
 
-  // 3. Acoustic marimba / kalimba bell lead
-  const melody = [
-    // Bar 1 (Fmaj7)
-    { freq: 523.25, at: 0.0, gain: 0.45 },
-    { freq: 659.25, at: 0.75, gain: 0.48 },
-    { freq: 783.99, at: 1.5, gain: 0.5 },
-    { freq: 880.0, at: 2.25, gain: 0.48 },
-    // Bar 2 (G6)
-    { freq: 987.77, at: 3.0, gain: 0.5 },
-    { freq: 783.99, at: 3.75, gain: 0.46 },
-    { freq: 587.33, at: 4.5, gain: 0.44 },
-    { freq: 659.25, at: 5.25, gain: 0.42 },
-    // Bar 3 (Em7)
-    { freq: 783.99, at: 6.0, gain: 0.48 },
-    { freq: 659.25, at: 6.75, gain: 0.44 },
-    { freq: 523.25, at: 7.5, gain: 0.42 },
-    { freq: 587.33, at: 8.25, gain: 0.44 },
-    // Bar 4 (Am7 resolving for loop)
-    { freq: 659.25, at: 9.0, gain: 0.46 },
-    { freq: 587.33, at: 9.75, gain: 0.42 },
-    { freq: 523.25, at: 10.5, gain: 0.4 },
-    { freq: 493.88, at: 11.25, gain: 0.38 },
-  ];
-  for (const m of melody) {
+  // Optional gong (CNY)
+  if (comp.gong) {
+    for (const at of comp.gong) {
+      notes.push({
+        freq: 130.81,
+        at,
+        gain: 0.35,
+        decaySec: 1.8,
+        attackSec: 0.005,
+        partials: [
+          { ratio: 1.41, gain: 0.22, decayScale: 0.6 },
+          { ratio: 2.15, gain: 0.14, decayScale: 0.4 },
+          { ratio: 3.52, gain: 0.08, decayScale: 0.3 },
+        ],
+      });
+    }
+  }
+
+  // 3. Lead melody
+  for (const item of comp.melody) {
     notes.push({
-      freq: m.freq,
-      at: m.at,
-      gain: m.gain,
-      decaySec: 0.46,
+      freq: item.freq,
+      at: item.at,
+      gain: 0.45,
+      decaySec: comp.melodyDecay ?? 0.46,
       attackSec: 0.005,
-      partials: [
-        { ratio: 4, gain: 0.12, decayScale: 0.35 },
-        { ratio: 2, gain: 0.08, decayScale: 0.5 },
-      ],
+      partials: comp.melodyPartials,
     });
   }
 
-  // 4. Soft lo-fi texture (whisper shakers & gentle kick hits)
-  for (let t = 0; t < 12.0; t += 0.375) {
-    noise.push({ freq: 2400, at: t, gain: 0.04, decaySec: 0.02 });
+  // 4. Rhythm & Noise
+  const noiseInterval = comp.noiseInterval ?? 0.375;
+  for (let t = 0; t < 12.0; t += noiseInterval) {
+    noise.push({ freq: comp.noiseFreq ?? 2400, at: t, gain: comp.sleighBells ? 0.06 : 0.04, decaySec: 0.02 });
   }
+
+  // Gentle kick hits
   for (let t = 0; t < 12.0; t += 1.5) {
-    notes.push({ freq: 85, at: t, gain: 0.15, decaySec: 0.08, attackSec: 0.005, dropSemis: -6 });
+    notes.push({ freq: 85, at: t, gain: 0.14, decaySec: 0.08, attackSec: 0.005, dropSemis: -6 });
+  }
+
+  // Optional bamboo drums (Dragon Boat)
+  if (comp.bambooDrums) {
+    for (let t = 0; t < 12.0; t += 0.75) {
+      noise.push({ freq: 850, at: t, gain: 0.12, decaySec: 0.03 });
+    }
   }
 
   return {
-    label: 'Story Soundtrack — cozy non-copyrighted lo-fi marimba & Rhodes progression for Pip stories.',
+    label: `Story Soundtrack (${comp.label}) — non-copyrighted procedural lo-fi for Pip stories.`,
     durationSec: 12.0,
     peak: 0.65,
     releaseSec: 0.08,
-    lowpassHz: 3400,
+    lowpassHz: comp.lowpassHz ?? 3400,
     lowpassPoles: 2,
     noise,
     notes,
   };
+}
+
+/**
+ * Synthesizes a relaxing, original, non-copyrighted 12-second lo-fi progression.
+ * Designed to loop cleanly in expo-audio during Pip's Monthly Wrapped story.
+ * @returns {Voice}
+ */
+function createStoryMelodyVoice() {
+  return createMonthlyStoryVoice('08');
 }
 
 /** @type {Record<string, Voice>} */
@@ -171,6 +493,18 @@ const VOICES = {
    * Procedurally synthesized with acoustic marimba plucks, warm Rhodes chords, and gentle bass.
    */
   storyMelody: createStoryMelodyVoice(),
+  story_01: createMonthlyStoryVoice('01'),
+  story_02: createMonthlyStoryVoice('02'),
+  story_03: createMonthlyStoryVoice('03'),
+  story_04: createMonthlyStoryVoice('04'),
+  story_05: createMonthlyStoryVoice('05'),
+  story_06: createMonthlyStoryVoice('06'),
+  story_07: createMonthlyStoryVoice('07'),
+  story_08: createMonthlyStoryVoice('08'),
+  story_09: createMonthlyStoryVoice('09'),
+  story_10: createMonthlyStoryVoice('10'),
+  story_11: createMonthlyStoryVoice('11'),
+  story_12: createMonthlyStoryVoice('12'),
   cowbell: {
     label: 'Cowbell — four warm, inharmonic taps for the monthly story opening.',
     durationSec: 2.0,
@@ -600,7 +934,17 @@ const flag = (name) => {
 if (argv.includes('--all')) {
   const dir = flag('--out') ?? path.join(__dirname, 'preview');
   for (const name of Object.keys(VOICES)) write(name, path.join(dir, `${name}.wav`));
+} else if (argv.includes('--stories')) {
+  for (let m = 1; m <= 12; m++) {
+    const num = String(m).padStart(2, '0');
+    write(`story_${num}`, path.join(STORIES_DIR, `story-${num}.wav`));
+  }
+} else if (argv.includes('--story')) {
+  write('storyMelody', STORY_SHIPPED);
+  for (let m = 1; m <= 12; m++) {
+    const num = String(m).padStart(2, '0');
+    write(`story_${num}`, path.join(STORIES_DIR, `story-${num}.wav`));
+  }
 } else {
-  if (argv.includes('--story')) write('storyMelody', STORY_SHIPPED);
-  else write(flag('--voice') ?? DEFAULT_VOICE, flag('--out') ?? SHIPPED);
+  write(flag('--voice') ?? DEFAULT_VOICE, flag('--out') ?? SHIPPED);
 }

@@ -1,4 +1,4 @@
-import { STORY_PALETTES } from '../src/lib/recapStoryTheme';
+import { MONTHLY_THEMES, STORY_PALETTES, getStoryThemeForMonth } from '../src/lib/recapStoryTheme';
 
 function relativeLuminance(hex: string): number {
   const channels = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
@@ -26,4 +26,45 @@ describe('monthly recap story palettes', () => {
       expect(contrastRatio(palette.accent, palette.background)).toBeGreaterThanOrEqual(3);
     },
   );
+});
+
+describe('all 12 monthly themes contrast compliance', () => {
+  const themes = Object.values(MONTHLY_THEMES);
+
+  test.each(themes)('theme $monthNumber ($titleEn) has readable foregrounds (>= 4.5:1) in all scenes', (theme) => {
+    for (const [sceneType, palette] of Object.entries(theme.palettes)) {
+      const ratio = contrastRatio(palette.foreground, palette.background);
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  const SCENES_WITH_ACCENT_LABELS = ['ritual', 'identity', 'spotlight', 'habit', 'finale'] as const;
+
+  test.each(themes)('theme $monthNumber ($titleEn) has accessible accents (>= 3.0:1) in labeled scenes', (theme) => {
+    for (const sceneType of SCENES_WITH_ACCENT_LABELS) {
+      const palette = theme.palettes[sceneType];
+      const ratio = contrastRatio(palette.accent, palette.background);
+      expect(ratio).toBeGreaterThanOrEqual(3.0);
+    }
+  });
+
+  it('resolves December theme for 2026-12 and returns snowflakes motif', () => {
+    const theme = getStoryThemeForMonth('2026-12');
+    expect(theme.monthNumber).toBe('12');
+    expect(theme.motif).toBe('snowflakes');
+    expect(theme.pipAccessory).toBe('santaHat');
+  });
+
+  it('resolves February theme for 2026-02 and returns lanterns motif', () => {
+    const theme = getStoryThemeForMonth('2026-02');
+    expect(theme.monthNumber).toBe('02');
+    expect(theme.motif).toBe('lanterns');
+    expect(theme.pipAccessory).toBe('cnyScarf');
+  });
+
+  it('falls back safely to August theme when month is unspecified', () => {
+    const theme = getStoryThemeForMonth();
+    expect(theme.monthNumber).toBe('08');
+    expect(theme.motif).toBe('confetti');
+  });
 });

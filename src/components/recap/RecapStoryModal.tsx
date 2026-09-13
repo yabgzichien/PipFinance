@@ -106,12 +106,12 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
     if (playedCycle.current !== state.cycle) {
       playedCycle.current = state.cycle;
       soundActive.current = true;
-      storyIntro();
+      storyIntro(sessionModel.month);
     } else if (!soundActive.current) {
       soundActive.current = true;
       resumeStoryIntro();
     }
-  }, [autoplay, state.muted, state.completed, state.cycle]);
+  }, [autoplay, state.muted, state.completed, state.cycle, sessionModel.month]);
 
   useEffect(() => {
     return () => {
@@ -227,7 +227,8 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
             <RecapStoryFrame scene={scene} mode="animated" motion={motion} progress={progress}
               mascotConfig={mascotConfig} monthLabel={formatMonthLabel(sessionModel.month)}
               categoryLabel={getCategoryLabel}
-              accessibilityPositionLabel={position} />
+              accessibilityPositionLabel={position}
+              month={sessionModel.month} />
           </View>
           {/* Receive touches in the displayed rectangle's coordinate system, independent
               of which text or illustration lies beneath the finger. */}

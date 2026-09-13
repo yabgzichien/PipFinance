@@ -10,16 +10,17 @@ export interface RecapStoryExportSurfaceProps {
   mascotConfig: WidgetMascotConfig;
   monthLabel: string;
   categoryLabel: (categoryId: string) => string;
+  month?: string;
 }
 
 /** A single, settled logical-size frame shared by native view-shot and the web adapter. */
 export const RecapStoryExportSurface = React.forwardRef<React.ComponentRef<typeof View>, RecapStoryExportSurfaceProps>(
-  function RecapStoryExportSurface({ scene, mascotConfig, monthLabel, categoryLabel }, ref) {
+  function RecapStoryExportSurface({ scene, mascotConfig, monthLabel, categoryLabel, month }, ref) {
     return <View testID="story-export-container" collapsable={false} style={styles.container}
       pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <View ref={ref} testID="story-export-surface" collapsable={false} style={styles.surface}>
         <RecapStoryFrame scene={scene} mode="export" motion="off" mascotConfig={mascotConfig}
-          monthLabel={monthLabel} categoryLabel={categoryLabel} />
+          monthLabel={monthLabel} categoryLabel={categoryLabel} month={month} />
       </View>
     </View>;
   },

@@ -19,12 +19,38 @@ let player: AudioPlayer | null = null;
  *  being able to mid-session, so retrying on every save just burns work and log noise. */
 let unavailable = false;
 
-/** The monthly-story sting is independent from the save chime so pausing the story never
- * interrupts a save payoff (and vice versa). It is decoded only when the story opens. */
+/** The monthly-story soundtrack is independent from the save chime so pausing the story never
+ * interrupts a save payoff (and vice versa). Decoded per month when the story opens. */
+const STORY_ASSETS: Record<string, any> = {
+  '01': require('../../assets/sounds/stories/story-01.wav'),
+  '02': require('../../assets/sounds/stories/story-02.wav'),
+  '03': require('../../assets/sounds/stories/story-03.wav'),
+  '04': require('../../assets/sounds/stories/story-04.wav'),
+  '05': require('../../assets/sounds/stories/story-05.wav'),
+  '06': require('../../assets/sounds/stories/story-06.wav'),
+  '07': require('../../assets/sounds/stories/story-07.wav'),
+  '08': require('../../assets/sounds/stories/story-08.wav'),
+  '09': require('../../assets/sounds/stories/story-09.wav'),
+  '10': require('../../assets/sounds/stories/story-10.wav'),
+  '11': require('../../assets/sounds/stories/story-11.wav'),
+  '12': require('../../assets/sounds/stories/story-12.wav'),
+};
+
 let storyPlayer: AudioPlayer | null = null;
+let currentStoryMonth: string | null = null;
 let storyUnavailable = false;
 /** Monotonic intent token: any action that supersedes a pending rewind advances it. */
 let storyStartVersion = 0;
+
+function resolveStoryMonth(month?: string): string {
+  if (!month) return '08';
+  if (month.length >= 7 && month[4] === '-') {
+    const mm = month.slice(5, 7);
+    if (STORY_ASSETS[mm]) return mm;
+  }
+  if (STORY_ASSETS[month]) return month;
+  return '08';
+}
 
 /** Wired up from AppDataProvider whenever the `soundEnabled` preference changes. Sound gets
  *  its own switch rather than riding on the motion setting: it carries into a room the way
@@ -59,9 +85,21 @@ function getPlayer(): AudioPlayer | null {
   return player;
 }
 
-function getStoryPlayer(): AudioPlayer | null {
-  if (storyPlayer || storyUnavailable) return storyPlayer;
+function getStoryPlayer(month?: string): AudioPlayer | null {
+  const targetMonth = resolveStoryMonth(month);
+  if (storyPlayer && currentStoryMonth === targetMonth) return storyPlayer;
+  if (storyUnavailable && currentStoryMonth === targetMonth) return null;
+
   try {
+    if (storyPlayer && currentStoryMonth !== targetMonth) {
+      try {
+        storyPlayer.pause();
+      } catch {
+        // Ignore errors when resetting prior player
+      }
+      storyPlayer = null;
+    }
+
     if (Platform.OS !== 'web') {
       void setAudioModeAsync({
         playsInSilentMode: false,
@@ -71,11 +109,15 @@ function getStoryPlayer(): AudioPlayer | null {
         // System defaults are an acceptable fallback for this optional sting.
       });
     }
-    storyPlayer = createAudioPlayer(require('../../assets/sounds/monthly-story.wav'));
+    const asset = STORY_ASSETS[targetMonth] ?? STORY_ASSETS['08'];
+    storyPlayer = createAudioPlayer(asset);
     storyPlayer.volume = STORY_VOLUME;
     storyPlayer.loop = true;
+    currentStoryMonth = targetMonth;
+    storyUnavailable = false;
   } catch {
     storyUnavailable = true;
+    currentStoryMonth = targetMonth;
     return null;
   }
   return storyPlayer;
@@ -101,11 +143,11 @@ export function payoff(): void {
   }
 }
 
-/** Starts the opening sting from its first beat. The story UI owns when this is called. */
-export function storyIntro(): void {
+/** Starts the soundtrack from its first beat for the given month. The story UI owns when this is called. */
+export function storyIntro(month?: string): void {
   if (!enabled) return;
   const startVersion = ++storyStartVersion;
-  const active = getStoryPlayer();
+  const active = getStoryPlayer(month);
   if (!active) return;
   try {
     void active

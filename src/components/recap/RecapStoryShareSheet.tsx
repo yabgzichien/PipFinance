@@ -294,7 +294,7 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
               <View pointerEvents="none" style={styles.thumbnailViewport}>
                 <View style={styles.thumbnailScale}>
                   <RecapStoryFrame scene={scene} mode="export" motion="off" mascotConfig={mascotConfig}
-                    monthLabel={monthLabel} categoryLabel={categoryLabel} />
+                    monthLabel={monthLabel} categoryLabel={categoryLabel} month={model.month} />
                 </View>
               </View>
               <View style={styles.choiceLabel}><Label color="#191919">{checked ? '✓ ' : '○ '}{sceneLabels[scene.id]}</Label></View>
@@ -340,7 +340,7 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
         </View>
       </View>
       <RecapStoryExportSurface ref={exportRef} scene={exportScene} mascotConfig={mascotConfig}
-        monthLabel={monthLabel} categoryLabel={categoryLabel} />
+        monthLabel={monthLabel} categoryLabel={categoryLabel} month={model.month} />
     </View>
   </Modal>;
 }
