@@ -353,3 +353,41 @@ it('keeps successful Photos feedback when Instagram is unavailable or throws', a
   expect(text(tree)).toContain('Saved to Photos');
   expect(text(tree)).toContain('Instagram is not installed');
 });
+
+it('supports spotlight scene selection and displays 6 of 6 selected when all scenes chosen', () => {
+  const modelWithSpotlight: story.RecapStoryModel = {
+    month: '2026-08',
+    kind: 'full',
+    scenes: [
+      { id: 'ritual', type: 'ritual' },
+      { id: 'identity', type: 'identity', persona: 'food', activityDays: 4 },
+      { id: 'pattern', type: 'pattern', categoryId: 'food', recordedSharePercent: 80 },
+      {
+        id: 'spotlight',
+        type: 'spotlight',
+        highlight: {
+          kind: 'techUpgrade',
+          itemLabel: 'MacBook',
+          iconName: 'laptop-outline',
+        },
+      },
+      { id: 'habit', type: 'habit', activityDays: 4, activityWeeks: 3 },
+      { id: 'finale', type: 'finale', badges: ['fiveExpenses'] },
+    ],
+    defaultSelectedSceneIds: ['identity', 'finale'],
+  };
+  const tree = render({ model: modelWithSpotlight });
+  expect(cards(tree).map((n: any) => n.props.testID)).toEqual([
+    'story-choice-ritual',
+    'story-choice-identity',
+    'story-choice-pattern',
+    'story-choice-spotlight',
+    'story-choice-habit',
+    'story-choice-finale',
+  ]);
+  const spotlightChoice = tree.root.findByProps({ testID: 'story-choice-spotlight' });
+  expect(spotlightChoice.props.accessibilityLabel).toContain('Special story');
+  for (const id of ['ritual', 'pattern', 'spotlight', 'habit']) toggle(tree, id);
+  expect(selected(tree)).toHaveLength(6);
+  expect(text(tree)).toContain('6 of 6 selected');
+});

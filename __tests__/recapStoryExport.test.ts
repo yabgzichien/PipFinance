@@ -143,6 +143,29 @@ describe('monthly story export coordinator', () => {
     ]);
   });
 
+  test('batch save captures spotlight scene in correct narrative order between pattern and habit', async () => {
+    const adapter = new FakeCaptureAdapter();
+
+    await expect(
+      saveSelectedStories(adapter, ['finale', 'spotlight', 'identity', 'pattern'], renderer(adapter)),
+    ).resolves.toEqual({ savedIds: ['identity', 'pattern', 'spotlight', 'finale'], failedIds: [] });
+    expect(adapter.events).toEqual([
+      'permission',
+      'capture:identity',
+      'save:tmp://identity',
+      'capture:pattern',
+      'save:tmp://pattern',
+      'capture:spotlight',
+      'save:tmp://spotlight',
+      'capture:finale',
+      'save:tmp://finale',
+      'cleanup:tmp://identity',
+      'cleanup:tmp://pattern',
+      'cleanup:tmp://spotlight',
+      'cleanup:tmp://finale',
+    ]);
+  });
+
   test('a partial save returns exact IDs and continues with later cards', async () => {
     const adapter = new FakeCaptureAdapter();
     adapter.failSaveUris.add('tmp://pattern');

@@ -252,4 +252,35 @@ describe('buildRecapStoryModel', () => {
       visible: false,
     });
   });
+
+  it('includes a spotlight scene when unusual spending or special moments occur', () => {
+    const withMacBook = [
+      ...fullMonth(),
+      txn({ merchantRaw: 'Apple', remark: 'MacBook Pro', amount: 5000, date: '2026-08-25' }),
+    ];
+    const model = buildRecapStoryModel({ transactions: withMacBook, month: '2026-08', now });
+    expect(model?.scenes).toHaveLength(6);
+    expect(model?.scenes.map((s) => s.id)).toEqual(['ritual', 'identity', 'pattern', 'spotlight', 'habit', 'finale']);
+    expect(scene(model, 'spotlight')).toMatchObject({
+      id: 'spotlight',
+      type: 'spotlight',
+      highlight: { kind: 'techUpgrade', itemLabel: 'MacBook', iconName: 'sparkles' },
+    });
+    assertPrivate(model);
+  });
+
+  it('includes a spotlight in sparse story when a major milestone is present', () => {
+    const sparseMilestone = [
+      txn({ type: 'expense', merchantRaw: 'Apple Store', remark: 'MacBook Air', amount: 3500, date: '2026-08-10' }),
+    ];
+    const model = buildRecapStoryModel({ transactions: sparseMilestone, month: '2026-08', now });
+    expect(model?.kind).toBe('sparse');
+    expect(model?.scenes.map((s) => s.id)).toEqual(['ritual', 'identity', 'spotlight', 'finale']);
+    expect(scene(model, 'spotlight')).toMatchObject({
+      id: 'spotlight',
+      type: 'spotlight',
+      highlight: { kind: 'techUpgrade', itemLabel: 'MacBook' },
+    });
+    assertPrivate(model);
+  });
 });

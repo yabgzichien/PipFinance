@@ -1,5 +1,13 @@
 import { currentMonthKey, txnMonthKey } from './budget';
 import type { Transaction } from './types';
+import {
+  detectStoryHighlight,
+  type RecapStoryHighlight,
+  type RecapStoryHighlightKind,
+} from './recapStoryHighlight';
+
+export type { RecapStoryHighlight, RecapStoryHighlightKind };
+export { detectStoryHighlight };
 
 export type RecapStoryKind = 'sparse' | 'full';
 export const RECAP_PERSONA_KEYS = [
@@ -19,6 +27,7 @@ export type RecapStoryScene =
   | { id: 'pattern'; type: 'pattern'; categoryId: string; recordedSharePercent: number;
       previousRecordedSharePercent?: number; changeDirection?: 'higher' | 'lower' | 'same';
       merchantCameo?: string }
+  | { id: 'spotlight'; type: 'spotlight'; highlight: RecapStoryHighlight }
   | { id: 'habit'; type: 'habit'; activityDays: number; activityWeeks: number }
   | { id: 'finale'; type: 'finale'; badges: RecapBadgeKey[] };
 
@@ -214,11 +223,19 @@ export function buildRecapStoryModel({
   };
   const finale: Extract<RecapStoryScene, { id: 'finale' }> = { id: 'finale', type: 'finale', badges };
 
+  const highlight = detectStoryHighlight(transactions, month);
+
   if (expenses.length < 5 || expenseDays.size < 3 || !winner) {
+    const sparseScenes: RecapStoryScene[] = [
+      { id: 'ritual', type: 'ritual' },
+      identity,
+      ...(highlight ? [{ id: 'spotlight' as const, type: 'spotlight' as const, highlight }] : []),
+      finale,
+    ];
     return {
       month,
       kind: 'sparse',
-      scenes: [{ id: 'ritual', type: 'ritual' }, identity, finale],
+      scenes: sparseScenes,
       defaultSelectedSceneIds: ['identity', 'finale'],
     };
   }
@@ -232,16 +249,18 @@ export function buildRecapStoryModel({
     ...comparisonFor(transactions, month, winner.id, recordedSharePercent),
     ...(hasCameo ? { merchantCameo: merchantCameo! } : {}),
   };
+  const fullScenes: RecapStoryScene[] = [
+    { id: 'ritual', type: 'ritual' },
+    identity,
+    pattern,
+    ...(highlight ? [{ id: 'spotlight' as const, type: 'spotlight' as const, highlight }] : []),
+    { id: 'habit', type: 'habit', activityDays: activityDays.size, activityWeeks },
+    finale,
+  ];
   return {
     month,
     kind: 'full',
-    scenes: [
-      { id: 'ritual', type: 'ritual' },
-      identity,
-      pattern,
-      { id: 'habit', type: 'habit', activityDays: activityDays.size, activityWeeks },
-      finale,
-    ],
+    scenes: fullScenes,
     defaultSelectedSceneIds: ['identity', 'finale'],
   };
 }

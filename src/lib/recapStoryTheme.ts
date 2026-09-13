@@ -7,6 +7,7 @@ export const STORY_PALETTES = {
   ritual: { background: '#F6D750', foreground: '#17352D', accent: '#C94F39' },
   identity: { background: '#173F35', foreground: '#FAF4E5', accent: '#F6D750' },
   pattern: { background: '#EF704B', foreground: '#221F1D', accent: '#F9E07F' },
+  spotlight: { background: '#261B3D', foreground: '#FAF4E5', accent: '#F6D750' },
   habit: { background: '#D8EADF', foreground: '#17352D', accent: '#1F6F4A' },
   finale: { background: '#27242C', foreground: '#FFFFFF', accent: '#F6D750' },
 } as const;

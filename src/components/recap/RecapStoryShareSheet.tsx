@@ -79,7 +79,7 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
   const [selectedIds, setSelectedIds] = useState<SceneId[]>(() => {
     if (initialSceneId && model.scenes.some((scene) => scene.id === initialSceneId)) return [initialSceneId];
     const defaults = model.scenes.filter((scene) => model.defaultSelectedSceneIds.includes(scene.id)).map((scene) => scene.id);
-    return (defaults.length ? defaults : [model.scenes[0].id]).slice(0, Platform.OS === 'web' ? 1 : 5);
+    return (defaults.length ? defaults : [model.scenes[0].id]).slice(0, Platform.OS === 'web' ? 1 : model.scenes.length);
   });
   const [exportSceneId, setExportSceneId] = useState<SceneId>(() => initialSceneId
     ?? model.defaultSelectedSceneIds[0]
@@ -125,8 +125,10 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
       setSelectedIds(selectedIds.filter((id) => id !== sceneId));
       return;
     }
-    if (selectedIds.length >= 5) {
-      AccessibilityInfo.announceForAccessibility(isZh ? '最多选择五张卡片。' : 'Choose up to five cards.');
+    if (selectedIds.length >= sessionModel.scenes.length) {
+      AccessibilityInfo.announceForAccessibility(
+        isZh ? `最多选择 ${sessionModel.scenes.length} 张卡片。` : `Choose up to ${sessionModel.scenes.length} cards.`
+      );
       return;
     }
     const wanted = new Set([...selectedIds, sceneId]);
@@ -267,8 +269,8 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
           ? `${t('recapStorySavedToPhotos')}. ${isZh ? '未安装 Instagram，或暂时无法打开。' : 'Instagram is not installed or could not be opened.'}`
           : '';
   const sceneLabels: Record<SceneId, string> = isZh
-    ? { ritual: '每月仪式', identity: '你的风格', pattern: '消费特点', habit: '记录习惯', finale: '本月徽章' }
-    : { ritual: 'Monthly ritual', identity: 'Your identity', pattern: 'Signature pattern', habit: 'Your records', finale: 'Monthly badges' };
+    ? { ritual: '每月仪式', identity: '你的风格', pattern: '消费特点', spotlight: '特别故事', habit: '记录习惯', finale: '本月徽章' }
+    : { ritual: 'Monthly ritual', identity: 'Your identity', pattern: 'Signature pattern', spotlight: 'Special story', habit: 'Your records', finale: 'Monthly badges' };
 
   return <Modal transparent animationType="slide" visible onRequestClose={requestClose}>
     <View style={styles.backdrop}>
@@ -278,8 +280,8 @@ export function RecapStoryShareSheet({ model, transactions, mascotConfig, monthL
           <SheetButton label={isZh ? '关闭分享选项' : 'Close share options'} onPress={requestClose} />
         </View>
         <ScrollView style={styles.content} contentContainerStyle={styles.contentSpacing}>
-        <Label color="#555555">{isZh ? `已选择 ${selectedIds.length} / ${Platform.OS === 'web' ? 1 : 5} 张`
-          : `${selectedIds.length} of ${Platform.OS === 'web' ? 1 : 5} selected`}</Label>
+        <Label color="#555555">{isZh ? `已选择 ${selectedIds.length} / ${Platform.OS === 'web' ? 1 : sessionModel.scenes.length} 张`
+          : `${selectedIds.length} of ${Platform.OS === 'web' ? 1 : sessionModel.scenes.length} selected`}</Label>
         <ScrollView horizontal contentContainerStyle={styles.choices} showsHorizontalScrollIndicator={false}>
           {sessionModel.scenes.map((scene) => {
             const checked = selectedSet.has(scene.id);

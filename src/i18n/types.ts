@@ -196,6 +196,19 @@ export interface Translations {
   streakFreeze: string;
   streakFreezeUsed: string;
   streakPausedBanner: string;
+  noSpendToday: string;
+  noExpensesTodayPrompt: string;
+  checkedInToday: string;
+  streakReviewToast: string;
+  streakNoSpendToast: string;
+  checkedInNoSpend: string;
+  weekDayMonInitial: string;
+  weekDayTueInitial: string;
+  weekDayWedInitial: string;
+  weekDayThuInitial: string;
+  weekDayFriInitial: string;
+  weekDaySatInitial: string;
+  weekDaySunInitial: string;
   quickAdd: string;
   scanReceipt: string;
   scanReceiptSub: string;
@@ -301,6 +314,26 @@ export interface Translations {
   recapStoryBadge_weekdayRhythm_body: string;
   recapStoryBadge_firstChapter_label: string;
   recapStoryBadge_firstChapter_body: string;
+  recapStorySpotlightBadge: string;
+  recapStorySpotlight_tech_title: string;
+  recapStorySpotlight_tech_body: string;
+  recapStorySpotlight_vehicle_title: string;
+  recapStorySpotlight_vehicle_body: string;
+  recapStorySpotlight_home_title: string;
+  recapStorySpotlight_home_body: string;
+  recapStorySpotlight_gift_title: string;
+  recapStorySpotlight_gift_body: string;
+  recapStorySpotlight_income_title: string;
+  recapStorySpotlight_income_body: string;
+  recapStorySpotlight_income_pct: string;
+  recapStorySpotlight_wellness_title: string;
+  recapStorySpotlight_wellness_body: string;
+  recapStorySpotlight_dates_title: string;
+  recapStorySpotlight_dates_body: string;
+  recapStorySpotlight_cafe_title: string;
+  recapStorySpotlight_cafe_body: string;
+  recapStorySpotlight_outlier_title: string;
+  recapStorySpotlight_outlier_body: string;
 
   // Transactions / Activity
   allTransactionsTitle: string;

@@ -11,6 +11,7 @@ const NARRATIVE_SCENE_IDS: readonly RecapStorySceneId[] = [
   'ritual',
   'identity',
   'pattern',
+  'spotlight',
   'habit',
   'finale',
 ];

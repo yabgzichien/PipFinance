@@ -277,3 +277,45 @@ it.each(['held release', 'termination', 'tap', 'swipe'] as const)(
     }
   },
 );
+
+it('renders spotlight scene and steps through 6-scene story', () => {
+  const fullModelWithSpotlight: RecapStoryModel = {
+    month: '2026-08',
+    kind: 'full',
+    scenes: [
+      { id: 'ritual', type: 'ritual' },
+      { id: 'identity', type: 'identity', persona: 'food', activityDays: 4 },
+      { id: 'pattern', type: 'pattern', categoryId: 'food', recordedSharePercent: 80 },
+      {
+        id: 'spotlight',
+        type: 'spotlight',
+        highlight: {
+          kind: 'techUpgrade',
+          itemLabel: 'MacBook',
+          iconName: 'laptop-outline',
+        },
+      },
+      { id: 'habit', type: 'habit', activityDays: 4, activityWeeks: 3 },
+      { id: 'finale', type: 'finale', badges: ['fiveExpenses'] },
+    ],
+    defaultSelectedSceneIds: ['identity', 'finale'],
+  };
+  const tree = render({ model: fullModelWithSpotlight });
+  expect(frame(tree).scene.id).toBe('ritual');
+  press(tree, 'Next');
+  expect(frame(tree).scene.id).toBe('identity');
+  press(tree, 'Next');
+  expect(frame(tree).scene.id).toBe('pattern');
+  press(tree, 'Next');
+  expect(frame(tree).scene.id).toBe('spotlight');
+  expect(frame(tree).scene.type).toBe('spotlight');
+  press(tree, 'Next');
+  expect(frame(tree).scene.id).toBe('habit');
+  press(tree, 'Next');
+  expect(frame(tree).scene.id).toBe('finale');
+  press(tree, 'Previous');
+  expect(frame(tree).scene.id).toBe('habit');
+  press(tree, 'Previous');
+  expect(frame(tree).scene.id).toBe('spotlight');
+});
+

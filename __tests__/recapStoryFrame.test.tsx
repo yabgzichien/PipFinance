@@ -17,6 +17,7 @@ const scenes: RecapStoryScene[] = [
   { id: 'identity', type: 'identity', persona: 'food', activityDays: 12 },
   { id: 'pattern', type: 'pattern', categoryId: 'food', recordedSharePercent: 43,
     previousRecordedSharePercent: 31, changeDirection: 'higher', merchantCameo: 'Little Kitchen' },
+  { id: 'spotlight', type: 'spotlight', highlight: { kind: 'techUpgrade', itemLabel: 'MacBook', iconName: 'sparkles' } },
   { id: 'habit', type: 'habit', activityDays: 12, activityWeeks: 4 },
   { id: 'finale', type: 'finale', badges: ['fiveExpenses', 'threeDays', 'fourWeeks'] },
 ];
@@ -99,14 +100,16 @@ describe.each(['animated', 'export'] as const)('%s story frame', (mode) => {
   });
 
   it('states actual activity days and weeks beside a decorative calendar motif', () => {
-    const tree = render(scenes[3], { mode });
+    const habit = scenes.find((s) => s.id === 'habit')!;
+    const tree = render(habit, { mode });
     expect(copy(tree)).toContain('12 active days');
     expect(copy(tree)).toContain('4 active weeks');
     expect(tree.root.findByProps({ testID: 'story-calendar-motif' }).props.accessible).toBe(false);
   });
 
   it('finishes with earned badge labels and facts, including a sparse first chapter', () => {
-    const tree = render(scenes[4], { mode });
+    const finale = scenes.find((s) => s.id === 'finale')!;
+    const tree = render(finale, { mode });
     expect(copy(tree)).toContain('Five in the mix');
     expect(copy(tree)).toContain('Three-day trace');
     expect(copy(tree)).toContain('Four-week rhythm');
@@ -114,6 +117,29 @@ describe.each(['animated', 'export'] as const)('%s story frame', (mode) => {
     const sparse = render({ id: 'finale', type: 'finale', badges: ['firstChapter'] }, { mode });
     expect(copy(sparse)).toContain('First chapter');
     expect(copy(sparse)).not.toContain('Five in the mix');
+  });
+
+  it('renders spotlight for tech upgrades and highlights', () => {
+    const spotlightScene: RecapStoryScene = {
+      id: 'spotlight',
+      type: 'spotlight',
+      highlight: { kind: 'techUpgrade', itemLabel: 'MacBook', iconName: 'sparkles' },
+    };
+    const tree = render(spotlightScene, { mode });
+    expect(copy(tree)).toContain('The Big Upgrade');
+    expect(copy(tree)).toContain('MacBook');
+    expect(copy(tree)).toContain('The Special Story');
+  });
+
+  it('renders spotlight for date night counts', () => {
+    const spotlightScene: RecapStoryScene = {
+      id: 'spotlight',
+      type: 'spotlight',
+      highlight: { kind: 'dates', count: 3, iconName: 'heart' },
+    };
+    const tree = render(spotlightScene, { mode });
+    expect(copy(tree)).toContain('Date Night Rhythm');
+    expect(copy(tree)).toContain('3 date nights');
   });
 });
 
@@ -141,9 +167,10 @@ it('uses caller progress for full motion and settles reduced/off motion', () => 
 });
 
 it('combines localized position with meaningful summary and hides duplicate child announcements', () => {
-  const tree = render(scenes[3], { accessibilityPositionLabel: '第 4 个故事，共 5 个' });
+  const habitScene = scenes.find((s) => s.id === 'habit')!;
+  const tree = render(habitScene, { accessibilityPositionLabel: '第 4 个故事，共 6 个' });
   const root = tree.root.findByProps({ testID: 'recap-story-capture-frame' });
-  expect(root.props.accessibilityLabel).toContain('第 4 个故事，共 5 个');
+  expect(root.props.accessibilityLabel).toContain('第 4 个故事，共 6 个');
   expect(root.props.accessibilityLabel).toContain('12 active days');
   expect(root.props.accessibilityLabel).toContain('4 active weeks');
   expect(tree.root.findByProps({ testID: 'story-artwork' }).props.importantForAccessibility).toBe('no-hide-descendants');

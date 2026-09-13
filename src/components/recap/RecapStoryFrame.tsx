@@ -55,9 +55,64 @@ export function RecapStoryFrame({ scene, mode, motion, progress, mascotConfig, m
   const badges = scene.type === 'finale' ? scene.badges.map((badge) => ({
     id: badge, label: t(`recapStoryBadge_${badge}_label`), body: t(`recapStoryBadge_${badge}_body`),
   })) : [];
+
+  let spotlightTitle = '';
+  let spotlightBody = '';
+  let spotlightSubtitle = '';
+  if (scene.type === 'spotlight') {
+    const hl = scene.highlight;
+    switch (hl.kind) {
+      case 'techUpgrade':
+        spotlightTitle = t('recapStorySpotlight_tech_title');
+        spotlightBody = t('recapStorySpotlight_tech_body', { item: hl.itemLabel || 'gear' });
+        spotlightSubtitle = hl.itemLabel || '';
+        break;
+      case 'vehicleMilestone':
+        spotlightTitle = t('recapStorySpotlight_vehicle_title');
+        spotlightBody = t('recapStorySpotlight_vehicle_body');
+        spotlightSubtitle = hl.itemLabel || '';
+        break;
+      case 'homeMilestone':
+        spotlightTitle = t('recapStorySpotlight_home_title');
+        spotlightBody = t('recapStorySpotlight_home_body');
+        spotlightSubtitle = hl.itemLabel || '';
+        break;
+      case 'giftCelebration':
+        spotlightTitle = t('recapStorySpotlight_gift_title');
+        spotlightBody = t('recapStorySpotlight_gift_body');
+        spotlightSubtitle = hl.occasion ? (hl.occasion === 'birthday' ? 'Birthday' : hl.occasion === 'wedding' ? 'Wedding' : 'Celebration') : '';
+        break;
+      case 'incomeBoost':
+        spotlightTitle = t('recapStorySpotlight_income_title');
+        spotlightBody = t('recapStorySpotlight_income_body');
+        spotlightSubtitle = hl.percentChange ? t('recapStorySpotlight_income_pct', { pct: hl.percentChange }) : '';
+        break;
+      case 'selfCare':
+        spotlightTitle = t('recapStorySpotlight_wellness_title');
+        spotlightBody = t('recapStorySpotlight_wellness_body');
+        spotlightSubtitle = hl.itemLabel || '';
+        break;
+      case 'dates':
+        spotlightTitle = t('recapStorySpotlight_dates_title');
+        spotlightBody = t('recapStorySpotlight_dates_body', { count: hl.count || 1 });
+        break;
+      case 'cafeRhythm':
+        spotlightTitle = t('recapStorySpotlight_cafe_title');
+        spotlightBody = t('recapStorySpotlight_cafe_body', { count: hl.count || 4 });
+        break;
+      case 'outlierSpend':
+      default:
+        spotlightTitle = t('recapStorySpotlight_outlier_title');
+        spotlightBody = t('recapStorySpotlight_outlier_body', { category: categoryLabel(hl.categoryId || 'other') });
+        spotlightSubtitle = categoryLabel(hl.categoryId || 'other');
+        break;
+    }
+  }
+
   const summary = scene.type === 'ritual' ? t('recapStoryRitualTitle')
     : scene.type === 'identity' ? `${personaTitle}. ${personaBody}`
     : scene.type === 'pattern' ? [patternCategory, `${scene.recordedSharePercent}% ${t('recapStoryRecordedShare')}`, comparison, scene.merchantCameo].filter(Boolean).join('. ')
+    : scene.type === 'spotlight' ? `${spotlightTitle}. ${spotlightBody}`
     : scene.type === 'habit' ? `${days}. ${weeks}`
     : badges.map((badge) => `${badge.label}. ${badge.body}`).join('. ');
 
@@ -98,6 +153,26 @@ export function RecapStoryFrame({ scene, mode, motion, progress, mascotConfig, m
               {!!scene.merchantCameo && <Label color={ink} numberOfLines={2} style={styles.cameo}>{scene.merchantCameo}</Label>}
             </View>
           </>}
+          {scene.type === 'spotlight' && (
+            <View style={styles.spotlightScene}>
+              <View style={[styles.spotlightPill, { borderColor: ink }]}>
+                <Icon name="sparkles" size={14} color={ink} />
+                <Label weight={700} color={ink}>{t('recapStorySpotlightBadge')}</Label>
+              </View>
+              <View style={styles.spotlightIcon}>
+                <Icon name={(scene.highlight.iconName as IconName) || 'sparkles'} size={96} color={ink} stroke={1.5} />
+              </View>
+              <View style={styles.spotlightContent}>
+                <Display color={ink} style={styles.headline} numberOfLines={2} adjustsFontSizeToFit>{spotlightTitle}</Display>
+                <Body color={ink} style={styles.body}>{spotlightBody}</Body>
+                {!!spotlightSubtitle && (
+                  <View style={[styles.spotlightTag, { borderColor: ink, borderWidth: 1 }]}>
+                    <Label weight={700} color={ink}>{spotlightSubtitle}</Label>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
           {scene.type === 'habit' && <>
             <View style={styles.habitCopy}>
               <Display color={ink} style={styles.headline}>{days}</Display>
@@ -147,6 +222,11 @@ const styles = StyleSheet.create({
   cameo: { marginTop: 16, lineHeight: 20 },
   habitCopy: { width: 256 },
   calendar: { position: 'absolute', bottom: 24, right: -8, transform: [{ rotate: '-8deg' }] },
+  spotlightScene: { flex: 1, justifyContent: 'space-between', paddingBottom: 16 },
+  spotlightPill: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderWidth: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 4 },
+  spotlightIcon: { alignSelf: 'center', marginVertical: 20 },
+  spotlightContent: { gap: 8 },
+  spotlightTag: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginTop: 12 },
   badges: { flex: 1, justifyContent: 'center', gap: 24 },
   singleBadge: { justifyContent: 'center' },
   sticker: { width: 272, borderWidth: 2, borderRadius: 24, padding: 16 },

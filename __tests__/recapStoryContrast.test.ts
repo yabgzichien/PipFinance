@@ -19,7 +19,7 @@ describe('monthly recap story palettes', () => {
     expect(contrastRatio(palette.foreground, palette.background)).toBeGreaterThanOrEqual(4.5);
   });
 
-  test.each(['ritual', 'identity', 'habit', 'finale'] as const)(
+  test.each(['ritual', 'identity', 'spotlight', 'habit', 'finale'] as const)(
     '%s accent supports its intentionally large meaningful label',
     (name) => {
       const palette = STORY_PALETTES[name];
