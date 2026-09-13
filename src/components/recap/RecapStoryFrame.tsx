@@ -259,7 +259,7 @@ function PipFestiveAccessory({ accessory, ink, accent }: { accessory: PipStoryAc
 /** Capture and playback share this exact tree; only caller-owned motion changes its pose. */
 export function RecapStoryFrame({ scene, mode, motion, progress, mascotConfig, monthLabel,
   categoryLabel, accessibilityPositionLabel, month }: RecapStoryFrameProps) {
-  const { t, isZh } = useLanguage();
+  const { t } = useLanguage();
   const theme = getStoryThemeForMonth(month);
   const palette = theme.palettes[scene.type];
   const ink = palette.foreground;
@@ -358,16 +358,7 @@ export function RecapStoryFrame({ scene, mode, motion, progress, mascotConfig, m
           </Svg>
           <StoryMotifSvg motif={theme.motif} stroke={ink} fill={palette.accent} />
         </Animated.View>
-        <View style={styles.month}>
-          <View style={styles.monthHeader}>
-            <Label color={ink}>{monthLabel}</Label>
-            <View style={[styles.themeTag, { borderColor: ink }]}>
-              <Label weight={700} color={ink} style={styles.themeTagText}>
-                {isZh ? theme.titleZh : theme.titleEn}
-              </Label>
-            </View>
-          </View>
-        </View>
+        <View style={styles.month}><Label color={ink}>{monthLabel}</Label></View>
         <Animated.View testID="story-scene-motion" style={[styles.scene, pose]}>
           {scene.type === 'ritual' && <>
             <View style={styles.ritualTitle}><Display color={ink} style={styles.headline}>{t('recapStoryRitualTitle')}</Display></View>
@@ -448,9 +439,6 @@ const styles = StyleSheet.create({
   artwork: { flex: 1 },
   ornaments: { ...StyleSheet.absoluteFillObject },
   month: { position: 'absolute', top: 48, left: 32, right: 80 },
-  monthHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  themeTag: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 },
-  themeTagText: { fontSize: 11, lineHeight: 14 },
   scene: { position: 'absolute', top: 96, left: 32, right: 32, bottom: 72 },
   headline: { lineHeight: 44, letterSpacing: -1 },
   body: { marginTop: 16, lineHeight: 24 },

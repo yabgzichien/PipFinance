@@ -238,10 +238,10 @@ function getMonthComposition(m) {
         noiseFreq: 3100,
       };
 
-    case '08': // Pip Anniversary
+    case '08': // Late Summer Bloom
     default:
       return {
-        label: 'Aug - Pip Anniversary: cozy lo-fi Rhodes & marimba groove',
+        label: 'Aug - Late Summer Bloom: cozy lo-fi Rhodes & marimba groove',
         lowpassHz: 3400,
         chords: [
           { at: 0.0, freqs: [174.61, 220.0, 261.63, 329.63] }, // Fmaj7

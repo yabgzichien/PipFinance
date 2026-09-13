@@ -174,9 +174,9 @@ export const MONTHLY_THEMES: Record<string, MonthlyStoryTheme> = {
   },
   '08': {
     monthNumber: '08',
-    id: 'anniversary',
-    titleEn: 'Pip Anniversary',
-    titleZh: '韶华八月',
+    id: 'latesummer',
+    titleEn: 'Late Summer Bloom',
+    titleZh: '盛夏韶华',
     motif: 'confetti',
     badgeIcon: 'sparkles',
     pipAccessory: 'partyHorn',
