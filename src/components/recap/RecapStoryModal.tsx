@@ -12,6 +12,7 @@ import { useReducedMotion } from '../../state/useReducedMotion';
 import type { WidgetMascotConfig } from '../../widget/mascot/config';
 import { Label } from '../ui';
 import { RecapStoryFrame } from './RecapStoryFrame';
+import { RecapStoryShareSheet } from './RecapStoryShareSheet';
 
 export interface RecapStoryModalProps {
   visible: boolean;
@@ -44,7 +45,7 @@ function Control({ label, hint, onPress, disabled = false }: {
 }
 
 function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCards }: RecapStoryModalProps) {
-  const { motionSetting, catById } = useAppData();
+  const { motionSetting, catById, transactions = [] } = useAppData();
   const reduced = useReducedMotion();
   const { t, tCat, isZh, formatMonthLabel } = useLanguage();
   const insets = useSafeAreaInsets();
@@ -59,8 +60,14 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
   const soundActive = useRef(false);
   const hold = useRef<{ started: number; wasPaused: boolean } | null>(null);
   const [stage, setStage] = useState({ width: 0, height: 0 });
-  const total = model.scenes.length;
-  const scene = model.scenes[state.index];
+  const [sessionModel, setSessionModel] = useState(model);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
+  const [shareInitialSceneId, setShareInitialSceneId] = useState<RecapStoryScene['id'] | undefined>(undefined);
+
+  useEffect(() => { setSessionModel(model); }, [model]);
+
+  const total = sessionModel.scenes.length;
+  const scene = sessionModel.scenes[state.index] ?? sessionModel.scenes[0];
   const position = isZh ? `第 ${state.index + 1} 个故事，共 ${total} 个` : `Story ${state.index + 1} of ${total}`;
   const status = state.paused ? (isZh ? '已暂停' : 'Paused') : position;
   const scale = Math.max(0, Math.min(stage.width / STORY_LOGICAL_WIDTH, stage.height / STORY_LOGICAL_HEIGHT));
@@ -117,6 +124,31 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
     if (previous && !previous.wasPaused) resume();
   }
 
+  function openShareCurrent() {
+    pause();
+    onShareScene?.(scene.id);
+    setShareInitialSceneId(scene.id);
+    setShareSheetVisible(true);
+  }
+
+  function openChooseCards() {
+    pause();
+    onChooseCards?.();
+    setShareInitialSceneId(undefined);
+    setShareSheetVisible(true);
+  }
+
+  function handleMerchantCameo(merchant: string) {
+    setSessionModel((current) => ({
+      ...current,
+      scenes: current.scenes.map((s) =>
+        s.type === 'pattern' ? { ...s, merchantCameo: merchant } : s
+      ),
+    }));
+  }
+
+  const getCategoryLabel = (id: string) => catById[id] ? tCat(catById[id]) : (isZh ? '未分类' : 'Uncategorized');
+
   // The responder owns a native interaction handle from grant through release.
   // Keep that owner stable while its handlers read the latest scene and callbacks.
   const gestureActions = useRef({ paused: state.paused, scale, total, pause, resume, navigate, finishHold });
@@ -161,7 +193,7 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
       <View testID="story-progress" accessibilityRole="progressbar" accessibilityLabel={position}
         accessibilityValue={{ min: 0, max: 100, now: state.completed ? 100 : Math.round(state.index / total * 100) }}
         style={styles.segments}>
-        {model.scenes.map((card, index) => <View key={card.id} style={styles.segment}>
+        {sessionModel.scenes.map((card, index) => <View key={card.id} style={styles.segment}>
           <Animated.View style={[styles.fill, { width: index < state.index || state.completed ? '100%'
             : index === state.index ? progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) : '0%' }]} />
         </View>)}
@@ -174,8 +206,8 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
           <View style={{ width: STORY_LOGICAL_WIDTH, height: STORY_LOGICAL_HEIGHT,
             transform: [{ scale }], transformOrigin: 'top left' }}>
             <RecapStoryFrame scene={scene} mode="animated" motion={motion} progress={progress}
-              mascotConfig={mascotConfig} monthLabel={formatMonthLabel(model.month)}
-              categoryLabel={(id) => catById[id] ? tCat(catById[id]) : (isZh ? '未分类' : 'Uncategorized')}
+              mascotConfig={mascotConfig} monthLabel={formatMonthLabel(sessionModel.month)}
+              categoryLabel={getCategoryLabel}
               accessibilityPositionLabel={position} />
           </View>
           {/* Receive touches in the displayed rectangle's coordinate system, independent
@@ -196,11 +228,21 @@ function StorySession({ model, mascotConfig, onClose, onShareScene, onChooseCard
           disabled={state.index === total - 1} onPress={() => navigate({ type: 'NEXT', total })} />
       </View>
       <View style={styles.toolbar}>
-        {onShareScene && <Control label={t('recapStoryShareCard')} hint={isZh ? '分享当前卡片' : 'Share the current card'}
-          onPress={() => { pause(); onShareScene(scene.id); }} />}
-        {scene.id === 'finale' && onChooseCards && <Control label={t('recapStoryChooseCards')}
-          hint={isZh ? '选择要分享的卡片' : 'Choose cards to share'} onPress={() => { pause(); onChooseCards(); }} />}
+        <Control label={t('recapStoryShareCard')} hint={isZh ? '分享当前卡片' : 'Share the current card'}
+          onPress={openShareCurrent} />
+        {scene.id === 'finale' && <Control label={t('recapStoryChooseCards')}
+          hint={isZh ? '选择要分享的卡片' : 'Choose cards to share'} onPress={openChooseCards} />}
       </View>
+      {shareSheetVisible && <RecapStoryShareSheet
+        model={sessionModel}
+        transactions={transactions}
+        mascotConfig={mascotConfig}
+        monthLabel={formatMonthLabel(sessionModel.month)}
+        categoryLabel={getCategoryLabel}
+        initialSceneId={shareInitialSceneId}
+        onClose={() => setShareSheetVisible(false)}
+        onMerchantCameo={handleMerchantCameo}
+      />}
     </View>
   </Modal>;
 }

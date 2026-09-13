@@ -2,6 +2,7 @@ import React from 'react';
 import { PanResponder, StyleSheet } from 'react-native';
 import { RecapStoryModal } from '../src/components/recap/RecapStoryModal';
 import { RecapStoryFrame } from '../src/components/recap/RecapStoryFrame';
+import { RecapStoryShareSheet } from '../src/components/recap/RecapStoryShareSheet';
 import * as sound from '../src/lib/sound';
 import type { RecapStoryModel } from '../src/lib/recapStory';
 import { DEFAULT_WIDGET_MASCOT_CONFIG } from '../src/widget/mascot/config';
@@ -10,6 +11,7 @@ let mockMotion = 'full';
 let mockReduced = false;
 let mockZh = false;
 jest.mock('../src/state/store', () => ({ useAppData: () => ({ motionSetting: mockMotion,
+  transactions: [],
   catById: { custom: { id: 'custom', label: 'Pottery', icon: 'dots', hue: 220, isDefault: false } } }) }));
 jest.mock('../src/state/useReducedMotion', () => ({ useReducedMotion: () => mockReduced }));
 jest.mock('../src/db/metaRepo', () => ({ getMeta: jest.fn(async () => null), setMeta: jest.fn() }));
@@ -141,6 +143,19 @@ it('offers current-card sharing and finale selection callbacks outside the frame
   press(tree, 'Share card'); expect(onShareScene).toHaveBeenCalledWith('ritual');
   press(tree, 'Next'); press(tree, 'Next'); press(tree, 'Choose cards');
   expect(onChooseCards).toHaveBeenCalledTimes(1);
+});
+
+it('opens the concrete picker from quiet share and finale defaults while preserving notifications', () => {
+  const onShareScene = jest.fn(); const onChooseCards = jest.fn();
+  const tree = render({ onShareScene, onChooseCards });
+  press(tree, 'Share card');
+  expect(onShareScene).toHaveBeenCalledWith('ritual');
+  expect(tree.root.findByType(RecapStoryShareSheet).props.initialSceneId).toBe('ritual');
+  press(tree, 'Close share options');
+  expect(tree.root.findAllByType(RecapStoryShareSheet)).toHaveLength(0);
+  press(tree, 'Next'); press(tree, 'Next'); press(tree, 'Choose cards');
+  expect(onChooseCards).toHaveBeenCalledTimes(1);
+  expect(tree.root.findByType(RecapStoryShareSheet).props.initialSceneId).toBeUndefined();
 });
 
 it('provides translated position/month/custom categories, safe scale, and 44-point controls', () => {
