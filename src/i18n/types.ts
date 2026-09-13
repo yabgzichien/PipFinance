@@ -796,4 +796,48 @@ export interface Translations {
   undoSettleMsg: string;
   reopen: string;
   allSettled: string;
+
+  // Paywall
+  proTitle: string;
+  proSubtitle: string;
+  proMonthly: string;
+  proAnnual: string;
+  proAnnualPerMonth: string;
+  proAnnualSave: string;
+  proStartTrial: string;
+  proRestore: string;
+  proRestoreNothing: string;
+  proManage: string;
+  proActive: string;
+  proTrialActive: string;
+  proDisclosure: string;
+  proStoreUnreachable: string;
+  // Gate headlines
+  gateScanQuota: string;
+  gateTaxExport: string;
+  gateReportExport: string;
+  gateMultiCurrency: string;
+  gateNetWorthHistory: string;
+  gateWidgetCustom: string;
+  // Free vs Pro comparison
+  compareFree: string;
+  comparePro: string;
+  compareScans: string;
+  compareScansFree: string;
+  compareScansPro: string;
+  compareTax: string;
+  compareTaxFree: string;
+  compareTaxPro: string;
+  compareReports: string;
+  compareReportsFree: string;
+  compareReportsPro: string;
+  // Scan counter
+  scansLeft: string;
+  scansNone: string;
+  scansDailyLeft: string;
+  scansDailyNone: string;
+  // Ambient upsell lines
+  upsellLine1: string;
+  upsellLine2: string;
+  upsellLine3: string;
 }
