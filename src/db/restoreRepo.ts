@@ -8,6 +8,7 @@
 import { getDb, genId } from './db';
 import { merchantKey as toMerchantKey } from '../lib/normalize';
 import type { Trip } from '../lib/trips';
+import { mascotConfigForTier } from '../widget/mascot/config';
 
 /** Loosely-typed mirror of the `backup.json` shape `generateFullBackupZip` writes (itself an
  *  extension of `generateAdvancedImportJSON`'s payload). Every field is optional/defensively
@@ -94,7 +95,8 @@ const nowIso = () => new Date().toISOString();
  */
 export async function restoreFromBackupPayload(
   payload: BackupPayload,
-  receiptUriByFileName: Map<string, string>
+  receiptUriByFileName: Map<string, string>,
+  isPro: boolean = false
 ): Promise<void> {
   const db = await getDb();
 
@@ -439,7 +441,7 @@ export async function restoreFromBackupPayload(
       if (s.commitmentReminderEnabled !== undefined) meta.commitment_reminder_on = s.commitmentReminderEnabled ? 'true' : 'false';
       if (s.motionSetting !== undefined) meta.motion_setting = s.motionSetting;
       if (typeof s.widgetMascotConfig === 'string') {
-        meta.widget_mascot_config = s.widgetMascotConfig;
+        meta.widget_mascot_config = mascotConfigForTier(s.widgetMascotConfig, isPro);
       }
       if (s.soundEnabled !== undefined) meta.sound_enabled = s.soundEnabled ? 'true' : 'false';
     }

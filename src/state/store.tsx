@@ -33,6 +33,7 @@ import {
 } from '../db/budgetRepo';
 import { resetAllData as dbResetAllData } from '../db/db';
 import { restoreFromBackupZip } from '../lib/backupRestore';
+import { readCachedTier } from '../billing/entitlementCache';
 import {
   addAccount as dbAddAccount,
   addBalanceEntry as dbAddBalanceEntry,
@@ -431,7 +432,7 @@ export interface AppData {
   resetAllData: () => Promise<void>;
   /** Destructively replaces all app data with the contents of a backup zip (Settings > Back
    *  Up & Restore). Callers must confirm with the user before calling this. */
-  restoreFromBackup: (zipBytes: Uint8Array) => Promise<void>;
+  restoreFromBackup: (zipBytes: Uint8Array, isPro?: boolean) => Promise<void>;
   /** Wipe all data AND reset onboarding so the setup wizard re-appears. */
   resetToOnboarding: () => Promise<void>;
   /** Monthly pay-yourself-first commitment. Motivation only. */
@@ -584,9 +585,11 @@ export async function persistWidgetMascotConfig(config: WidgetMascotConfig): Pro
  *  refreshed explicitly after React state has reloaded. */
 export async function restoreBackupAndRefresh(
   zipBytes: Uint8Array,
-  refresh: () => Promise<void>
+  refresh: () => Promise<void>,
+  isPro?: boolean
 ): Promise<void> {
-  await restoreFromBackupZip(zipBytes);
+  const pro = isPro ?? ((await readCachedTier()) === 'pro');
+  await restoreFromBackupZip(zipBytes, pro);
   await refresh();
   await syncAllWidgets().catch(() => {});
 }
@@ -1441,8 +1444,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await refreshAll();
   }, [refreshAll]);
 
-  const restoreFromBackup = useCallback(async (zipBytes: Uint8Array) => {
-    await restoreBackupAndRefresh(zipBytes, refreshAll);
+  const restoreFromBackup = useCallback(async (zipBytes: Uint8Array, isPro?: boolean) => {
+    await restoreBackupAndRefresh(zipBytes, refreshAll, isPro);
   }, [refreshAll]);
 
   // `refreshAll` matters as much here as in `resetAllData` above, and is easy to miss because
