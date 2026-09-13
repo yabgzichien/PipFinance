@@ -245,3 +245,18 @@ export function buildRecapStoryModel({
     defaultSelectedSceneIds: ['identity', 'finale'],
   };
 }
+
+export function shouldShowRecapStoryInvitation(
+  transactions: Transaction[],
+  now: Date,
+  handledMonth: string | null,
+): { visible: boolean; month: string } {
+  const month = previousMonthKey(currentMonthKey(now));
+  const inWindow = now.getDate() >= 1 && now.getDate() <= 7;
+  return {
+    month,
+    visible: inWindow && handledMonth !== month &&
+      buildRecapStoryModel({ transactions, month, now }) !== null,
+  };
+}
+

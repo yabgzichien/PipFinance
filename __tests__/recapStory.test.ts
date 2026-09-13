@@ -4,6 +4,7 @@ import {
   isCompletedStoryMonth,
   RECAP_PERSONA_KEYS,
   recapStoryMerchantCandidates,
+  shouldShowRecapStoryInvitation,
   transactionDay,
 } from '../src/lib/recapStory';
 
@@ -214,5 +215,41 @@ describe('buildRecapStoryModel', () => {
     expect(scene(defaultModel, 'pattern')).not.toHaveProperty('merchantCameo');
     expect(scene(disclosedModel, 'pattern')).toMatchObject({ merchantCameo: ' Alpha Cafe ' });
     expect(recapStoryMerchantCandidates(rows, '2026-08', 'food')).toEqual(['Zeta Market', 'Alpha Cafe']);
+  });
+
+  it('shows the invitation on days 1 through 7 for the previous eligible month', () => {
+    const txns = [txn({ date: '2026-08-15' })];
+    const day1 = new Date(2026, 8, 1, 10);
+    const day7 = new Date(2026, 8, 7, 23, 59);
+    const day8 = new Date(2026, 8, 8, 0, 1);
+
+    expect(shouldShowRecapStoryInvitation(txns, day1, null)).toEqual({
+      month: '2026-08',
+      visible: true,
+    });
+    expect(shouldShowRecapStoryInvitation(txns, day7, null)).toEqual({
+      month: '2026-08',
+      visible: true,
+    });
+    expect(shouldShowRecapStoryInvitation(txns, day8, null)).toEqual({
+      month: '2026-08',
+      visible: false,
+    });
+    expect(shouldShowRecapStoryInvitation(txns, day1, '2026-08')).toEqual({
+      month: '2026-08',
+      visible: false,
+    });
+    expect(shouldShowRecapStoryInvitation([], day1, null)).toEqual({
+      month: '2026-08',
+      visible: false,
+    });
+    expect(shouldShowRecapStoryInvitation([txn({ type: 'transfer', date: '2026-08-15' })], day1, null)).toEqual({
+      month: '2026-08',
+      visible: false,
+    });
+    expect(shouldShowRecapStoryInvitation([txn({ date: '2026-09-01' })], day1, null)).toEqual({
+      month: '2026-08',
+      visible: false,
+    });
   });
 });

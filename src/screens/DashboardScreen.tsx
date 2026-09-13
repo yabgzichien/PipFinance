@@ -84,7 +84,7 @@ export function DashboardScreen({
   onOpenBudget?: () => void;
   /** Tapping a category row on the budget card (not "Manage"). */
   onOpenCategory?: (id: string) => void;
-  onOpenRecap?: (month?: string) => void;
+  onOpenRecap?: (month?: string, openStory?: boolean) => void;
   onOpenNetWorth?: () => void;
   onOpenTrip?: (tripId: string) => void;
   onOpenOwed?: () => void;
@@ -127,6 +127,8 @@ export function DashboardScreen({
     tasksDone,
     pendingTaskCelebrations,
     clearTaskCelebrations,
+    recapStoryHomeHandledMonth,
+    markRecapStoryHomeHandled,
   } = useAppData();
   const taskStatus = useMemo(() => computeExploreTaskStatus(tasksDone), [tasksDone]);
   const [tasksSheetOpen, setTasksSheetOpen] = useState(false);
@@ -441,7 +443,16 @@ export function DashboardScreen({
               </Pressable>
             )}
 
-            <RecapEntry transactions={transactions} now={now} onOpen={onOpenRecap} />
+            <RecapEntry
+              transactions={transactions}
+              now={now}
+              handledMonth={recapStoryHomeHandledMonth}
+              onDismiss={(month) => markRecapStoryHomeHandled(month)}
+              onOpenStory={(month) => {
+                markRecapStoryHomeHandled(month);
+                onOpenRecap(month, true);
+              }}
+            />
 
             {/* This month budget */}
             <TourAnchor id="tour_budget_card" activeId={activeTourAnchor}>

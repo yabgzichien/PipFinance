@@ -446,6 +446,8 @@ export interface AppData {
    *  analytics in this app. */
   diagnosticsEnabled: boolean;
   setDiagnosticsEnabled: (on: boolean) => Promise<void>;
+  recapStoryHomeHandledMonth: string | null;
+  markRecapStoryHomeHandled: (month: string) => Promise<void>;
 
   // --- Streak (docs/ui-engagement-plan.md Step 4) ---------------------------------------
   /** The displayed streak: pause-frozen when paused, freeze-bridged otherwise. What every
@@ -562,6 +564,12 @@ export async function restoreBackupAndRefresh(
   await syncAllWidgets().catch(() => {});
 }
 
+export const RECAP_STORY_HOME_HANDLED_MONTH_KEY = 'recap_story_home_handled_month';
+
+export async function persistRecapStoryHomeHandledMonth(month: string): Promise<void> {
+  await setMeta(RECAP_STORY_HOME_HANDLED_MONTH_KEY, month);
+}
+
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -598,9 +606,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [reliefTags, setReliefTags] = useState<ReliefTag[]>([]);
   const [tasksDone, setTasksDoneState] = useState<ExploreTaskId[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [recapStoryHomeHandledMonth, setRecapStoryHomeHandledMonth] = useState<string | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, recapStoryHomeHandledMonthRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -629,6 +638,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         getMeta(STREAK_FREEZE_AVAILABLE_KEY),
         getMeta(STREAK_FREEZE_SPENT_FOR_KEY),
         getMeta(STREAK_PAUSED_SINCE_KEY),
+        getMeta(RECAP_STORY_HOME_HANDLED_MONTH_KEY),
         dbListPeople(),
         dbListSplits(),
         dbListShares(),
@@ -636,6 +646,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         listTrips(),
       ]);
     setTrips(tripRows);
+    setRecapStoryHomeHandledMonth(recapStoryHomeHandledMonthRaw || null);
     // An unreadable cadence falls back to off rather than to a guess: silence is the safe
     // failure mode for something that interrupts the user.
     setReminderCadenceState(isReminderCadence(reminderCadenceRaw) ? reminderCadenceRaw : 'off');
@@ -1326,6 +1337,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await setMeta(DIAGNOSTICS_INSTALL_ID_KEY, installId ?? '');
     setDiagnosticsEnabledState(on);
     resolveConsent(on, installId);
+  }, []);
+
+  const markRecapStoryHomeHandled = useCallback(async (month: string) => {
+    await persistRecapStoryHomeHandledMonth(month);
+    setRecapStoryHomeHandledMonth(month);
   }, []);
 
   const pauseStreak = useCallback(async () => {
@@ -2310,6 +2326,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setSoundEnabled,
     diagnosticsEnabled,
     setDiagnosticsEnabled,
+    recapStoryHomeHandledMonth,
+    markRecapStoryHomeHandled,
     streak: effectiveStreak,
     streakWeek,
     streakTodayIndex,
