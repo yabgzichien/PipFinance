@@ -18,6 +18,8 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { colors, radius, uiFont } from '../theme';
 
 // The current calendar year is always offered even when no schedule is registered for it yet:
@@ -43,6 +45,8 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
   const { transactions, commitments, updateCommitmentEntry } = useAppData();
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const [ya, setYa] = useState(AVAILABLE_YAS[0]);
   const [tags, setTags] = useState<ReliefTag[] | null>(null);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -150,6 +154,10 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             disabled={exportingPdf || !schedule || !tags || tags.length === 0}
             onPress={async () => {
               if (!schedule || !tags) return;
+              if (!isPro) {
+                openPaywall('tax_export', 'tax');
+                return;
+              }
               setExportingPdf(true);
               try {
                 try {
@@ -186,6 +194,10 @@ export function TaxScreen({ onBack }: { onBack: () => void }) {
             disabled={exportingZip || !schedule || !tags || tags.length === 0}
             onPress={async () => {
               if (!schedule || !tags) return;
+              if (!isPro) {
+                openPaywall('tax_export', 'tax');
+                return;
+              }
               setExportingZip(true);
               try {
                 try {

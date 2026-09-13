@@ -14,6 +14,8 @@ import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useLanguage } from '../i18n';
 import { useAppData } from '../state/store';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { radius, spacing, type as typeScale, uiFont } from '../theme';
 
 interface Row extends NetWorthPoint {
@@ -26,9 +28,17 @@ export function NetWorthHistoryScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { t, formatMonthLabel, isZh } = useLanguage();
   const { accounts, balanceEntries } = useAppData();
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const dc = useDisplayCurrency();
   const [search, setSearch] = useState('');
   const [rates, setRates] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!isPro) {
+      openPaywall('networth_history', 'networth');
+    }
+  }, [isPro, openPaywall]);
 
   useEffect(() => {
     listFxRates().then((fx) => setRates(ratesFromCache(fx)));

@@ -15,6 +15,8 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { colors, radius, uiFont } from '../theme';
 
 export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
@@ -23,12 +25,20 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { markTaskDone } = useAppData();
   const { isZh } = useLanguage();
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const [active, setActive] = useState<string[] | null>(null);
   const [display, setDisplay] = useState<string>(BASE_CURRENCY);
   const [search, setSearch] = useState<string>('');
   // The one row whose fetch/write is in flight — disabled while pending so a second tap
   // can't race the first, mirroring ProviderCard's single busy-state pattern.
   const [pendingCode, setPendingCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isPro) {
+      openPaywall('multi_currency', 'settings');
+    }
+  }, [isPro, openPaywall]);
 
   const reload = useCallback(async () => {
     const [nextActive, nextDisplay] = await Promise.all([

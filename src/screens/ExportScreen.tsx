@@ -32,6 +32,8 @@ import { useThemeColors } from '../state/colorScheme';
 import { useDisplayCurrency } from '../state/useDisplayCurrency';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { platformShadow, radius, uiFont } from '../theme';
 
 type ExportMode = 'summary' | 'advanced';
@@ -68,6 +70,8 @@ export function ExportScreen({
   const { formatMonthLabel, isZh } = useLanguage();
   const { transactions, categories, accounts, balanceEntries, markTaskDone } = useAppData();
   const displayCurrency = useDisplayCurrency();
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
 
   const now = useMemo(() => new Date(), []);
   const currentYear = now.getFullYear();
@@ -136,6 +140,10 @@ export function ExportScreen({
   const visibleCategories = reportData.incomeStatement.expenseRows.slice(0, 4);
 
   const handleExport = async () => {
+    if (!isPro) {
+      openPaywall('report_export', 'export');
+      return;
+    }
     setExporting(true);
     try {
       const periodSlug = activePeriod.label.replace(/[^a-zA-Z0-9_-]/g, '_');

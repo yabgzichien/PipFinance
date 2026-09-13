@@ -24,6 +24,8 @@ import {
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { useBackHandler } from '../state/useBackHandler';
 import { BADGE_THEMES, badgeIconSvg, badgeAnimationCss } from '../widget/mascot/badge';
 import { DOWN_ARROW_SVG, UP_ARROW_SVG } from '../widget/mascot/chrome';
@@ -74,9 +76,17 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const colorTheme = useThemeColors();
   const { t } = useLanguage();
   const { widgetMascotConfig, setWidgetMascotConfig } = useAppData();
+  const { isPro } = useEntitlement();
+  const { openPaywall } = usePaywall();
   const [draft, setDraft] = useState(widgetMascotConfig);
   const [tab, setTab] = useState<CustomizerTab>('preset');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isPro) {
+      openPaywall('widget_custom', 'settings');
+    }
+  }, [isPro, openPaywall]);
 
   // The whole widget, not just the mascot — otherwise the slot pickers and size sliders change
   // nothing on screen. See mascot/previewCompose.ts on why it is a second renderer.
