@@ -19,7 +19,7 @@ import { tap } from '../lib/haptics';
 import { useModalHandoff } from '../lib/modalHandoff';
 import { suggestForMerchant } from '../lib/recommend';
 import type { ExtractedTxn } from '../lib/types';
-import { getLLM, llmErrorMessage } from '../llm';
+import { llmErrorMessage } from '../llm';
 import { getScanStage } from '../lib/scanningNarration';
 import { ScanProgressBar } from '../components/ScanProgressBar';
 import { useLanguage } from '../i18n';
@@ -27,6 +27,7 @@ import { useEntitlement } from '../billing/entitlement';
 import { usePaywall } from '../billing/paywallContext';
 import { submitScan } from '../billing/scanProxy';
 import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
+import type { OcrOutcome } from '../lib/receiptOcr';
 import { PipUpsellCard } from '../components/PipUpsellCard';
 import { fireOnce, getMomentLine, type UpsellMoment } from '../billing/moments';
 import { useAccent } from '../state/accent';
@@ -47,6 +48,7 @@ const FOUND_HOLD_MS = motionDuration.enter;
 
 export function ExtractScreen({
   image,
+  prefetchedOcr,
   cachedItems,
   linkId: initialLinkId = null,
   onBack,
@@ -54,6 +56,8 @@ export function ExtractScreen({
   onItemsExtracted,
 }: {
   image: PickedImage;
+  /** OCR started on ScanKind — skip a second ML Kit pass. */
+  prefetchedOcr?: OcrOutcome | Promise<OcrOutcome>;
   cachedItems?: ExtractedTxn[];
   linkId?: string | null;
   onBack: () => void;
@@ -69,7 +73,7 @@ export function ExtractScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh, t, tCat } = useLanguage();
-  const { memory, catById, accounts, entryCategories } = useAppData();
+  const { memory, catById, accounts } = useAppData();
   const {
     tier,
     isPro,
@@ -165,40 +169,29 @@ export function ExtractScreen({
     (async () => {
       try {
         let rows: ExtractedTxn[] = [];
-        try {
-          const proxyResult = await submitScan(
-            {
-              imageBase64: image.base64,
-              mimeType: image.mime,
-              categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-            },
-            tier
-          );
-          if (proxyResult.quotaBlocked) {
-            if (!alive) return;
-            openPaywall('scan_quota', 'add');
-            setError(t('scansDailyNone') || 'Scan limit reached');
-            setPhase('error');
-            return;
-          }
-          if (proxyResult.ok && proxyResult.items && proxyResult.items.length > 0) {
-            rows = proxyResult.items;
-          } else {
-            const llm = await getLLM();
-            rows = await llm.extract({
-              imageBase64: image.base64,
-              mimeType: image.mime,
-              categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-            });
-          }
-        } catch {
-          const llm = await getLLM();
-          rows = await llm.extract({
+        const proxyResult = await submitScan(
+          {
+            uri: image.uri,
             imageBase64: image.base64,
             mimeType: image.mime,
-            categories: entryCategories.map((c) => ({ id: c.id, label: c.label, kind: c.kind })),
-          });
+            prefetchedOcr,
+          },
+          tier
+        );
+        if (proxyResult.quotaBlocked) {
+          if (!alive) return;
+          openPaywall('scan_quota', 'add');
+          setError(t('scansDailyNone') || 'Scan limit reached');
+          setPhase('error');
+          return;
         }
+        if (!proxyResult.ok || !proxyResult.items || proxyResult.items.length === 0) {
+          if (!alive) return;
+          setError(proxyResult.error || (isZh ? '未能在该截图中识别到任何交易。' : "I couldn't read any transactions in that image."));
+          setPhase('error');
+          return;
+        }
+        rows = proxyResult.items;
         if (!alive) return;
         void refreshAllowance();
         setElapsedMs(Date.now() - start);
@@ -221,7 +214,7 @@ export function ExtractScreen({
     return () => {
       alive = false;
     };
-  }, [image, cachedItems, onItemsExtracted, entryCategories, canScan, tier, openPaywall, refreshAllowance, t]);
+  }, [image, cachedItems, onItemsExtracted, canScan, tier, openPaywall, refreshAllowance, t]);
 
   useEffect(() => {
     if (phase !== 'found') return;

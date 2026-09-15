@@ -21,6 +21,7 @@ import { llmErrorMessage } from '../llm';
 import { derivedSurcharges, type ScannedReceipt } from '../lib/parseReceipt';
 import { notify } from '../lib/platformAlert';
 import { saveReceiptImage } from '../lib/receiptStorage';
+import type { OcrOutcome } from '../lib/receiptOcr';
 import { scanReceiptImage } from '../lib/scanReceipt';
 import { getScanStage } from '../lib/scanningNarration';
 import { ScanProgressBar } from '../components/ScanProgressBar';
@@ -85,6 +86,7 @@ const PREVIEW_H = 280;
 
 export function ReceiptScanScreen({
   initialImage,
+  prefetchedOcr,
   cachedReceipt,
   initialDraft,
   onScanned,
@@ -96,6 +98,8 @@ export function ReceiptScanScreen({
    *  ScanKindScreen that it was a receipt. When set, this screen skips straight to reading it;
    *  its own capture screen stays reachable as the retry surface if that read fails. */
   initialImage?: PickedImage;
+  /** OCR started on ScanKind for `initialImage` — skip a second ML Kit pass on first read. */
+  prefetchedOcr?: OcrOutcome | Promise<OcrOutcome>;
   /** A previous read of this same image, handed back in when the user backed out to the kind
    *  question and returned. Lets the screen skip straight to 'assign' instead of paying for
    *  another LLM round-trip (and the "reading" loading beat) to re-read a receipt already read. */
@@ -229,7 +233,7 @@ export function ReceiptScanScreen({
     setChargedText((scanned.total ?? fallbackTotal).toFixed(2));
   };
 
-  const read = async (image: PickedImage) => {
+  const read = async (image: PickedImage, ocr?: OcrOutcome | Promise<OcrOutcome>) => {
     if (!canScan) {
       openPaywall('scan_quota', 'add');
       return;
@@ -238,12 +242,18 @@ export function ReceiptScanScreen({
     setPhase('reading');
     setError('');
     try {
-      const scanned = await scanReceiptImage(image);
+      const scanned = await scanReceiptImage(image, isPro ? 'pro' : 'free', ocr);
       applyScan(scanned);
       onScanned?.(scanned);
       void refreshAllowance();
       setPhase('assign');
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.quotaBlocked) {
+        openPaywall('scan_quota', 'add');
+        setError(e.message || 'Scan limit reached');
+        setPhase('capture');
+        return;
+      }
       // A read failure (network, auth, or a reply nothing usable could be parsed from) still
       // leaves a real photo the user took. Falling through to 'assign' with a blank receipt lets
       // them type the total by hand and save it, instead of dead-ending at 'capture' with only
@@ -268,18 +278,18 @@ export function ReceiptScanScreen({
       else applyScan(cachedReceipt);
       return;
     }
-    if (initialImage) read(initialImage);
+    if (initialImage) read(initialImage, prefetchedOcr);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleResult = (res: ImagePicker.ImagePickerResult) => {
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
-    if (!a.base64) {
+    if (!a.uri && !a.base64) {
       notify('Hmm', isZh ? '无法读取该照片，请尝试其他照片。' : "That photo couldn't be read. Try another one.");
       return;
     }
-    read({ uri: a.uri, base64: a.base64, mime: a.mimeType ?? 'image/jpeg' });
+    read({ uri: a.uri, base64: a.base64 || '', mime: a.mimeType ?? 'image/jpeg' });
   };
 
   const takePhoto = async () => {
@@ -305,7 +315,7 @@ export function ReceiptScanScreen({
         notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相机以拍摄小票。' : 'Allow camera access to photograph the receipt.');
         return;
       }
-      handleResult(await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 }));
+      handleResult(await ImagePicker.launchCameraAsync({ quality: 0.85 }));
     } finally {
       setBusy(false);
     }
@@ -324,7 +334,7 @@ export function ReceiptScanScreen({
         notify(isZh ? '需要权限' : 'Permission needed', isZh ? '请允许访问相册以选取小票。' : 'Allow photo access to pick the receipt.');
         return;
       }
-      handleResult(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], base64: true, quality: 0.7 }));
+      handleResult(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.85 }));
     } finally {
       setBusy(false);
     }

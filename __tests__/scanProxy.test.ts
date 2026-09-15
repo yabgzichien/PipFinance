@@ -1,8 +1,13 @@
 // __tests__/scanProxy.test.ts
 import {
   fetchAllowance,
+  fetchServerEntitlement,
   getInstallationId,
+  redeemPromoCode,
   submitScan,
+  submitReceiptScan,
+  submitSnapshotScan,
+  computeIdempotencyKey,
   type ScanRequest,
   type ScanResult,
 } from '../src/billing/scanProxy';
@@ -123,6 +128,62 @@ describe('submitScan', () => {
     expect(res.allowance.canScan).toBe(true);
   });
 
+  it('activates dual-path preprocessing when uri is present even if imageBase64 is also passed', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        items: [],
+        allowance: { tier: 'free', monthUsed: 1, dayUsed: 1 },
+      }),
+    } as never);
+
+    const req: ScanRequest = {
+      uri: 'file:///photo.jpg',
+      imageBase64: 'raw_picker_base64',
+      mimeType: 'image/jpeg',
+    };
+
+    await submitScan(req);
+    expect(global.fetch).toHaveBeenCalled();
+    const callArgs = (global.fetch as jest.Mock).mock.calls[0];
+    expect(callArgs[1].headers['x-client-preprocess']).toBeDefined();
+  });
+
+  it('hashes the full payload for idempotency, not just head and tail', async () => {
+    const head = 'H'.repeat(20000);
+    const tail = 'T'.repeat(20000);
+    const a = `${head}MIDDLE_A${tail}`;
+    const b = `${head}MIDDLE_B${tail}`;
+    const ka = await computeIdempotencyKey('install-1', 'transactions', a);
+    const kb = await computeIdempotencyKey('install-1', 'transactions', b);
+    expect(ka).not.toBe(kb);
+  });
+
+  it('retries once at a smaller image when the worker returns 413', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 413,
+        json: async () => ({ error: 'Image payload exceeds 400KB limit' }),
+      } as never)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          items: [{ merchant: 'Rescued', amount: 9, type: 'expense', date: null, currency: 'MYR' }],
+          allowance: { tier: 'free', monthUsed: 1, dayUsed: 1 },
+        }),
+      } as never);
+
+    const res = await submitScan({ uri: 'file:///huge.jpg' });
+    expect(res.ok).toBe(true);
+    expect(res.items[0].merchant).toBe('Rescued');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+
   it('handles worker quota rejection (e.g. daily limit hit)', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
@@ -177,5 +238,155 @@ describe('submitScan', () => {
     expect(res.quotaBlocked).toBe(true);
     expect(res.allowance.blockedBy).toBe('monthly');
     expect(res.allowance.canScan).toBe(false);
+  });
+});
+
+describe('submitReceiptScan', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (getMeta as jest.Mock).mockResolvedValue('anon-install-123');
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('submits receipt scan and returns parsed receipt data', async () => {
+    const mockReceipt = {
+      merchant: 'FamilyMart',
+      currency: 'MYR',
+      items: [{ label: 'Oden', amount: 8.5, quantity: 1 }],
+      subtotal: 8.5,
+      serviceCharge: null,
+      tax: 0.51,
+      total: 9.01,
+      discount: null,
+    };
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        scanType: 'receipt',
+        receipt: mockReceipt,
+        allowance: {
+          tier: 'free',
+          monthUsed: 5,
+          dayUsed: 2,
+        },
+      }),
+    } as never);
+
+    const res = await submitReceiptScan({
+      imageBase64: 'base64receipt',
+      mimeType: 'image/jpeg',
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.receipt).toEqual(mockReceipt);
+    expect(res.allowance.monthUsed).toBe(5);
+  });
+});
+
+describe('submitSnapshotScan', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (getMeta as jest.Mock).mockResolvedValue('anon-install-123');
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('submits snapshot scan and returns parsed balance snapshot', async () => {
+    const mockSnapshot = {
+      kind: 'balance',
+      provider: 'Maybank',
+      accountKind: 'asset',
+      amount: 1250.8,
+      currency: 'MYR',
+    };
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        scanType: 'snapshot',
+        snapshot: mockSnapshot,
+        allowance: {
+          tier: 'pro',
+          monthUsed: 0,
+          dayUsed: 0,
+        },
+      }),
+    } as never);
+
+    const res = await submitSnapshotScan(
+      { imageBase64: 'base64snap', mimeType: 'image/jpeg' },
+      'pro'
+    );
+
+    expect(res.ok).toBe(true);
+    expect(res.snapshot).toEqual(mockSnapshot);
+  });
+});
+
+describe('promo redeem client', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (getMeta as jest.Mock).mockResolvedValue('anon-install-123');
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('redeems a code and returns the lifetime grant', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        grant: { kind: 'lifetime', expiresAt: null, source: 'promo' },
+      }),
+    } as never);
+
+    const res = await redeemPromoCode('pip-a7k2');
+    expect(res).toEqual({
+      ok: true,
+      grant: { kind: 'lifetime', expiresAt: null, source: 'promo' },
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/redeem'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ code: 'pip-a7k2' }),
+      })
+    );
+  });
+
+  it('maps already_used from the worker', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ ok: false, error: 'already_used' }),
+    } as never);
+    expect(await redeemPromoCode('PIP-USED')).toEqual({ ok: false, error: 'already_used' });
+  });
+
+  it('fetches server entitlement for the installation', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active: true,
+        kind: 'lifetime',
+        expiresAt: null,
+        source: 'promo',
+      }),
+    } as never);
+    expect(await fetchServerEntitlement()).toEqual({
+      active: true,
+      kind: 'lifetime',
+      expiresAt: null,
+      source: 'promo',
+    });
   });
 });
