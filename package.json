@@ -18,8 +18,14 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "setupFiles": [
+      "react-native-gesture-handler/jestSetup.js"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup.js"
+    ],
     "transformIgnorePatterns": [
-      "node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|react-native-purchases|@revenuecat))"
+      "node_modules/(?!(.pnpm|react-native|@react-native|@react-native-community|expo|@expo|@expo-google-fonts|react-navigation|@react-navigation|@sentry/react-native|native-base|react-native-purchases|@revenuecat|react-native-reanimated|react-native-gesture-handler|react-native-worklets))"
     ]
   },
   "overrides": {
@@ -59,8 +65,10 @@
     "react-native": "0.81.5",
     "react-native-android-widget": "^0.22.1",
     "react-native-document-scanner-plugin": "^2.0.4",
+    "react-native-gesture-handler": "~2.28.0",
     "react-native-purchases": "^10.9.1",
     "react-native-purchases-ui": "^10.9.1",
+    "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.12.1",
     "react-native-view-shot": "4.0.3",

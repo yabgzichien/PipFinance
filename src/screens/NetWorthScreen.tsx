@@ -2,12 +2,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import Svg, { Circle, Defs, LinearGradient, Path, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddAccountModal } from '../components/AddAccountModal';
 import { AddDebtModal } from '../components/AddDebtModal';
 import { SettleSheet } from '../components/SettleSheet';
 import { Icon, type IconName } from '../components/Icon';
+import { ProBadge } from '../components/ProUi';
 import { CalcBadge } from '../components/CalcBadge';
 import { InstitutionBadge } from '../components/InstitutionBadge';
 import { BrandBadge } from '../components/BrandBadge';
@@ -54,6 +57,7 @@ import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useLanguage } from '../i18n';
+import { useEntitlement } from '../billing/entitlement';
 import { numFont, radius, shadowToggle, spacing, uiFont } from '../theme';
 
 const RED2 = '#c5402f';
@@ -122,6 +126,7 @@ export function NetWorthScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, isZh } = useLanguage();
+  const { isPro } = useEntitlement();
   const { accounts, balanceEntries, accountValues, prices, pricesAsOf, refreshPrices, openShares, deleteDirectDebt, settleShare } = useAppData();
   const [adding, setAdding] = useState(false);
   const [addingDebt, setAddingDebt] = useState(false);
@@ -334,7 +339,9 @@ export function NetWorthScreen({
               values={series}
               months={monthShorts}
               hasTrend={hasTrend}
+              isPro={isPro}
               onOpenHistory={onOpenHistory}
+              dc={dc}
             />
 
             {hasTrend && movers.length > 0 && (
@@ -568,29 +575,76 @@ function TrendSection({
   values,
   months,
   hasTrend,
+  isPro,
   onOpenHistory,
+  dc,
 }: {
   values: number[];
   months: string[];
   hasTrend: boolean;
+  isPro: boolean;
   onOpenHistory: () => void;
+  dc: DisplayCurrency;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { isZh } = useLanguage();
+  const [selectedIndex, setSelectedIndex] = useState(() => Math.max(0, values.length - 1));
+
+  useEffect(() => {
+    if (values.length === 0) return;
+    setSelectedIndex(values.length - 1);
+  }, [values.length]);
+
+  const selected = values.length > 0 ? Math.min(selectedIndex, values.length - 1) : -1;
+  const selectedValue = selected >= 0 ? values[selected] : null;
+  const selectedMonth = selected >= 0 ? months[selected] : null;
+
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Body weight={700} style={styles.sectionTitle}>{isZh ? '六个月趋势' : 'Your 6-month trend'}</Body>
-        <Pressable onPress={onOpenHistory} hitSlop={8} accessibilityRole="button" accessibilityLabel={isZh ? '查看净资产历史' : 'View net worth history'}>
+        <Pressable onPress={onOpenHistory} hitSlop={8} accessibilityRole="button" accessibilityLabel={isZh ? '查看净资产历史' : 'View net worth history'} style={styles.proInlineAction}>
           <Label color={theme.accent}>{isZh ? '历史记录' : 'View history'}</Label>
+          {!isPro ? <ProBadge locked /> : null}
         </Pressable>
       </View>
       {hasTrend ? (
         <View style={[styles.trendSurface, { backgroundColor: colorTheme.surface2 }]}>
-          <JournalTrendChart values={values} lineColor={theme.accent} />
+          {selectedValue != null && selectedMonth != null && (
+            <Caption
+              color={selectedValue < 0 ? colorTheme.red : colorTheme.ink2}
+              style={styles.trendReadout}
+            >
+              {selectedMonth}  ·  {fmtMoney(dc.convert(selectedValue), dc.code)}
+            </Caption>
+          )}
+          <JournalTrendChart
+            values={values}
+            lineColor={theme.accent}
+            ink3={colorTheme.ink3}
+            selectedIndex={selected}
+            onSelectIndex={setSelectedIndex}
+          />
           <View style={styles.trendMonths}>
-            {months.map((month, index) => <Caption key={`${month}-${index}`} color={colorTheme.ink2} style={styles.trendMonth}>{month}</Caption>)}
+            {months.map((month, index) => (
+              <Pressable
+                key={`${month}-${index}`}
+                onPress={() => setSelectedIndex(index)}
+                hitSlop={6}
+                style={styles.trendMonthHit}
+                accessibilityRole="button"
+                accessibilityState={{ selected: index === selected }}
+                accessibilityLabel={`${month} net worth`}
+              >
+                <Caption
+                  color={index === selected ? theme.accent : colorTheme.ink2}
+                  style={[styles.trendMonth, index === selected && styles.trendMonthSelected]}
+                >
+                  {month}
+                </Caption>
+              </Pressable>
+            ))}
           </View>
         </View>
       ) : (
@@ -602,7 +656,19 @@ function TrendSection({
   );
 }
 
-function JournalTrendChart({ values, lineColor }: { values: number[]; lineColor: string }) {
+function JournalTrendChart({
+  values,
+  lineColor,
+  ink3,
+  selectedIndex,
+  onSelectIndex,
+}: {
+  values: number[];
+  lineColor: string;
+  ink3: string;
+  selectedIndex: number;
+  onSelectIndex: (index: number) => void;
+}) {
   const [layoutWidth, setLayoutWidth] = useState(0);
   const height = 76;
   const verticalPadding = 10;
@@ -619,26 +685,68 @@ function JournalTrendChart({ values, lineColor }: { values: number[]; lineColor:
   const first = points[0];
   const last = points[points.length - 1];
   const area = `${line} L ${last[0].toFixed(1)} ${height} L ${first[0].toFixed(1)} ${height} Z`;
+  const selected = points[Math.min(Math.max(selectedIndex, 0), points.length - 1)] ?? last;
+
+  const selectAtX = (x: number) => {
+    if (points.length === 0) return;
+    let best = 0;
+    let bestDist = Math.abs(points[0][0] - x);
+    for (let i = 1; i < points.length; i++) {
+      const d = Math.abs(points[i][0] - x);
+      if (d < bestDist) {
+        best = i;
+        bestDist = d;
+      }
+    }
+    if (best !== selectedIndex) onSelectIndex(best);
+  };
+
+  const pan = Gesture.Pan()
+    .onBegin((e) => {
+      runOnJS(selectAtX)(e.x);
+    })
+    .onUpdate((e) => {
+      runOnJS(selectAtX)(e.x);
+    });
+  const tap = Gesture.Tap().onEnd((e) => {
+    runOnJS(selectAtX)(e.x);
+  });
+  const gesture = Gesture.Race(pan, tap);
+
   return (
-    <View
-      style={styles.trendChart}
-      onLayout={(event) => {
-        const nextWidth = event.nativeEvent.layout.width;
-        if (nextWidth > 0 && nextWidth !== layoutWidth) setLayoutWidth(nextWidth);
-      }}
-    >
-      <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        <Defs>
-          <LinearGradient id="journalTrend" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={lineColor} stopOpacity={0.24} />
-            <Stop offset="1" stopColor={lineColor} stopOpacity={0} />
-          </LinearGradient>
-        </Defs>
-        <Path d={area} fill="url(#journalTrend)" />
-        <Path d={line} fill="none" stroke={lineColor} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-        <Circle cx={last[0]} cy={last[1]} r={4} fill={lineColor} />
-      </Svg>
-    </View>
+    <GestureDetector gesture={gesture}>
+      <View
+        style={styles.trendChart}
+        onLayout={(event) => {
+          const nextWidth = event.nativeEvent.layout.width;
+          if (nextWidth > 0 && nextWidth !== layoutWidth) setLayoutWidth(nextWidth);
+        }}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Six-month net worth trend"
+      >
+        <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+          <Defs>
+            <LinearGradient id="journalTrend" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={lineColor} stopOpacity={0.24} />
+              <Stop offset="1" stopColor={lineColor} stopOpacity={0} />
+            </LinearGradient>
+          </Defs>
+          <Path d={area} fill="url(#journalTrend)" />
+          <Path d={line} fill="none" stroke={lineColor} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+          <Line
+            x1={selected[0]}
+            x2={selected[0]}
+            y1={verticalPadding / 2}
+            y2={height}
+            stroke={ink3}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            opacity={0.55}
+          />
+          <Circle cx={selected[0]} cy={selected[1]} r={4} fill={lineColor} stroke="#fff" strokeWidth={1.5} />
+        </Svg>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -2406,11 +2514,15 @@ const styles = StyleSheet.create({
   updateButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.base, borderRadius: radius.sm },
   section: { marginHorizontal: spacing.lg, marginBottom: spacing.lg },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md, marginBottom: spacing.md },
+  proInlineAction: { alignItems: 'center', flexDirection: 'row', gap: spacing.sm },
   sectionTitle: { flex: 1 },
   trendSurface: { borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  trendReadout: { marginBottom: spacing.xs, fontFamily: numFont(600) },
   trendChart: { width: '100%', height: 76 },
   trendMonths: { flexDirection: 'row', marginTop: spacing.xs },
-  trendMonth: { flex: 1, textAlign: 'center' },
+  trendMonthHit: { flex: 1 },
+  trendMonth: { textAlign: 'center' },
+  trendMonthSelected: { fontFamily: uiFont(700) },
   trendEmpty: { minHeight: 76, borderTopWidth: 1, borderBottomWidth: 1, justifyContent: 'center', paddingVertical: spacing.base },
   moversList: { borderTopWidth: 1 },
   moverRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
