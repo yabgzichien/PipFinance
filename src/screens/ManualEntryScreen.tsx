@@ -14,6 +14,8 @@ import { TourAnchor } from '../components/TourAnchor';
 import { BtnLabel, BubbleText, CategoryChip, Eyebrow, PipSays, PrimaryButton, TopBar } from '../components/ui';
 import { activateCurrency, getActiveCurrencies, getEntryCurrency, setEntryCurrency } from '../db/currencyRepo';
 import { listFxRates } from '../db/fxRepo';
+import { canActivateCurrency } from '../billing/currencyEntitlements';
+import { useEntitlement } from '../billing/entitlement';
 import { todayISO } from '../lib/duplicates';
 import { fullDate, isValidIsoDate } from '../lib/dates';
 import { CLASS_BY_ID, defaultLinkEffect, type LinkEffect } from '../lib/networth';
@@ -103,6 +105,7 @@ export function ManualEntryScreen({
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const { t, formatFullDate, isZh } = useLanguage();
+  const { isPro } = useEntitlement();
   const { accounts, recordBalanceLink, ensureDefaultAccount, trips } = useAppData();
   const [merchant, setMerchant] = useState(initialMerchant ?? '');
   const [amountText, setAmountText] = useState(
@@ -150,12 +153,12 @@ export function ManualEntryScreen({
       // be one the user has ever entered before. Activate it here rather than leaving the
       // amount stuck on an inactive currency with no cached rate and no way to save.
       if (initialCurrency && !active.includes(initialCurrency)) {
-        if (await activateCurrency(initialCurrency)) {
+        if (canActivateCurrency(active, initialCurrency, isPro) && await activateCurrency(initialCurrency)) {
           [active, fx] = await Promise.all([getActiveCurrencies(), listFxRates()]);
         }
       }
       setActiveCurrencies(active);
-      if (initialCurrency) {
+      if (initialCurrency && active.includes(initialCurrency)) {
         setCurrency(initialCurrency);
       } else {
         setCurrency(entry);

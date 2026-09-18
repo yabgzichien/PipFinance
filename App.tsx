@@ -16,6 +16,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Linking, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomNav, type NavTab } from './src/components/BottomNav';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { Pip } from './src/components/Pip';
@@ -64,6 +65,8 @@ import type { TxnType } from './src/lib/types';
 import { backTargetFor, type Screen } from './src/lib/screenNav';
 import { EXPLORE_TASKS, type ExploreTaskId } from './src/lib/tasks';
 import { platformShadow, uiFont } from './src/theme';
+import type { WidgetMascotConfig } from './src/widget/mascot/config';
+import { seedNetWorthDemo } from './src/lib/seedNetWorthDemo';
 
 /**
  * Web-only: a global :focus-visible outline so keyboard users get a visible focus indicator
@@ -99,24 +102,27 @@ export default function App() {
   return (
     <ColorSchemeProvider>
       <PhoneFrame>
-        <SafeAreaProvider>
-          <AppDataProvider>
-            <EntitlementProvider>
-              <AccentProvider>
-                <LanguageProvider>
-                  <GlossaryProvider>
-                    <AlertHostProvider>
-                      <ErrorBoundary>
-                        <Root fontsLoaded={fontsLoaded} />
-                      </ErrorBoundary>
-                    </AlertHostProvider>
-                  </GlossaryProvider>
-                </LanguageProvider>
-              </AccentProvider>
-            </EntitlementProvider>
-          </AppDataProvider>
-          <ThemedStatusBar />
-        </SafeAreaProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <SafeAreaProvider>
+            <AppDataProvider>
+              <EntitlementProvider>
+                <AccentProvider>
+                  <LanguageProvider>
+                    <GlossaryProvider>
+                      <AlertHostProvider>
+                        <ErrorBoundary>
+                          <Root fontsLoaded={fontsLoaded} />
+                          {__DEV__ ? <DevNetWorthSeeder /> : null}
+                        </ErrorBoundary>
+                      </AlertHostProvider>
+                    </GlossaryProvider>
+                  </LanguageProvider>
+                </AccentProvider>
+              </EntitlementProvider>
+            </AppDataProvider>
+            <ThemedStatusBar />
+          </SafeAreaProvider>
+        </GestureHandlerRootView>
       </PhoneFrame>
     </ColorSchemeProvider>
   );
@@ -126,6 +132,31 @@ export default function App() {
 function ThemedStatusBar() {
   const { resolvedScheme } = useColorSchemeMode();
   return <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />;
+}
+
+/**
+ * Dev-only: expose `globalThis.__pipSeedNetWorth()` so localhost can be seeded from the
+ * browser console / CDP without a settings UI. Reloads after seeding so store + entitlement
+ * pick up the new rows and the lifetime Pro grant.
+ */
+function DevNetWorthSeeder() {
+  useEffect(() => {
+    const g = globalThis as typeof globalThis & {
+      __pipSeedNetWorth?: () => Promise<{ accounts: number; entries: number; proGranted: boolean }>;
+    };
+    g.__pipSeedNetWorth = async () => {
+      const result = await seedNetWorthDemo(new Date());
+      // Hard reload so AppDataProvider + EntitlementProvider re-read SQLite / grant cache.
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => window.location.reload(), 50);
+      }
+      return result;
+    };
+    return () => {
+      delete g.__pipSeedNetWorth;
+    };
+  }, []);
+  return null;
 }
 
 /**
@@ -238,6 +269,7 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
   const [owedOrigin, setOwedOrigin] = useState<Screen>('transactions');
   const [paywallOrigin, setPaywallOrigin] = useState<Screen>('home');
   const [paywallTrigger, setPaywallTrigger] = useState<GateTrigger>('scan_quota');
+  const [widgetCustomizerDraft, setWidgetCustomizerDraft] = useState<WidgetMascotConfig | null>(null);
 
   const openPaywall = React.useCallback((trigger: GateTrigger, origin?: Screen) => {
     setPaywallOrigin(origin ?? screen);
@@ -729,10 +761,6 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
               setScreen('calendar');
             }}
             onOpenCurrencySettings={() => {
-              if (!isPro) {
-                openPaywall('multi_currency', 'home');
-                return;
-              }
               setCurrencyOrigin('home');
               setScreen('currencySettings');
             }}
@@ -777,19 +805,11 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
           }}
           onOpenTax={() => setScreen('tax')}
           onOpenCurrencySettings={() => {
-            if (!isPro) {
-              openPaywall('multi_currency', 'settings');
-              return;
-            }
             setCurrencyOrigin('settings');
             setScreen('currencySettings');
           }}
           onOpenBackup={() => setScreen('backup')}
           onOpenWidgetCustomizer={() => {
-            if (!isPro) {
-              openPaywall('widget_custom', 'settings');
-              return;
-            }
             setScreen('widgetCustomizer');
           }}
           taxRequestableCount={taxRequestableCount}
@@ -798,7 +818,16 @@ function Root({ fontsLoaded }: { fontsLoaded: boolean }) {
       )}
       {screen === 'advancedImport' && <AdvancedImportScreen onClose={goBack} />}
       {screen === 'backup' && <BackupScreen onBack={goBack} />}
-      {screen === 'widgetCustomizer' && <WidgetCustomizerScreen onBack={goBack} />}
+      {screen === 'widgetCustomizer' && (
+        <WidgetCustomizerScreen
+          initialDraft={widgetCustomizerDraft}
+          onDraftChange={setWidgetCustomizerDraft}
+          onBack={() => {
+            setWidgetCustomizerDraft(null);
+            goBack();
+          }}
+        />
+      )}
       {screen === 'export' && (
         <ExportScreen
           initialMonth={exportMonth}

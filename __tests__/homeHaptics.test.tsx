@@ -4,6 +4,10 @@ import { Pip } from '../src/components/Pip';
 import { DashboardScreen } from '../src/screens/DashboardScreen';
 import * as haptics from '../src/lib/haptics';
 
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: jest.fn(),
+  setAudioModeAsync: jest.fn(),
+}));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));

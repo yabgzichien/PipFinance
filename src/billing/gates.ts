@@ -8,6 +8,7 @@ export const GATE_TRIGGERS = [
   'multi_currency',
   'networth_history',
   'widget_custom',
+  'live_holdings',
 ] as const;
 
 export type GateTrigger = (typeof GATE_TRIGGERS)[number];
@@ -28,5 +29,20 @@ export function gateHeadline(trigger: GateTrigger, t: Translations): string {
       return t.gateNetWorthHistory;
     case 'widget_custom':
       return t.gateWidgetCustom;
+    case 'live_holdings':
+      return t.gateLiveHoldings;
+  }
+}
+
+/** One calm, contextual sentence for the minimal paywall hero. */
+export function gateContextLine(trigger: GateTrigger, t: Translations): string {
+  switch (trigger) {
+    case 'scan_quota': return t.gateContextScanQuota;
+    case 'tax_export': return t.gateContextTaxExport;
+    case 'report_export': return t.gateContextReportExport;
+    case 'multi_currency': return t.gateContextMultiCurrency;
+    case 'networth_history': return t.gateContextNetWorthHistory;
+    case 'widget_custom': return t.gateContextWidgetCustom;
+    case 'live_holdings': return t.gateContextLiveHoldings;
   }
 }

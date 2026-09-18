@@ -13,6 +13,9 @@ import { Icon } from '../components/Icon';
 import { InfoButton } from '../components/InfoButton';
 import { ReceiptItemModal } from '../components/ReceiptItemModal';
 import { B, BtnLabel, BubbleText, Card, PipSays, PrimaryButton, TopBar } from '../components/ui';
+import { canActivateCurrency } from '../billing/currencyEntitlements';
+import { useEntitlement } from '../billing/entitlement';
+import { usePaywall } from '../billing/paywallContext';
 import { activateCurrency, getActiveCurrencies } from '../db/currencyRepo';
 import { BASE_CURRENCY } from '../lib/currency';
 import { scanDocument } from '../lib/documentScanner';
@@ -28,8 +31,6 @@ import { ScanProgressBar } from '../components/ScanProgressBar';
 import { computeBillTotal, computeItemized, SELF, type Discount, type ReceiptLine, type Surcharges } from '../lib/split';
 import type { SplitDraft } from '../lib/types';
 import { useLanguage } from '../i18n';
-import { useEntitlement } from '../billing/entitlement';
-import { usePaywall } from '../billing/paywallContext';
 import { ScanQuotaBadge } from '../components/ScanQuotaBadge';
 import { useAppData } from '../state/store';
 import { useAccent } from '../state/accent';
@@ -699,6 +700,10 @@ export function ReceiptScanScreen({
             <Pressable
               onPress={async () => {
                 if (activatingCode) return;
+                if (!canActivateCurrency(activeCurrencies, receipt.currency, isPro)) {
+                  openPaywall('multi_currency');
+                  return;
+                }
                 setActivatingCode(receipt.currency);
                 try {
                   const ok = await activateCurrency(receipt.currency);

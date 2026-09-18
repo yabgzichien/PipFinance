@@ -11,7 +11,17 @@ export type SlotId = 'head' | 'eyes' | 'mouth' | 'holding';
 export type Notch = 1 | 2 | 3 | 4 | 5;
 export type BadgeIcon = 'flame' | 'star' | 'leaf' | 'sprout' | 'none';
 export type BadgeColor = 'amber' | 'red' | 'green' | 'blue' | 'violet';
-export type PresetId = 'classic' | 'nerdy' | 'cool' | 'swordsman' | 'scientist' | 'chef';
+export type PresetId =
+  | 'classic'
+  | 'nerdy'
+  | 'cool'
+  | 'sassy'
+  | 'swordsman'
+  | 'scientist'
+  | 'chef'
+  | 'cowboy'
+  | 'cyborg'
+  | 'wizard';
 
 /**
  * What occupies one of the two slots to the right of the mascot.
@@ -55,7 +65,19 @@ export const DEFAULT_WIDGET_MASCOT_CONFIG: WidgetMascotConfig = {
   badgeColor: 'amber',
 };
 
-const PRESET_IDS: readonly string[] = ['classic', 'nerdy', 'cool', 'swordsman', 'scientist', 'chef', 'custom'];
+const PRESET_IDS: readonly string[] = [
+  'classic',
+  'nerdy',
+  'cool',
+  'sassy',
+  'swordsman',
+  'scientist',
+  'chef',
+  'cowboy',
+  'cyborg',
+  'wizard',
+  'custom',
+];
 const BADGE_ICONS: readonly string[] = ['flame', 'star', 'leaf', 'sprout', 'none'];
 const BADGE_COLORS: readonly string[] = ['amber', 'red', 'green', 'blue', 'violet'];
 const SLOT_CONTENTS: readonly string[] = ['income', 'expense', 'streak', 'none'];

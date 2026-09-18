@@ -1,6 +1,7 @@
 // __tests__/prepareScanImage.test.ts
 import {
   longerSideResize,
+  smartScanResize,
   isUsableOcrText,
   sanitizeOcrText,
   prepareDualPathScan,
@@ -60,6 +61,60 @@ describe('longerSideResize', () => {
   });
 });
 
+describe('smartScanResize', () => {
+  it('handles standard aspect ratio screenshots by capping longer side to 2048', () => {
+    // Normal 1080x2400 screenshot (AR = 2.22 <= 2.5)
+    const resized = smartScanResize(1080, 2400, 'transactions');
+    expect(resized.height).toBe(2048);
+    expect(resized.width).toBe(922);
+  });
+
+  it('handles standard aspect ratio receipts by capping longer side to 1600', () => {
+    // Normal 3000x4000 camera receipt (AR = 1.33 <= 2.5)
+    const resized = smartScanResize(3000, 4000, 'receipt');
+    expect(resized.height).toBe(1600);
+    expect(resized.width).toBe(1200);
+  });
+
+  it('preserves readable width on long scrolling screenshots up to max ceiling 4096', () => {
+    // 1080x7200 scrolling screenshot (AR = 6.67 > 2.5)
+    // Scale = 4096 / 7200 ~= 0.5689 -> width = 614, height = 4096
+    // (Old longerSideResize crushed width to 307)
+    const resized = smartScanResize(1080, 7200, 'transactions');
+    expect(resized.height).toBe(4096);
+    expect(resized.width).toBe(614);
+  });
+
+  it('preserves full target width on moderately long screenshots', () => {
+    // 1080x3600 screenshot (AR = 3.33 > 2.5)
+    // Target short is min(1080, 1024) = 1024 -> scale = 1024 / 1080 ~= 0.9481
+    // Height becomes 3600 * 0.9481 = 3413 <= 4096
+    const resized = smartScanResize(1080, 3600, 'transactions');
+    expect(resized.width).toBe(1024);
+    expect(resized.height).toBe(3413);
+  });
+
+  it('preserves resolution on long paper receipts without excessive downscaling', () => {
+    // 643x2228 grocery receipt (AR = 3.46 > 2.5)
+    // Target short = min(643, 800) = 643 (scale = 1), max long = 3200 (scale = 1.43) -> scale = 1
+    const resized = smartScanResize(643, 2228, 'receipt');
+    expect(resized.width).toBe(643);
+    expect(resized.height).toBe(2228);
+  });
+
+  it('handles zero or negative dimensions safely', () => {
+    expect(smartScanResize(0, 0, 'transactions')).toEqual({ width: 0, height: 0 });
+    expect(smartScanResize(-100, 500, 'receipt')).toEqual({ width: -100, height: 500 });
+  });
+
+  it('respects overrideMaxLongerSide for high aspect ratio images', () => {
+    // When an explicit override is supplied (e.g. 2048 from step-down)
+    const resized = smartScanResize(1080, 7200, 'transactions', 2048);
+    expect(resized.height).toBe(2048);
+    expect(resized.width).toBe(307);
+  });
+});
+
 describe('getScanTypeImageConfig', () => {
   it('uses JPEG 0.65 1600px for receipts', () => {
     const config = getScanTypeImageConfig('receipt');
@@ -87,7 +142,9 @@ describe('getScanTypeImageConfig', () => {
 });
 
 describe('nextScanSide', () => {
-  it('steps 2048 -> 1280 -> 960 -> null', () => {
+  it('steps 4096 -> 2048 -> 1280 -> 960 -> null', () => {
+    expect(nextScanSide(4096)).toBe(2048);
+    expect(nextScanSide(3200)).toBe(2048);
     expect(nextScanSide(2048)).toBe(1280);
     expect(nextScanSide(1600)).toBe(1280);
     expect(nextScanSide(1280)).toBe(960);

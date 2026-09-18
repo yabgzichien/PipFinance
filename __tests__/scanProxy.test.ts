@@ -17,6 +17,10 @@ jest.mock('../src/db/metaRepo', () => ({
   getMeta: jest.fn(),
   setMeta: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('../src/billing/purchases', () => ({
+  fetchAppUserId: jest.fn(async () => null),
+}));
+import { fetchAppUserId } from '../src/billing/purchases';
 
 const originalFetch = global.fetch;
 
@@ -68,6 +72,28 @@ describe('fetchAllowance', () => {
       canScan: true,
       blockedBy: null,
     });
+    const headers = (global.fetch as jest.Mock).mock.calls[0][1].headers;
+    expect(headers['x-entitlement']).toBeUndefined();
+    expect(headers['x-installation-id']).toBe('anon-install-123');
+  });
+
+  it('sends the RevenueCat app user id so the Worker can verify Pro', async () => {
+    (fetchAppUserId as jest.Mock).mockResolvedValue('$RCAnonymousID:abc');
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tier: 'pro',
+        monthUsed: 0,
+        dayUsed: 0,
+        monthLimit: 'Infinity',
+        dayLimit: 'Infinity',
+      }),
+    } as never);
+
+    await fetchAllowance();
+    const headers = (global.fetch as jest.Mock).mock.calls[0][1].headers;
+    expect(headers['x-rc-app-user-id']).toBe('$RCAnonymousID:abc');
+    expect(headers['x-entitlement']).toBeUndefined();
   });
 
   it('falls back to safe default if worker is unreachable', async () => {
@@ -370,6 +396,15 @@ describe('promo redeem client', () => {
       json: async () => ({ ok: false, error: 'already_used' }),
     } as never);
     expect(await redeemPromoCode('PIP-USED')).toEqual({ ok: false, error: 'already_used' });
+  });
+
+  it('maps rate_limited from the worker', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ ok: false, error: 'rate_limited' }),
+    } as never);
+    expect(await redeemPromoCode('PIP-XXXX-XXXX-XXXX')).toEqual({ ok: false, error: 'rate_limited' });
   });
 
   it('fetches server entitlement for the installation', async () => {

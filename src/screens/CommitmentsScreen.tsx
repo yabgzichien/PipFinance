@@ -246,7 +246,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
               onPress={() => setEditing('new')}
               hitSlop={8}
               accessibilityLabel="Add a recurring commitment"
-              style={[styles.addCircleBtn, { backgroundColor: RED }]}
+              style={[styles.addCircleBtn, { backgroundColor: theme.accent }]}
             >
               <Icon name="plus" size={15} color="#ffffff" stroke={2.8} />
             </Pressable>
@@ -269,7 +269,7 @@ export function CommitmentsScreen({ onBack }: { onBack: () => void }) {
               <Text style={[styles.emptySub, { color: colorTheme.ink2 }]}>
                 {isZh
                   ? '车贷、房租、话费套餐、流媒体订阅或每月固定定投 — 添加一次即可按期打勾完成。'
-                  : "Streaming, telco bills, car loans, or a fixed monthly investment — add it once and keep your schedule on track."}
+                  : 'Click the button to add new commitment.'}
               </Text>
               <View style={{ marginTop: 16, alignSelf: 'stretch' }}>
                 <PrimaryButton onPress={() => setEditing('new')} height={48}>
@@ -963,19 +963,16 @@ function CommitmentEditorModal({
 
             {kind === 'investment' && (
               <View style={{ marginTop: 18 }}>
-                {investmentAccounts.length === 0 ? (
-                  <Text style={[styles.emptySub, { color: colorTheme.amber }]}>
-                    {isZh ? '请先在净资产中添加投资账户或持仓，然后再来设置定投计划。' : 'Add an investment holding or account in Net Worth first, then come back to set up the DCA.'}
-                  </Text>
-                ) : (
-                  <AccountLinkField
-                    accounts={investmentAccounts as any}
-                    selectedId={toAccountId}
-                    onSelect={setToAccountId}
-                    label={isZh ? '转入投资账户' : 'Invest into'}
-                    required
-                  />
-                )}
+                <AccountLinkField
+                  accounts={investmentAccounts as any}
+                  selectedId={toAccountId}
+                  onSelect={setToAccountId}
+                  label={isZh ? '转入投资账户' : 'Invest into'}
+                  required
+                  emptyCreateLabel={isZh ? '创建投资账户' : 'Create investment account'}
+                  createAccountInitialKind="asset"
+                  createAccountInitialClass="investments"
+                />
               </View>
             )}
 

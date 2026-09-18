@@ -298,8 +298,6 @@ describe('onboardingWizard', () => {
         'advanced_import',
         'appearance',
         'demo',
-        'budget',
-        'recurring',
         'notifications',
         'widget',
       ];

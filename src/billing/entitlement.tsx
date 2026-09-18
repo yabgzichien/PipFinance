@@ -1,11 +1,19 @@
 // src/billing/entitlement.tsx
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import Purchases from 'react-native-purchases';
+import Purchases, { type CustomerInfo } from 'react-native-purchases';
 import { FREE_DAILY_SCANS, FREE_MONTHLY_SCANS, type ScanAllowance } from './scanQuota';
-import { fetchAllowance } from './scanProxy';
+import { fetchAllowance, fetchServerEntitlement } from './scanProxy';
 import { readCachedTier, writeCachedTier, type Tier } from './entitlementCache';
 import { configurePurchases, fetchTier, tierFromCustomerInfo } from './purchases';
+import {
+  GRANT_CACHE_KEY,
+  isGrantActive,
+  mergeTiers,
+  parseCachedGrant,
+  type PromoGrant,
+} from './promoGrants';
+import { getMeta, setMeta } from '../db/metaRepo';
 
 /** Live result wins when we get one. Only a thrown lookup falls back to the cache, so a
  *  cancelled or lapsed subscription downgrades immediately rather than lingering for a week. */
@@ -18,6 +26,32 @@ export async function resolveTier(
     const tier = await fetch();
     await onLive(tier);
     return tier;
+  } catch {
+    return await cached();
+  }
+}
+
+async function readCachedGrant(): Promise<PromoGrant | null> {
+  return parseCachedGrant(await getMeta(GRANT_CACHE_KEY));
+}
+
+async function writeCachedGrant(grant: PromoGrant | null): Promise<void> {
+  if (!grant) {
+    await setMeta(GRANT_CACHE_KEY, '');
+    return;
+  }
+  await setMeta(GRANT_CACHE_KEY, JSON.stringify(grant));
+}
+
+export async function resolveGrant(
+  fetch: () => Promise<PromoGrant | null>,
+  cached: () => Promise<PromoGrant | null>,
+  onLive: (grant: PromoGrant | null) => Promise<void> = async () => {}
+): Promise<PromoGrant | null> {
+  try {
+    const grant = await fetch();
+    await onLive(grant);
+    return grant;
   } catch {
     return await cached();
   }
@@ -55,30 +89,73 @@ const FALLBACK: EntitlementState = {
 
 const Ctx = createContext<EntitlementState>(FALLBACK);
 
+function readDevForcePro(): boolean {
+  if (!__DEV__) return false;
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('pip_dev_force_pro') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function EntitlementProvider({ children }: { children: React.ReactNode }) {
-  const [tier, setTier] = useState<Tier>('free');
+  const [rcTier, setRcTier] = useState<Tier>('free');
+  const [grant, setGrant] = useState<PromoGrant | null>(null);
   const [allowance, setAllowance] = useState<ScanAllowance | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [devForcePro] = useState(readDevForcePro);
+
+  const tier = devForcePro ? 'pro' : mergeTiers(rcTier, isGrantActive(grant));
+
+  const refreshGrant = useCallback(async (): Promise<PromoGrant | null> => {
+    const next = await resolveGrant(
+      async () => {
+        const remote = await fetchServerEntitlement();
+        if (!remote.active || !remote.kind || !remote.source) return null;
+        return {
+          kind: remote.kind,
+          expiresAt: remote.expiresAt ?? null,
+          source: remote.source,
+        };
+      },
+      readCachedGrant,
+      writeCachedGrant
+    );
+    const active = isGrantActive(next) ? next : null;
+    setGrant(active);
+    return active;
+  }, []);
 
   const refresh = useCallback(async () => {
-    const next = await resolveTier(fetchTier, readCachedTier, writeCachedTier);
-    setTier(next);
-  }, []);
+    const nextRc = await resolveTier(fetchTier, readCachedTier, writeCachedTier);
+    setRcTier(nextRc);
+    const nextGrant = await refreshGrant();
+    const nextTier = mergeTiers(nextRc, isGrantActive(nextGrant));
+    setAllowance(await fetchAllowance(nextTier));
+  }, [refreshGrant]);
 
   const refreshAllowance = useCallback(async () => {
     setAllowance(await fetchAllowance(tier));
   }, [tier]);
 
   useEffect(() => {
+    let cancelled = false;
+
     void (async () => {
+      const [cachedTier, cachedGrant] = await Promise.all([readCachedTier(), readCachedGrant()]);
+      if (cancelled) return;
+      setRcTier(cachedTier);
+      setGrant(isGrantActive(cachedGrant) ? cachedGrant : null);
+      setHydrated(true);
       await configurePurchases();
+      if (cancelled) return;
       await refresh();
-      await refreshAllowance();
     })();
 
-    const customerInfoListener = (info: any) => {
+    const customerInfoListener = (info: CustomerInfo | null) => {
       if (info) {
         const next = tierFromCustomerInfo(info);
-        setTier(next);
+        setRcTier(next);
         void writeCachedTier(next);
       }
     };
@@ -86,19 +163,17 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     Purchases.addCustomerInfoUpdateListener?.(customerInfoListener);
 
     const handleAppStateChange = (nextStatus: AppStateStatus) => {
-      if (nextStatus === 'active') {
-        void refresh();
-        void refreshAllowance();
-      }
+      if (nextStatus === 'active') void refresh();
     };
 
     const sub = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
+      cancelled = true;
       Purchases.removeCustomerInfoUpdateListener?.(customerInfoListener);
       sub.remove();
     };
-  }, [refresh, refreshAllowance]);
+  }, [refresh]);
 
   const value = useMemo<EntitlementState>(() => {
     const isPro = tier === 'pro';
@@ -124,6 +199,7 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
     };
   }, [tier, allowance, refreshAllowance, refresh]);
 
+  if (!hydrated) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

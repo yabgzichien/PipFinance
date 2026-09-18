@@ -26,6 +26,7 @@ import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useEntitlement } from '../billing/entitlement';
 import { usePaywall } from '../billing/paywallContext';
+import { widgetConfigRequiresPro, widgetItemTier } from '../billing/widgetEntitlements';
 import { useBackHandler } from '../state/useBackHandler';
 import { BADGE_THEMES, badgeIconSvg, badgeAnimationCss } from '../widget/mascot/badge';
 import { DOWN_ARROW_SVG, UP_ARROW_SVG } from '../widget/mascot/chrome';
@@ -70,7 +71,11 @@ function slotContentSvg(content: SlotContent, config: WidgetMascotConfig): strin
   return `<svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="9" fill="none" stroke="#9E9686" stroke-width="2" stroke-dasharray="3 3" /></svg>`;
 }
 
-export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
+export function WidgetCustomizerScreen({ onBack, initialDraft, onDraftChange }: {
+  onBack: () => void;
+  initialDraft?: WidgetMascotConfig | null;
+  onDraftChange?: (draft: WidgetMascotConfig | null) => void;
+}) {
   const insets = useSafeAreaInsets();
   const theme = useAccent();
   const colorTheme = useThemeColors();
@@ -78,15 +83,13 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   const { widgetMascotConfig, setWidgetMascotConfig } = useAppData();
   const { isPro } = useEntitlement();
   const { openPaywall } = usePaywall();
-  const [draft, setDraft] = useState(widgetMascotConfig);
+  const [draft, setDraft] = useState(initialDraft ?? widgetMascotConfig);
   const [tab, setTab] = useState<CustomizerTab>('preset');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!isPro) {
-      openPaywall('widget_custom', 'settings');
-    }
-  }, [isPro, openPaywall]);
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
 
   // The whole widget, not just the mascot — otherwise the slot pickers and size sliders change
   // nothing on screen. See mascot/previewCompose.ts on why it is a second renderer.
@@ -132,6 +135,7 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
         id,
         label: t(`widgetPreset_${id}`),
         selected: draft.preset === id,
+        requiresPro: widgetItemTier('preset', id) === 'pro',
         svg: composeMascotThumbnail(applyPreset(draft, id), THUMB_FRAMES.preset),
         apply: () => setDraft((current) => applyPreset(current, id)),
       }));
@@ -141,6 +145,7 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
         id,
         label: t(`widgetPart_${id}`),
         selected: draft[tab] === id,
+        requiresPro: widgetItemTier(tab, id) === 'pro',
         svg: composeMascotThumbnail(setSlot(draft, tab, id), THUMB_FRAMES[tab]),
         apply: () => setDraft((current) => setSlot(current, tab, id)),
       }));
@@ -149,9 +154,14 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
   }, [tab, draft, t]);
 
   const save = async () => {
+    if (!isPro && widgetConfigRequiresPro(draft)) {
+      openPaywall('widget_custom', 'widgetCustomizer');
+      return;
+    }
     setSaving(true);
     try {
       await setWidgetMascotConfig(draft);
+      onDraftChange?.(null);
       onBack();
     } finally {
       setSaving(false);
@@ -249,6 +259,7 @@ export function WidgetCustomizerScreen({ onBack }: { onBack: () => void }) {
                 label={tile.label}
                 selected={tile.selected}
                 onPress={tile.apply}
+                requiresPro={tile.requiresPro}
               />
             ))}
           </View>

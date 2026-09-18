@@ -157,13 +157,14 @@ export async function restoreFromBackupPayload(
       if (!a?.id || !a?.name) continue;
       await db.runAsync(
         `INSERT INTO accounts
-           (id, name, kind, cls, archived, created_at, sub, symbol, ticker, quantity, cost, icon, currency, interest_rate)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, name, kind, cls, archived, archived_at, created_at, sub, symbol, ticker, quantity, cost, icon, currency, interest_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         a.id,
         a.name,
         a.kind === 'liability' ? 'liability' : 'asset',
         a.cls ?? 'cash',
         a.archived ? 1 : 0,
+        a.archivedAt ?? null,
         nowIso(),
         a.sub ?? null,
         a.symbol ?? null,
@@ -177,12 +178,13 @@ export async function restoreFromBackupPayload(
       for (const h of a.history ?? []) {
         if (!h?.asOf || typeof h.value !== 'number') continue;
         await db.runAsync(
-          'INSERT INTO balance_entries (id, account_id, value, as_of, created_at) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO balance_entries (id, account_id, value, as_of, created_at, source) VALUES (?, ?, ?, ?, ?, ?)',
           genId(),
           a.id,
           h.value,
           h.asOf,
-          nowIso()
+          nowIso(),
+          h.source === 'linked' || h.source === 'price' ? h.source : 'manual'
         );
       }
     }

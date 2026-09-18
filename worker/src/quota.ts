@@ -7,7 +7,7 @@ export interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = unknown>(colName?: string): Promise<T | null>;
   all<T = unknown>(): Promise<{ results: T[] }>;
-  run(): Promise<{ success: boolean }>;
+  run(): Promise<{ success: boolean; meta?: { changes: number } }>;
 }
 
 export interface D1Database {
@@ -40,20 +40,21 @@ export async function getUsage(
   dayKey: string,
   monthKey: string
 ): Promise<{ dayUsed: number; monthUsed: number }> {
-  const dayRow = await db
-    .prepare('SELECT used_count FROM quota_usage WHERE installation_hash = ? AND period_type = ? AND period_key = ?')
-    .bind(hash, 'day', dayKey)
-    .first<{ used_count: number }>();
+  const { results } = await db
+    .prepare(
+      `SELECT period_type, used_count FROM quota_usage WHERE installation_hash = ? AND ((period_type = 'day' AND period_key = ?) OR (period_type = 'month' AND period_key = ?))`
+    )
+    .bind(hash, dayKey, monthKey)
+    .all<{ period_type: string; used_count: number }>();
 
-  const monthRow = await db
-    .prepare('SELECT used_count FROM quota_usage WHERE installation_hash = ? AND period_type = ? AND period_key = ?')
-    .bind(hash, 'month', monthKey)
-    .first<{ used_count: number }>();
+  let dayUsed = 0;
+  let monthUsed = 0;
+  for (const row of results || []) {
+    if (row.period_type === 'day') dayUsed = row.used_count;
+    else if (row.period_type === 'month') monthUsed = row.used_count;
+  }
 
-  return {
-    dayUsed: dayRow?.used_count ?? 0,
-    monthUsed: monthRow?.used_count ?? 0,
-  };
+  return { dayUsed, monthUsed };
 }
 
 export interface ReserveResult {
@@ -75,18 +76,18 @@ export async function checkAndReserve(
 
   // Check idempotency first
   const existing = await db
-    .prepare('SELECT status, expires_at FROM reservations WHERE idempotencyKey = ?')
+    .prepare('SELECT status, expires_at FROM reservations WHERE idempotency_key = ?')
     .bind(idempotencyKey)
     .first<{ status: string; expires_at: number }>();
 
   if (existing) {
     if (existing.status === 'committed') {
-      const usage = await getUsage(db, hash, dayKey, monthKey);
+      const usage = isPro ? { dayUsed: 0, monthUsed: 0 } : await getUsage(db, hash, dayKey, monthKey);
       return { ok: true, blockedBy: null, dayUsed: usage.dayUsed, monthUsed: usage.monthUsed, alreadyCommitted: true };
     }
     if (existing.status === 'reserved' && existing.expires_at > now) {
       // Active reservation exists
-      const usage = await getUsage(db, hash, dayKey, monthKey);
+      const usage = isPro ? { dayUsed: 0, monthUsed: 0 } : await getUsage(db, hash, dayKey, monthKey);
       return { ok: true, blockedBy: null, dayUsed: usage.dayUsed, monthUsed: usage.monthUsed };
     }
   }
@@ -129,23 +130,38 @@ export async function commitReservation(
   db: D1Database,
   idempotencyKey: string,
   isPro: boolean,
-  now: number = Date.now()
+  now: number = Date.now(),
+  meta?: { hash?: string; dayKey?: string; monthKey?: string }
 ): Promise<void> {
-  const res = await db
-    .prepare('SELECT installation_hash, day_key, month_key, status FROM reservations WHERE idempotency_key = ?')
+  let installationHash = meta?.hash;
+  let dayKey = meta?.dayKey;
+  let monthKey = meta?.monthKey;
+
+  if (!installationHash || !dayKey || !monthKey) {
+    const res = await db
+      .prepare('SELECT installation_hash, day_key, month_key, status FROM reservations WHERE idempotency_key = ?')
+      .bind(idempotencyKey)
+      .first<{ installation_hash: string; day_key: string; month_key: string; status: string }>();
+
+    if (!res || res.status !== 'reserved') return;
+    installationHash = res.installation_hash;
+    dayKey = res.day_key;
+    monthKey = res.month_key;
+  }
+
+  // Atomically update reservation ONLY if it is currently 'reserved'.
+  // If another concurrent request already committed or rolled it back, changes will be 0.
+  const updateRes = await db
+    .prepare("UPDATE reservations SET status = 'committed' WHERE idempotency_key = ? AND status = 'reserved'")
     .bind(idempotencyKey)
-    .first<{ installation_hash: string; day_key: string; month_key: string; status: string }>();
+    .run();
 
-  if (!res || res.status === 'committed') return;
+  if (!updateRes.meta?.changes) {
+    return;
+  }
 
-  const stmts: D1PreparedStatement[] = [
-    db
-      .prepare('UPDATE reservations SET status = ? WHERE idempotency_key = ?')
-      .bind('committed', idempotencyKey),
-  ];
-
-  if (!isPro) {
-    stmts.push(
+  if (!isPro && installationHash && dayKey && monthKey) {
+    const stmts: D1PreparedStatement[] = [
       db
         .prepare(
           `INSERT INTO quota_usage (installation_hash, period_type, period_key, used_count, updated_at)
@@ -153,10 +169,7 @@ export async function commitReservation(
            ON CONFLICT(installation_hash, period_type, period_key)
            DO UPDATE SET used_count = used_count + 1, updated_at = excluded.updated_at`
         )
-        .bind(res.installation_hash, res.day_key, now)
-    );
-
-    stmts.push(
+        .bind(installationHash, dayKey, now),
       db
         .prepare(
           `INSERT INTO quota_usage (installation_hash, period_type, period_key, used_count, updated_at)
@@ -164,11 +177,10 @@ export async function commitReservation(
            ON CONFLICT(installation_hash, period_type, period_key)
            DO UPDATE SET used_count = used_count + 1, updated_at = excluded.updated_at`
         )
-        .bind(res.installation_hash, res.month_key, now)
-    );
+        .bind(installationHash, monthKey, now),
+    ];
+    await db.batch(stmts);
   }
-
-  await db.batch(stmts);
 }
 
 export async function rollbackReservation(db: D1Database, idempotencyKey: string): Promise<void> {

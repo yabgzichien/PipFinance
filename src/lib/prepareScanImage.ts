@@ -51,6 +51,7 @@ export function longerSideResize(
 export const MAX_SCAN_BASE64_CHARS = 380 * 1024;
 
 export function nextScanSide(currentMax: number): number | null {
+  if (currentMax > 2048) return 2048;
   if (currentMax > 1280) return 1280;
   if (currentMax > 960) return 960;
   return null;
@@ -87,6 +88,45 @@ export function getScanTypeImageConfig(scanType: ScanType): {
   }
 }
 
+export function smartScanResize(
+  width: number,
+  height: number,
+  scanType: ScanType,
+  overrideMaxLongerSide?: number
+): { width: number; height: number } {
+  if (width <= 0 || height <= 0) return { width, height };
+
+  const short = Math.min(width, height);
+  const long = Math.max(width, height);
+  const aspectRatio = long / short;
+
+  const config = getScanTypeImageConfig(scanType);
+  const isScreenshot = scanType === 'transactions' || scanType === 'snapshot';
+
+  // Standard aspect ratio (<= 2.5): use existing longer-side cap
+  if (aspectRatio <= 2.5) {
+    const defaultMax = overrideMaxLongerSide ?? config.maxLongerSide;
+    return longerSideResize(width, height, defaultMax);
+  }
+
+  // High aspect ratio (> 2.5) e.g. scrolling screenshots or long cash receipts:
+  // For screenshots, small fonts (amounts, dates, items) need adequate short-side width/density.
+  // We protect readable width (min(short, 1024) for screenshots, min(short, 800) for receipts)
+  // while capping the maximum long-side dimension to a mobile GPU-safe ceiling (4096px for screenshots, 3200px for receipts).
+  const targetShort = Math.min(short, isScreenshot ? 1024 : 800);
+  const defaultHighAspectMax = isScreenshot ? 4096 : 3200;
+  const maxHighAspectLong = overrideMaxLongerSide ?? defaultHighAspectMax;
+
+  const scaleByShort = targetShort / short;
+  const scaleByLong = maxHighAspectLong / long;
+  const scale = Math.min(1, scaleByShort, scaleByLong);
+
+  return {
+    width: Math.round(width * scale),
+    height: Math.round(height * scale),
+  };
+}
+
 function getImageDimensions(uri: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
     Image.getSize(
@@ -105,16 +145,29 @@ export async function prepareScanImage(
   opts?: { maxLongerSide?: number }
 ): Promise<PreparedImage> {
   const config = getScanTypeImageConfig(scanType);
-  let maxSide = opts?.maxLongerSide ?? config.maxLongerSide;
   let quality = config.quality;
 
   try {
     const dims = await getImageDimensions(uri);
 
+    const isHighAspect =
+      dims.width > 0 &&
+      dims.height > 0 &&
+      Math.max(dims.width, dims.height) / Math.min(dims.width, dims.height) > 2.5;
+
+    const isScreenshot = scanType === 'transactions' || scanType === 'snapshot';
+    const defaultInitialMax = isHighAspect
+      ? isScreenshot
+        ? 4096
+        : 3200
+      : config.maxLongerSide;
+
+    let maxSide = opts?.maxLongerSide ?? defaultInitialMax;
+
     const encode = async (side: number, q: number) => {
       const actions: Action[] = [];
       if (dims.width > 0 && dims.height > 0) {
-        const target = longerSideResize(dims.width, dims.height, side);
+        const target = smartScanResize(dims.width, dims.height, scanType, side);
         if (target.width !== dims.width || target.height !== dims.height) {
           actions.push({ resize: target });
         }

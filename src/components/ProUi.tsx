@@ -4,7 +4,6 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { radius, spacing } from '../theme';
-import { Icon } from './Icon';
 import { Pip } from './Pip';
 import { Caption } from './ui';
 
@@ -18,7 +17,6 @@ export function ProBadge({ locked = false }: { locked?: boolean }) {
       accessibilityLabel={accessibilityLabel}
       style={[styles.badge, { backgroundColor: theme.accentSoft }]}
     >
-      <Icon name="sparkles" size={12} color={theme.onTint} />
       <Caption color={theme.onTint} style={styles.badgeText}>PRO</Caption>
     </View>
   );
@@ -102,7 +100,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 999,
     flexDirection: 'row',
-    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
   },

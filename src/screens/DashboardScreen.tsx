@@ -16,14 +16,16 @@ import { Body, BtnLabel, Caption, Card, Display, Eyebrow, Label, PrimaryButton, 
 import { catColorsForHue } from '../lib/catColors';
 import { allocatedTotal, currentMonthKey, txnMonthKey } from '../lib/budget';
 import { formatRangeLabel } from '../lib/dateRange';
-import { daysLeftInMonth, greeting, longDate, monthName } from '../lib/dates';
+import { daysLeftInMonth, greeting, longDate, monthName, monthProgressPct } from '../lib/dates';
 import { currencyPrefix, fmt, fmtCompact, fmtMoney } from '../lib/format';
+import { MONTH_PROGRESS_SEEN_KEY, monthProgressCaption } from '../lib/timeProgress';
 import { netWorth, netWorthSeries } from '../lib/networth';
 import type { Screen } from '../lib/screenNav';
 import { lastActiveDay, localDayNumber } from '../lib/streak';
 import { computeExploreTaskStatus, type ExploreTask } from '../lib/tasks';
 import { AGING_DAYS, daysBetween } from '../lib/split';
 import * as haptics from '../lib/haptics';
+import { payoff as playChime } from '../lib/sound';
 import { computeTripTotals, featuredTripForDate } from '../lib/trips';
 import type { FeaturedTrip } from '../lib/trips';
 import type { Category, Transaction } from '../lib/types';
@@ -39,6 +41,8 @@ import { usePaywall } from '../billing/paywallContext';
 import { UPSELL_STATE_KEY, shouldShowUpsell, pickLine, type UpsellState } from '../billing/upsellCadence';
 import { fireOnce, getMomentLine, reliefThresholdCrossed, type UpsellMoment } from '../billing/moments';
 import { PipUpsellCard, upsellLines } from '../components/PipUpsellCard';
+import { MascotTierMarker, ProSummaryHeader } from '../components/ProUi';
+import { TimeProgressBar } from '../components/TimeProgressBar';
 import { getMeta, setMeta } from '../db/metaRepo';
 import { listReliefTags } from '../db/reliefRepo';
 import { shadowCard, spacing, uiFont } from '../theme';
@@ -166,7 +170,7 @@ export function DashboardScreen({
 
   useEffect(() => {
     if (isPro) return;
-    if (streak.count >= 7) {
+    if (streak >= 7) {
       void (async () => {
         try {
           if (await fireOnce('streak_7')) {
@@ -177,7 +181,7 @@ export function DashboardScreen({
         }
       })();
     }
-  }, [isPro, streak.count]);
+  }, [isPro, streak]);
 
   useEffect(() => {
     if (isPro) return;
@@ -428,8 +432,8 @@ export function DashboardScreen({
                 accessibilityRole="button"
                 accessibilityLabel={
                   taskStatus.pendingCount > 0
-                    ? `${taskStatus.pendingCount} ${t('exploreTasksBadgeLabel')}`
-                    : t('exploreTasksSheetTitle')
+                    ? `${taskStatus.pendingCount} ${t('exploreTasksBadgeLabel')}, ${isPro ? t('comparePro') : t('compareFree')}`
+                    : `${t('exploreTasksSheetTitle')}, ${isPro ? t('comparePro') : t('compareFree')}`
                 }
               >
                 {sleepy ? <Pip size={44} expr="sleepy" /> : <Pip size={49} expr="idle" float />}
@@ -439,6 +443,9 @@ export function DashboardScreen({
                   </View>
                 )}
               </Pressable>
+              <View style={styles.mascotTierMarker} pointerEvents="none">
+                <MascotTierMarker isPro={isPro} label={isPro ? t('comparePro') : t('compareFree')} />
+              </View>
             </View>
           </View>
         </View>
@@ -487,6 +494,7 @@ export function DashboardScreen({
                   onPress={onOpenCalendar}
                   onNoSpendCheckIn={async () => {
                     await checkInToday('no_spend');
+                    playChime();
                   }}
                 />
                 {celebrating && <StreakCelebration onDone={() => setCelebrating(false)} />}
@@ -498,6 +506,7 @@ export function DashboardScreen({
                 first-run or pre-payday user is never greeted by a red negative. */}
             <TourAnchor id="tour_breakdown_card" activeId={activeTourAnchor}>
               <SummaryCard
+                isPro={isPro}
                 net={net}
                 received={received}
                 spent={spent}
@@ -515,6 +524,7 @@ export function DashboardScreen({
                 featuredTrip={featuredTrip}
                 transactions={transactions}
                 onOpenTrip={onOpenTrip}
+                onOpenCalendar={onOpenCalendar}
               />
             </TourAnchor>
 
@@ -802,7 +812,7 @@ function StreakCard({
           {graduated && startLabel ? (
             <>
               <Label weight={700} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{startLabel}</Label>
-              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? `连续 ${streak} 天` : `${streak}-day run`)}</Caption>
+              <Caption color={colorTheme.ink2}>{paused ? t('paused') : (isZh ? `连续 ${streak} 天` : `${streak} days`)}</Caption>
             </>
           ) : (
             <>
@@ -829,29 +839,33 @@ function StreakCard({
             return (
               <View
                 key={i}
-                style={[
-                  styles.dot,
-                  done
-                    ? [styles.dotDone, { backgroundColor: theme.accent }]
-                    : i === todayIndex
-                      ? styles.dotToday
-                      : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
-                ]}
+                style={styles.dotCell}
               >
-                {done ? (
-                  kind === 'checkin' ? (
-                    <Svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-                      <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
-                      <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
-                    </Svg>
-                  ) : (
-                    <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
-                      <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
-                    </Svg>
-                  )
-                ) : i === todayIndex ? (
-                  <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
-                ) : null}
+                <View
+                  style={[
+                    styles.dot,
+                    done
+                      ? [styles.dotDone, { backgroundColor: theme.accent }]
+                      : i === todayIndex
+                        ? styles.dotToday
+                        : [styles.dotTodo, { borderColor: colorTheme.ink3 }],
+                  ]}
+                >
+                  {done ? (
+                    kind === 'checkin' ? (
+                      <Svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                        <Path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+                        <Path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
+                      </Svg>
+                    ) : (
+                      <Svg width={10} height={8} viewBox="0 0 10 8" fill="none">
+                        <Path d="M1 4l2.8 3L9 1" stroke="#fff" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" />
+                      </Svg>
+                    )
+                  ) : i === todayIndex ? (
+                    <TodayDotSpinner color={theme.accent} trackColor={theme.accentSoft} />
+                  ) : null}
+                </View>
               </View>
             );
           })}
@@ -1136,6 +1150,7 @@ export function adaptivePanel(hasAnyIncome: boolean, hasBudget: boolean, hasCurr
 /* ── Summary card: a swipeable hero carousel (Net cash flow / Total spent / Left to spend /
    Net worth). ── */
 function SummaryCard({
+  isPro,
   net,
   received,
   spent,
@@ -1153,7 +1168,9 @@ function SummaryCard({
   featuredTrip,
   transactions,
   onOpenTrip,
+  onOpenCalendar,
 }: {
+  isPro: boolean;
   net: number;
   received: number;
   spent: number;
@@ -1171,10 +1188,13 @@ function SummaryCard({
   featuredTrip: FeaturedTrip | null;
   transactions: Transaction[];
   onOpenTrip: (tripId: string) => void;
+  onOpenCalendar: () => void;
 }) {
   const theme = useAccent();
   const colorTheme = useThemeColors();
   const dc = useDisplayCurrency();
+  const { isZh } = useLanguage();
+  const now = useNow();
   const hasFeaturedTrip = !!featuredTrip;
   const hasCurrentTrip = featuredTrip?.timing === 'current';
   const panels = useMemo(() => heroPanels(hasBudget, hasFeaturedTrip), [hasBudget, hasFeaturedTrip]);
@@ -1188,6 +1208,9 @@ function SummaryCard({
   const scrollRef = useRef<ScrollView>(null);
   const measureRef = useRef<View>(null);
   const didInitialScroll = useRef(false);
+
+  const monthPct = monthProgressPct(now);
+  const monthDaysLeft = daysLeftInMonth(now);
 
   // `onLayout` alone (React Native Web's ResizeObserver-based implementation) can miss the
   // first paint if the surface isn't yet compositing, so also measure directly on mount.
@@ -1209,8 +1232,9 @@ function SummaryCard({
 
   const currentPanel = panels[index] ?? panels[0];
 
-  return (
-    <Card style={styles.cashCard}>
+  const content = (
+    <>
+      {isPro ? <ProSummaryHeader /> : null}
       <View ref={measureRef} onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}>
       {cardWidth > 0 && (
         <ScrollView
@@ -1249,6 +1273,16 @@ function SummaryCard({
         </ScrollView>
       )}
 
+      <View style={styles.monthProgressWrap}>
+        <TimeProgressBar
+          percent={monthPct}
+          storageKey={MONTH_PROGRESS_SEEN_KEY}
+          captionFor={(pct) => monthProgressCaption(monthDaysLeft, pct, isZh)}
+          onPress={onOpenCalendar}
+          accessibilityLabel={isZh ? '本月进度，打开日历' : 'Month progress, open calendar'}
+        />
+      </View>
+
       {panels.length > 1 && (
         <View style={styles.heroDotsRow}>
           {panels.map((panel, i) => (
@@ -1260,7 +1294,11 @@ function SummaryCard({
         </View>
       )}
       </View>
-    </Card>
+    </>
+  );
+
+  return (
+    <Card style={styles.cashCard}>{content}</Card>
   );
 }
 
@@ -1304,7 +1342,7 @@ function CashFlowView({
       ? (isZh ? '本月总支出' : 'Total expenses this month')
       : panel === 'cashflow'
         ? (isZh ? '收入 − 支出 · 本月' : 'Income − Expenses · this month')
-        : (isZh ? `${monthName()} 还剩 ${daysLeftInMonth()} 天` : `${daysLeftInMonth()} days left in ${monthName()}`);
+        : (isZh ? '本月预算剩余' : "Remaining of this month's budget");
   const heroValue = panel === 'spent' ? spent : panel === 'cashflow' ? net : budgetLeft;
   const heroNegative = heroValue < 0;
   const heroAmount = `${currencyPrefix(dc.code)} ${fmtCompact(Math.abs(dc.convert(heroValue)))}`;
@@ -1553,7 +1591,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingTop: spacing.xs, paddingBottom: spacing.md },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   headerIcon: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center', ...shadowCard },
-  mascotWrap: { position: 'relative' },
+  mascotWrap: { position: 'relative', overflow: 'visible', alignItems: 'center' },
   // zIndex has to be set here, on the overlay itself, not just on its taskCelebrationAnchor
   // child: a child's zIndex only ranks it among ITS OWN siblings, and this overlay has none  it
   // competes against the ScrollView (its actual sibling) as a peer, where both defaulted to
@@ -1576,6 +1614,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   mascotBadgeText: { color: '#fff', fontSize: 10.5, fontFamily: uiFont(800), lineHeight: 13 },
+  mascotTierMarker: { alignItems: 'center', marginTop: 2 },
 
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
@@ -1584,10 +1623,10 @@ const styles = StyleSheet.create({
   needsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginHorizontal: spacing.base, marginTop: spacing.md, padding: spacing.md, borderRadius: 16, borderWidth: 1 },
 
   /* streak */
-  streakCard: { marginHorizontal: spacing.base, marginTop: spacing.xs, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  streakLeft: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  streakCard: { marginHorizontal: spacing.base, marginTop: spacing.xs, padding: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  streakLeft: { width: 130, flexGrow: 0, flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   streakCopy: { flex: 1, minWidth: 0 },
-  flameTile: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
+  flameTile: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(217,138,0,0.10)', alignItems: 'center', justifyContent: 'center' },
   streakDivider: { width: 1, height: 38, flexShrink: 0 },
   streakShield: {
     position: 'absolute',
@@ -1602,11 +1641,12 @@ const styles = StyleSheet.create({
     ...shadowCard,
   },
   weekLabelsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  weekColumn: { flex: 1, minWidth: 152 },
+  weekColumn: { flex: 1, minWidth: 0 },
   weekLabelCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   weekLabelText: { fontSize: 9.5, fontFamily: uiFont(700) },
-  dotsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  dot: { width: 23, height: 23, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  dotsRow: { flexDirection: 'row' },
+  dotCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 18, height: 18, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   dotDone: {},
   dotToday: {},
   dotTodo: { borderWidth: 2, borderStyle: 'dashed' },
@@ -1657,6 +1697,7 @@ const styles = StyleSheet.create({
 
   /* summary hero carousel */
   heroDotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
+  monthProgressWrap: { marginTop: spacing.sm },
   heroDot: { width: 6, height: 6, borderRadius: 3 },
 
   /* cash flow */

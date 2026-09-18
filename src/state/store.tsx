@@ -42,6 +42,7 @@ import {
   adjustHoldingQuantity as dbAdjustHoldingQuantity,
   deleteAccount as dbDeleteAccount,
   getPriceCache,
+  moveLiquidBalances as dbMoveLiquidBalances,
   listAccounts,
   listBalanceEntries,
   updateAccount as dbUpdateAccount,
@@ -169,6 +170,8 @@ const MOTION_SETTING_KEY = 'motion_setting';
 // muting it is a separate decision from turning motion down. Defaults to on, so an absent
 // row reads as on and only an explicit 'false' mutes.
 const SOUND_ENABLED_KEY = 'sound_enabled';
+// Glossary (i) buttons. Defaults to on — same absent-means-on convention as SOUND_ENABLED_KEY.
+const GLOSSARY_ENABLED_KEY = 'glossary_enabled';
 // Crash diagnostics (src/lib/diagnostics.ts). Defaults to on, so an absent row reads as on and
 // only an explicit 'false' opts out — same convention as SOUND_ENABLED_KEY above. The install id
 // is a random UUID with no link to anything on the device; it exists so a crash loop on one phone
@@ -189,6 +192,7 @@ const TUTORIAL_MANUAL_DONE_KEY = 'tutorial_manual_done';
 const TUTORIAL_DISMISSED_KEY = 'tutorial_dismissed';
 const EXPLORE_TASKS_DONE_KEY = 'explore_tasks_done';
 import { applyEffect, currentValue, RECEIVABLE_CLS, type LinkEffect } from '../lib/networth';
+import { validateMove, type MoveError } from '../lib/moveFunds';
 import { holdingValue, isHolding, mergeAccountValues } from '../lib/prices';
 import { merchantKey } from '../lib/normalize';
 import { listFxRates } from '../db/fxRepo';
@@ -462,6 +466,9 @@ export interface AppData {
    *  comment above SOUND_ENABLED_KEY. */
   soundEnabled: boolean;
   setSoundEnabled: (on: boolean) => Promise<void>;
+  /** Whether the inline (i) glossary buttons are shown. On by default. */
+  glossaryEnabled: boolean;
+  setGlossaryEnabled: (on: boolean) => Promise<void>;
   /** Whether anonymous crash diagnostics may leave the device. On by default and disclosed in
    *  the privacy policy; turning it off also deletes the install id (see
    *  DIAGNOSTICS_ENABLED_KEY). Nothing but crash reports is ever sent — there is no behavioural
@@ -491,12 +498,12 @@ export interface AppData {
   /** True once the run has held for `STREAK_GRADUATION_DAYS`: the UI should back off the daily
    *  count in favour of `streakStartLabel`. */
   streakGraduated: boolean;
-  /** "Logging since <Month Year>", or null if there's no active run to date from. Only
+  /** "Since <Mon YYYY>", or null if there's no active run to date from. Only
    *  meaningful once `streakGraduated` is true. */
   streakStartLabel: string | null;
-  /** Whether the user has paused the streak (Settings). While paused, `streak` is frozen and
-   *  the reminder ladder should not chase logging (wired in a later step). */
+  /** Whether the streak is paused. Pause controls were removed from Settings; load clears any leftover pause. */
   streakPaused: boolean;
+  /** No-op kept for API stability; streaks stay on. */
   pauseStreak: () => Promise<void>;
   resumeStreak: () => Promise<void>;
   /** Increments once each time a save extends the streak to a new day (freeze-bridged saves
@@ -529,6 +536,8 @@ export interface AppData {
    *  currency (see `deriveNative`): `balance_entries.value` is native to the account, never
    *  assumed MYR. */
   recordBalanceLink: (accountId: string, amount: number, effect: LinkEffect, asOf: string) => Promise<void>;
+  /** Move cash between two Cash & Bank accounts. Returns a guard error or null on success. */
+  moveLiquidFunds: (fromId: string, toId: string, amount: number, asOf: string) => Promise<MoveError | null>;
   addHolding: (name: string, sub: string, symbol: string, ticker: string, quantity: number, cost: number | null, icon?: string | null, interestRate?: number | null) => Promise<string>;
   updateHoldingQuantity: (id: string, quantity: number) => Promise<void>;
   setHoldingCost: (id: string, cost: number | null) => Promise<void>;
@@ -629,6 +638,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     DEFAULT_WIDGET_MASCOT_CONFIG
   );
   const [soundEnabled, setSoundEnabledState] = useState(true);
+  const [glossaryEnabled, setGlossaryEnabledState] = useState(true);
   const [diagnosticsEnabled, setDiagnosticsEnabledState] = useState(true);
   const [streakFreeze, setStreakFreezeState] = useState<StreakFreezeState>(NO_STREAK_FREEZE);
   const [streakPausedSinceDay, setStreakPausedSinceDayState] = useState<number | null>(null);
@@ -641,7 +651,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [recapStoryHomeHandledMonth, setRecapStoryHomeHandledMonth] = useState<string | null>(null);
 
   const refreshAll = useCallback(async () => {
-    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, recapStoryHomeHandledMonthRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows, checkInDays, knownBankLabelMap] =
+    const [cats, txns, mem, income, alloc, snaps, accts, entries, cache, onboardingFlag, tutorialScanRaw, tutorialManualRaw, tutorialDismissedRaw, exploreTasksDoneRaw, reminderCadenceRaw, reminderHourOverrideRaw, owedReminderRaw, commitmentReminderRaw, motionSettingRaw, widgetMascotRaw, soundEnabledRaw, glossaryEnabledRaw, diagnosticsEnabledRaw, diagnosticsInstallIdRaw, streakFreezeMonthRaw, streakFreezeAvailableRaw, streakFreezeSpentForRaw, streakPausedSinceRaw, recapStoryHomeHandledMonthRaw, peopleRows, splitRows, shareRows, paymentRows, tripRows, checkInDays, knownBankLabelMap] =
       await Promise.all([
         listCategories(),
         listTransactions(),
@@ -664,6 +674,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         getMeta(MOTION_SETTING_KEY),
         getMeta(WIDGET_MASCOT_CONFIG_KEY),
         getMeta(SOUND_ENABLED_KEY),
+        getMeta(GLOSSARY_ENABLED_KEY),
         getMeta(DIAGNOSTICS_ENABLED_KEY),
         getMeta(DIAGNOSTICS_INSTALL_ID_KEY),
         getMeta(STREAK_FREEZE_MONTH_KEY),
@@ -703,6 +714,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setSoundEnabledState(resolvedSoundEnabled);
     applySoundEnabled(resolvedSoundEnabled);
 
+    const resolvedGlossaryEnabled = glossaryEnabledRaw !== 'false';
+    setGlossaryEnabledState(resolvedGlossaryEnabled);
+
     // Same absent-means-on convention. This is the point the crash reporter has been waiting for
     // since index.ts armed it: until resolveConsent runs, anything it caught during startup is
     // held in memory and nothing has left the device.
@@ -733,8 +747,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         setMeta(STREAK_FREEZE_SPENT_FOR_KEY, ''),
       ]);
     }
-    const parsedPausedSince = streakPausedSinceRaw === null || streakPausedSinceRaw === '' ? NaN : Number(streakPausedSinceRaw);
-    setStreakPausedSinceDayState(Number.isFinite(parsedPausedSince) ? parsedPausedSince : null);
+    // Streak pause was removed from Settings; clear any leftover pause so streaks stay on.
+    if (streakPausedSinceRaw !== null && streakPausedSinceRaw !== '') {
+      await setMeta(STREAK_PAUSED_SINCE_KEY, '');
+    }
+    setStreakPausedSinceDayState(null);
 
     setOnboardingComplete(onboardingFlag === 'true');
     setTutorialScanDoneState(tutorialScanRaw === 'true');
@@ -887,7 +904,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const startDay = streakStartDay(transactions, new Date(), 1, checkIns);
     if (startDay === null) return null;
     const d = new Date(startDay * 86_400_000);
-    return `Logging since ${monthLabel(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)}`;
+    return `Since ${monthLabel(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`, false)}`;
   }, [transactions, checkIns]);
 
   // Fires the Home fire-burst (see DashboardScreen's StreakCelebration): a save that extends the
@@ -1392,6 +1409,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     applySoundEnabled(on);
   }, []);
 
+  const setGlossaryEnabled = useCallback(async (on: boolean) => {
+    await setMeta(GLOSSARY_ENABLED_KEY, on ? 'true' : 'false');
+    setGlossaryEnabledState(on);
+  }, []);
+
   const setDiagnosticsEnabled = useCallback(async (on: boolean) => {
     await setMeta(DIAGNOSTICS_ENABLED_KEY, on ? 'true' : 'false');
     // Turning off deletes the install id outright; turning back on mints a fresh one, so the two
@@ -1408,11 +1430,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const pauseStreak = useCallback(async () => {
-    // Local, matching every other day number the streak reasons in (see `localDayNumber`):
-    // a UTC one would freeze the streak on yesterday for anyone pausing in the small hours.
-    const today = localDayNumber(new Date());
-    await setMeta(STREAK_PAUSED_SINCE_KEY, String(today));
-    setStreakPausedSinceDayState(today);
+    // Pause UI removed; keep the method as a no-op so callers cannot re-pause.
   }, []);
 
   const resumeStreak = useCallback(async () => {
@@ -1532,10 +1550,25 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       // shadow it. So never date it before the latest reading we already have.
       const latestAsOf = mine.reduce((m, e) => (e.asOf > m ? e.asOf : m), '');
       const effectiveAsOf = asOf > latestAsOf ? asOf : latestAsOf;
-      await dbAddBalanceEntry(accountId, applyEffect(current, amount, effect), effectiveAsOf);
+      await dbAddBalanceEntry(accountId, applyEffect(current, amount, effect), effectiveAsOf, 'linked');
       setBalanceEntries(await listBalanceEntries());
     },
     []
+  );
+
+  const moveLiquidFunds = useCallback(
+    async (fromId: string, toId: string, amount: number, asOf: string): Promise<MoveError | null> => {
+      const from = accounts.find((a) => a.id === fromId);
+      const to = accounts.find((a) => a.id === toId);
+      if (!from || !to) return 'ineligible';
+      const fromBalance = currentValue(balanceEntries.filter((e) => e.accountId === fromId));
+      const err = validateMove({ from, to, amount, fromBalance });
+      if (err) return err;
+      await dbMoveLiquidBalances(fromId, toId, amount, asOf);
+      setBalanceEntries(await listBalanceEntries());
+      return null;
+    },
+    [accounts, balanceEntries]
   );
 
   const addHolding = useCallback(
@@ -1569,7 +1602,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const bySymbol: Record<string, PriceQuote> = Object.fromEntries(quotes.map((q) => [q.symbol, q]));
     for (const a of accts) {
       if (isHolding(a) && bySymbol[a.symbol as string]) {
-        await upsertDailyBalanceEntry(a.id, holdingValue(a.quantity as number, bySymbol[a.symbol as string].priceMYR), day);
+        await upsertDailyBalanceEntry(a.id, holdingValue(a.quantity as number, bySymbol[a.symbol as string].priceMYR), day, 'price');
       }
     }
     const [cache, entries] = await Promise.all([getPriceCache(), listBalanceEntries()]);
@@ -2398,6 +2431,8 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setWidgetMascotConfig,
     soundEnabled,
     setSoundEnabled,
+    glossaryEnabled,
+    setGlossaryEnabled,
     diagnosticsEnabled,
     setDiagnosticsEnabled,
     recapStoryHomeHandledMonth,
@@ -2421,6 +2456,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     deleteAccount,
     setBalance,
     recordBalanceLink,
+    moveLiquidFunds,
     addHolding,
     updateHoldingQuantity,
     setHoldingCost,

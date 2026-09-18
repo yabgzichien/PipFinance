@@ -6,6 +6,7 @@ import type { ExtractedTxn } from '../lib/types';
 import type { ScannedReceipt } from '../lib/parseReceipt';
 import type { ScannedSnapshot } from '../lib/parseSnapshot';
 import { prepareDualPathScan, prepareScanImage, type ScanType } from '../lib/prepareScanImage';
+import { fetchAppUserId } from './purchases';
 import type { OcrOutcome } from '../lib/receiptOcr';
 
 export const INSTALLATION_ID_KEY = 'installation_id';
@@ -78,15 +79,17 @@ export async function getInstallationId(): Promise<string> {
 }
 
 export async function fetchServerAllowance(
-  entitlement: 'free' | 'pro' = 'free'
+  _entitlement: 'free' | 'pro' = 'free'
 ): Promise<ScanAllowance> {
   const id = await getInstallationId();
+  const appUserId = await fetchAppUserId();
+  const headers: Record<string, string> = {
+    'x-installation-id': id,
+  };
+  if (appUserId) headers['x-rc-app-user-id'] = appUserId;
   const res = await fetch(`${WORKER_URL}/allowance`, {
     method: 'GET',
-    headers: {
-      'x-installation-id': id,
-      'x-entitlement': entitlement,
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -116,7 +119,7 @@ export type ServerEntitlement = {
 
 export type RedeemPromoResult =
   | { ok: true; grant: { kind: 'lifetime' | 'timed'; expiresAt: number | null; source: 'promo' | 'referral' } }
-  | { ok: false; error: 'invalid' | 'disabled' | 'already_used' | 'already_granted' | 'network' | 'invalid_json' };
+  | { ok: false; error: 'invalid' | 'disabled' | 'already_used' | 'already_granted' | 'network' | 'invalid_json' | 'rate_limited' };
 
 export async function fetchServerEntitlement(): Promise<ServerEntitlement> {
   const id = await getInstallationId();
@@ -155,11 +158,12 @@ export async function redeemPromoCode(code: string): Promise<RedeemPromoResult> 
         error === 'disabled' ||
         error === 'already_used' ||
         error === 'already_granted' ||
-        error === 'invalid_json'
+        error === 'invalid_json' ||
+        error === 'rate_limited'
       ) {
         return { ok: false, error };
       }
-      return { ok: false, error: 'network' };
+      return { ok: false, error: res.status === 429 ? 'rate_limited' : 'network' };
     }
     return {
       ok: true,
@@ -301,12 +305,13 @@ async function submitScanInternal(
 
   const scanPromise = (async (): Promise<CommonScanResult> => {
     try {
+      const appUserId = await fetchAppUserId();
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'x-installation-id': id,
         'x-idempotency-key': idempotencyKey,
-        'x-entitlement': entitlement,
       };
+      if (appUserId) headers['x-rc-app-user-id'] = appUserId;
 
       if (preprocessTimings) {
         headers['x-client-preprocess'] =

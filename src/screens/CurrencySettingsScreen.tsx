@@ -15,6 +15,7 @@ import { useAccent } from '../state/accent';
 import { useThemeColors } from '../state/colorScheme';
 import { useAppData } from '../state/store';
 import { useLanguage } from '../i18n';
+import { canActivateCurrency } from '../billing/currencyEntitlements';
 import { useEntitlement } from '../billing/entitlement';
 import { usePaywall } from '../billing/paywallContext';
 import { colors, radius, uiFont } from '../theme';
@@ -33,12 +34,6 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
   // The one row whose fetch/write is in flight — disabled while pending so a second tap
   // can't race the first, mirroring ProviderCard's single busy-state pattern.
   const [pendingCode, setPendingCode] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isPro) {
-      openPaywall('multi_currency', 'settings');
-    }
-  }, [isPro, openPaywall]);
 
   const reload = useCallback(async () => {
     const [nextActive, nextDisplay] = await Promise.all([
@@ -63,6 +58,10 @@ export function CurrencySettingsScreen({ onBack }: { onBack: () => void }) {
 
   const toggle = async (code: string, on: boolean) => {
     if (code === BASE_CURRENCY || pendingCode) return;
+    if (on && !canActivateCurrency(active ?? [], code, isPro)) {
+      openPaywall('multi_currency');
+      return;
+    }
     setPendingCode(code);
     try {
       if (on) {

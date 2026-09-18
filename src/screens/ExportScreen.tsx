@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ExportSuccessModal } from '../components/ExportSuccessModal';
 import { Icon } from '../components/Icon';
+import { ProBadge } from '../components/ProUi';
 import { Amount, Card, TopBar } from '../components/ui';
 import {
   buildFinancialReportBundle,
@@ -533,6 +534,7 @@ export function ExportScreen({
                       ? (isZh ? '导出财务报表 (PDF)' : 'Export Financial Statement (PDF)')
                       : (isZh ? '导出 Excel 工作簿' : 'Export Excel workbook')}
                 </Text>
+                {!isPro ? <ProBadge locked /> : null}
               </>
             )}
           </Pressable>

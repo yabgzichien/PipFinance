@@ -139,4 +139,18 @@ describe('D1 Quota enforcement', () => {
     expect(usage.dayUsed).toBe(1);
     expect(usage.monthUsed).toBe(1);
   });
+
+  it('does not double count quota when commitReservation is called twice with meta keys', async () => {
+    const res = await checkAndReserve(db, hash, 'concurrent-key', false, now);
+    expect(res.ok).toBe(true);
+
+    const meta = { hash, dayKey: '2026-09-15', monthKey: '2026-09' };
+    await commitReservation(db, 'concurrent-key', false, now, meta);
+    // Second commit with same key (e.g. concurrent in-flight settled)
+    await commitReservation(db, 'concurrent-key', false, now, meta);
+
+    const usage = await getUsage(db, hash, '2026-09-15', '2026-09');
+    expect(usage.dayUsed).toBe(1);
+    expect(usage.monthUsed).toBe(1);
+  });
 });

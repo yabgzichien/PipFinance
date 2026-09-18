@@ -1,5 +1,4 @@
-// __tests__/entitlementResolve.test.ts
-import { resolveTier } from '../src/billing/entitlement';
+import { resolveGrant, resolveTier } from '../src/billing/entitlement';
 
 describe('resolveTier', () => {
   it('prefers a successful live lookup', async () => {
@@ -37,5 +36,25 @@ describe('resolveTier', () => {
       async () => 'pro'
     );
     expect(tier).toBe('free');
+  });
+});
+
+describe('resolveGrant', () => {
+  it('keeps a cached lifetime grant when the live lookup is offline', async () => {
+    const grant = await resolveGrant(
+      async () => {
+        throw new Error('offline');
+      },
+      async () => ({ kind: 'lifetime', expiresAt: null, source: 'promo' })
+    );
+    expect(grant).toEqual({ kind: 'lifetime', expiresAt: null, source: 'promo' });
+  });
+
+  it('clears a cached grant when the server says inactive', async () => {
+    const grant = await resolveGrant(
+      async () => null,
+      async () => ({ kind: 'lifetime', expiresAt: null, source: 'promo' })
+    );
+    expect(grant).toBeNull();
   });
 });

@@ -43,11 +43,10 @@ import {
 } from './quickAddPrompt';
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
-// qwen/qwen3.6-27b is the only vision-capable (text+image) model Groq currently serves; the
-// Llama 4 vision models it replaced are retired. Its "thinking" output is returned in a
-// separate `reasoning` field, so `message.content` stays clean JSON. Override with
-// EXPO_PUBLIC_GROQ_MODEL if Groq's lineup changes again.
-const DEFAULT_MODEL = 'qwen/qwen3.6-27b';
+// qwen/qwen3.8-27b is Groq's current vision-capable model. Its thinking mode is
+// suppressed with reasoning_effort: 'none' so short JSON extraction is not eaten
+// by a reasoning budget. Override with EXPO_PUBLIC_GROQ_MODEL if Groq's lineup changes.
+const DEFAULT_MODEL = 'qwen/qwen3.8-27b';
 
 const SYSTEM_PROMPT =
   'You are a precise data extractor for a personal expenses app. You read a ' +
@@ -78,7 +77,7 @@ Rules:
 
 async function postChat(body: object, apiKey: string): Promise<Response> {
   if (!apiKey) throw new LLMError('no_key', 'Missing API key.');
-  // The default model (qwen/qwen3.6-27b) is a reasoning model: left on, it emits a `<think>…</think>`
+  // The default model (qwen/qwen3.8-27b) is a reasoning model: left on, it emits a `<think>…</think>`
   // block into the reply and, under a tight max_tokens cap (e.g. the coach), the reasoning eats the
   // whole budget and leaks/blanks the answer. Disabling it keeps replies direct, cheaper, and faster;
   // extraction quality is unaffected (it's OCR-style, not a reasoning task). A body may override.
